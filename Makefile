@@ -37,6 +37,8 @@ rpm: tarball
 		--define "_sourcedir $(CURDIR)/dist" \
 		--define "_srcrpmdir $(CURDIR)/dist" \
 		--define "_rpmdir $(CURDIR)/dist" \
+		--define "_builddir $(CURDIR)/dist/build" \
+		--define "_buildrootdir $(CURDIR)/dist/buildroot" \
 		cockpit-airlock.spec
 
 clean:
