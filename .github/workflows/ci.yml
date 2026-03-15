@@ -52,6 +52,8 @@ jobs:
 
   build-container:
     runs-on: ubuntu-latest
+    env:
+      HAS_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -74,7 +76,7 @@ jobs:
             sh -c "pip install --no-cache-dir pytest pytest-asyncio && pytest /tests/test_l2_integration.py -v"
 
       - name: Run L3 integration tests in container
-        if: ${{ secrets.GEMINI_API_KEY != '' }}
+        if: env.HAS_GEMINI_KEY == 'true'
         run: |
           docker run --rm \
             --entrypoint "" \
