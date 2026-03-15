@@ -42,7 +42,10 @@ def main() -> None:
     if not args.no_dbus:
         try:
             from .dbus_interface import start_dbus
-            asyncio.get_event_loop().run_until_complete(start_dbus())
+
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(start_dbus())
+            loop.close()
         except Exception:
             logger.warning("D-Bus startup failed — continuing without D-Bus", exc_info=True)
 
