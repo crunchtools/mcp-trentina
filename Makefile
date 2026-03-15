@@ -1,5 +1,5 @@
 NAME = cockpit-airlock
-VERSION = 0.2.1
+VERSION = 0.2.2
 COCKPIT_DIR = /usr/share/cockpit/$(NAME)
 DBUS_DIR = /usr/share/dbus-1/system.d
 
