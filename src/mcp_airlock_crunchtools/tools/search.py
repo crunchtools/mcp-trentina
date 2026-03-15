@@ -10,9 +10,11 @@ the sanitized output into actionable results.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from ..config import get_config
+from ..dbus_interface import emit_detection_event, emit_request_event
 from ..errors import BlockedSourceError, QuarantineAgentError
 from ..quarantine.agent import (
     quarantine_extract,
@@ -52,6 +54,7 @@ def _sanitize_l0_output(
 
 async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
     """L0 → resolve → L1 → L2. Fail if injection detected."""
+    start_time = time.time()
 
     try:
         raw = await search_grounded(query, num_results)
@@ -64,6 +67,7 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
     )
 
     if total_l1 >= 3:
+        emit_detection_event("L1", f"search:{query}", "high", {"total_l1": total_l1})
         raise BlockedSourceError(
             f"search:{query}",
             f"L1 detected {total_l1} injection vectors in L0 output",
@@ -71,11 +75,30 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
 
     classification = classify(sanitized_text)
     if classification and classification.label == "MALICIOUS":
+        emit_detection_event("L2", f"search:{query}", "high", {
+            "classifier_label": classification.label,
+            "classifier_score": classification.score,
+        })
         raise BlockedSourceError(
             f"search:{query}",
             f"L2 classifier flagged L0 output as MALICIOUS "
             f"(score: {classification.score:.3f})",
         )
+
+    emit_request_event(
+        tool="safe_search",
+        source=f"search:{query}",
+        trust_level="sanitized-only",
+        risk_level="low",
+        l1_detections=total_l1,
+        l1_suspicious=0,
+        l2_label=classification.label if classification else None,
+        l2_score=classification.score if classification else None,
+        input_size=len(raw.get("text", "")),
+        output_size=len(sanitized_text),
+        stats={"total_detections": total_l1},
+        start_time=start_time,
+    )
 
     return {
         "text": sanitized_text,
@@ -94,6 +117,7 @@ async def quarantine_search(
     query: str, prompt: str, num_results: int = 5,
 ) -> dict[str, Any]:
     """L0 → resolve → L1 → L2 → L3."""
+    start_time = time.time()
     config = get_config()
 
     try:
@@ -139,6 +163,21 @@ async def quarantine_search(
             "content": {"extracted_text": sanitized_text},
             "usage": {},
         }
+
+    emit_request_event(
+        tool="quarantine_search",
+        source=f"search:{query}",
+        trust_level="quarantined",
+        risk_level="low",
+        l1_detections=_total_l1,
+        l1_suspicious=0,
+        l2_label=classification.label if classification else None,
+        l2_score=classification.score if classification else None,
+        input_size=len(raw.get("text", "")),
+        output_size=len(sanitized_text),
+        stats={"total_detections": _total_l1},
+        start_time=start_time,
+    )
 
     return {
         "text": sanitized_text,

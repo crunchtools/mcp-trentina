@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 from ..config import get_config
 from ..database import is_blocked, record_detection
+from ..dbus_interface import emit_detection_event, emit_request_event
 from ..errors import BlockedSourceError, FileReadError
 from ..models import ALLOWED_TEXT_EXTENSIONS
 from ..quarantine.agent import quarantine_detect, quarantine_extract
@@ -70,6 +72,7 @@ def _build_sanitization_metadata(pipeline_result: PipelineResult) -> dict[str, A
 
 async def safe_read(path: str) -> dict[str, Any]:
     """Read local file with Layer 1 sanitization. Fails if injection detected."""
+    start_time = time.time()
     config = get_config()
 
     resolved = _validate_file(path)
@@ -101,6 +104,10 @@ async def safe_read(path: str) -> dict[str, Any]:
                 "classifier_score": classification.score,
             },
         )
+        emit_detection_event("L2", resolved, "high", {
+            "classifier_label": classification.label,
+            "classifier_score": classification.score,
+        })
         raise BlockedSourceError(resolved, "just detected")
 
     if not is_trusted and config.has_api_key:
@@ -114,6 +121,7 @@ async def safe_read(path: str) -> dict[str, Any]:
                 risk_level=detection.get("risk_level", "high"),
                 qagent_assessment=detection,
             )
+            emit_detection_event("L3", resolved, detection.get("risk_level", "high"), detection)
             raise BlockedSourceError(resolved, "just detected")
 
     if pipeline_result.stats.total_detections() > 0 and not is_trusted:
@@ -126,9 +134,25 @@ async def safe_read(path: str) -> dict[str, Any]:
                 layer1_stats=pipeline_result.stats.to_flat_dict(),
                 risk_level=risk,
             )
+            emit_detection_event("L1", resolved, risk, pipeline_result.stats.to_flat_dict())
             raise BlockedSourceError(resolved, "just detected")
 
     trust_level = "trusted-sanitized" if is_trusted else "sanitized-only"
+
+    emit_request_event(
+        tool="safe_read",
+        source=resolved,
+        trust_level=trust_level,
+        risk_level=pipeline_result.stats.risk_level(),
+        l1_detections=pipeline_result.stats.total_detections(),
+        l1_suspicious=pipeline_result.stats.suspicious_detections(),
+        l2_label=classification.label if classification else None,
+        l2_score=classification.score if classification else None,
+        input_size=pipeline_result.input_size,
+        output_size=pipeline_result.output_size,
+        stats=pipeline_result.stats.to_flat_dict(),
+        start_time=start_time,
+    )
 
     return {
         "content": pipeline_result.content,
@@ -143,6 +167,7 @@ async def safe_read(path: str) -> dict[str, Any]:
 
 async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
     """Read local file with Layer 1 + Layer 2 (Q-Agent) extraction."""
+    start_time = time.time()
     config = get_config()
 
     resolved = _validate_file(path)
@@ -173,7 +198,24 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
             f"(score: {classification.score:.3f}). Proceeding in quarantine mode."
         )
 
+    def _emit(trust_level: str) -> None:
+        emit_request_event(
+            tool="quarantine_read",
+            source=resolved,
+            trust_level=trust_level,
+            risk_level=pipeline_result.stats.risk_level(),
+            l1_detections=pipeline_result.stats.total_detections(),
+            l1_suspicious=pipeline_result.stats.suspicious_detections(),
+            l2_label=classification.label if classification else None,
+            l2_score=classification.score if classification else None,
+            input_size=pipeline_result.input_size,
+            output_size=pipeline_result.output_size,
+            stats=pipeline_result.stats.to_flat_dict(),
+            start_time=start_time,
+        )
+
     if is_trusted:
+        _emit("trusted-sanitized")
         return {
             "content": {"extracted_text": pipeline_result.content},
             "trust": {
@@ -191,6 +233,7 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
             from ..errors import ConfigError
 
             raise ConfigError("GEMINI_API_KEY required and QUARANTINE_FALLBACK=fail")
+        _emit("sanitized-only")
         return {
             "content": {"extracted_text": pipeline_result.content},
             "trust": {
@@ -206,6 +249,7 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
     truncated = pipeline_result.content[: config.max_content]
     extraction = await quarantine_extract(truncated, prompt)
 
+    _emit("quarantined")
     return {
         "content": extraction.get("content", {}),
         "trust": {

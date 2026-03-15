@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from typing import Any
 
 from ..config import get_config
 from ..database import is_blocked, record_detection
+from ..dbus_interface import emit_detection_event, emit_request_event
 from ..errors import BlockedSourceError, ContentSizeError
 from ..quarantine.agent import quarantine_detect, quarantine_extract
 from ..quarantine.classifier import classify
@@ -50,6 +52,7 @@ async def safe_content(
     Always untrusted — runs L1 + L2 + L3 detection on every call.
     Uses SHA-256 content hash for blocklist.
     """
+    start_time = time.time()
     config = get_config()
 
     _validate_content_size(content, config.max_content)
@@ -75,6 +78,10 @@ async def safe_content(
                 "classifier_score": classification.score,
             },
         )
+        emit_detection_event("L2", chash, "high", {
+            "classifier_label": classification.label,
+            "classifier_score": classification.score,
+        })
         raise BlockedSourceError(chash, "just detected")
 
     if config.has_api_key:
@@ -88,6 +95,7 @@ async def safe_content(
                 risk_level=detection.get("risk_level", "high"),
                 qagent_assessment=detection,
             )
+            emit_detection_event("L3", chash, detection.get("risk_level", "high"), detection)
             raise BlockedSourceError(chash, "just detected")
 
     if pipeline_result.stats.total_detections() > 0:
@@ -100,7 +108,23 @@ async def safe_content(
                 layer1_stats=pipeline_result.stats.to_flat_dict(),
                 risk_level=risk,
             )
+            emit_detection_event("L1", chash, risk, pipeline_result.stats.to_flat_dict())
             raise BlockedSourceError(chash, "just detected")
+
+    emit_request_event(
+        tool="safe_content",
+        source=chash,
+        trust_level="sanitized-only",
+        risk_level=pipeline_result.stats.risk_level(),
+        l1_detections=pipeline_result.stats.total_detections(),
+        l1_suspicious=pipeline_result.stats.suspicious_detections(),
+        l2_label=classification.label if classification else None,
+        l2_score=classification.score if classification else None,
+        input_size=pipeline_result.input_size,
+        output_size=pipeline_result.output_size,
+        stats=pipeline_result.stats.to_flat_dict(),
+        start_time=start_time,
+    )
 
     return {
         "content": pipeline_result.content,
@@ -122,6 +146,7 @@ async def quarantine_content(
 
     Warns but proceeds if content hash is in blocklist.
     """
+    start_time = time.time()
     config = get_config()
 
     _validate_content_size(content, config.max_content)
@@ -146,11 +171,28 @@ async def quarantine_content(
             f"(score: {classification.score:.3f}). Proceeding in quarantine mode."
         )
 
+    def _emit(trust_level: str) -> None:
+        emit_request_event(
+            tool="quarantine_content",
+            source=chash,
+            trust_level=trust_level,
+            risk_level=pipeline_result.stats.risk_level(),
+            l1_detections=pipeline_result.stats.total_detections(),
+            l1_suspicious=pipeline_result.stats.suspicious_detections(),
+            l2_label=classification.label if classification else None,
+            l2_score=classification.score if classification else None,
+            input_size=pipeline_result.input_size,
+            output_size=pipeline_result.output_size,
+            stats=pipeline_result.stats.to_flat_dict(),
+            start_time=start_time,
+        )
+
     if not config.has_api_key:
         if config.fallback == "fail":
             from ..errors import ConfigError
 
             raise ConfigError("GEMINI_API_KEY required and QUARANTINE_FALLBACK=fail")
+        _emit("sanitized-only")
         return {
             "content": {"extracted_text": pipeline_result.content},
             "trust": {
@@ -167,6 +209,7 @@ async def quarantine_content(
 
     extraction = await quarantine_extract(truncated, prompt)
 
+    _emit("quarantined")
     return {
         "content": extraction.get("content", {}),
         "trust": {
@@ -190,6 +233,7 @@ async def scan_content(
 
     Returns threat assessment only — no content in the response.
     """
+    start_time = time.time()
     config = get_config()
 
     _validate_content_size(content, config.max_content)
@@ -217,7 +261,7 @@ async def scan_content(
         layer1_context = _build_layer1_context(layer1_stats, layer1_detections)
         qagent_assessment = await quarantine_detect(truncated, layer1_context=layer1_context)
 
-    return _build_scan_result(
+    result = _build_scan_result(
         source_type="content",
         source=chash,
         layer1_stats=layer1_stats,
@@ -229,6 +273,23 @@ async def scan_content(
         classifier_result=classifier_result,
     )
 
+    emit_request_event(
+        tool="scan_content",
+        source=chash,
+        trust_level="scan",
+        risk_level=result["risk_level"],
+        l1_detections=layer1_detections,
+        l1_suspicious=0,
+        l2_label=str(classifier_result["label"]) if classifier_result else None,
+        l2_score=float(classifier_result["score"]) if classifier_result else None,  # type: ignore[arg-type]
+        input_size=pipeline_result.input_size,
+        output_size=pipeline_result.output_size,
+        stats=layer1_stats,
+        start_time=start_time,
+    )
+
+    return result
+
 
 async def deep_scan_content(
     content: str,
@@ -239,6 +300,7 @@ async def deep_scan_content(
     Higher risk of Q-Agent compromise but better detection of injection
     vectors that L1 would strip.
     """
+    start_time = time.time()
     config = get_config()
 
     _validate_content_size(content, config.max_content)
@@ -266,7 +328,7 @@ async def deep_scan_content(
         layer1_context = _build_layer1_context(layer1_stats, layer1_detections)
         qagent_assessment = await quarantine_detect(truncated, layer1_context=layer1_context)
 
-    return _build_scan_result(
+    result = _build_scan_result(
         source_type="content",
         source=chash,
         layer1_stats=layer1_stats,
@@ -277,3 +339,20 @@ async def deep_scan_content(
         scan_mode="deep",
         classifier_result=classifier_result,
     )
+
+    emit_request_event(
+        tool="deep_scan_content",
+        source=chash,
+        trust_level="scan",
+        risk_level=result["risk_level"],
+        l1_detections=layer1_detections,
+        l1_suspicious=0,
+        l2_label=str(classifier_result["label"]) if classifier_result else None,
+        l2_score=float(classifier_result["score"]) if classifier_result else None,  # type: ignore[arg-type]
+        input_size=pipeline_result.input_size,
+        output_size=pipeline_result.output_size,
+        stats=layer1_stats,
+        start_time=start_time,
+    )
+
+    return result

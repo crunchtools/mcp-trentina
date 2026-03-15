@@ -1,0 +1,11 @@
+{
+    "tools": {
+        "index": {
+            "label": "Airlock",
+            "keywords": [
+                { "matches": ["airlock", "prompt injection", "quarantine", "sanitize", "defense"] }
+            ]
+        }
+    },
+    "content-security-policy": "default-src 'self'"
+}

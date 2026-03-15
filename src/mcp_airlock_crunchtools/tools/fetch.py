@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 from urllib.parse import urlparse
 
 from ..client import fetch_url
 from ..config import get_config
 from ..database import is_blocked, record_detection
+from ..dbus_interface import emit_detection_event, emit_request_event
 from ..errors import BlockedSourceError
 from ..quarantine.agent import quarantine_detect, quarantine_extract
 from ..quarantine.classifier import classify
@@ -29,6 +31,7 @@ async def safe_fetch(url: str) -> dict[str, Any]:
     For untrusted sources, also runs Q-Agent detection scan.
     Trusted sources get Layer 1 only (no Q-Agent cost).
     """
+    start_time = time.time()
     config = get_config()
 
     blocked = is_blocked(url)
@@ -55,6 +58,10 @@ async def safe_fetch(url: str) -> dict[str, Any]:
                 "classifier_score": classification.score,
             },
         )
+        emit_detection_event("L2", url, "high", {
+            "classifier_label": classification.label,
+            "classifier_score": classification.score,
+        })
         raise BlockedSourceError(url, "just detected")
 
     if not is_trusted and config.has_api_key:
@@ -69,6 +76,7 @@ async def safe_fetch(url: str) -> dict[str, Any]:
                 risk_level=detection.get("risk_level", "high"),
                 qagent_assessment=detection,
             )
+            emit_detection_event("L3", url, detection.get("risk_level", "high"), detection)
             raise BlockedSourceError(url, "just detected")
 
     if pipeline_result.stats.total_detections() > 0 and not is_trusted:
@@ -82,11 +90,12 @@ async def safe_fetch(url: str) -> dict[str, Any]:
                 layer1_stats=pipeline_result.stats.to_flat_dict(),
                 risk_level=risk,
             )
+            emit_detection_event("L1", url, risk, pipeline_result.stats.to_flat_dict())
             raise BlockedSourceError(url, "just detected")
 
     trust_level = "trusted-sanitized" if is_trusted else "sanitized-only"
 
-    return {
+    result = {
         "content": pipeline_result.content,
         "trust": {
             "level": trust_level,
@@ -96,12 +105,30 @@ async def safe_fetch(url: str) -> dict[str, Any]:
         "sanitization": _build_sanitization_metadata(pipeline_result),
     }
 
+    emit_request_event(
+        tool="safe_fetch",
+        source=url,
+        trust_level=trust_level,
+        risk_level=pipeline_result.stats.risk_level(),
+        l1_detections=pipeline_result.stats.total_detections(),
+        l1_suspicious=pipeline_result.stats.suspicious_detections(),
+        l2_label=classification.label if classification else None,
+        l2_score=classification.score if classification else None,
+        input_size=pipeline_result.input_size,
+        output_size=pipeline_result.output_size,
+        stats=pipeline_result.stats.to_flat_dict(),
+        start_time=start_time,
+    )
+
+    return result
+
 
 async def quarantine_fetch(url: str, prompt: str) -> dict[str, Any]:
     """Fetch URL with Layer 1 + Layer 2 (Q-Agent) extraction.
 
     Warns but proceeds if source is in blocklist.
     """
+    start_time = time.time()
     config = get_config()
 
     blocked = is_blocked(url)
@@ -126,7 +153,24 @@ async def quarantine_fetch(url: str, prompt: str) -> dict[str, Any]:
             f"(score: {classification.score:.3f}). Proceeding in quarantine mode."
         )
 
+    def _emit(trust_level: str) -> None:
+        emit_request_event(
+            tool="quarantine_fetch",
+            source=url,
+            trust_level=trust_level,
+            risk_level=pipeline_result.stats.risk_level(),
+            l1_detections=pipeline_result.stats.total_detections(),
+            l1_suspicious=pipeline_result.stats.suspicious_detections(),
+            l2_label=classification.label if classification else None,
+            l2_score=classification.score if classification else None,
+            input_size=pipeline_result.input_size,
+            output_size=pipeline_result.output_size,
+            stats=pipeline_result.stats.to_flat_dict(),
+            start_time=start_time,
+        )
+
     if is_trusted:
+        _emit("trusted-sanitized")
         return {
             "content": {"extracted_text": pipeline_result.content},
             "trust": {
@@ -144,6 +188,7 @@ async def quarantine_fetch(url: str, prompt: str) -> dict[str, Any]:
             from ..errors import ConfigError
 
             raise ConfigError("GEMINI_API_KEY required and QUARANTINE_FALLBACK=fail")
+        _emit("sanitized-only")
         return {
             "content": {"extracted_text": pipeline_result.content},
             "trust": {
@@ -160,6 +205,7 @@ async def quarantine_fetch(url: str, prompt: str) -> dict[str, Any]:
 
     extraction = await quarantine_extract(truncated, prompt)
 
+    _emit("quarantined")
     return {
         "content": extraction.get("content", {}),
         "trust": {

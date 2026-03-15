@@ -1,0 +1,40 @@
+/* cockpit-airlock — minimal custom styles */
+
+.airlock-score-bar {
+    display: inline-flex;
+    align-items: center;
+    width: 120px;
+    height: 16px;
+    background: var(--pf-v6-global--BackgroundColor--200, #f0f0f0);
+    border-radius: 3px;
+    position: relative;
+    overflow: hidden;
+}
+
+.airlock-score-fill {
+    height: 100%;
+    background: var(--pf-v6-global--palette--orange-300, #f4c145);
+    border-radius: 3px 0 0 3px;
+    transition: width 0.3s ease;
+}
+
+.airlock-score-text {
+    position: absolute;
+    width: 100%;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--pf-v6-global--Color--100, #151515);
+}
+
+.airlock-event-row {
+    cursor: pointer;
+}
+
+.airlock-event-row:hover {
+    background: var(--pf-v6-global--BackgroundColor--200, #f0f0f0);
+}
+
+.airlock-alert {
+    margin-bottom: var(--pf-v6-global--spacer--md, 16px);
+}

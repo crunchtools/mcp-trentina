@@ -27,6 +27,7 @@ dependencies = [
     "onnxruntime>=1.17",
     "transformers>=4.40",
     "numpy>=1.24",
+    "dbus-fast>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -71,7 +72,8 @@ max-branches = 10
 max-statements = 50
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S105", "S108", "PLC0415", "PLR2004", "ARG002", "RUF003"]
+"tests/*" = ["S105", "S108", "PLC0415", "PLR2004", "ARG002", "ARG005", "RUF003"]
+"src/mcp_airlock_crunchtools/dbus_interface.py" = ["UP037", "C901", "TRY300"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -80,7 +82,7 @@ warn_return_any = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["markdownify", "bs4", "onnxruntime", "transformers"]
+module = ["markdownify", "bs4", "onnxruntime", "transformers", "dbus_fast", "dbus_fast.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

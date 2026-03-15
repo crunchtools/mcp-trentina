@@ -15,6 +15,11 @@
 #     quay.io/crunchtools/mcp-airlock \
 #     --transport streamable-http --host 0.0.0.0 --port 8019
 #
+# Optional D-Bus integration (for Cockpit plugin / mcp-assayer):
+#   Add: -v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:z
+#   D-Bus is optional — the server runs fine without it (--no-dbus is implicit
+#   when the socket is not mounted).
+#
 # With Claude Code (stdio):
 #   claude mcp add mcp-airlock-crunchtools \
 #     -- podman run -i --rm \

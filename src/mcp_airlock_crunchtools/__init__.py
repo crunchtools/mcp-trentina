@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import logging
 
 __version__ = "0.2.0"
 
 DEFAULT_PORT = 8019
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -22,6 +26,11 @@ def main() -> None:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    parser.add_argument(
+        "--no-dbus",
+        action="store_true",
+        help="Disable D-Bus interface registration",
+    )
 
     args = parser.parse_args()
 
@@ -29,6 +38,13 @@ def main() -> None:
     from .server import mcp
 
     get_db()
+
+    if not args.no_dbus:
+        try:
+            from .dbus_interface import start_dbus
+            asyncio.get_event_loop().run_until_complete(start_dbus())
+        except Exception:
+            logger.warning("D-Bus startup failed — continuing without D-Bus", exc_info=True)
 
     match args.transport:
         case "stdio":

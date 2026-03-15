@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from ..client import fetch_url
 from ..config import get_config
+from ..dbus_interface import emit_request_event
 from ..quarantine.agent import quarantine_detect
 from ..quarantine.classifier import classify
 from ..sanitize.pipeline import looks_like_html, sanitize, sanitize_text
@@ -128,6 +130,7 @@ async def quarantine_scan(
     if not url and not path:
         return {"error": "Provide either url or path to scan"}
 
+    start_time = time.time()
     config = get_config()
     content, source_type, source = await _fetch_content(url, path)
 
@@ -154,7 +157,7 @@ async def quarantine_scan(
         layer1_context = _build_layer1_context(layer1_stats, layer1_detections)
         qagent_assessment = await quarantine_detect(truncated, layer1_context=layer1_context)
 
-    return _build_scan_result(
+    result = _build_scan_result(
         source_type=source_type,
         source=source,
         layer1_stats=layer1_stats,
@@ -165,6 +168,23 @@ async def quarantine_scan(
         scan_mode="standard",
         classifier_result=classifier_result,
     )
+
+    emit_request_event(
+        tool="quarantine_scan",
+        source=source,
+        trust_level="scan",
+        risk_level=result["risk_level"],
+        l1_detections=layer1_detections,
+        l1_suspicious=0,
+        l2_label=str(classifier_result["label"]) if classifier_result else None,
+        l2_score=float(classifier_result["score"]) if classifier_result else None,  # type: ignore[arg-type]
+        input_size=pipeline_result.input_size,
+        output_size=pipeline_result.output_size,
+        stats=layer1_stats,
+        start_time=start_time,
+    )
+
+    return result
 
 
 async def deep_quarantine_scan(
@@ -185,6 +205,7 @@ async def deep_quarantine_scan(
     if not url and not path:
         return {"error": "Provide either url or path to scan"}
 
+    start_time = time.time()
     config = get_config()
     content, source_type, source = await _fetch_content(url, path)
 
@@ -211,7 +232,7 @@ async def deep_quarantine_scan(
         layer1_context = _build_layer1_context(layer1_stats, layer1_detections)
         qagent_assessment = await quarantine_detect(truncated, layer1_context=layer1_context)
 
-    return _build_scan_result(
+    result = _build_scan_result(
         source_type=source_type,
         source=source,
         layer1_stats=layer1_stats,
@@ -222,3 +243,20 @@ async def deep_quarantine_scan(
         scan_mode="deep",
         classifier_result=classifier_result,
     )
+
+    emit_request_event(
+        tool="deep_quarantine_scan",
+        source=source,
+        trust_level="scan",
+        risk_level=result["risk_level"],
+        l1_detections=layer1_detections,
+        l1_suspicious=0,
+        l2_label=str(classifier_result["label"]) if classifier_result else None,
+        l2_score=float(classifier_result["score"]) if classifier_result else None,  # type: ignore[arg-type]
+        input_size=pipeline_result.input_size,
+        output_size=pipeline_result.output_size,
+        stats=layer1_stats,
+        start_time=start_time,
+    )
+
+    return result
