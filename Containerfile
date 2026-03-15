@@ -58,7 +58,7 @@ RUN HF_TOKEN="${HF_TOKEN}" python -m optimum.exporters.onnx \
 FROM quay.io/hummingbird/python:latest
 
 LABEL name="mcp-airlock-crunchtools" \
-      version="0.2.0" \
+      version="0.2.1" \
       summary="Secure MCP server for quarantined web content extraction" \
       description="Three-layer defense against prompt injection: deterministic sanitization + Prompt Guard 2 classifier + quarantined LLM" \
       maintainer="crunchtools.com" \

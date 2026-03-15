@@ -1,5 +1,5 @@
 Name:           cockpit-airlock
-Version:        0.2.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Cockpit plugin for MCP Airlock defense pipeline visualization
 License:        AGPL-3.0-or-later
