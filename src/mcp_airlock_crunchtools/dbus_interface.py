@@ -153,31 +153,25 @@ def _build_interface() -> Any:
         ) -> None:
             """Signal emitted when injection is detected."""
 
-        def on_request_processed(self, _event: str, data: dict[str, Any]) -> None:
+        def on_request_processed(self, _event: str, event_payload: dict[str, Any]) -> None:
             """EventBus callback — emit D-Bus signal."""
-            try:
-                self.RequestProcessed(
-                    data.get("tool", ""),
-                    data.get("source", ""),
-                    data.get("trust_level", ""),
-                    data.get("risk_level", ""),
-                    int(data.get("duration_ms", 0)),
-                    json.dumps(data.get("stats", {})),
-                )
-            except Exception:
-                logger.debug("Failed to emit RequestProcessed signal", exc_info=True)
+            self.RequestProcessed(
+                event_payload.get("tool", ""),
+                event_payload.get("source", ""),
+                event_payload.get("trust_level", ""),
+                event_payload.get("risk_level", ""),
+                int(event_payload.get("duration_ms", 0)),
+                json.dumps(event_payload.get("stats", {})),
+            )
 
-        def on_detection_occurred(self, _event: str, data: dict[str, Any]) -> None:
+        def on_detection_occurred(self, _event: str, event_payload: dict[str, Any]) -> None:
             """EventBus callback — emit D-Bus signal."""
-            try:
-                self.DetectionOccurred(
-                    data.get("layer", ""),
-                    data.get("source", ""),
-                    data.get("severity", ""),
-                    json.dumps(data.get("details", {})),
-                )
-            except Exception:
-                logger.debug("Failed to emit DetectionOccurred signal", exc_info=True)
+            self.DetectionOccurred(
+                event_payload.get("layer", ""),
+                event_payload.get("source", ""),
+                event_payload.get("severity", ""),
+                json.dumps(event_payload.get("details", {})),
+            )
 
     return Airlock1Interface()
 
