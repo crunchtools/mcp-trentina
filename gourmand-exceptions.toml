@@ -96,3 +96,103 @@ check = "summary_litter"
 path = "tests/test-injection.md"
 pattern = "test-injection.md"
 justification = "Test fixture containing sample prompt injection payloads for integration testing of the sanitization pipeline"
+
+# --- D-Bus interface: lint suppressions are required by dbus-fast framework ---
+# dbus-fast uses Python string annotations ("s", "u") as D-Bus type signatures.
+# These are NOT standard Python type hints — they map to D-Bus wire types
+# (s=string, u=uint32). The type: ignore and noqa suppressions are mandatory
+# because mypy/ruff cannot understand D-Bus signature syntax.
+# D-Bus specification also requires PascalCase method/signal names (N802).
+
+[[exceptions]]
+check = "lint_suppression"
+path = "src/mcp_airlock_crunchtools/dbus_interface.py"
+pattern = "type: ignore[name-defined]"
+justification = "dbus-fast uses string annotations (\"s\", \"u\") as D-Bus type signatures, not Python types — mypy cannot resolve them"
+
+[[exceptions]]
+check = "lint_suppression"
+path = "src/mcp_airlock_crunchtools/dbus_interface.py"
+pattern = "noqa: N802"
+justification = "D-Bus specification requires PascalCase method and signal names (e.g. GetStats, RequestProcessed)"
+
+[[exceptions]]
+check = "lint_suppression"
+path = "src/mcp_airlock_crunchtools/dbus_interface.py"
+pattern = "noqa: F821"
+justification = "dbus-fast D-Bus type signature strings (\"s\", \"u\") are forward references resolved at D-Bus registration, not Python names"
+
+# --- Classifier result dict: loose typing from classify() return ---
+
+[[exceptions]]
+check = "lint_suppression"
+path = "src/mcp_airlock_crunchtools/tools/content.py"
+pattern = "type: ignore[arg-type]"
+justification = "classifier_result dict values are typed as Any — float() cast is safe but mypy cannot verify dict value types through conditional access"
+
+[[exceptions]]
+check = "lint_suppression"
+path = "src/mcp_airlock_crunchtools/tools/scan.py"
+pattern = "type: ignore[arg-type]"
+justification = "classifier_result dict values are typed as Any — float() cast is safe but mypy cannot verify dict value types through conditional access"
+
+# --- Cockpit UI: generic_names in D-Bus callback handlers ---
+
+[[exceptions]]
+check = "generic_names"
+path = "cockpit-airlock/airlock.js"
+pattern = "data"
+justification = "D-Bus signal/callback handlers receive a generic payload object — 'data' is the Cockpit D-Bus API convention for response payloads"
+
+# --- Cockpit UI: single-use helpers provide semantic structure ---
+# airlock.js is a single-file Cockpit plugin. Named functions provide
+# readable structure for the UI lifecycle (init, render, signals).
+# Inlining them into a monolithic IIFE would harm readability.
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "cockpit-airlock/airlock.js"
+pattern = "formatTime"
+justification = "UI display helper — semantic name clarifies intent in single-file Cockpit plugin"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "cockpit-airlock/airlock.js"
+pattern = "truncateSource"
+justification = "UI display helper — semantic name clarifies intent in single-file Cockpit plugin"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "cockpit-airlock/airlock.js"
+pattern = "scoreBar"
+justification = "UI display helper — generates HTML for L2 classifier score visualization"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "cockpit-airlock/airlock.js"
+pattern = "renderPage"
+justification = "UI lifecycle function — builds the initial DOM structure for the Cockpit panel"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "cockpit-airlock/airlock.js"
+pattern = "renderDetail"
+justification = "UI lifecycle function — populates pipeline detail card on event selection"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "cockpit-airlock/airlock.js"
+pattern = "setupSignals"
+justification = "UI lifecycle function — registers D-Bus signal listeners for live event streaming"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "cockpit-airlock/airlock.js"
+pattern = "showDetectionAlert"
+justification = "UI lifecycle function — creates and auto-dismisses PatternFly alert banners for injection detections"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "cockpit-airlock/airlock.js"
+pattern = "init"
+justification = "UI lifecycle function — entry point that orchestrates page render, D-Bus connection, and signal setup"
