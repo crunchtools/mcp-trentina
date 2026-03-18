@@ -38,7 +38,7 @@ class EventBus:
                 self._subscribers[event_name] = []
             self._subscribers[event_name].append(callback)
 
-    def emit(self, event_name: str, data: dict[str, Any]) -> None:
+    def emit(self, event_name: str, event_data: dict[str, Any]) -> None:
         """Fire-and-forget event emission.
 
         Stores the event in the ring buffer and notifies all subscribers.
@@ -47,7 +47,7 @@ class EventBus:
         event = {
             "event": event_name,
             "timestamp": time.time(),
-            "data": data,
+            "data": event_data,
         }
 
         with self._lock:
@@ -56,7 +56,7 @@ class EventBus:
 
         for cb in callbacks:
             try:
-                cb(event_name, data)
+                cb(event_name, event_data)
             except Exception:
                 logger.exception("EventBus callback error for %s", event_name)
 
