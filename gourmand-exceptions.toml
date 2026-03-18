@@ -122,6 +122,12 @@ path = "src/mcp_airlock_crunchtools/dbus_interface.py"
 pattern = "noqa: F821"
 justification = "dbus-fast D-Bus type signature strings (\"s\", \"u\") are forward references resolved at D-Bus registration, not Python names"
 
+[[exceptions]]
+check = "lint_suppression"
+path = "src/mcp_airlock_crunchtools/dbus_interface.py"
+pattern = "noqa: F401"
+justification = "_has_dbus_fast() imports dbus_fast solely to check availability — the import is intentionally unused"
+
 # --- Classifier result dict: loose typing from classify() return ---
 
 [[exceptions]]
