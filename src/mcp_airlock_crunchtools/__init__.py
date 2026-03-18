@@ -40,14 +40,11 @@ def main() -> None:
     get_db()
 
     if not args.no_dbus:
-        try:
-            from .dbus_interface import start_dbus
+        from .dbus_interface import start_dbus
 
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(start_dbus())
-            loop.close()
-        except Exception:
-            logger.warning("D-Bus startup failed — continuing without D-Bus", exc_info=True)
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(start_dbus())
+        loop.close()
 
     match args.transport:
         case "stdio":
