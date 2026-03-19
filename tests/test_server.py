@@ -12,12 +12,12 @@ class TestServerRegistration:
 
     def test_tool_count(self) -> None:
         """Verify exactly 13 tools are registered."""
-        tools = asyncio.run(mcp.list_tools())
+        tools = asyncio.run(mcp._list_tools())
         assert len(tools) == 13, f"Expected 13 tools, got {len(tools)}"
 
     def test_expected_tools_registered(self) -> None:
         """Verify all expected tool names are present."""
-        tools = asyncio.run(mcp.list_tools())
+        tools = asyncio.run(mcp._list_tools())
         tool_names = {t.name for t in tools}
         expected = {
             "safe_fetch_tool",
