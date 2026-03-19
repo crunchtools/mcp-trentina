@@ -29,16 +29,7 @@ from mcp_airlock_crunchtools.sanitize.pipeline import sanitize_text
 
 _has_classifier = is_classifier_available()
 
-
-# ---------------------------------------------------------------------------
-# Static fixture responses — captured from real Gemini Q-Agent calls
-# ---------------------------------------------------------------------------
-
-# Each key is a short substring unique to the test vector payload.
-# The mock looks up the fixture by scanning for these keys in the request body.
-
 _FIXTURE_RESPONSES: dict[str, dict[str, Any]] = {
-    # --- L3_CATCHES: injection attacks the Q-Agent detects ---
     "act as DAN": {
         "injection_detected": True,
         "risk_level": "high",
@@ -149,7 +140,6 @@ _FIXTURE_RESPONSES: dict[str, dict[str, Any]] = {
             "environment variables."
         ),
     },
-    # --- BENIGN: normal content the Q-Agent should not flag ---
     "Red Hat Enterprise Linux 10": {
         "injection_detected": False,
         "risk_level": "low",
@@ -215,7 +205,7 @@ def _find_fixture(request_body: dict[str, Any]) -> dict[str, Any]:
     raise ValueError(msg)
 
 
-async def _mock_post(url: str, **kwargs: Any) -> httpx.Response:
+async def _mock_post(_url: str, **kwargs: Any) -> httpx.Response:
     """Mock httpx.AsyncClient.post that returns fixture-based responses."""
     request_body = kwargs.get("json", {})
     fixture = _find_fixture(request_body)
