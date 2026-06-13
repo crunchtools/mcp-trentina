@@ -1,0 +1,189 @@
+"""Tests for gateway/router.py — JSON-RPC dispatch with mocked backends."""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import patch
+
+import pytest
+from pydantic import SecretStr
+
+from mcp_airlock_crunchtools.gateway.backend import BackendCall
+from mcp_airlock_crunchtools.gateway.errors import BackendCallError, BackendNotInProfileError
+from mcp_airlock_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+from mcp_airlock_crunchtools.gateway.router import (
+    NAMESPACE_SEP,
+    PROTOCOL_VERSION,
+    route_jsonrpc,
+)
+
+
+def _profile() -> Profile:
+    """Build a Profile with two backends and one deny pattern for testing."""
+    p = Profile(
+        name="testp",
+        auth=AuthConfig(bearer_token_env="TEST"),
+        backends={
+            "mcp-slack": Backend(
+                url="http://mcp-slack:8005/mcp",
+                tools_allow=["*"],
+                tools_deny=["slack_dangerous"],
+            ),
+            "mcp-atlassian": Backend(
+                url="http://mcp-atlassian:8021/mcp",
+                tools_allow=["*"],
+            ),
+        },
+    )
+    p.auth.bearer_token = SecretStr("x")
+    return p
+
+
+@pytest.mark.asyncio
+class TestRouter:
+    """JSON-RPC dispatch covers initialize, ping, tools/list, tools/call."""
+
+    async def test_initialize_returns_server_info(self) -> None:
+        resp = await route_jsonrpc(_profile(), {"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+        assert resp["id"] == 1
+        assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
+        assert resp["result"]["serverInfo"]["name"] == "mcp-airlock-gateway:testp"
+        assert "tools" in resp["result"]["capabilities"]
+
+    async def test_ping_returns_empty_result(self) -> None:
+        resp = await route_jsonrpc(_profile(), {"jsonrpc": "2.0", "id": 7, "method": "ping"})
+        assert resp == {"jsonrpc": "2.0", "id": 7, "result": {}}
+
+    async def test_unknown_method_returns_method_not_found(self) -> None:
+        resp = await route_jsonrpc(
+            _profile(),
+            {"jsonrpc": "2.0", "id": 2, "method": "resources/list"},
+        )
+        assert resp["error"]["code"] == -32601
+
+    async def test_tools_list_aggregates_and_namespaces(self) -> None:
+        async def fake_list(backend_name: str, _backend: Backend) -> list[dict[str, Any]]:
+            if backend_name == "mcp-slack":
+                return [
+                    {"name": "slack_list_channels", "description": "", "inputSchema": {}},
+                    {"name": "slack_dangerous", "description": "", "inputSchema": {}},
+                ]
+            return [{"name": "jira_search", "description": "", "inputSchema": {}}]
+
+        with patch(
+            "mcp_airlock_crunchtools.gateway.router.list_backend_tools",
+            side_effect=fake_list,
+        ):
+            resp = await route_jsonrpc(
+                _profile(), {"jsonrpc": "2.0", "id": 3, "method": "tools/list"}
+            )
+
+        names = sorted(str(t["name"]) for t in resp["result"]["tools"])
+        assert names == [
+            f"mcp-atlassian{NAMESPACE_SEP}jira_search",
+            f"mcp-slack{NAMESPACE_SEP}slack_list_channels",
+        ]
+
+    async def test_tools_list_skips_unreachable_backend(self) -> None:
+        async def fake_list(backend_name: str, _backend: Backend) -> list[dict[str, Any]]:
+            if backend_name == "mcp-slack":
+                raise BackendCallError("simulated outage")
+            return [{"name": "jira_search", "description": "", "inputSchema": {}}]
+
+        with patch(
+            "mcp_airlock_crunchtools.gateway.router.list_backend_tools",
+            side_effect=fake_list,
+        ):
+            resp = await route_jsonrpc(
+                _profile(), {"jsonrpc": "2.0", "id": 4, "method": "tools/list"}
+            )
+        names = [str(t["name"]) for t in resp["result"]["tools"]]
+        assert names == [f"mcp-atlassian{NAMESPACE_SEP}jira_search"]
+
+    async def test_tools_call_routes_to_correct_backend(self) -> None:
+        called: dict[str, Any] = {}
+
+        async def fake_call(
+            backend_name: str,
+            _backend: Backend,
+            tool_name: str,
+            arguments: dict[str, Any],
+        ) -> BackendCall:
+            called["backend"] = backend_name
+            called["tool"] = tool_name
+            called["args"] = arguments
+            return BackendCall(
+                content=[{"type": "text", "text": "ok"}],
+                is_error=False,
+                structured_content=None,
+            )
+
+        with patch(
+            "mcp_airlock_crunchtools.gateway.router.call_backend_tool",
+            side_effect=fake_call,
+        ):
+            resp = await route_jsonrpc(
+                _profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"mcp-slack{NAMESPACE_SEP}slack_list_channels",
+                        "arguments": {"limit": 5},
+                    },
+                },
+            )
+
+        assert called == {
+            "backend": "mcp-slack",
+            "tool": "slack_list_channels",
+            "args": {"limit": 5},
+        }
+        assert resp["result"]["content"] == [{"type": "text", "text": "ok"}]
+        assert resp["result"]["isError"] is False
+
+    async def test_tools_call_rejects_non_namespaced_name(self) -> None:
+        resp = await route_jsonrpc(
+            _profile(),
+            {
+                "jsonrpc": "2.0",
+                "id": 6,
+                "method": "tools/call",
+                "params": {"name": "no_namespace", "arguments": {}},
+            },
+        )
+        assert resp["error"]["code"] == -32602
+
+    async def test_tools_call_rejects_unknown_backend(self) -> None:
+        with pytest.raises(BackendNotInProfileError):
+            await route_jsonrpc(
+                _profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"mcp-unknown{NAMESPACE_SEP}some_tool",
+                        "arguments": {},
+                    },
+                },
+            )
+
+    async def test_tools_call_enforces_denylist_at_call_time(self) -> None:
+        """Defense in depth: a deny-listed tool name on a valid backend must
+        be rejected at call time even if the consumer somehow learned the name."""
+        resp = await route_jsonrpc(
+            _profile(),
+            {
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "tools/call",
+                "params": {
+                    "name": f"mcp-slack{NAMESPACE_SEP}slack_dangerous",
+                    "arguments": {},
+                },
+            },
+        )
+        assert resp["error"]["code"] == -32602
+        assert "not permitted" in resp["error"]["message"].lower()
