@@ -68,20 +68,17 @@ def main() -> None:
 
 
 def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
-    """Run airlock with the gateway routes mounted alongside the FastMCP app.
+    """Run airlock with gateway routes wired in via FastMCP's custom_route API.
 
-    Loads profiles from AIRLOCK_PROFILES_PATH and exposes
-    POST /gateway/{profile}/mcp endpoints. The existing /mcp endpoint with
-    the web-tools surface remains unchanged at the same port.
+    Loads profiles from AIRLOCK_PROFILES_PATH and registers
+    POST /gateway/{profile}/mcp endpoints on the FastMCP app. The existing
+    /mcp endpoint with the web-tools surface remains unchanged at the same
+    port — both surfaces live inside the same FastMCP-managed app.
 
     Failure to load profiles is fatal — we fail closed rather than serve with
     no gateway when the operator asked for one.
     """
-    import uvicorn
-    from starlette.applications import Starlette
-    from starlette.routing import Mount
-
-    from .gateway import gateway_app, load_profiles
+    from .gateway import load_profiles, register_with_fastmcp
 
     profiles_path = Path(
         os.environ.get("AIRLOCK_PROFILES_PATH", "/etc/airlock/profiles.yaml")
@@ -89,20 +86,10 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     logger.info("gateway: loading profiles from %s", profiles_path)
     registry = load_profiles(profiles_path)
 
-    fastmcp_app = mcp_server.http_app(transport="streamable-http")
-    gw_app = gateway_app(registry)
-
-    parent = Starlette(
-        routes=[
-            Mount("/", app=gw_app),
-            Mount("/", app=fastmcp_app),
-        ]
-    )
-
+    register_with_fastmcp(mcp_server, registry)
     logger.info(
-        "gateway: mounted %d profile(s); listening on %s:%d",
+        "gateway: registered %d profile(s) at /gateway/<profile>/mcp",
         len(registry),
-        host,
-        port,
     )
-    uvicorn.run(parent, host=host, port=port, log_config=None)
+
+    mcp_server.run(transport="streamable-http", host=host, port=port)

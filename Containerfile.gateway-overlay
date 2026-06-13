@@ -1,0 +1,23 @@
+# Local-only overlay Containerfile for Phase 1 gateway deployment.
+#
+# Builds on top of the existing production airlock image and overlays the
+# new gateway source code. starlette, uvicorn, and pyyaml are already
+# in the base image — no pip install needed.
+#
+# Used as a temporary workaround while the canonical container.yml build
+# is blocked on an upstream HF gated-repo access issue.
+#
+# Build locally:
+#   podman build -f Containerfile.gateway-overlay -t mcp-airlock-gateway-overlay .
+# Then save + load on lotor for the Phase 1 architecture validation.
+
+FROM quay.io/crunchtools/mcp-airlock:latest
+
+USER 0
+
+COPY src/mcp_airlock_crunchtools/__init__.py /tmp/.local/lib/python3.14/site-packages/mcp_airlock_crunchtools/__init__.py
+COPY src/mcp_airlock_crunchtools/gateway /tmp/.local/lib/python3.14/site-packages/mcp_airlock_crunchtools/gateway
+
+USER 65532
+
+LABEL org.opencontainers.image.description="Phase 1 gateway overlay (not for registry push)"

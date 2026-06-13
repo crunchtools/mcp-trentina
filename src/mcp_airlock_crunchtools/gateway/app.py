@@ -34,14 +34,15 @@ logger = logging.getLogger(__name__)
 
 
 def gateway_app(registry: dict[str, Profile]) -> Starlette:
-    """Build the Starlette sub-app exposing /gateway/{profile}/mcp.
+    """Build the Starlette sub-app exposing /{profile}/mcp.
+
+    Used by tests with Starlette's TestClient. Production deployment wires
+    the same handler via `register_with_fastmcp` to avoid mount-composition
+    issues with FastMCP's own internal routing.
 
     Args:
         registry: Mapping from profile name to loaded `Profile` (returned by
             `loader.load_profiles`).
-
-    Returns:
-        A Starlette app with one route family. Mount under `/` in a parent.
     """
 
     async def handle_post(request: Request) -> Response:
@@ -52,17 +53,38 @@ def gateway_app(registry: dict[str, Profile]) -> Starlette:
 
     routes = [
         Route(
-            "/gateway/{profile}/mcp",
+            "/{profile}/mcp",
             endpoint=handle_post,
             methods=["POST"],
         ),
         Route(
-            "/gateway/{profile}/mcp",
+            "/{profile}/mcp",
             endpoint=handle_method_not_allowed,
             methods=["GET", "DELETE"],
         ),
     ]
     return Starlette(routes=routes)
+
+
+def register_with_fastmcp(mcp_server: Any, registry: dict[str, Profile]) -> None:
+    """Wire gateway routes onto a FastMCP server via its custom_route decorator.
+
+    FastMCP exposes `custom_route(path, methods)` precisely for this kind of
+    additional HTTP surface (OAuth callbacks, health endpoints, admin APIs).
+    Going through that API rather than wrapping the FastMCP app in a parent
+    Starlette keeps the existing /mcp surface intact and preserves FastMCP's
+    internal routing assumptions.
+
+    A single handler covers POST + GET + DELETE so we don't register two
+    Route objects at the same path — fastmcp 3.1.1's dispatch can be flaky
+    with overlapping custom routes.
+    """
+
+    @mcp_server.custom_route("/gateway/{profile}/mcp", methods=["POST", "GET", "DELETE"])  # type: ignore[untyped-decorator]
+    async def gateway_endpoint(request: Request) -> Response:
+        if request.method != "POST":
+            return _plain(405, "Method Not Allowed (Phase 1 supports POST only)")
+        return await _handle_post(request, registry)
 
 
 async def _handle_post(request: Request, registry: dict[str, Profile]) -> Response:

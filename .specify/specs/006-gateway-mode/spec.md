@@ -128,6 +128,24 @@ Phase 1 adds zero `@mcp.tool()`-registered tools to the existing FastMCP surface
 2. **Profile reload behavior**: hot-reload on YAML file change (Phase 4 — Cockpit editor needs this), or restart-only for Phase 1? Recommend restart-only for Phase 1; revisit in Phase 4.
 3. **MCP `resources/*` and `prompts/*` methods**: deferred to v1.1 per design doc, not Phase 1. Phase 1 returns method-not-found for these.
 
+## Phase 1 known issues
+
+**FastMCP 3.1.1 / streamable-http custom-route collision** (deferred to Phase 1.1):
+On the current production base image (mcp-airlock:latest, fastmcp 3.1.1), registering
+the gateway's `custom_route("/gateway/{profile}/mcp")` causes the FastMCP-managed
+`/mcp` streamable-http endpoint to return HTTP 404 — both routes are present in
+`router.routes` after registration but only the custom route dispatches at runtime.
+Reproducible with the consolidated single-handler form; not yet reproduced on
+fastmcp 3.4.2 (local dev). Likely a routing-table compile-step bug in 3.1.1.
+
+Workaround for v1: production runs with `AIRLOCK_GATEWAY_ENABLED=false` (existing
+behavior); gateway architecture validation was performed on lotor with the overlay
+image and confirmed via `/gateway/gateway-test/mcp` returning a correctly-filtered
+5-tool list across two backends (mcp-slack, mcp-mediawiki) with the allowlist
+applied. Phase 1.1 work: bump fastmcp to 3.4.2+ in the canonical Containerfile,
+re-test the collision, replace `custom_route` with a Mount-based composition if
+the bug persists, then flip the production flag.
+
 ---
 
 ## Changelog
