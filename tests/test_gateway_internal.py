@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from mcp.types import TextContent
+from mcp.types import TextContent, ToolAnnotations
 from mcp.types import Tool as McpTool
 
 from mcp_airlock_crunchtools.gateway import internal
@@ -112,6 +113,23 @@ class TestInternalBackend:
         sample = tools[0]
         assert "description" in sample
         assert sample["inputSchema"] == {"type": "object", "properties": {}}
+
+    async def test_tools_with_annotations_serialize_to_json(self) -> None:
+        """Regression: a tool whose annotations is a pydantic ToolAnnotations
+        model must serialize to a JSON-able dict, not blow up json.dumps."""
+        annotated = _FakeFunctionTool(
+            McpTool(
+                name="safe_fetch_tool",
+                description="d",
+                inputSchema={"type": "object", "properties": {}},
+                annotations=ToolAnnotations(title="Safe Fetch", readOnlyHint=True),
+            )
+        )
+        internal.register_internal_server(_FakeServer([annotated]))  # type: ignore[arg-type]
+        tools = await internal.list_internal_tools()
+        assert isinstance(tools[0]["annotations"], dict)
+        assert tools[0]["annotations"]["title"] == "Safe Fetch"
+        json.dumps(tools)  # must not raise
 
     async def test_call_returns_backendcall(self) -> None:
         result = _FakeResult(
