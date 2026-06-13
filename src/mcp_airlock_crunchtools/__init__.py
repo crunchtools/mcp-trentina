@@ -71,14 +71,19 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     """Run airlock with gateway routes wired in via FastMCP's custom_route API.
 
     Loads profiles from AIRLOCK_PROFILES_PATH and registers
-    POST /gateway/{profile}/mcp endpoints on the FastMCP app. The existing
-    /mcp endpoint with the web-tools surface remains unchanged at the same
-    port — both surfaces live inside the same FastMCP-managed app.
+    POST /gateway/{profile}/mcp endpoints on the FastMCP app. Airlock's own
+    tools are bound as the in-process internal backend so profiles can surface
+    them (via an ``internal://<label>`` backend) through the same gateway
+    endpoint as the remote MCP backends.
+
+    The legacy /mcp endpoint with the web-tools surface is still registered by
+    mcp.run() at the same port, but Option C treats it as deprecated — consumers
+    talk to the gateway only.
 
     Failure to load profiles is fatal — we fail closed rather than serve with
     no gateway when the operator asked for one.
     """
-    from .gateway import load_profiles, register_with_fastmcp
+    from .gateway import load_profiles, register_internal_server, register_with_fastmcp
 
     profiles_path = Path(
         os.environ.get("AIRLOCK_PROFILES_PATH", "/etc/airlock/profiles.yaml")
@@ -86,6 +91,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     logger.info("gateway: loading profiles from %s", profiles_path)
     registry = load_profiles(profiles_path)
 
+    register_internal_server(mcp_server)
     register_with_fastmcp(mcp_server, registry)
     logger.info(
         "gateway: registered %d profile(s) at /gateway/<profile>/mcp",

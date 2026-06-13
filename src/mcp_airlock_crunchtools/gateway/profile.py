@@ -20,6 +20,10 @@ BACKEND_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 GLOB_PATTERN_RE = re.compile(r"^[a-zA-Z0-9_*][a-zA-Z0-9_*-]*$")
 ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
+#: Scheme marking a backend as airlock's own in-process tool surface rather
+#: than a remote streamable-http MCP server. See gateway/internal.py.
+INTERNAL_SCHEME = "internal://"
+
 MAX_BACKEND_TIMEOUT_SECONDS = 300.0
 
 
@@ -55,7 +59,13 @@ class Backend(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    url: str = Field(..., description="MCP streamable-http URL of the backend")
+    url: str = Field(
+        ...,
+        description=(
+            "Backend location. Either a streamable-http URL (http(s)://) or "
+            "internal://<label> for airlock's own in-process tool surface."
+        ),
+    )
     tools_allow: list[str] = Field(
         default_factory=lambda: ["*"],
         description="Tool-name glob patterns to allow (default: all)",
@@ -77,11 +87,31 @@ class Backend(BaseModel):
 
     @field_validator("url")
     @classmethod
-    def url_is_http_or_https(cls, v: str) -> str:
-        """Restrict the URL scheme to http or https. SSE / stdio not supported."""
-        if not v.startswith(("http://", "https://")):
-            raise ValueError(f"Backend URL must start with http:// or https://: {v!r}")
-        return v
+    def url_scheme_supported(cls, v: str) -> str:
+        """Allow http(s):// (remote MCP) or internal://<label> (airlock's own tools).
+
+        SSE and stdio are not supported. An internal:// URL must carry a
+        URL-safe slug label after the scheme (cosmetic, but required so the
+        namespace stays well-formed).
+        """
+        if v.startswith(("http://", "https://")):
+            return v
+        if v.startswith(INTERNAL_SCHEME):
+            label = v[len(INTERNAL_SCHEME) :]
+            if not BACKEND_NAME_RE.match(label):
+                raise ValueError(
+                    f"internal:// URL must carry a slug label "
+                    f"(^[a-z][a-z0-9-]*$): {v!r}"
+                )
+            return v
+        raise ValueError(
+            f"Backend URL must start with http://, https://, or internal://: {v!r}"
+        )
+
+    @property
+    def is_internal(self) -> bool:
+        """True when this backend resolves to airlock's in-process tool surface."""
+        return self.url.startswith(INTERNAL_SCHEME)
 
     @field_validator("tools_allow", "tools_deny")
     @classmethod

@@ -1,4 +1,4 @@
-# Implementation Plan: Gateway Mode — Phase 1
+# Implementation Plan: Gateway Mode — Phase 1 + Option C
 
 > **Spec ID:** 006-gateway-mode
 > **Status:** In Progress
@@ -6,10 +6,14 @@
 
 ## Summary
 
-Phase 1: add a `gateway/` subpackage that exposes `/gateway/<profile>/mcp` endpoints
-alongside airlock's existing `/mcp` web-tools surface. Transparent proxy to
-backend MCP servers with bearer-token auth and tool-allowlist filtering on
-`tools/list` responses. No defense pipeline application yet — that's Phase 2.
+Phase 1 added a `gateway/` subpackage exposing `/gateway/<profile>/mcp` endpoints
+that proxy to backend MCP servers with bearer-token auth and tool-allowlist
+filtering on `tools/list` responses.
+
+**Option C** folds airlock's own tools into that same gateway as an in-process
+`internal://` backend and deprecates the standalone `/mcp` web-tools surface, so
+the gateway becomes the single per-consumer endpoint for everything. No defense
+pipeline application yet — that's Phase 2.
 
 ---
 
@@ -24,11 +28,7 @@ Consumer (Josui / Kagetora / future Takeda)
     │  Content-Type: application/json
     │  Body: JSON-RPC 2.0 request
     ▼
-Starlette parent app  (server.py)
-    │
-    │  route match on /gateway/{profile}/mcp
-    ▼
-gateway/app.py  GatewayHandler
+FastMCP app  —  custom_route("/gateway/{profile}/mcp")  (gateway/app.py)
     │  ┌──────────────────┐
     │  │ auth.py verify   │  bearer token vs profile config
     │  ├──────────────────┤
@@ -37,32 +37,35 @@ gateway/app.py  GatewayHandler
     │  │ router.py        │  JSON-RPC method dispatch
     │  │                  │
     │  │  initialize ────────► return gateway server info
-    │  │  tools/list ────────► aggregate from backends, filter.py applies allowlist
-    │  │  tools/call ────────► backend.py routes to correct backend
+    │  │  tools/list ────────► aggregate across backends, filter.py applies allowlist
+    │  │  tools/call ────────► dispatch by backend.is_internal
     │  │  ping ──────────────► return pong
     │  │  (other) ───────────► method-not-found
     │  └──────────────────┘
     ▼
-backend.py
-    │  mcp.client.streamable_http connection pool (one per backend per profile)
-    ▼
-Backend MCP server (mcp-slack:8005, mcp-mediawiki:8016, etc.)
+   scheme dispatch
+    ├── http(s):// ──► backend.py  ──► remote MCP server (mcp-slack:8005, …)
+    └── internal:// ─► internal.py ──► airlock's own FastMCP tool registry (in-process)
     │
-    │  response
+    │  response (both paths return the same dict / BackendCall shape)
     ▼
-filter.py (for tools/list) — drops tools not in profile allowlist
+filter.py (for tools/list) — drops tools not in profile allowlist; namespaces <backend>__<tool>
     │
     ▼
 Consumer
 ```
 
-### Why Starlette parent app
+The deprecated `/mcp` web-tools endpoint is still registered by FastMCP's
+`mcp.run()` but is not a consumer surface under Option C — airlock's tools are
+reached through the `internal://` backend above.
 
-FastMCP exposes `mcp.streamable_http_app()` returning a Starlette app. To add
-custom `/gateway/{profile}/mcp` routes we wrap that app inside a parent Starlette
-container that adds our routes at top-level priority and mounts the FastMCP app
-at `/` for everything else (so the existing `/mcp` web-tools endpoint keeps
-working unchanged).
+### Why custom_route, not a parent Starlette app
+
+Phase 1 originally planned a parent Starlette wrapper, but the gateway is wired
+via FastMCP's `custom_route("/gateway/{profile}/mcp")` decorator instead — it
+keeps FastMCP's internal routing intact and needs no app composition. Under
+Option C the gateway is the only live surface, so there is no parallel `/mcp`
+surface to preserve and no routing-collision concern.
 
 ### Why raw JSON-RPC instead of FastMCP-per-profile
 
@@ -141,21 +144,33 @@ auth check awkward, and complicates the future defense-pipeline injection point
 - [x] `tests/test_gateway_router.py`: method dispatch + tool routing with mocked `BackendPool`.
 - [x] `tests/test_gateway_app.py`: Starlette test-client integration.
 
-### Step 11: Quality gates
+### Step 11 (Option C): Internal-tool backend
 
-- [ ] `uv run ruff check src tests`
-- [ ] `uv run mypy src`
-- [ ] `uv run pytest -v`
+- [x] `gateway/profile.py`: `Backend.url` validator accepts `internal://<label>` (slug-validated) alongside `http(s)://`; add `Backend.is_internal` property.
+- [x] `gateway/internal.py`: module-level bound FastMCP server + `register_internal_server()`, `list_internal_tools()`, `call_internal_tool()` returning the same `dict` / `BackendCall` shapes as `backend.py` (reusing its `_serialize_tool` / `_serialize_content_block`).
+- [x] `gateway/router.py`: `_route_tools_list` and `_route_tools_call` dispatch on `backend.is_internal` (internal registry vs streamable-http). Namespacing and allowlist logic unchanged.
+- [x] `gateway/__init__.py`: export the internal-tool functions.
+- [x] `__init__.py` `_run_with_gateway()`: call `register_internal_server(mcp)` before `mcp.run(...)`.
+- [x] `tests/test_gateway_internal.py` + extend `tests/test_gateway_router.py` (mixed http+internal) and `tests/test_gateway_profile.py` (`internal://` validation).
+
+### Step 12: Quality gates
+
+- [x] `uv run ruff check src tests` (gateway + new tests clean)
+- [x] `uv run mypy src` (gateway clean)
+- [x] `uv run pytest -v` (332 passed, 32 pre-existing skips)
 - [ ] `gourmand --full .`
 - [ ] `podman build -f Containerfile .`
 
-### Step 12: Deploy to lotor
+### Step 13: Deploy to lotor (Option C cutover)
 
-- [ ] Push branch → GHA build → image at `quay.io/crunchtools/mcp-airlock:latest`
-- [ ] Provision `/srv/mcp-airlock.crunchtools.com/config/profiles.yaml` with `josui` + `kagetora` profiles
-- [ ] Add `AIRLOCK_GATEWAY_ENABLED=true` and `AIRLOCK_PROFILES_PATH=/etc/airlock/profiles.yaml` to env file
-- [ ] Mount profiles.yaml into container at /etc/airlock/profiles.yaml
-- [ ] systemctl restart, verify both endpoints respond, validate tool allowlist with a probe
+- [ ] Push branch → GHA build (or build the overlay image) → image carrying Option C
+- [ ] Provision `/srv/mcp-airlock.crunchtools.com/config/profiles.yaml` with real `josui` + `kagetora` profiles, each carrying the `web` (`internal://web`) backend + their http backend matrix
+- [ ] Generate `AIRLOCK_GATEWAY_JOSUI_TOKEN` + `AIRLOCK_GATEWAY_KAGETORA_TOKEN` on lotor (`secrets.token_hex(32)`), add to `mcp-airlock.env`
+- [ ] Add `AIRLOCK_GATEWAY_ENABLED=true` + `AIRLOCK_PROFILES_PATH=/etc/airlock/profiles.yaml`; mount profiles.yaml into the container
+- [ ] systemctl restart; verify `/gateway/<profile>/mcp` lists tools across an http backend AND `web__safe_fetch_tool`; confirm `/mcp` 404 is deliberate
+- [ ] **Cut Kagetora over first** (smaller blast radius, autonomous agent): one `mcp_servers:` entry in Hermes `config.yaml`; verify prompt-token count drops from ~146K toward <50K
+- [ ] **Then Josui**: one `airlock-gateway` entry in `~/.claude.json`; shrink the SSH tunnel from 10 LocalForwards to one (8019)
+- [ ] Clean up: delete the `gateway-test` profile, `/root/.airlock-gateway-test-token`, the `phase1` overlay image, and `Containerfile.gateway-overlay`
 
 ---
 
@@ -194,8 +209,9 @@ auth check awkward, and complicates the future defense-pipeline injection point
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Backend MCP connection leaks under load | Med | `BackendPool` uses `async with` context managers; verified by mocked-client test that asserts on `__aexit__` calls. |
-| FastMCP's Starlette app conflicts with gateway routes | High | Mount FastMCP at `/` after gateway routes are registered — Starlette matches first-match-wins, so `/gateway/*` matches before `/`. Verified by integration test. |
+| Backend MCP connection leaks under load | Med | Phase 1 opens a fresh session per call (no pool); `async with` guarantees teardown. Pooling is a Phase 2 optimization. |
+| ~~FastMCP `/mcp` vs gateway custom-route collision (3.1.1)~~ | ~~High~~ | **Retired by Option C.** `/mcp` is deprecated and unused; its 404 on 3.1.1 is harmless. No fastmcp bump needed. |
+| Internal backend executing untrusted args in-process | Med | The internal backend only invokes airlock's own already-trusted tool coroutines, subject to the same per-profile allow/deny filter and call-time re-check as http backends. No new code path executes consumer content. |
 | Allowlist patterns allowing path traversal in tool names | Med | Glob validator rejects `..`, `/`, leading hyphen, regex metachars. Tested adversarially. |
 | Bearer tokens leaked in logs | High | Profile model uses `SecretStr`; errors.py scrubbed; mypy enforces no `__repr__` leak. Test asserts log absence. |
 | Profile YAML file not present on container start | Low | When `AIRLOCK_GATEWAY_ENABLED=true` but file missing → fail closed at startup with clear error log. When disabled → no profile load attempted. |
@@ -207,3 +223,4 @@ auth check awkward, and complicates the future defense-pipeline injection point
 | Date | Changes |
 |------|---------|
 | 2026-06-13 | Initial Phase 1 plan |
+| 2026-06-13 | Option C: internal-tool backend steps; routing-collision risk retired; migration step rewritten as the Kagetora-then-Josui single-endpoint cutover |

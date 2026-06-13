@@ -1,8 +1,8 @@
 # Gateway Mode — airlock as the trusted boundary for MCP traffic
 
-**Status:** Design draft (v0.1) — open for review
+**Status:** Design draft (v0.2, Option C — single-endpoint architecture)
 **Branch:** `feat/gateway-design`
-**Tracking task:** crunchtools/tmp #18
+**Tracking task:** crunchtools/tmp #18 · RT #1438 (Option C)
 
 ---
 
@@ -65,10 +65,17 @@ Three problems converge:
 
 ## Approach
 
-Add a second endpoint family to airlock alongside the existing `/mcp`:
+> **Option C (2026-06-13):** the gateway is the **single** surface. The original
+> `/mcp` web-tools endpoint is deprecated — airlock's own tools are folded into
+> the gateway as an in-process `internal://` backend (conventionally named `web`),
+> so one per-consumer endpoint behind one bearer token covers airlock's tools
+> *and* the whole MCP fleet. There is no parallel surface to maintain.
+
+The gateway endpoint family:
 
 ```
-POST /gateway/<profile_name>/mcp
+POST /gateway/<profile_name>/mcp        ← canonical, single surface
+POST /mcp                                ← deprecated (404 on the fastmcp 3.1.1 base)
 ```
 
 Each request to the gateway endpoint:
@@ -76,9 +83,11 @@ Each request to the gateway endpoint:
 1. **Authenticates** the caller (bearer token in `Authorization` header, matched
    against the profile's configured token).
 2. **Resolves** the consumer's profile (tool allowlist + defense config).
-3. **Proxies** the MCP call to the relevant backend MCP server via the
-   `crunchtools` podman network (container DNS lookup — already how Kagetora
-   reaches the fleet today).
+3. **Dispatches** the MCP call by backend URL scheme: `http(s)://` proxies to a
+   remote MCP server via the `crunchtools` podman network (container DNS lookup
+   — already how Kagetora reaches the fleet today); `internal://<label>`
+   dispatches in-process to airlock's own FastMCP tool registry. Both paths
+   return identical wire shapes to the consumer.
 4. **On `tools/list` response:** drops tool definitions not in the profile's
    allowlist *before* forwarding to the consumer. This is where context savings
    come from.
@@ -89,9 +98,9 @@ Each request to the gateway endpoint:
    counts) to airlock's existing SQLite audit table.
 7. **Surfaces** in the Cockpit plugin under a new "Gateway" tab.
 
-The existing `/mcp` endpoint with the 6 web-content tools stays exactly as-is
-for backwards compatibility. A `default` profile in config can also be exposed
-at `/mcp` to give the airlock tools the same gateway treatment if desired.
+Under Option C the standalone `/mcp` web-tools endpoint is deprecated; airlock's
+own tools are reached through the gateway's `internal://` backend, so every tool
+response — web fetches included — flows through the single gateway chokepoint.
 
 ---
 
@@ -104,8 +113,12 @@ on file change (handled by Cockpit when profiles are edited from the UI).
 profiles:
   josui:
     auth:
-      bearer_token_env: AIRLOCK_PROFILE_JOSUI_TOKEN
+      bearer_token_env: AIRLOCK_GATEWAY_JOSUI_TOKEN
     backends:
+      web:                              # airlock's own tools, in-process
+        url: internal://web
+        tools_allow: ["*"]
+        tools_deny: []
       mcp-slack:
         url: http://mcp-slack:8005/mcp
         tools_allow: ["*"]
@@ -181,10 +194,13 @@ profiles:
 
 ### Consumer-visible tool names
 
-Backend tools are exposed under their original names, namespaced by server name
-to avoid collisions:
+Backend tools are exposed under their original names, namespaced by backend name
+to avoid collisions — including airlock's own tools under the `internal://`
+backend's name (conventionally `web`):
 
 ```
+web__safe_fetch_tool
+web__quarantine_fetch_tool
 mcp-slack__slack_list_channels
 mcp-atlassian__jira_search
 google-workspace-personal__get_gmail_message_content
@@ -280,25 +296,39 @@ update SQLite and the YAML file with locking.
 
 ## Migration & compatibility
 
-The existing `/mcp` endpoint stays. Two migration paths for current consumers:
+Option C is a **hard cut on the airlock side** (the gateway is the only surface),
+with consumers migrating at their own pace. Each consumer collapses its many MCP
+entries — including the old direct airlock `/mcp` entry — into a single
+gateway entry behind one bearer token. **Kagetora cuts over first** (smaller
+blast radius, autonomous agent), then Josui.
 
-**Josui (Claude Code on Breetai):**
-1. Add `josui` profile to airlock config with all 14 backends + Josui's deny list.
-2. Replace the 12 `LocalForward` lines in `~/.ssh/config` with one (to airlock's port).
-3. Replace 12 `~/.claude.json` MCP entries with one entry pointing at
-   `http://127.0.0.1:8019/gateway/josui/mcp`.
-4. Confirm all tools still work; the existing direct connections to airlock's
-   `/mcp` (web tools) continue to coexist.
+**Kagetora (Hermes on lotor) — first:**
+1. Add the `kagetora` profile to airlock config: the `web` (`internal://web`)
+   backend + a narrowed http backend set.
+2. Replace the 14 `mcp_servers:` entries in Hermes `config.yaml` with one
+   `airlock-gateway` entry pointing at
+   `http://mcp-airlock:8019/gateway/kagetora/mcp` (Bearer
+   `${AIRLOCK_GATEWAY_KAGETORA_TOKEN}`).
+3. Restart kagetora; verify a call exercises both an http backend
+   (`mcp-gemini__gemini_query_tool`) and the internal backend
+   (`web__safe_fetch_tool`); confirm the prompt-token count drops from ~146K
+   toward the <50K target.
 
-**Kagetora (Hermes on lotor):**
-1. Add `kagetora` profile to airlock config with a narrower backend set.
-2. Replace the 14 `mcp_servers:` entries in Hermes `config.yaml` with one entry
-   pointing at `http://mcp-airlock:8019/gateway/kagetora/mcp`.
-3. Restart kagetora; verify reduced prompt token count.
+**Josui (Claude Code on Breetai) — second:**
+1. Add the `josui` profile with the `web` backend + the full http backend matrix.
+2. Replace the ~10 migrated `~/.claude.json` MCP entries + the old airlock entry
+   with one `airlock-gateway` entry pointing at
+   `http://127.0.0.1:8019/gateway/josui/mcp`. Genuinely-local servers (pcloud,
+   trove, claude-in-chrome, …) stay as-is.
+3. Shrink the `~/.ssh/config` `lotor-mcp` tunnel from 10 `LocalForward` lines to
+   one (8019).
+4. Confirm `web__safe_fetch_tool` returns sanitized content and a remote backend
+   (`mcp-slack__slack_list_channels`) returns results — both via the same token,
+   single endpoint.
 
-Estimated context savings for Kagetora when narrowed to (memory, airlock,
-mcp-gemini, google-workspace-personal): ~575 tools → ~150 tools, ~137K → ~35K
-prompt tokens, ~75% reduction.
+Estimated context savings for Kagetora when narrowed to (web, memory,
+mcp-gemini, google-workspace-personal): ~575 tools → ~150 tools, ~146K → <50K
+prompt tokens.
 
 ---
 
@@ -417,6 +447,7 @@ they arrive, applying L1 incrementally; L2/L3 buffer until the stream completes
 | Phase | Scope | Estimated effort |
 |---|---|---|
 | 1 | Profile loader + auth + endpoint routing + tool allowlist filter (no defense pipeline yet) | ~half session |
+| 1-final (Option C) | `internal://` airlock-tools backend; `/mcp` deprecated; gateway becomes the single surface | ~half session |
 | 2 | L1 + L2 on tool-call responses; L3 with profile + Cockpit master switch | ~half session |
 | 3 | Audit log integration + Cockpit Gateway tab (read-only) | ~half session |
 | 4 | Cockpit profile editor + token rotation UI | ~half session |

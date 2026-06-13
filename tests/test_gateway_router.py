@@ -39,6 +39,20 @@ def _profile() -> Profile:
     return p
 
 
+def _mixed_profile() -> Profile:
+    """Profile mixing an http backend with an internal:// (airlock-tools) backend."""
+    p = Profile(
+        name="mixed",
+        auth=AuthConfig(bearer_token_env="TEST"),
+        backends={
+            "mcp-slack": Backend(url="http://mcp-slack:8005/mcp", tools_allow=["*"]),
+            "web": Backend(url="internal://web", tools_allow=["*"]),
+        },
+    )
+    p.auth.bearer_token = SecretStr("x")
+    return p
+
+
 @pytest.mark.asyncio
 class TestRouter:
     """JSON-RPC dispatch covers initialize, ping, tools/list, tools/call."""
@@ -169,6 +183,84 @@ class TestRouter:
                     },
                 },
             )
+
+    async def test_tools_list_aggregates_http_and_internal(self) -> None:
+        """Mixed-backend tools/list: http + internal both filtered and namespaced."""
+
+        async def fake_list(_backend_name: str, _backend: Backend) -> list[dict[str, Any]]:
+            return [{"name": "slack_list_channels", "description": "", "inputSchema": {}}]
+
+        async def fake_internal_list() -> list[dict[str, Any]]:
+            return [
+                {"name": "safe_fetch_tool", "description": "", "inputSchema": {}},
+                {"name": "quarantine_stats_tool", "description": "", "inputSchema": {}},
+            ]
+
+        with (
+            patch(
+                "mcp_airlock_crunchtools.gateway.router.list_backend_tools",
+                side_effect=fake_list,
+            ),
+            patch(
+                "mcp_airlock_crunchtools.gateway.router.list_internal_tools",
+                side_effect=fake_internal_list,
+            ),
+        ):
+            resp = await route_jsonrpc(
+                _mixed_profile(), {"jsonrpc": "2.0", "id": 9, "method": "tools/list"}
+            )
+
+        names = sorted(str(t["name"]) for t in resp["result"]["tools"])
+        assert names == [
+            f"mcp-slack{NAMESPACE_SEP}slack_list_channels",
+            f"web{NAMESPACE_SEP}quarantine_stats_tool",
+            f"web{NAMESPACE_SEP}safe_fetch_tool",
+        ]
+
+    async def test_tools_call_routes_to_internal_backend(self) -> None:
+        """A call on the internal backend dispatches to call_internal_tool, not http."""
+        called: dict[str, Any] = {}
+
+        async def fake_internal_call(
+            tool_name: str, arguments: dict[str, Any]
+        ) -> BackendCall:
+            called["tool"] = tool_name
+            called["args"] = arguments
+            return BackendCall(
+                content=[{"type": "text", "text": "fetched"}],
+                is_error=False,
+                structured_content=None,
+            )
+
+        async def fail_http(*_args: Any, **_kwargs: Any) -> BackendCall:
+            raise AssertionError("http backend must not be called for internal://")
+
+        with (
+            patch(
+                "mcp_airlock_crunchtools.gateway.router.call_internal_tool",
+                side_effect=fake_internal_call,
+            ),
+            patch(
+                "mcp_airlock_crunchtools.gateway.router.call_backend_tool",
+                side_effect=fail_http,
+            ),
+        ):
+            resp = await route_jsonrpc(
+                _mixed_profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 10,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"web{NAMESPACE_SEP}safe_fetch_tool",
+                        "arguments": {"url": "http://example.com"},
+                    },
+                },
+            )
+
+        assert called == {"tool": "safe_fetch_tool", "args": {"url": "http://example.com"}}
+        assert resp["result"]["content"] == [{"type": "text", "text": "fetched"}]
+        assert resp["result"]["isError"] is False
 
     async def test_tools_call_enforces_denylist_at_call_time(self) -> None:
         """Defense in depth: a deny-listed tool name on a valid backend must

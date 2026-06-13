@@ -65,6 +65,19 @@ class TestProfileModel:
         with pytest.raises(ValidationError):
             Backend(url="ftp://example/mcp")
 
+    def test_internal_url_scheme_accepted(self) -> None:
+        b = Backend(url="internal://web")
+        assert b.is_internal is True
+
+    def test_http_backend_is_not_internal(self) -> None:
+        assert Backend(url="http://x/mcp").is_internal is False
+
+    def test_internal_url_requires_slug_label(self) -> None:
+        with pytest.raises(ValidationError):
+            Backend(url="internal://")
+        with pytest.raises(ValidationError):
+            Backend(url="internal://Bad_Label")
+
     def test_bad_env_name(self) -> None:
         with pytest.raises(ValidationError):
             AuthConfig(bearer_token_env="lowercase_not_allowed")

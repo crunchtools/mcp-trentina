@@ -24,6 +24,7 @@ from .. import __version__
 from .backend import call_backend_tool, list_backend_tools
 from .errors import BackendCallError, BackendNotInProfileError
 from .filter import filter_tools
+from .internal import call_internal_tool, list_internal_tools
 
 if TYPE_CHECKING:
     from .profile import Profile
@@ -112,7 +113,10 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
     aggregated: list[dict[str, Any]] = []
     for backend_name, backend in profile.backends.items():
         try:
-            backend_tools = await list_backend_tools(backend_name, backend)
+            if backend.is_internal:
+                backend_tools = await list_internal_tools()
+            else:
+                backend_tools = await list_backend_tools(backend_name, backend)
         except BackendCallError as exc:
             logger.warning(
                 "gateway: tools/list profile=%s backend=%s skipped: %s",
@@ -167,7 +171,12 @@ async def _route_tools_call(
         )
 
     try:
-        call_result = await call_backend_tool(backend_name, backend, tool_name, arguments)
+        if backend.is_internal:
+            call_result = await call_internal_tool(tool_name, arguments)
+        else:
+            call_result = await call_backend_tool(
+                backend_name, backend, tool_name, arguments
+            )
     except BackendCallError as exc:
         return _err(req_id, -32603, str(exc))
 
