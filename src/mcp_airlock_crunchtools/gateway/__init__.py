@@ -11,7 +11,7 @@ full design and phase plan.
 
 from __future__ import annotations
 
-from .app import gateway_app
+from .app import gateway_app, register_with_fastmcp
 from .auth import verify_bearer
 from .backend import BackendCall, call_backend_tool, list_backend_tools
 from .errors import AuthError, GatewayError, ProfileConfigError
@@ -34,6 +34,7 @@ __all__ = [
     "gateway_app",
     "list_backend_tools",
     "load_profiles",
+    "register_with_fastmcp",
     "route_jsonrpc",
     "verify_bearer",
 ]

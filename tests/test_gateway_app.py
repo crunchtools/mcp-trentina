@@ -30,32 +30,32 @@ class TestGatewayApp:
     """Endpoint behaviour across auth, body parsing, methods, and dispatch."""
 
     def test_post_unknown_profile_404(self, client: TestClient) -> None:
-        resp = client.post("/gateway/missing/mcp", json={"jsonrpc": "2.0", "id": 1})
+        resp = client.post("/missing/mcp", json={"jsonrpc": "2.0", "id": 1})
         assert resp.status_code == 404
 
     def test_post_missing_auth_401(self, client: TestClient) -> None:
-        resp = client.post("/gateway/alice/mcp", json={"jsonrpc": "2.0", "id": 1})
+        resp = client.post("/alice/mcp", json={"jsonrpc": "2.0", "id": 1})
         assert resp.status_code == 401
 
     def test_post_wrong_token_401(self, client: TestClient) -> None:
         resp = client.post(
-            "/gateway/alice/mcp",
+            "/alice/mcp",
             json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
             headers={"Authorization": "Bearer wrong"},
         )
         assert resp.status_code == 401
 
     def test_get_returns_405(self, client: TestClient) -> None:
-        resp = client.get("/gateway/alice/mcp")
+        resp = client.get("/alice/mcp")
         assert resp.status_code == 405
 
     def test_delete_returns_405(self, client: TestClient) -> None:
-        resp = client.delete("/gateway/alice/mcp")
+        resp = client.delete("/alice/mcp")
         assert resp.status_code == 405
 
     def test_empty_body_400(self, client: TestClient) -> None:
         resp = client.post(
-            "/gateway/alice/mcp",
+            "/alice/mcp",
             content=b"",
             headers={
                 "Authorization": "Bearer alice-token",
@@ -66,7 +66,7 @@ class TestGatewayApp:
 
     def test_invalid_json_400(self, client: TestClient) -> None:
         resp = client.post(
-            "/gateway/alice/mcp",
+            "/alice/mcp",
             content=b"{not json",
             headers={
                 "Authorization": "Bearer alice-token",
@@ -77,7 +77,7 @@ class TestGatewayApp:
 
     def test_non_object_body_400(self, client: TestClient) -> None:
         resp = client.post(
-            "/gateway/alice/mcp",
+            "/alice/mcp",
             json=[1, 2, 3],
             headers={"Authorization": "Bearer alice-token"},
         )
@@ -85,7 +85,7 @@ class TestGatewayApp:
 
     def test_ping_authorized_returns_200(self, client: TestClient) -> None:
         resp = client.post(
-            "/gateway/alice/mcp",
+            "/alice/mcp",
             json={"jsonrpc": "2.0", "id": 5, "method": "ping"},
             headers={"Authorization": "Bearer alice-token"},
         )
@@ -94,7 +94,7 @@ class TestGatewayApp:
 
     def test_initialize_authorized_returns_server_info(self, client: TestClient) -> None:
         resp = client.post(
-            "/gateway/alice/mcp",
+            "/alice/mcp",
             json={"jsonrpc": "2.0", "id": 1, "method": "initialize"},
             headers={"Authorization": "Bearer alice-token"},
         )
@@ -106,7 +106,7 @@ class TestGatewayApp:
         self, client: TestClient
     ) -> None:
         resp = client.post(
-            "/gateway/alice/mcp",
+            "/alice/mcp",
             json={
                 "jsonrpc": "2.0",
                 "id": 9,
@@ -135,7 +135,7 @@ class TestGatewayApp:
             side_effect=fake_call,
         ):
             resp = client.post(
-                "/gateway/alice/mcp",
+                "/alice/mcp",
                 json={
                     "jsonrpc": "2.0",
                     "id": 10,
