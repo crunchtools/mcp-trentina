@@ -170,6 +170,53 @@ profiles:
         with pytest.raises(ProfileConfigError, match="non-empty 'profiles'"):
             load_profiles(cfg)
 
+    def test_header_env_ref_expanded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cfg = tmp_path / "profiles.yaml"
+        cfg.write_text(
+            """
+profiles:
+  kagetora:
+    auth:
+      bearer_token_env: AIRLOCK_PROFILE_KAGETORA_TOKEN
+    backends:
+      memory:
+        url: http://mcp-memory:8765/mcp
+        headers:
+          Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
+"""
+        )
+        monkeypatch.setenv("AIRLOCK_PROFILE_KAGETORA_TOKEN", "tok")
+        monkeypatch.setenv("MCP_MEMORY_API_KEY", "memsecret")
+        registry = load_profiles(cfg)
+        assert (
+            registry["kagetora"].backends["memory"].headers["Authorization"]
+            == "Bearer memsecret"
+        )
+
+    def test_header_env_ref_missing_fails_closed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cfg = tmp_path / "profiles.yaml"
+        cfg.write_text(
+            """
+profiles:
+  kagetora:
+    auth:
+      bearer_token_env: AIRLOCK_PROFILE_KAGETORA_TOKEN
+    backends:
+      memory:
+        url: http://mcp-memory:8765/mcp
+        headers:
+          Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
+"""
+        )
+        monkeypatch.setenv("AIRLOCK_PROFILE_KAGETORA_TOKEN", "tok")
+        monkeypatch.delenv("MCP_MEMORY_API_KEY", raising=False)
+        with pytest.raises(ProfileConfigError, match="MCP_MEMORY_API_KEY"):
+            load_profiles(cfg)
+
     def test_missing_token_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = tmp_path / "profiles.yaml"
         cfg.write_text(

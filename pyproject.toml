@@ -1,6 +1,6 @@
 [project]
 name = "mcp-airlock-crunchtools"
-version = "0.3.0"
+version = "0.4.0"
 description = "Secure MCP server for quarantined web content extraction and per-consumer MCP gateway — three-layer defense against prompt injection"
 requires-python = ">=3.10"
 license = "AGPL-3.0-or-later"

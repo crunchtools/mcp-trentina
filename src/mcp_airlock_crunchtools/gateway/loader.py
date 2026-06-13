@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,65 @@ from .errors import ProfileConfigError
 from .profile import Profile
 
 logger = logging.getLogger(__name__)
+
+#: ${VAR} references in backend header values, resolved from the server's own
+#: environment at load time. Lets a profile carry a backend auth header without
+#: hardcoding the secret in YAML (e.g. Authorization: "Bearer ${MCP_MEMORY_API_KEY}").
+_ENV_REF_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
+
+
+def _expand_env_refs(value: str, *, context: str) -> str:
+    """Substitute ${VAR} references in a header value from os.environ.
+
+    Fails closed (raises ProfileConfigError) if a referenced var is unset or
+    empty — a missing auth secret must not silently become an unauthenticated
+    backend call.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        var_name = match.group(1)
+        resolved = os.environ.get(var_name, "")
+        if not resolved:
+            raise ProfileConfigError(
+                f"{context}: env var {var_name} referenced but not set or empty"
+            )
+        return resolved
+
+    return _ENV_REF_RE.sub(_replace, value)
+
+
+def _build_profile(name: str, body: Any) -> Profile:
+    """Validate one profile entry and resolve its secrets from the environment.
+
+    Resolves the bearer token from `auth.bearer_token_env` and expands any
+    ${VAR} references in backend headers. Both fail closed on a missing env var.
+    """
+    if not isinstance(body, dict):
+        raise ProfileConfigError(
+            f"Profile {name!r}: body must be a mapping, got {type(body).__name__}"
+        )
+    try:
+        profile = Profile(name=name, **body)
+    except ValidationError as exc:
+        raise ProfileConfigError(f"Profile {name!r}: {exc}") from exc
+
+    env_name = profile.auth.bearer_token_env
+    token_value = os.environ.get(env_name, "")
+    if not token_value:
+        raise ProfileConfigError(f"Profile {name!r}: env var {env_name} not set or empty")
+    profile.auth.bearer_token = SecretStr(token_value)
+
+    for backend_name, backend in profile.backends.items():
+        if backend.headers:
+            backend.headers = {
+                key: _expand_env_refs(
+                    val,
+                    context=f"Profile {name!r} backend {backend_name!r} header {key!r}",
+                )
+                for key, val in backend.headers.items()
+            }
+
+    return profile
 
 
 def load_profiles(path: Path | str) -> dict[str, Profile]:
@@ -60,25 +120,9 @@ def load_profiles(path: Path | str) -> dict[str, Profile]:
             f"Profiles file {config_path} must contain a non-empty 'profiles' mapping"
         )
 
-    registry: dict[str, Profile] = {}
-    for name, body in profiles_section.items():
-        if not isinstance(body, dict):
-            raise ProfileConfigError(
-                f"Profile {name!r}: body must be a mapping, got {type(body).__name__}"
-            )
-        try:
-            profile = Profile(name=name, **body)
-        except ValidationError as exc:
-            raise ProfileConfigError(f"Profile {name!r}: {exc}") from exc
-
-        env_name = profile.auth.bearer_token_env
-        token_value = os.environ.get(env_name, "")
-        if not token_value:
-            raise ProfileConfigError(
-                f"Profile {name!r}: env var {env_name} not set or empty"
-            )
-        profile.auth.bearer_token = SecretStr(token_value)
-        registry[name] = profile
+    registry: dict[str, Profile] = {
+        name: _build_profile(name, body) for name, body in profiles_section.items()
+    }
 
     logger.info(
         "gateway: loaded %d profile(s): %s",
