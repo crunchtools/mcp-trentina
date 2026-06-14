@@ -384,7 +384,7 @@ async def search_grounded(
     _enforce_search_quarantine(request_body)
 
     api_key = config.api_key.get_secret_value()
-    model = config.model
+    model = config.search_model
     url = f"{GEMINI_API_BASE}/{model}:generateContent?key={api_key}"
 
     try:

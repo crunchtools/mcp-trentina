@@ -13,6 +13,7 @@ from pydantic import SecretStr
 _config: Config | None = None
 
 DEFAULT_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_SEARCH_MODEL = "gemini-2.5-flash"
 DEFAULT_FALLBACK = "layer1"
 DEFAULT_MAX_CONTENT = 100_000
 DEFAULT_DB_PATH = "/data/airlock.db"
@@ -31,6 +32,9 @@ class Config:
         raw_key = os.environ.get("GEMINI_API_KEY", "")
         self.api_key: SecretStr = SecretStr(raw_key) if raw_key else SecretStr("")
         self.model: str = os.environ.get("QUARANTINE_MODEL", DEFAULT_MODEL)
+        self.search_model: str = os.environ.get(
+            "QUARANTINE_SEARCH_MODEL", DEFAULT_SEARCH_MODEL
+        )
         self.fallback: str = os.environ.get("QUARANTINE_FALLBACK", DEFAULT_FALLBACK)
         self.max_content: int = int(
             os.environ.get("QUARANTINE_MAX_CONTENT", str(DEFAULT_MAX_CONTENT))

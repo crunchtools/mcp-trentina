@@ -12,7 +12,8 @@ uv run mcp-airlock-crunchtools
 ## Environment Variables
 
 - `GEMINI_API_KEY` — Required for Layer 2 (Q-Agent)
-- `QUARANTINE_MODEL` — Gemini model (default: gemini-2.0-flash-lite)
+- `QUARANTINE_MODEL` — Gemini model for Q-Agent (default: gemini-2.5-flash-lite)
+- `QUARANTINE_SEARCH_MODEL` — Gemini model for L0 search grounding (default: gemini-2.5-flash; must support google_search)
 - `QUARANTINE_FALLBACK` — "layer1" (default) or "fail"
 - `QUARANTINE_MAX_CONTENT` — Max chars to Q-Agent (default: 100000)
 - `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-airlock/airlock.db)
