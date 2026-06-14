@@ -103,13 +103,12 @@ class TestInternalBackend:
 
     async def test_register_then_listed(self) -> None:
         server = _FakeServer([_tool("safe_fetch_tool"), _tool("quarantine_stats_tool")])
-        internal.register_internal_server(server)  # type: ignore[arg-type]
+        internal.register_internal_server(server)
         assert internal.internal_server_registered() is True
 
         tools = await internal.list_internal_tools()
         names = sorted(t["name"] for t in tools)
         assert names == ["quarantine_stats_tool", "safe_fetch_tool"]
-        # Serialized shape matches the remote-backend path.
         sample = tools[0]
         assert "description" in sample
         assert sample["inputSchema"] == {"type": "object", "properties": {}}
@@ -125,7 +124,7 @@ class TestInternalBackend:
                 annotations=ToolAnnotations(title="Safe Fetch", readOnlyHint=True),
             )
         )
-        internal.register_internal_server(_FakeServer([annotated]))  # type: ignore[arg-type]
+        internal.register_internal_server(_FakeServer([annotated]))
         tools = await internal.list_internal_tools()
         assert isinstance(tools[0]["annotations"], dict)
         assert tools[0]["annotations"]["title"] == "Safe Fetch"
@@ -138,8 +137,7 @@ class TestInternalBackend:
             is_error=False,
         )
         server = _FakeServer([_tool("safe_fetch_tool")], call_result=result)
-        internal.register_internal_server(server)  # type: ignore[arg-type]
-
+        internal.register_internal_server(server)
         call = await internal.call_internal_tool("safe_fetch_tool", {"url": "http://x"})
         assert server.calls == [("safe_fetch_tool", {"url": "http://x"})]
         assert call.content == [{"type": "text", "text": "hello"}]
@@ -151,20 +149,19 @@ class TestInternalBackend:
             content=[TextContent(type="text", text="boom")], is_error=True
         )
         server = _FakeServer([_tool("safe_fetch_tool")], call_result=result)
-        internal.register_internal_server(server)  # type: ignore[arg-type]
-
+        internal.register_internal_server(server)
         call = await internal.call_internal_tool("safe_fetch_tool", {})
         assert call.is_error is True
 
     async def test_list_wraps_failure_in_backendcallerror(self) -> None:
         server = _FakeServer([], raise_on_list=RuntimeError("walk failed"))
-        internal.register_internal_server(server)  # type: ignore[arg-type]
+        internal.register_internal_server(server)
         with pytest.raises(BackendCallError, match="internal list_tools failed"):
             await internal.list_internal_tools()
 
     async def test_call_wraps_failure_in_backendcallerror(self) -> None:
         server = _FakeServer([], raise_on_call=KeyError("no such tool"))
-        internal.register_internal_server(server)  # type: ignore[arg-type]
+        internal.register_internal_server(server)
         with pytest.raises(BackendCallError, match="call failed"):
             await internal.call_internal_tool("nope", {})
 
@@ -188,7 +185,6 @@ async def test_real_airlock_server_lists_its_tools() -> None:
     names = {t["name"] for t in tools}
     assert "safe_fetch_tool" in names
     assert "quarantine_stats_tool" in names
-    # Every serialized tool carries the fields the gateway namespacer relies on.
     for t in tools:
         assert isinstance(t["name"], str) and t["name"]
         assert "inputSchema" in t

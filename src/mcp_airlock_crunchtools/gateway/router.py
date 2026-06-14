@@ -17,6 +17,7 @@ inserts the L1/L2/L3 defense pipeline here.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -35,6 +36,18 @@ logger = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = "2024-11-05"
 NAMESPACE_SEP = "__"
+
+
+def _audit(
+    profile: str,
+    backend: str,
+    tool: str,
+    success: bool,
+    duration_ms: int,
+    error_message: str | None = None,
+) -> None:
+    with contextlib.suppress(Exception):
+        record_gateway_call(profile, backend, tool, success, duration_ms, error_message)
 
 
 def _ok(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -182,11 +195,11 @@ async def _route_tools_call(
             )
     except BackendCallError as exc:
         duration_ms = int((time.monotonic() - t0) * 1000)
-        record_gateway_call(profile.name, backend_name, tool_name, False, duration_ms, str(exc))
+        _audit(profile.name, backend_name, tool_name, False, duration_ms, str(exc))
         return _err(req_id, -32603, str(exc))
 
     duration_ms = int((time.monotonic() - t0) * 1000)
-    record_gateway_call(profile.name, backend_name, tool_name, True, duration_ms)
+    _audit(profile.name, backend_name, tool_name, True, duration_ms)
 
     result: dict[str, Any] = {
         "content": call_result.content,

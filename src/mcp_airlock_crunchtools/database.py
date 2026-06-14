@@ -8,15 +8,12 @@ deterministic code, which decides whether to record a detection.
 from __future__ import annotations
 
 import json
-import logging
 import sqlite3
 import time
 from datetime import datetime, timezone
 from typing import Any
 
 from .config import get_config
-
-logger = logging.getLogger(__name__)
 
 _db: sqlite3.Connection | None = None
 
@@ -140,9 +137,6 @@ def get_blocklist_stats() -> dict[str, Any]:
     }
 
 
-# -- Gateway audit --
-
-
 def record_gateway_call(
     profile: str,
     backend: str,
@@ -151,21 +145,15 @@ def record_gateway_call(
     duration_ms: int,
     error_message: str | None = None,
 ) -> None:
-    """Record a gateway tools/call invocation. Never raises."""
-    try:
-        db = get_db()
-        db.execute(
-            "INSERT INTO gateway_calls "
-            "(timestamp, profile, backend, tool, success, duration_ms, error_message) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (time.time(), profile, backend, tool, success, duration_ms, error_message),
-        )
-        db.commit()
-    except Exception:
-        logger.warning(
-            "gateway audit: failed to record call %s/%s/%s",
-            profile, backend, tool, exc_info=True,
-        )
+    """Record a gateway tools/call invocation."""
+    db = get_db()
+    db.execute(
+        "INSERT INTO gateway_calls "
+        "(timestamp, profile, backend, tool, success, duration_ms, error_message) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (time.time(), profile, backend, tool, success, duration_ms, error_message),
+    )
+    db.commit()
 
 
 def get_gateway_call_stats(

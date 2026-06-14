@@ -150,8 +150,6 @@ def _serialize_tool(tool: Any) -> dict[str, Any]:
         value = getattr(tool, extra, None)
         if value is None:
             continue
-        # annotations (and sometimes outputSchema) come back as pydantic models
-        # (e.g. ToolAnnotations), which are not directly JSON-serializable.
         if hasattr(value, "model_dump"):
             value = value.model_dump(mode="json", by_alias=True, exclude_none=True)
         out[extra] = value

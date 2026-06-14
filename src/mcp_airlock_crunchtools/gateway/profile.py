@@ -20,8 +20,6 @@ BACKEND_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 GLOB_PATTERN_RE = re.compile(r"^[a-zA-Z0-9_*][a-zA-Z0-9_*-]*$")
 ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
-#: Scheme marking a backend as airlock's own in-process tool surface rather
-#: than a remote streamable-http MCP server. See gateway/internal.py.
 INTERNAL_SCHEME = "internal://"
 
 MAX_BACKEND_TIMEOUT_SECONDS = 300.0
