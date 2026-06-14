@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import get_config
-from ..database import get_blocklist_stats
+from ..database import get_blocklist_stats, get_gateway_call_stats
 from ..quarantine.classifier import is_classifier_available
 
 
@@ -30,4 +30,5 @@ async def get_airlock_stats() -> dict[str, Any]:
             "threshold": config.classifier_threshold,
         },
         "blocklist": blocklist,
+        "gateway_audit": get_gateway_call_stats(days=30),
     }

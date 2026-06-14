@@ -1,0 +1,207 @@
+# Kagetora gateway profile — tightened allowlists for context optimization
+#
+# Reduction: ~520 tools -> ~210 tools (60% cut)
+# Strategy: ["*"] for small backends (<20 tools), explicit allowlists for heavy ones
+# Audit: gateway_calls table logs every tools/call for data-driven future tightening
+
+profiles:
+  kagetora:
+    auth:
+      bearer_token_env: AIRLOCK_PROFILE_KAGETORA_TOKEN
+
+    backends:
+      # ── Internal (airlock's own tools) ──────────────────────────
+      web:
+        url: "internal://web"
+        tools_allow: ["*"]
+
+      # ── Small backends — keep all ───────────────────────────────
+      memory:
+        url: "http://mcp-memory:8006/mcp"
+        headers:
+          Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
+        tools_allow: ["*"]
+
+      slack:
+        url: "http://mcp-slack:8005/mcp"
+        tools_allow: ["*"]
+
+      request-tracker:
+        url: "http://mcp-request-tracker:8008/mcp"
+        tools_allow: ["*"]
+
+      feed-reader:
+        url: "http://mcp-feed-reader:8004/mcp"
+        tools_allow: ["*"]
+
+      mediawiki:
+        url: "http://mcp-mediawiki:8009/mcp"
+        tools_allow: ["*"]
+
+      google-search-console:
+        url: "http://mcp-google-search-console:8010/mcp"
+        tools_allow: ["*"]
+
+      ashigaru:
+        url: "http://mcp-ashigaru:8020/mcp"
+        tools_allow: ["*"]
+
+      # ── GitHub (existing explicit allowlist) ────────────────────
+      github:
+        url: "http://mcp-github:8016/mcp"
+        tools_allow:
+          - list_repositories_tool
+          - get_repository_tool
+          - list_pull_requests_tool
+          - get_pull_request_tool
+          - get_pull_request_diff_tool
+          - get_pull_request_checks_tool
+          - list_issues_tool
+          - get_issue_tool
+          - create_issue_tool
+          - create_issue_comment_tool
+          - list_workflow_runs_tool
+          - rerun_workflow_run_tool
+          - rerun_failed_jobs_tool
+          - search_repositories_tool
+          - search_code_tool
+
+      # ── Atlassian/Jira (~40 -> ~14) ────────────────────────────
+      atlassian:
+        url: "http://mcp-atlassian:8021/mcp"
+        tools_allow:
+          # Search & read
+          - jira_search
+          - jira_get_issue
+          - jira_get_all_projects
+          - jira_get_project_issues
+          - jira_search_fields
+          # Write
+          - jira_create_issue
+          - jira_update_issue
+          - jira_add_comment
+          - jira_transition_issue
+          - jira_get_transitions
+          # Links
+          - jira_create_issue_link
+          - jira_get_link_types
+          - jira_link_to_epic
+          # Dev info (PR visibility for ashigaru)
+          - jira_get_issue_development_info
+
+      # ── GWS Personal (~130 -> ~25) ─────────────────────────────
+      gws-personal:
+        url: "http://gws-personal:8011/mcp"
+        tools_allow:
+          # Gmail
+          - search_gmail_messages
+          - get_gmail_message_content
+          - get_gmail_messages_content_batch
+          - get_gmail_thread_content
+          - get_gmail_threads_content_batch
+          - draft_gmail_message
+          - list_gmail_labels
+          - modify_gmail_message_labels
+          - batch_modify_gmail_message_labels
+          # Calendar
+          - get_events
+          - manage_event
+          - list_calendars
+          - query_freebusy
+          - manage_focus_time
+          - manage_out_of_office
+          # Tasks
+          - list_task_lists
+          - list_tasks
+          - get_task
+          - get_task_list
+          - manage_task
+          - manage_task_list
+          # Contacts
+          - search_contacts
+          - get_contact
+          # Drive (read-only)
+          - search_drive_files
+          - get_drive_file_content
+
+      # ── GWS Work (~130 -> ~15) ─────────────────────────────────
+      gws-work:
+        url: "http://gws-work:8012/mcp"
+        tools_allow:
+          # Gmail (read + draft)
+          - search_gmail_messages
+          - get_gmail_message_content
+          - get_gmail_messages_content_batch
+          - get_gmail_thread_content
+          - get_gmail_threads_content_batch
+          - draft_gmail_message
+          - list_gmail_labels
+          # Calendar
+          - get_events
+          - list_calendars
+          - query_freebusy
+          # Contacts
+          - search_contacts
+          - get_contact
+          # Drive (read-only)
+          - search_drive_files
+          - get_drive_file_content
+          - get_drive_file_download_url
+
+      # ── Gemini (~25 -> ~12) ────────────────────────────────────
+      gemini:
+        url: "http://mcp-gemini:8007/mcp"
+        tools_allow:
+          - gemini_query_tool
+          - gemini_search_tool
+          - gemini_generate_image_tool
+          - gemini_image_prompt_tool
+          - gemini_analyze_text_tool
+          - gemini_analyze_url_tool
+          - gemini_analyze_image_tool
+          - gemini_summarize_tool
+          - gemini_brainstorm_tool
+          - gemini_structured_tool
+          - gemini_extract_tool
+          - gemini_run_code_tool
+
+      # ── Cloudflare (~20 -> ~6, read-only) ──────────────────────
+      cloudflare:
+        url: "http://mcp-cloudflare:8003/mcp"
+        tools_allow:
+          - get_zone_analytics_tool
+          - get_security_events_tool
+          - get_top_pages_tool
+          - get_traffic_by_country_tool
+          - list_zones_tool
+          - get_zone_tool
+
+      # ── WordPress Crunchtools (~20 -> ~10) ─────────────────────
+      wordpress-crunchtools:
+        url: "http://mcp-wordpress-crunchtools:8013/mcp"
+        tools_allow:
+          - wordpress_list_posts
+          - wordpress_get_post
+          - wordpress_create_post
+          - wordpress_update_post
+          - wordpress_search_posts
+          - wordpress_list_categories
+          - wordpress_list_tags
+          - wordpress_upload_media
+          - wordpress_get_media_url
+          - wordpress_list_media
+
+      # ── WordPress Educated Confusion (~20 -> ~10) ──────────────
+      wordpress-educatedconfusion:
+        url: "http://mcp-wordpress-educatedconfusion:8014/mcp"
+        tools_allow:
+          - wordpress_list_posts
+          - wordpress_get_post
+          - wordpress_create_post
+          - wordpress_update_post
+          - wordpress_search_posts
+          - wordpress_list_categories
+          - wordpress_list_tags
+          - wordpress_upload_media
+          - wordpress_get_media_url
+          - wordpress_list_media

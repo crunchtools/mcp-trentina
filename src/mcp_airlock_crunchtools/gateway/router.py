@@ -18,9 +18,11 @@ inserts the L1/L2/L3 defense pipeline here.
 from __future__ import annotations
 
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from .. import __version__
+from ..database import record_gateway_call
 from .backend import call_backend_tool, list_backend_tools
 from .errors import BackendCallError, BackendNotInProfileError
 from .filter import filter_tools
@@ -170,6 +172,7 @@ async def _route_tools_call(
             f"Tool {tool_name!r} not permitted on backend {backend_name!r}",
         )
 
+    t0 = time.monotonic()
     try:
         if backend.is_internal:
             call_result = await call_internal_tool(tool_name, arguments)
@@ -178,7 +181,12 @@ async def _route_tools_call(
                 backend_name, backend, tool_name, arguments
             )
     except BackendCallError as exc:
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        record_gateway_call(profile.name, backend_name, tool_name, False, duration_ms, str(exc))
         return _err(req_id, -32603, str(exc))
+
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    record_gateway_call(profile.name, backend_name, tool_name, True, duration_ms)
 
     result: dict[str, Any] = {
         "content": call_result.content,

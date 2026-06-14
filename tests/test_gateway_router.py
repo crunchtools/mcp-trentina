@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr
 
+from mcp_airlock_crunchtools.database import get_gateway_call_stats
 from mcp_airlock_crunchtools.gateway.backend import BackendCall
 from mcp_airlock_crunchtools.gateway.errors import BackendCallError, BackendNotInProfileError
 from mcp_airlock_crunchtools.gateway.profile import AuthConfig, Backend, Profile
@@ -279,3 +280,83 @@ class TestRouter:
         )
         assert resp["error"]["code"] == -32602
         assert "not permitted" in resp["error"]["message"].lower()
+
+    async def test_tools_call_records_audit_on_success(self, tmp_path: Any) -> None:
+        """Successful tools/call writes an audit row to gateway_calls."""
+        import mcp_airlock_crunchtools.database as db_mod
+
+        db_mod._db = None
+        db_path = str(tmp_path / "audit_test.db")
+
+        async def fake_call(
+            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+        ) -> BackendCall:
+            return BackendCall(
+                content=[{"type": "text", "text": "ok"}],
+                is_error=False, structured_content=None,
+            )
+
+        tool_name = f"mcp-slack{NAMESPACE_SEP}slack_list_channels"
+        with (
+            patch(
+                "mcp_airlock_crunchtools.gateway.router.call_backend_tool",
+                side_effect=fake_call,
+            ),
+            patch("mcp_airlock_crunchtools.database.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value.db_path = db_path
+            mock_cfg.return_value.ensure_db_dir = lambda: None
+            await route_jsonrpc(
+                _profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 20,
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": {}},
+                },
+            )
+
+        stats = get_gateway_call_stats("testp", days=1)
+        assert stats["total_calls"] == 1
+        assert stats["by_tool"][0]["tool"] == "slack_list_channels"
+        assert stats["by_tool"][0]["ok"] == 1
+        assert stats["by_tool"][0]["errors"] == 0
+        db_mod._db = None
+
+    async def test_tools_call_records_audit_on_failure(self, tmp_path: Any) -> None:
+        """Failed tools/call writes an audit row with error_message."""
+        import mcp_airlock_crunchtools.database as db_mod
+
+        db_mod._db = None
+        db_path = str(tmp_path / "audit_fail_test.db")
+
+        async def fail_call(
+            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+        ) -> BackendCall:
+            raise BackendCallError("backend down")
+
+        tool_name = f"mcp-slack{NAMESPACE_SEP}slack_list_channels"
+        with (
+            patch(
+                "mcp_airlock_crunchtools.gateway.router.call_backend_tool",
+                side_effect=fail_call,
+            ),
+            patch("mcp_airlock_crunchtools.database.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value.db_path = db_path
+            mock_cfg.return_value.ensure_db_dir = lambda: None
+            resp = await route_jsonrpc(
+                _profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 21,
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": {}},
+                },
+            )
+
+        assert resp["error"]["code"] == -32603
+        stats = get_gateway_call_stats("testp", days=1)
+        assert stats["total_calls"] == 1
+        assert stats["by_tool"][0]["errors"] == 1
+        db_mod._db = None
