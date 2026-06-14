@@ -51,14 +51,27 @@ RUN HF_TOKEN="${HF_TOKEN}" python -m optimum.exporters.onnx \
       /models/prompt-guard-2-22m/
 
 # ============================================================
-# Stage 2: Runtime image (ONNX Runtime only — no PyTorch)
-# Hummingbird Python is minimal — libstdc++ copied from builder
-# to support onnxruntime/numpy C extensions at runtime.
+# Stage 2: pip install (builder variant — has shell for RUN)
+# Hummingbird default is distroless (no /bin/sh), so pip install
+# must happen in a builder stage. Installed packages are copied
+# into the final distroless image.
+# ============================================================
+FROM quay.io/hummingbird/python:latest-builder AS pip-builder
+USER 0
+
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY src/ ./src/
+
+RUN pip install --no-cache-dir --prefix=/usr .
+
+# ============================================================
+# Stage 3: Runtime image (distroless — no shell, no dnf)
 # ============================================================
 FROM quay.io/hummingbird/python:latest
 
 LABEL name="mcp-airlock-crunchtools" \
-      version="0.2.2" \
+      version="0.4.0" \
       summary="Secure MCP server for quarantined web content extraction" \
       description="Three-layer defense against prompt injection: deterministic sanitization + Prompt Guard 2 classifier + quarantined LLM" \
       maintainer="crunchtools.com" \
@@ -74,19 +87,15 @@ LABEL name="mcp-airlock-crunchtools" \
 
 WORKDIR /app
 
-# Copy libstdc++ from builder — required by onnxruntime/numpy C extensions
+# Copy libstdc++ from model-builder — required by onnxruntime/numpy C extensions
 COPY --from=model-builder /usr/lib64/libstdc++.so.6* /usr/lib64/
 
-# Copy ONNX model files from builder stage (no PyTorch in final image)
+# Copy ONNX model files from model-builder (no PyTorch in final image)
 COPY --from=model-builder /models/prompt-guard-2-22m/ /models/prompt-guard-2-22m/
 
-COPY pyproject.toml README.md ./
-COPY src/ ./src/
-
-RUN pip install --no-cache-dir .
-
-RUN python -c "from mcp_airlock_crunchtools import main; print('Installation verified')" && \
-    python -c "from mcp_airlock_crunchtools.quarantine.classifier import is_classifier_available; assert is_classifier_available(), 'Classifier failed to load'; print('Classifier verified')"
+# Copy installed Python packages from pip-builder (pure Python + native C extensions)
+COPY --from=pip-builder /usr/lib/python3.14/site-packages/ /usr/lib/python3.14/site-packages/
+COPY --from=pip-builder /usr/lib64/python3.14/site-packages/ /usr/lib64/python3.14/site-packages/
 
 ENV QUARANTINE_DB=/data/quarantine.db
 ENV CLASSIFIER_MODEL_PATH=/models/prompt-guard-2-22m

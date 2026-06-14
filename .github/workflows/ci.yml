@@ -65,26 +65,37 @@ jobs:
         run: |
           timeout 5 docker run --rm mcp-airlock:test || true
 
+      - name: Build test runner image (adds shell + pytest to distroless)
+        run: |
+          docker build -f - -t mcp-airlock:test-runner . <<'EOF'
+          FROM quay.io/hummingbird/python:latest-builder AS test-deps
+          USER 0
+          RUN pip install --no-cache-dir --prefix=/usr pytest pytest-asyncio
+
+          FROM mcp-airlock:test
+          COPY --from=test-deps /usr/lib/python3.14/site-packages/ /usr/lib/python3.14/site-packages/
+          EOF
+
       - name: Run L2 integration tests in container
         run: |
           docker run --rm \
-            --entrypoint "" \
+            --entrypoint python \
             -v ${{ github.workspace }}/tests:/tests:ro \
             -e GEMINI_API_KEY="test_key_for_ci" \
             -e CLASSIFIER_MODEL_PATH="/models/prompt-guard-2-22m" \
-            mcp-airlock:test \
-            sh -c "pip install --no-cache-dir pytest pytest-asyncio && python -m pytest /tests/test_l2_integration.py -v"
+            mcp-airlock:test-runner \
+            -m pytest /tests/test_l2_integration.py -v
 
       - name: Run L3 integration tests in container
         if: env.HAS_GEMINI_KEY == 'true'
         run: |
           docker run --rm \
-            --entrypoint "" \
+            --entrypoint python \
             -v ${{ github.workspace }}/tests:/tests:ro \
             -e GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
             -e CLASSIFIER_MODEL_PATH="/models/prompt-guard-2-22m" \
-            mcp-airlock:test \
-            sh -c "pip install --no-cache-dir pytest pytest-asyncio && python -m pytest /tests/test_l3_integration.py -v"
+            mcp-airlock:test-runner \
+            -m pytest /tests/test_l3_integration.py -v
 
   validate-constitution:
     name: Constitution Validation

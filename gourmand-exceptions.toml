@@ -202,3 +202,27 @@ check = "single_use_helpers"
 path = "cockpit-airlock/airlock.js"
 pattern = "init"
 justification = "UI lifecycle function — entry point that orchestrates page render, D-Bus connection, and signal setup"
+
+[[exceptions]]
+check = "generic_names"
+path = "src/mcp_airlock_crunchtools/gateway/router.py"
+pattern = "result"
+justification = "result is the JSON-RPC 2.0 wire-protocol field name for success responses (https://www.jsonrpc.org/specification §5.1); renaming would obscure the protocol mapping"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_airlock_crunchtools/__init__.py"
+pattern = "_run_with_gateway"
+justification = "Configuration gate isolated from the main() match statement so the gateway-disabled path stays a single mcp.run() call with no imports of starlette/uvicorn at startup time"
+
+[[exceptions]]
+check = "lint_suppression"
+path = "src/mcp_airlock_crunchtools/__init__.py"
+pattern = "type: ignore"
+justification = "Starlette's lifespan callable type signature uses opaque generics; the [no-untyped-def] ignore is the standard pattern for framework-supplied callbacks"
+
+[[exceptions]]
+check = "lint_suppression"
+path = "src/mcp_airlock_crunchtools/gateway/app.py"
+pattern = "type: ignore"
+justification = "FastMCP's custom_route decorator has no type stubs; the [misc] ignore is the standard pattern for typed code calling into untyped framework APIs"

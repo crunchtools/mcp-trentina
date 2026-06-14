@@ -24,7 +24,7 @@ from .tools import (
 
 mcp = FastMCP(
     "mcp-airlock-crunchtools",
-    version="0.2.2",
+    version="0.4.0",
     instructions=(
         "Quarantined web content extraction with three-layer prompt injection defense. "
         "Layer 1: deterministic sanitization. Layer 2: Prompt Guard 2 classifier. "

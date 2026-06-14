@@ -1,14 +1,14 @@
 [project]
 name = "mcp-airlock-crunchtools"
-version = "0.2.2"
-description = "Secure MCP server for quarantined web content extraction — two-layer defense against prompt injection"
+version = "0.4.0"
+description = "Secure MCP server for quarantined web content extraction and per-consumer MCP gateway — three-layer defense against prompt injection"
 requires-python = ">=3.10"
 license = "AGPL-3.0-or-later"
 authors = [
     { name = "crunchtools.com" }
 ]
 readme = "README.md"
-keywords = ["mcp", "security", "prompt-injection", "sanitization", "quarantine"]
+keywords = ["mcp", "security", "prompt-injection", "sanitization", "quarantine", "gateway"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -28,6 +28,7 @@ dependencies = [
     "transformers>=4.40",
     "numpy>=1.24",
     "dbus-fast>=2.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -72,8 +73,9 @@ max-branches = 10
 max-statements = 50
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S105", "S108", "PLC0415", "PLR2004", "ARG002", "ARG005", "RUF003"]
+"tests/*" = ["S105", "S106", "S108", "PLC0415", "PLR2004", "ARG002", "ARG005", "RUF003", "PT018", "TC003"]
 "src/mcp_airlock_crunchtools/dbus_interface.py" = ["UP037", "C901", "TRY300"]
+"src/mcp_airlock_crunchtools/gateway/app.py" = ["C901", "PLR0911", "PLR0912"]
 
 [tool.mypy]
 python_version = "3.10"
@@ -82,7 +84,7 @@ warn_return_any = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["markdownify", "bs4", "onnxruntime", "transformers", "dbus_fast", "dbus_fast.*"]
+module = ["markdownify", "bs4", "onnxruntime", "transformers", "dbus_fast", "dbus_fast.*", "yaml"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

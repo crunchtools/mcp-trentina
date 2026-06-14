@@ -1,23 +1,30 @@
-"""mcp-airlock-crunchtools: Quarantined web content extraction."""
+"""mcp-airlock-crunchtools: Quarantined web content extraction + MCP gateway."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import logging
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-__version__ = "0.2.2"
+__version__ = "0.4.0"
 
 DEFAULT_PORT = 8019
+_TRUTHY = {"1", "true", "yes", "on"}
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
 
 
 def main() -> None:
     """Entry point for mcp-airlock-crunchtools."""
     parser = argparse.ArgumentParser(
         prog="mcp-airlock-crunchtools",
-        description="MCP server for quarantined web content extraction",
+        description="MCP server for quarantined web content extraction and gateway",
     )
     parser.add_argument(
         "--transport",
@@ -46,10 +53,49 @@ def main() -> None:
         loop.run_until_complete(start_dbus())
         loop.close()
 
+    gateway_enabled = os.environ.get("AIRLOCK_GATEWAY_ENABLED", "").strip().lower() in _TRUTHY
+
     match args.transport:
         case "stdio":
             mcp.run(transport="stdio")
         case "sse":
             mcp.run(transport="sse", host=args.host, port=args.port)
         case _:
-            mcp.run(transport="streamable-http", host=args.host, port=args.port)
+            if gateway_enabled:
+                _run_with_gateway(mcp, host=args.host, port=args.port)
+            else:
+                mcp.run(transport="streamable-http", host=args.host, port=args.port)
+
+
+def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
+    """Run airlock with gateway routes wired in via FastMCP's custom_route API.
+
+    Loads profiles from AIRLOCK_PROFILES_PATH and registers
+    POST /gateway/{profile}/mcp endpoints on the FastMCP app. Airlock's own
+    tools are bound as the in-process internal backend so profiles can surface
+    them (via an ``internal://<label>`` backend) through the same gateway
+    endpoint as the remote MCP backends.
+
+    The legacy /mcp endpoint with the web-tools surface is still registered by
+    mcp.run() at the same port, but Option C treats it as deprecated — consumers
+    talk to the gateway only.
+
+    Failure to load profiles is fatal — we fail closed rather than serve with
+    no gateway when the operator asked for one.
+    """
+    from .gateway import load_profiles, register_internal_server, register_with_fastmcp
+
+    profiles_path = Path(
+        os.environ.get("AIRLOCK_PROFILES_PATH", "/etc/airlock/profiles.yaml")
+    )
+    logger.info("gateway: loading profiles from %s", profiles_path)
+    registry = load_profiles(profiles_path)
+
+    register_internal_server(mcp_server)
+    register_with_fastmcp(mcp_server, registry)
+    logger.info(
+        "gateway: registered %d profile(s) at /gateway/<profile>/mcp",
+        len(registry),
+    )
+
+    mcp_server.run(transport="streamable-http", host=host, port=port)
