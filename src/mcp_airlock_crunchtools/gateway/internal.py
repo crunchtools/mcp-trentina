@@ -20,20 +20,17 @@ internal tool and a remote tool present identically to the consumer.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .backend import BackendCall, _serialize_content_block, _serialize_tool
 from .errors import BackendCallError
 
-if TYPE_CHECKING:
-    from fastmcp import FastMCP
-
 logger = logging.getLogger(__name__)
 
-_server: FastMCP | None = None
+_server: Any = None
 
 
-def register_internal_server(mcp_server: FastMCP) -> None:
+def register_internal_server(mcp_server: Any) -> None:
     """Bind the FastMCP server whose tools the internal backend exposes.
 
     Called once at startup. Idempotent — re-binding simply replaces the

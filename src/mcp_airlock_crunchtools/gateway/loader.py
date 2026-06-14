@@ -21,9 +21,6 @@ from .profile import Profile
 
 logger = logging.getLogger(__name__)
 
-#: ${VAR} references in backend header values, resolved from the server's own
-#: environment at load time. Lets a profile carry a backend auth header without
-#: hardcoding the secret in YAML (e.g. Authorization: "Bearer ${MCP_MEMORY_API_KEY}").
 _ENV_REF_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
 
 
