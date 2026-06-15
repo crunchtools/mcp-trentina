@@ -3,9 +3,9 @@
 These tests verify that the classifier catches attacks that pass Layer 1
 (no structural detections) using adversarial phrasing patterns.
 
-Requires the Prompt Guard 2 22M ONNX model to be available.
+Requires the Prompt Guard 2 86M ONNX model to be available.
 Tests skip gracefully when the model is not installed (e.g., local dev).
-Run in the container image where the model is baked in at /models/prompt-guard-2-22m.
+Run in the container image where the model is baked in at /models/prompt-guard-2-86m.
 
 Test data from threshold tuning session (2026-03-10, RT#1408).
 """

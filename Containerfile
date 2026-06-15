@@ -42,13 +42,13 @@ RUN pip install --no-cache-dir \
     transformers \
     sentencepiece
 
-# Download and convert the official Meta Prompt Guard 2 22M model to ONNX
+# Download and convert the official Meta Prompt Guard 2 86M model to ONNX
 # Requires HF_TOKEN to access meta-llama gated model
 ARG HF_TOKEN
 RUN HF_TOKEN="${HF_TOKEN}" python -m optimum.exporters.onnx \
-      --model meta-llama/Llama-Prompt-Guard-2-22M \
+      --model meta-llama/Llama-Prompt-Guard-2-86M \
       --task text-classification \
-      /models/prompt-guard-2-22m/
+      /models/prompt-guard-2-86m/
 
 # ============================================================
 # Stage 2: pip install (builder variant — has shell for RUN)
@@ -82,7 +82,7 @@ LABEL name="mcp-airlock-crunchtools" \
       org.opencontainers.image.description="Secure MCP server for quarantined web content extraction" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later" \
       com.meta.llama.built-with="Built with Llama" \
-      com.meta.llama.model="Llama-Prompt-Guard-2-22M" \
+      com.meta.llama.model="Llama-Prompt-Guard-2-86M" \
       com.meta.llama.license="Llama 4 Community License Agreement"
 
 WORKDIR /app
@@ -91,14 +91,14 @@ WORKDIR /app
 COPY --from=model-builder /usr/lib64/libstdc++.so.6* /usr/lib64/
 
 # Copy ONNX model files from model-builder (no PyTorch in final image)
-COPY --from=model-builder /models/prompt-guard-2-22m/ /models/prompt-guard-2-22m/
+COPY --from=model-builder /models/prompt-guard-2-86m/ /models/prompt-guard-2-86m/
 
 # Copy installed Python packages from pip-builder (pure Python + native C extensions)
 COPY --from=pip-builder /usr/lib/python3.14/site-packages/ /usr/lib/python3.14/site-packages/
 COPY --from=pip-builder /usr/lib64/python3.14/site-packages/ /usr/lib64/python3.14/site-packages/
 
 ENV QUARANTINE_DB=/data/quarantine.db
-ENV CLASSIFIER_MODEL_PATH=/models/prompt-guard-2-22m
+ENV CLASSIFIER_MODEL_PATH=/models/prompt-guard-2-86m
 
 EXPOSE 8019
 ENTRYPOINT ["python", "-m", "mcp_airlock_crunchtools"]
