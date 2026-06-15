@@ -155,7 +155,7 @@ class TestLayerSpecificDetection:
     """Verify each defense layer catches attacks the others miss.
 
     Layer 1: Deterministic sanitization (regex, structural HTML stripping)
-    Layer 2: Prompt Guard 2 22M classifier (explicit jailbreak patterns)
+    Layer 2: Prompt Guard 2 86M classifier (explicit jailbreak patterns)
     Layer 3: Q-Agent / Gemini (semantic understanding)
 
     These tests document the attack taxonomy from RT#1408.

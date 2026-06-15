@@ -18,7 +18,7 @@ DEFAULT_FALLBACK = "layer1"
 DEFAULT_MAX_CONTENT = 100_000
 DEFAULT_DB_PATH = "/data/airlock.db"
 DEFAULT_CLASSIFIER_THRESHOLD = 0.5
-DEFAULT_CLASSIFIER_MODEL_PATH = "/models/prompt-guard-2-22m"
+DEFAULT_CLASSIFIER_MODEL_PATH = "/models/prompt-guard-2-86m"
 
 
 class Config:

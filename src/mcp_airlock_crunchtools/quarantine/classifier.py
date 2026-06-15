@@ -1,4 +1,4 @@
-"""Layer 2 — Prompt Guard 2 22M classifier via ONNX Runtime.
+"""Layer 2 — Prompt Guard 2 86M classifier via ONNX Runtime.
 
 Embedded in-process inference. No sidecar, no HTTP API, no network calls.
 Synchronous — ONNX inference is CPU-bound (<100ms), not I/O-bound.
