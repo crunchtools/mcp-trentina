@@ -27,6 +27,7 @@ from ..database import record_gateway_call
 from .backend import call_backend_tool, list_backend_tools
 from .errors import BackendCallError, BackendNotInProfileError
 from .filter import filter_tools
+from .guards import check_parameter_guards
 from .internal import call_internal_tool, list_internal_tools
 
 if TYPE_CHECKING:
@@ -184,6 +185,10 @@ async def _route_tools_call(
             -32602,
             f"Tool {tool_name!r} not permitted on backend {backend_name!r}",
         )
+
+    guard_err = check_parameter_guards(tool_name, arguments, backend)
+    if guard_err:
+        return _err(req_id, -32602, guard_err)
 
     t0 = time.monotonic()
     try:

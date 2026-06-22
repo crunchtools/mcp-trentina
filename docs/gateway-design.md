@@ -264,6 +264,75 @@ chcon etc_t per the crunchtools convention.
 
 ---
 
+## Parameter guards
+
+Tool-name allowlists control *which* tools a consumer can call. Parameter
+guards extend this to *what values* can be passed in the arguments. A guarded
+parameter's value must match at least one `allow` pattern and must not match
+any `deny` pattern — same semantics as `tools_allow`/`tools_deny`, applied to
+argument values instead of tool names.
+
+### Motivation
+
+Behavioral enforcement ("the LLM should only send emails to self") is not
+reliable. Parameter guards provide deterministic, gateway-level enforcement:
+the call is rejected before it reaches the backend MCP server.
+
+### Configuration
+
+Parameter guards are configured per-backend, per-tool in the profile YAML:
+
+```yaml
+backends:
+  gws-personal:
+    url: "http://gws-personal:8011/mcp"
+    tools_allow: ["*"]
+    parameter_guards:
+      send_gmail_message:
+        to:
+          allow: ["scott.mccarty@gmail.com"]
+        cc:
+          allow: ["scott.mccarty@gmail.com"]
+        bcc:
+          allow: ["scott.mccarty@gmail.com"]
+```
+
+Each entry maps: **tool name → parameter name → value constraint**. The
+constraint has two fields:
+
+| Field | Default | Description |
+|---|---|---|
+| `allow` | `["*"]` | Value glob patterns to allow |
+| `deny` | `[]` | Value glob patterns to deny (wins over allow) |
+
+Values use `fnmatch.fnmatchcase()` for matching, supporting shell-style globs
+(e.g., `*@redhat.com`). A more permissive character set than tool-name globs is
+allowed — values can contain `@`, `.`, `+`, `/`, and spaces.
+
+### Semantics
+
+- **Missing guard**: no `parameter_guards` entry for a tool = all values allowed.
+- **Missing parameter**: if a guarded parameter is absent or `None` in the
+  arguments dict, it passes (no value to validate).
+- **Deny wins**: a value matching any deny pattern is rejected even if it also
+  matches an allow pattern.
+- **Error code**: rejected calls return JSON-RPC error `-32602` (invalid params)
+  with a terse message that does not include the rejected value.
+
+### Pipeline position
+
+Parameter guards run after the tool-name allowlist re-check and before the
+backend call — the same defense-in-depth position:
+
+```
+Parse tool name → Backend exists? → Tool in allowlist? → Parameter guards → Backend call
+```
+
+A call that fails parameter validation never reaches the backend. No tokens
+spent, no side effects.
+
+---
+
 ## Audit & Cockpit additions
 
 Every gateway passthrough writes one row to airlock's SQLite audit table:

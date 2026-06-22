@@ -11,7 +11,12 @@ from pydantic import SecretStr
 from mcp_airlock_crunchtools.database import get_gateway_call_stats
 from mcp_airlock_crunchtools.gateway.backend import BackendCall
 from mcp_airlock_crunchtools.gateway.errors import BackendCallError, BackendNotInProfileError
-from mcp_airlock_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+from mcp_airlock_crunchtools.gateway.profile import (
+    AuthConfig,
+    Backend,
+    ParameterConstraint,
+    Profile,
+)
 from mcp_airlock_crunchtools.gateway.router import (
     NAMESPACE_SEP,
     PROTOCOL_VERSION,
@@ -360,3 +365,84 @@ class TestRouter:
         assert stats["total_calls"] == 1
         assert stats["by_tool"][0]["errors"] == 1
         db_mod._db = None
+
+    async def test_tools_call_rejects_guarded_parameter(self) -> None:
+        """Parameter guard blocks a call with a forbidden argument value."""
+        p = Profile(
+            name="guarded",
+            auth=AuthConfig(bearer_token_env="TEST"),
+            backends={
+                "gws": Backend(
+                    url="http://gws:8011/mcp",
+                    tools_allow=["*"],
+                    parameter_guards={
+                        "send_gmail_message": {
+                            "to": ParameterConstraint(allow=["self@example.com"]),
+                        }
+                    },
+                ),
+            },
+        )
+        p.auth.bearer_token = SecretStr("x")
+        resp = await route_jsonrpc(
+            p,
+            {
+                "jsonrpc": "2.0",
+                "id": 30,
+                "method": "tools/call",
+                "params": {
+                    "name": f"gws{NAMESPACE_SEP}send_gmail_message",
+                    "arguments": {"to": "evil@example.com"},
+                },
+            },
+        )
+        assert resp["error"]["code"] == -32602
+        assert "not in allow list" in resp["error"]["message"]
+
+    async def test_tools_call_allowed_guarded_parameter_passes(self) -> None:
+        """Parameter guard allows a call with a permitted argument value."""
+        called: dict[str, Any] = {}
+
+        async def fake_call(
+            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+        ) -> BackendCall:
+            called["tool"] = _tn
+            return BackendCall(
+                content=[{"type": "text", "text": "sent"}],
+                is_error=False, structured_content=None,
+            )
+
+        p = Profile(
+            name="guarded",
+            auth=AuthConfig(bearer_token_env="TEST"),
+            backends={
+                "gws": Backend(
+                    url="http://gws:8011/mcp",
+                    tools_allow=["*"],
+                    parameter_guards={
+                        "send_gmail_message": {
+                            "to": ParameterConstraint(allow=["self@example.com"]),
+                        }
+                    },
+                ),
+            },
+        )
+        p.auth.bearer_token = SecretStr("x")
+        with patch(
+            "mcp_airlock_crunchtools.gateway.router.call_backend_tool",
+            side_effect=fake_call,
+        ):
+            resp = await route_jsonrpc(
+                p,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 31,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"gws{NAMESPACE_SEP}send_gmail_message",
+                        "arguments": {"to": "self@example.com"},
+                    },
+                },
+            )
+        assert called["tool"] == "send_gmail_message"
+        assert resp["result"]["content"] == [{"type": "text", "text": "sent"}]

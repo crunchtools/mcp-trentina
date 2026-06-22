@@ -100,9 +100,18 @@ profiles:
           - get_gmail_thread_content
           - get_gmail_threads_content_batch
           - draft_gmail_message
+          - send_gmail_message
           - list_gmail_labels
           - modify_gmail_message_labels
           - batch_modify_gmail_message_labels
+        parameter_guards:
+          send_gmail_message:
+            to:
+              allow: ["scott.mccarty@gmail.com"]
+            cc:
+              allow: ["scott.mccarty@gmail.com"]
+            bcc:
+              allow: ["scott.mccarty@gmail.com"]
           # Calendar
           - get_events
           - manage_event
@@ -128,14 +137,23 @@ profiles:
       gws-work:
         url: "http://gws-work:8012/mcp"
         tools_allow:
-          # Gmail (read + draft)
+          # Gmail (read + draft + guarded send)
           - search_gmail_messages
           - get_gmail_message_content
           - get_gmail_messages_content_batch
           - get_gmail_thread_content
           - get_gmail_threads_content_batch
           - draft_gmail_message
+          - send_gmail_message
           - list_gmail_labels
+        parameter_guards:
+          send_gmail_message:
+            to:
+              allow: ["smccarty@redhat.com"]
+            cc:
+              allow: ["smccarty@redhat.com"]
+            bcc:
+              allow: ["smccarty@redhat.com"]
           # Calendar
           - get_events
           - list_calendars

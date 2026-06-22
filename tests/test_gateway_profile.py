@@ -13,6 +13,7 @@ from mcp_airlock_crunchtools.gateway.profile import (
     AuthConfig,
     Backend,
     DefenseConfig,
+    ParameterConstraint,
     Profile,
 )
 
@@ -106,6 +107,34 @@ class TestProfileModel:
             tools_allow=["*", "delete_*", "get_*_thing", "*_suffix"],
         )
         assert "*" in b.tools_allow
+
+    def test_backend_with_parameter_guards(self) -> None:
+        b = Backend(
+            url="http://x/mcp",
+            parameter_guards={
+                "send_gmail_message": {
+                    "to": ParameterConstraint(allow=["scott@gmail.com"]),
+                    "cc": ParameterConstraint(allow=["scott@gmail.com"], deny=["banned@x.com"]),
+                }
+            },
+        )
+        assert "send_gmail_message" in b.parameter_guards
+        assert b.parameter_guards["send_gmail_message"]["to"].allow == ["scott@gmail.com"]
+        assert b.parameter_guards["send_gmail_message"]["cc"].deny == ["banned@x.com"]
+
+    def test_parameter_guard_invalid_value_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ParameterConstraint(allow=["has;semicolon"])
+
+    def test_parameter_guard_extra_keys_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ParameterConstraint.model_validate(
+                {"allow": ["*"], "unknown_field": True}
+            )
+
+    def test_parameter_guard_valid_patterns(self) -> None:
+        c = ParameterConstraint(allow=["*@redhat.com", "scott.mccarty@gmail.com", "*"])
+        assert len(c.allow) == 3
 
     def test_defense_defaults(self) -> None:
         d = DefenseConfig()
