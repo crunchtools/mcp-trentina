@@ -16,6 +16,7 @@ from .auth import verify_bearer
 from .backend import BackendCall, call_backend_tool, list_backend_tools
 from .errors import AuthError, GatewayError, ProfileConfigError
 from .filter import filter_tools
+from .guards import check_parameter_guards
 from .internal import (
     call_internal_tool,
     internal_server_registered,
@@ -23,7 +24,7 @@ from .internal import (
     register_internal_server,
 )
 from .loader import load_profiles
-from .profile import AuthConfig, Backend, DefenseConfig, Profile
+from .profile import AuthConfig, Backend, DefenseConfig, ParameterConstraint, Profile
 from .router import route_jsonrpc
 
 __all__ = [
@@ -32,9 +33,11 @@ __all__ = [
     "Backend",
     "BackendCall",
     "DefenseConfig",
+    "ParameterConstraint",
     "GatewayError",
     "Profile",
     "ProfileConfigError",
+    "check_parameter_guards",
     "call_backend_tool",
     "call_internal_tool",
     "filter_tools",

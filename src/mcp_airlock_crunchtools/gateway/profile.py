@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 PROFILE_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 BACKEND_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 GLOB_PATTERN_RE = re.compile(r"^[a-zA-Z0-9_*][a-zA-Z0-9_*-]*$")
+GUARD_VALUE_RE = re.compile(r"^[a-zA-Z0-9_*@.\-+/ ]+$")
 ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 INTERNAL_SCHEME = "internal://"
@@ -52,6 +53,33 @@ class AuthConfig(BaseModel):
         return v
 
 
+class ParameterConstraint(BaseModel):
+    """Allow/deny constraint on a single tool parameter's value."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    allow: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Value glob patterns to allow (default: all)",
+    )
+    deny: list[str] = Field(
+        default_factory=list,
+        description="Value glob patterns to deny (wins over allow)",
+    )
+
+    @field_validator("allow", "deny")
+    @classmethod
+    def guard_values_valid(cls, v: list[str]) -> list[str]:
+        for pat in v:
+            if not GUARD_VALUE_RE.match(pat):
+                raise ValueError(
+                    f"Invalid guard value {pat!r}: allowed characters are "
+                    "alphanumerics, underscore, hyphen, dot, at-sign, plus, "
+                    "forward-slash, space, and '*'"
+                )
+        return v
+
+
 class Backend(BaseModel):
     """Per-profile backend MCP server config."""
 
@@ -81,6 +109,13 @@ class Backend(BaseModel):
         gt=0,
         le=MAX_BACKEND_TIMEOUT_SECONDS,
         description="Per-call backend timeout",
+    )
+    parameter_guards: dict[str, dict[str, ParameterConstraint]] = Field(
+        default_factory=dict,
+        description=(
+            "Tool name -> parameter name -> value constraint. "
+            "Validated at call time before the backend is contacted."
+        ),
     )
 
     @field_validator("url")

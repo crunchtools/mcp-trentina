@@ -46,3 +46,5 @@ podman build -f Containerfile . # Container
 - `quarantine/` — Layer 2: Q-Agent (Gemini REST via httpx, NO SDK, NO tools)
 - `tools/` — Tool implementations called by server.py wrappers
 - `database.py` — SQLite blocklist for cumulative detection memory
+- `gateway/` — Per-consumer MCP gateway proxy with tool allowlists, parameter guards, and defense pipeline
+  - **Parameter guards**: per-tool argument validation with allow/deny value patterns — see `docs/gateway-design.md`
