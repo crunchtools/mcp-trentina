@@ -1,7 +1,8 @@
 """Tool description compression for the gateway.
 
-Pre-compresses verbose tool descriptions at startup using Gemini Flash Lite.
+Pre-compresses verbose tool descriptions at startup using Gemini.
 Results are cached in SQLite and looked up synchronously during tools/list.
+Compression is best-effort: failures at any level are logged and skipped.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_TIMEOUT = 60.0
 BATCH_SIZE = 5
+DELAY_BETWEEN_BACKENDS = 2
+DELAY_BETWEEN_BATCHES = 3
 DEFAULT_COMPRESS_MODEL = "gemini-2.5-flash-lite"
 
 _cache: dict[str, str] = {}
@@ -105,10 +108,9 @@ async def precompress_all(
 ) -> dict[str, int]:
     """Pre-compress descriptions for all compression-enabled backends.
 
-    Deduplicates backends by URL so the same server isn't fetched twice.
-    Returns {backend_name: count_compressed}.
+    Best-effort: each backend is independent. A failure in one backend
+    does not affect others. Deduplicates by URL.
     """
-
     seen_urls: set[str] = set()
     stats: dict[str, int] = {}
 
@@ -126,12 +128,12 @@ async def precompress_all(
                 count = await _precompress_backend(backend_name, backend)
                 stats[backend_name] = count
             except Exception:
-                logger.warning(
-                    "compress: failed to pre-compress backend %s",
-                    backend_name,
-                    exc_info=True,
-                )
-            await asyncio.sleep(2)
+                logger.warning("compress: backend %s failed, skipping", backend_name)
+            await asyncio.sleep(DELAY_BETWEEN_BACKENDS)
+
+    total = sum(stats.values())
+    if total:
+        logger.info("compress: finished — %d descriptions across %d backends", total, len(stats))
     return stats
 
 
@@ -165,27 +167,48 @@ async def _precompress_backend(backend_name: str, backend: Backend) -> int:
     try:
         tools = await list_backend_tools(backend_name, backend)
     except Exception:
-        logger.warning("compress: could not list tools for %s", backend_name)
+        logger.warning("compress: %s — could not list tools, skipping", backend_name)
         return 0
 
     uncached = _find_uncached(tools)
     if not uncached:
-        logger.info("compress: %s — all %d descriptions already cached", backend_name, len(tools))
         return 0
 
-    logger.info("compress: %s — %d uncached descriptions to compress", backend_name, len(uncached))
+    logger.info("compress: %s — %d descriptions to compress", backend_name, len(uncached))
 
     compressed_count = 0
     for i in range(0, len(uncached), BATCH_SIZE):
         if i > 0:
-            await asyncio.sleep(3)
+            await asyncio.sleep(DELAY_BETWEEN_BATCHES)
         batch = uncached[i : i + BATCH_SIZE]
-        for h, text in await _call_compress_model(batch):
+        results = await _compress_batch_with_fallback(batch)
+        for h, text in results:
             if _store_result(batch, h, text):
                 compressed_count += 1
 
-    logger.info("compress: %s — compressed %d descriptions", backend_name, compressed_count)
+    if compressed_count:
+        logger.info("compress: %s — compressed %d descriptions", backend_name, compressed_count)
     return compressed_count
+
+
+async def _compress_batch_with_fallback(
+    batch: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Try batch compression, fall back to one-at-a-time on failure."""
+    results = await _call_compress_model(batch)
+    if results:
+        return results
+
+    if len(batch) == 1:
+        return []
+
+    logger.info("compress: batch of %d failed, falling back to one-at-a-time", len(batch))
+    all_results: list[tuple[str, str]] = []
+    for item in batch:
+        await asyncio.sleep(1)
+        single = await _call_compress_model([item])
+        all_results.extend(single)
+    return all_results
 
 
 async def _call_compress_model(
@@ -194,10 +217,10 @@ async def _call_compress_model(
     """Call Gemini to compress a batch of descriptions.
 
     Returns [(hash, compressed_text)] for successful compressions.
+    Returns empty list on any failure — caller handles fallback.
     """
     config = get_config()
     if not config.has_api_key:
-        logger.warning("compress: no GEMINI_API_KEY, skipping compression")
         return []
 
     descriptions_payload = [{"id": h, "text": desc} for h, desc in items]
@@ -223,8 +246,11 @@ async def _call_compress_model(
             resp = await client.post(url, json=request_body)
             resp.raise_for_status()
             data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        logger.warning("compress: Gemini %d for %d items", exc.response.status_code, len(items))
+        return []
     except Exception:
-        logger.warning("compress: Gemini API call failed", exc_info=True)
+        logger.warning("compress: Gemini call failed for %d items", len(items))
         return []
 
     return _parse_compress_response(data)
@@ -235,12 +261,17 @@ def _parse_compress_response(data: dict[str, Any]) -> list[tuple[str, str]]:
     try:
         candidates = data.get("candidates", [])
         if not candidates:
+            logger.warning("compress: Gemini returned no candidates")
             return []
         text = candidates[0]["content"]["parts"][0]["text"]
         parsed = json.loads(text)
         compressed_list = parsed.get("compressed", [])
-    except (KeyError, IndexError, json.JSONDecodeError):
-        logger.warning("compress: could not parse Gemini response")
+    except (KeyError, IndexError) as exc:
+        logger.warning("compress: unexpected response structure: %s", exc)
+        return []
+    except json.JSONDecodeError:
+        raw = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        logger.warning("compress: malformed JSON from Gemini (len=%d): %.100s", len(raw), raw)
         return []
 
     return [
