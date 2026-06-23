@@ -1,0 +1,22 @@
+[project]
+name = "mcp-airlock-crunchtools"
+version = "0.4.1"
+description = "DEPRECATED: Use mcp-trentina-crunchtools instead. See https://crunchtools.com/trentina/"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "crunchtools.com" }]
+readme = "README.md"
+keywords = ["mcp", "deprecated"]
+classifiers = [
+    "Development Status :: 7 - Inactive",
+]
+dependencies = [
+    "mcp-trentina-crunchtools>=0.5.0",
+]
+
+[project.scripts]
+mcp-airlock-crunchtools = "mcp_airlock_crunchtools:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
