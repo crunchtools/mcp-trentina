@@ -7,7 +7,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 __version__ = "0.5.0"
 
@@ -101,20 +101,19 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
 
     load_compression_cache()
 
-    async def _bg_compress() -> None:
+    import threading
+
+    def _bg_compress_thread() -> None:
+        loop = asyncio.new_event_loop()
         try:
-            stats = await precompress_all(registry)
+            stats = loop.run_until_complete(precompress_all(registry))
             if stats:
                 logger.info("gateway: pre-compressed tools: %s", stats)
         except Exception:
             logger.warning("gateway: pre-compression failed", exc_info=True)
+        finally:
+            loop.close()
 
-    original_run = mcp_server.run
+    threading.Thread(target=_bg_compress_thread, daemon=True).start()
 
-    def _run_with_compression(**kwargs: Any) -> None:
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(_bg_compress())
-        loop.close()
-        original_run(**kwargs)
-
-    _run_with_compression(transport="streamable-http", host=host, port=port)
+    mcp_server.run(transport="streamable-http", host=host, port=port)
