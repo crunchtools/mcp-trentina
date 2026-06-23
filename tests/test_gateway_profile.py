@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from mcp_airlock_crunchtools.gateway.errors import ProfileConfigError
-from mcp_airlock_crunchtools.gateway.loader import load_profiles
-from mcp_airlock_crunchtools.gateway.profile import (
+from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
+from mcp_trentina_crunchtools.gateway.loader import load_profiles
+from mcp_trentina_crunchtools.gateway.profile import (
     AuthConfig,
     Backend,
     DefenseConfig,

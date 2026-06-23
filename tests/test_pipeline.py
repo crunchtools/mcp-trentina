@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 
-from mcp_airlock_crunchtools.sanitize.pipeline import (
+from mcp_trentina_crunchtools.sanitize.pipeline import (
     looks_like_html,
     sanitize,
     sanitize_text,

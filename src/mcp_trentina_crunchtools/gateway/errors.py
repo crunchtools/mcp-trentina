@@ -16,7 +16,7 @@ class ProfileConfigError(GatewayError):
     """Raised at startup when the profiles YAML is missing or invalid.
 
     Gateway routes are not mounted if profile loading fails while
-    AIRLOCK_GATEWAY_ENABLED is true. Fails closed.
+    TRENTINA_GATEWAY_ENABLED is true. Fails closed.
     """
 
 

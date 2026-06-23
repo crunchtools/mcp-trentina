@@ -9,8 +9,8 @@ from ..database import get_blocklist_stats, get_gateway_call_stats
 from ..quarantine.classifier import is_classifier_available
 
 
-async def get_airlock_stats() -> dict[str, Any]:
-    """Get airlock session stats, configuration, and blocklist summary."""
+async def get_trentina_stats() -> dict[str, Any]:
+    """Get trentina session stats, configuration, and blocklist summary."""
     config = get_config()
 
     blocklist = get_blocklist_stats()

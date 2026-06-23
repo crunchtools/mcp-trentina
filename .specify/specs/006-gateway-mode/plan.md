@@ -164,8 +164,8 @@ auth check awkward, and complicates the future defense-pipeline injection point
 ### Step 13: Deploy to lotor (Option C cutover)
 
 - [ ] Push branch → GHA build (or build the overlay image) → image carrying Option C
-- [ ] Provision `/srv/mcp-airlock.crunchtools.com/config/profiles.yaml` with real `josui` + `kagetora` profiles, each carrying the `web` (`internal://web`) backend + their http backend matrix
-- [ ] Generate `AIRLOCK_GATEWAY_JOSUI_TOKEN` + `AIRLOCK_GATEWAY_KAGETORA_TOKEN` on lotor (`secrets.token_hex(32)`), add to `mcp-airlock.env`
+- [ ] Provision `/srv/mcp-trentina.crunchtools.com/config/profiles.yaml` with real `josui` + `kagetora` profiles, each carrying the `web` (`internal://web`) backend + their http backend matrix
+- [ ] Generate `AIRLOCK_GATEWAY_JOSUI_TOKEN` + `AIRLOCK_GATEWAY_KAGETORA_TOKEN` on lotor (`secrets.token_hex(32)`), add to `mcp-trentina.env`
 - [ ] Add `AIRLOCK_GATEWAY_ENABLED=true` + `AIRLOCK_PROFILES_PATH=/etc/airlock/profiles.yaml`; mount profiles.yaml into the container
 - [ ] systemctl restart; verify `/gateway/<profile>/mcp` lists tools across an http backend AND `web__safe_fetch_tool`; confirm `/mcp` 404 is deliberate
 - [ ] **Cut Kagetora over first** (smaller blast radius, autonomous agent): one `mcp_servers:` entry in Hermes `config.yaml`; verify prompt-token count drops from ~146K toward <50K
@@ -180,15 +180,15 @@ auth check awkward, and complicates the future defense-pipeline injection point
 
 | File | Purpose |
 |------|---------|
-| `src/mcp_airlock_crunchtools/gateway/__init__.py` | Subpackage exports |
-| `src/mcp_airlock_crunchtools/gateway/profile.py` | Pydantic profile models |
-| `src/mcp_airlock_crunchtools/gateway/loader.py` | YAML loader + env resolution |
-| `src/mcp_airlock_crunchtools/gateway/auth.py` | Bearer-token check |
-| `src/mcp_airlock_crunchtools/gateway/backend.py` | Backend MCP connection pool |
-| `src/mcp_airlock_crunchtools/gateway/filter.py` | Tools/list allowlist filter |
-| `src/mcp_airlock_crunchtools/gateway/router.py` | JSON-RPC dispatch |
-| `src/mcp_airlock_crunchtools/gateway/app.py` | Starlette gateway app |
-| `src/mcp_airlock_crunchtools/gateway/errors.py` | Gateway error responses |
+| `src/mcp_trentina_crunchtools/gateway/__init__.py` | Subpackage exports |
+| `src/mcp_trentina_crunchtools/gateway/profile.py` | Pydantic profile models |
+| `src/mcp_trentina_crunchtools/gateway/loader.py` | YAML loader + env resolution |
+| `src/mcp_trentina_crunchtools/gateway/auth.py` | Bearer-token check |
+| `src/mcp_trentina_crunchtools/gateway/backend.py` | Backend MCP connection pool |
+| `src/mcp_trentina_crunchtools/gateway/filter.py` | Tools/list allowlist filter |
+| `src/mcp_trentina_crunchtools/gateway/router.py` | JSON-RPC dispatch |
+| `src/mcp_trentina_crunchtools/gateway/app.py` | Starlette gateway app |
+| `src/mcp_trentina_crunchtools/gateway/errors.py` | Gateway error responses |
 | `tests/test_gateway_profile.py` | Profile + loader tests |
 | `tests/test_gateway_auth.py` | Auth tests |
 | `tests/test_gateway_filter.py` | Filter tests |
@@ -199,8 +199,8 @@ auth check awkward, and complicates the future defense-pipeline injection point
 
 | File | Changes |
 |------|---------|
-| `src/mcp_airlock_crunchtools/server.py` | Wrap FastMCP app in parent Starlette; mount gateway routes when enabled |
-| `src/mcp_airlock_crunchtools/config.py` | Add `AIRLOCK_GATEWAY_ENABLED`, `AIRLOCK_PROFILES_PATH` |
+| `src/mcp_trentina_crunchtools/server.py` | Wrap FastMCP app in parent Starlette; mount gateway routes when enabled |
+| `src/mcp_trentina_crunchtools/config.py` | Add `AIRLOCK_GATEWAY_ENABLED`, `AIRLOCK_PROFILES_PATH` |
 | `pyproject.toml` | Add `pyyaml>=6.0`; bump `version` to `0.4.0` |
 
 ---

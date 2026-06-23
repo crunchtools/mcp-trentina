@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from mcp_airlock_crunchtools.server import mcp
+from mcp_trentina_crunchtools.server import mcp
 
 
 class TestServerRegistration:
@@ -37,4 +37,4 @@ class TestServerRegistration:
         assert tool_names == expected
 
     def test_server_name(self) -> None:
-        assert mcp.name == "mcp-airlock-crunchtools"
+        assert mcp.name == "mcp-trentina-crunchtools"

@@ -1,4 +1,4 @@
-"""Layer 1: Deterministic sanitization pipeline for mcp-airlock-crunchtools."""
+"""Layer 1: Deterministic sanitization pipeline for mcp-trentina-crunchtools."""
 
 from __future__ import annotations
 

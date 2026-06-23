@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mcp_airlock_crunchtools.dbus_interface import (
+from mcp_trentina_crunchtools.dbus_interface import (
     emit_detection_event,
     emit_request_event,
 )
-from mcp_airlock_crunchtools.events import reset_event_bus
+from mcp_trentina_crunchtools.events import reset_event_bus
 
 
 class TestEmitRequestEvent:
@@ -20,7 +20,7 @@ class TestEmitRequestEvent:
         reset_event_bus()
 
     def test_emits_request_processed(self) -> None:
-        from mcp_airlock_crunchtools.events import get_event_bus
+        from mcp_trentina_crunchtools.events import get_event_bus
 
         bus = get_event_bus()
         received: list[dict] = []
@@ -53,7 +53,7 @@ class TestEmitRequestEvent:
     def test_duration_calculated_from_start_time(self) -> None:
         import time
 
-        from mcp_airlock_crunchtools.events import get_event_bus
+        from mcp_trentina_crunchtools.events import get_event_bus
 
         bus = get_event_bus()
         received: list[dict] = []
@@ -87,7 +87,7 @@ class TestEmitDetectionEvent:
         reset_event_bus()
 
     def test_emits_detection_occurred(self) -> None:
-        from mcp_airlock_crunchtools.events import get_event_bus
+        from mcp_trentina_crunchtools.events import get_event_bus
 
         bus = get_event_bus()
         received: list[dict] = []
@@ -119,7 +119,7 @@ class TestDbusInterfaceMethods:
             pass
 
     def test_on_request_processed_callback(self) -> None:
-        from mcp_airlock_crunchtools.events import get_event_bus
+        from mcp_trentina_crunchtools.events import get_event_bus
 
         reset_event_bus()
         bus = get_event_bus()
@@ -150,7 +150,7 @@ class TestGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_start_dbus_without_dbus_fast(self) -> None:
-        import mcp_airlock_crunchtools.dbus_interface as dbi
+        import mcp_trentina_crunchtools.dbus_interface as dbi
 
         dbi._dbus_started = False
 
@@ -161,7 +161,7 @@ class TestGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_start_dbus_connection_failure(self) -> None:
-        import mcp_airlock_crunchtools.dbus_interface as dbi
+        import mcp_trentina_crunchtools.dbus_interface as dbi
 
         dbi._dbus_started = False
 
@@ -189,7 +189,7 @@ class TestEventDataShapes:
         reset_event_bus()
 
     def test_request_event_fields(self) -> None:
-        from mcp_airlock_crunchtools.events import get_event_bus
+        from mcp_trentina_crunchtools.events import get_event_bus
 
         bus = get_event_bus()
         events_captured: list[dict] = []
@@ -218,7 +218,7 @@ class TestEventDataShapes:
         assert expected_keys.issubset(set(d.keys()))
 
     def test_detection_event_fields(self) -> None:
-        from mcp_airlock_crunchtools.events import get_event_bus
+        from mcp_trentina_crunchtools.events import get_event_bus
 
         bus = get_event_bus()
         events_captured: list[dict] = []

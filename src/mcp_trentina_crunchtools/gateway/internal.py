@@ -1,12 +1,12 @@
-"""Internal-tool backend: airlock's own FastMCP tools as a gateway backend.
+"""Internal-tool backend: trentina's own FastMCP tools as a gateway backend.
 
-Option C folds airlock's native tool surface (safe_fetch, quarantine_*, scan,
+Option C folds trentina's native tool surface (safe_fetch, quarantine_*, scan,
 stats, …) into the gateway alongside the remote http(s) MCP backends. A profile
 backend whose URL uses the ``internal://<label>`` scheme routes here instead of
-opening a streamable-http session: the whole airlock tool surface becomes one
+opening a streamable-http session: the whole trentina tool surface becomes one
 backend, namespaced under whatever key the profile gives it (conventionally
 ``web``). The ``<label>`` after the scheme is cosmetic — there is exactly one
-internal source, the airlock FastMCP server itself.
+internal source, the trentina FastMCP server itself.
 
 The bound server is a module-level singleton, populated once at startup from the
 FastMCP instance (see ``__init__._run_with_gateway``). This mirrors backend.py's
@@ -50,7 +50,7 @@ def internal_server_registered() -> bool:
 
 
 async def list_internal_tools() -> list[dict[str, Any]]:
-    """Fetch airlock's own tool list, serialized like a remote backend's.
+    """Fetch trentina's own tool list, serialized like a remote backend's.
 
     Returns the raw (un-namespaced, un-filtered) tool list — the router applies
     the profile allowlist and the ``<backend>__<tool>`` namespacing, exactly as
@@ -73,7 +73,7 @@ async def list_internal_tools() -> list[dict[str, Any]]:
 
 
 async def call_internal_tool(tool_name: str, arguments: dict[str, Any]) -> BackendCall:
-    """Invoke an airlock tool in-process, returning a BackendCall like the http path.
+    """Invoke an trentina tool in-process, returning a BackendCall like the http path.
 
     Phase 1 returns the tool result verbatim. Phase 2 wraps it in the L1/L2/L3
     defense pipeline at the router, identically to remote backends.

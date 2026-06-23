@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcp_airlock_crunchtools.sanitize.html import sanitize_html
+from mcp_trentina_crunchtools.sanitize.html import sanitize_html
 
 
 class TestHtmlSanitization:

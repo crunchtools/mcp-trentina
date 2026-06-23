@@ -55,7 +55,7 @@ body:
     id: version
     attributes:
       label: Server Version
-      description: Output of `mcp-airlock-crunchtools --version` or pip show
+      description: Output of `mcp-trentina-crunchtools --version` or pip show
       placeholder: "0.1.0"
     validations:
       required: true

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcp_airlock_crunchtools.sanitize.unicode import sanitize_unicode
+from mcp_trentina_crunchtools.sanitize.unicode import sanitize_unicode
 
 
 class TestUnicodeSanitization:

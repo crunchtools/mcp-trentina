@@ -8,7 +8,7 @@ from .errors import FetchError
 
 FETCH_TIMEOUT = 30.0
 MAX_RESPONSE_SIZE = 5_000_000  # 5 MB
-USER_AGENT = "mcp-airlock-crunchtools/0.1.0 (security-scanner)"
+USER_AGENT = "mcp-trentina-crunchtools/0.1.0 (security-scanner)"
 
 
 async def fetch_url(url: str) -> tuple[str, str]:

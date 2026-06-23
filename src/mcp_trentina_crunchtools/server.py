@@ -1,4 +1,4 @@
-"""MCP server registration for mcp-airlock-crunchtools."""
+"""MCP server registration for mcp-trentina-crunchtools."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from fastmcp import FastMCP
 from .tools import (
     deep_quarantine_scan,
     deep_scan_content,
-    get_airlock_stats,
+    get_trentina_stats,
     quarantine_content,
     quarantine_fetch,
     quarantine_read,
@@ -23,7 +23,7 @@ from .tools import (
 )
 
 mcp = FastMCP(
-    "mcp-airlock-crunchtools",
+    "mcp-trentina-crunchtools",
     version="0.4.0",
     instructions=(
         "Quarantined web content extraction with three-layer prompt injection defense. "
@@ -264,5 +264,5 @@ async def quarantine_search_tool(
 
 @mcp.tool()
 async def quarantine_stats_tool() -> dict[str, Any]:
-    """Get airlock configuration, Q-Agent status, and blocklist summary."""
-    return await get_airlock_stats()
+    """Get trentina configuration, Q-Agent status, and blocklist summary."""
+    return await get_trentina_stats()

@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Prompt Injection Research
-    url: https://github.com/crunchtools/mcp-airlock/blob/main/SECURITY.md
+    url: https://github.com/crunchtools/mcp-trentina/blob/main/SECURITY.md
     about: Review the security architecture and threat model

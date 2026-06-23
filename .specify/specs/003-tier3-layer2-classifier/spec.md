@@ -10,7 +10,7 @@
 
 Add Llama Prompt Guard 2 22M as a dedicated classifier layer (Layer 2) between
 deterministic sanitization (Layer 1) and the Gemini Q-Agent (Layer 3). The ONNX
-model is embedded directly in the mcp-airlock container image — no sidecar, no
+model is embedded directly in the mcp-trentina container image — no sidecar, no
 HTTP API, no network calls. In-process inference via ONNX Runtime for minimal
 latency. Creates a three-layer defense system where each layer has fundamentally
 different failure modes: regex, classifier, and LLM.
@@ -46,7 +46,7 @@ No sidecar container, no HTTP overhead, no network failure modes.
 - Multi-stage build: PyTorch + optimum export in builder stage, ONNX files only in runtime
 - Model files baked into the container image at build time
 
-**Resource impact on the mcp-airlock container:**
+**Resource impact on the mcp-trentina container:**
 - Additional disk: ~100-150MB (ONNX model + runtime)
 - Additional memory: ~200-300MB RSS (model loaded in memory)
 - Inference latency: ~30-80ms per classification on CPU (4 vCPU lotor)
@@ -105,7 +105,7 @@ Callers in async tools can call it directly (acceptable for <100ms blocking).
 
 ### 2. Update Containerfile
 
-Add ONNX Runtime and model to the existing mcp-airlock container:
+Add ONNX Runtime and model to the existing mcp-trentina container:
 - Install `onnxruntime` and `transformers` (tokenizer only) as dependencies
 - Download and bake in the quantized ONNX model at build time
 - Add "Built with Llama" attribution to container labels

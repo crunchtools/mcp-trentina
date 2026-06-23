@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.crunchtools/airlock",
-  "title": "MCP Airlock",
-  "description": "Secure MCP server for quarantined web content extraction with two-layer prompt injection defense",
+  "name": "io.github.crunchtools/trentina",
+  "title": "Trentina",
+  "description": "Secure MCP gateway and quarantine for AI agent traffic — three-layer defense against prompt injection",
   "repository": {
-    "url": "https://github.com/crunchtools/mcp-airlock",
+    "url": "https://github.com/crunchtools/mcp-trentina",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.5.0",
   "packages": [
     {
       "registryType": "pypi",
-      "identifier": "mcp-airlock-crunchtools",
-      "version": "0.1.0",
+      "identifier": "mcp-trentina-crunchtools",
+      "version": "0.5.0",
       "transport": {
         "type": "stdio"
       }

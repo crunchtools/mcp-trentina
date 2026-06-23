@@ -3,7 +3,7 @@ Version:        0.2.2
 Release:        1%{?dist}
 Summary:        Cockpit plugin for MCP Airlock defense pipeline visualization
 License:        AGPL-3.0-or-later
-URL:            https://github.com/crunchtools/mcp-airlock
+URL:            https://github.com/crunchtools/mcp-trentina
 Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch

@@ -94,11 +94,11 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
                 "protocolVersion": PROTOCOL_VERSION,
                 "capabilities": {"tools": {"listChanged": False}},
                 "serverInfo": {
-                    "name": f"mcp-airlock-gateway:{profile.name}",
+                    "name": f"mcp-trentina-gateway:{profile.name}",
                     "version": __version__,
                 },
                 "instructions": (
-                    f"airlock gateway, profile={profile.name}. Tool names are "
+                    f"trentina gateway, profile={profile.name}. Tool names are "
                     f"namespaced as <backend>{NAMESPACE_SEP}<tool>."
                 ),
             },

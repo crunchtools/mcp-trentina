@@ -1,4 +1,4 @@
-"""Error hierarchy for mcp-airlock-crunchtools.
+"""Error hierarchy for mcp-trentina-crunchtools.
 
 All errors scrub credentials from messages before surfacing to users.
 """
@@ -19,7 +19,7 @@ def _scrub_credentials(message: str) -> str:
 
 
 class AirlockError(Exception):
-    """Base error for all airlock operations."""
+    """Base error for all trentina operations."""
 
     def __init__(self, message: str) -> None:
         super().__init__(_scrub_credentials(message))

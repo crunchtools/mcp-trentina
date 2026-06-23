@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
-from mcp_airlock_crunchtools.gateway.auth import verify_bearer
-from mcp_airlock_crunchtools.gateway.errors import AuthError
-from mcp_airlock_crunchtools.gateway.profile import AuthConfig, Profile
+from mcp_trentina_crunchtools.gateway.auth import verify_bearer
+from mcp_trentina_crunchtools.gateway.errors import AuthError
+from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Profile
 
 
 def _profile_with_token(value: str) -> Profile:

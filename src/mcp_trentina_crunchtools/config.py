@@ -1,4 +1,4 @@
-"""Configuration for mcp-airlock-crunchtools."""
+"""Configuration for mcp-trentina-crunchtools."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ DEFAULT_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_SEARCH_MODEL = "gemini-2.5-flash"
 DEFAULT_FALLBACK = "layer1"
 DEFAULT_MAX_CONTENT = 100_000
-DEFAULT_DB_PATH = "/data/airlock.db"
+DEFAULT_DB_PATH = "/data/trentina.db"
 DEFAULT_CLASSIFIER_THRESHOLD = 0.5
 DEFAULT_CLASSIFIER_MODEL_PATH = "/models/prompt-guard-2-86m"
 
@@ -47,12 +47,12 @@ class Config:
             "CLASSIFIER_MODEL_PATH", DEFAULT_CLASSIFIER_MODEL_PATH
         )
 
-        home_db = str(Path.home() / ".local" / "share" / "mcp-airlock" / "airlock.db")
+        home_db = str(Path.home() / ".local" / "share" / "mcp-trentina" / "trentina.db")
         self.db_path: str = os.environ.get("QUARANTINE_DB", home_db)
 
         trust_config_path = os.environ.get(
             "QUARANTINE_TRUST_CONFIG",
-            str(Path.home() / ".config" / "mcp-env" / "mcp-airlock-trust.json"),
+            str(Path.home() / ".config" / "mcp-env" / "mcp-trentina-trust.json"),
         )
         try:
             with open(trust_config_path) as fh:

@@ -1,6 +1,6 @@
-# mcp-airlock-crunchtools
+# mcp-trentina-crunchtools
 
-<!-- mcp-name: io.github.crunchtools/airlock -->
+<!-- mcp-name: io.github.crunchtools/trentina -->
 
 Secure MCP server for quarantined web content extraction with two-layer prompt injection defense.
 
@@ -24,13 +24,13 @@ Secure MCP server for quarantined web content extraction with two-layer prompt i
 
 ```bash
 # PyPI
-pip install mcp-airlock-crunchtools
+pip install mcp-trentina-crunchtools
 
 # uvx (zero-install)
-uvx mcp-airlock-crunchtools
+uvx mcp-trentina-crunchtools
 
 # Container
-podman run quay.io/crunchtools/mcp-airlock
+podman run quay.io/crunchtools/mcp-trentina
 ```
 
 ## Configuration
@@ -43,8 +43,8 @@ export GEMINI_API_KEY=your-key
 export QUARANTINE_MODEL=gemini-2.0-flash-lite  # default
 export QUARANTINE_FALLBACK=layer1              # or "fail"
 export QUARANTINE_MAX_CONTENT=100000           # max chars to Q-Agent
-export QUARANTINE_DB=/data/airlock.db          # SQLite blocklist path
-export QUARANTINE_TRUST_CONFIG=~/.config/mcp-env/mcp-airlock-trust.json
+export QUARANTINE_DB=/data/trentina.db          # SQLite blocklist path
+export QUARANTINE_TRUST_CONFIG=~/.config/mcp-env/mcp-trentina-trust.json
 ```
 
 ## Claude Code
@@ -52,9 +52,9 @@ export QUARANTINE_TRUST_CONFIG=~/.config/mcp-env/mcp-airlock-trust.json
 ```json
 {
   "mcpServers": {
-    "mcp-airlock-crunchtools": {
+    "mcp-trentina-crunchtools": {
       "command": "uvx",
-      "args": ["mcp-airlock-crunchtools"]
+      "args": ["mcp-trentina-crunchtools"]
     }
   }
 }

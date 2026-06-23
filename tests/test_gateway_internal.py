@@ -1,4 +1,4 @@
-"""Tests for gateway/internal.py — airlock's own tools as an in-process backend."""
+"""Tests for gateway/internal.py — trentina's own tools as an in-process backend."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import pytest
 from mcp.types import TextContent, ToolAnnotations
 from mcp.types import Tool as McpTool
 
-from mcp_airlock_crunchtools.gateway import internal
-from mcp_airlock_crunchtools.gateway.errors import BackendCallError
+from mcp_trentina_crunchtools.gateway import internal
+from mcp_trentina_crunchtools.gateway.errors import BackendCallError
 
 
 class _FakeFunctionTool:
@@ -41,7 +41,7 @@ class _FakeResult:
 class _FakeServer:
     """Minimal FastMCP stand-in: list_tools() + call_tool()."""
 
-    name = "fake-airlock"
+    name = "fake-trentina"
 
     def __init__(
         self,
@@ -167,13 +167,13 @@ class TestInternalBackend:
 
 
 @pytest.mark.asyncio
-async def test_real_airlock_server_lists_its_tools() -> None:
+async def test_real_trentina_server_lists_its_tools() -> None:
     """Integration smoke test: the real FastMCP server's tools serialize cleanly.
 
     Metadata only — no tool is executed, so this stays offline and DB-free. It
     guards the to_mcp_tool() path against the installed FastMCP version.
     """
-    from mcp_airlock_crunchtools.server import mcp
+    from mcp_trentina_crunchtools.server import mcp
 
     saved = internal._server
     try:

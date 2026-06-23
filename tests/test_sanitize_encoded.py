@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 
-from mcp_airlock_crunchtools.sanitize.encoded import sanitize_encoded
+from mcp_trentina_crunchtools.sanitize.encoded import sanitize_encoded
 
 
 class TestEncodedPayloadDetection:

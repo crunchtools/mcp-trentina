@@ -8,10 +8,10 @@ import pytest
 from pydantic import SecretStr
 from starlette.testclient import TestClient
 
-from mcp_airlock_crunchtools.gateway.app import gateway_app
-from mcp_airlock_crunchtools.gateway.backend import BackendCall
-from mcp_airlock_crunchtools.gateway.profile import AuthConfig, Backend, Profile
-from mcp_airlock_crunchtools.gateway.router import NAMESPACE_SEP
+from mcp_trentina_crunchtools.gateway.app import gateway_app
+from mcp_trentina_crunchtools.gateway.backend import BackendCall
+from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP
 
 
 @pytest.fixture
@@ -100,7 +100,7 @@ class TestGatewayApp:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["result"]["serverInfo"]["name"] == "mcp-airlock-gateway:alice"
+        assert body["result"]["serverInfo"]["name"] == "mcp-trentina-gateway:alice"
 
     def test_tools_call_invalid_backend_returns_jsonrpc_error(
         self, client: TestClient
@@ -131,7 +131,7 @@ class TestGatewayApp:
             )
 
         with patch(
-            "mcp_airlock_crunchtools.gateway.router.call_backend_tool",
+            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
             side_effect=fake_call,
         ):
             resp = client.post(

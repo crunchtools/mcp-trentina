@@ -3,16 +3,16 @@
 # Built entirely on Hummingbird Python images (Red Hat hardened, minimal)
 #
 # Build (requires HF_TOKEN for Llama model download):
-#   source ~/.config/mcp-env/mcp-airlock-build.env
+#   source ~/.config/mcp-env/mcp-trentina-build.env
 #   podman build --build-arg HF_TOKEN=$HF_TOKEN \
-#     -t quay.io/crunchtools/mcp-airlock .
+#     -t quay.io/crunchtools/mcp-trentina .
 #
 # Run (Streamable HTTP on port 8019):
 #   podman run --rm \
-#     --env-file ~/.config/mcp-env/mcp-airlock.env \
-#     -v ~/.local/share/mcp-airlock:/data:Z \
+#     --env-file ~/.config/mcp-env/mcp-trentina.env \
+#     -v ~/.local/share/mcp-trentina:/data:Z \
 #     -p 127.0.0.1:8019:8019 \
-#     quay.io/crunchtools/mcp-airlock \
+#     quay.io/crunchtools/mcp-trentina \
 #     --transport streamable-http --host 0.0.0.0 --port 8019
 #
 # Optional D-Bus integration (for Cockpit plugin / mcp-assayer):
@@ -21,11 +21,11 @@
 #   when the socket is not mounted).
 #
 # With Claude Code (stdio):
-#   claude mcp add mcp-airlock-crunchtools \
+#   claude mcp add mcp-trentina-crunchtools \
 #     -- podman run -i --rm \
-#     --env-file ~/.config/mcp-env/mcp-airlock.env \
-#     -v ~/.local/share/mcp-airlock:/data:Z \
-#     quay.io/crunchtools/mcp-airlock
+#     --env-file ~/.config/mcp-env/mcp-trentina.env \
+#     -v ~/.local/share/mcp-trentina:/data:Z \
+#     quay.io/crunchtools/mcp-trentina
 
 # ============================================================
 # Stage 1: ONNX model conversion (Hummingbird builder — discarded)
@@ -70,15 +70,15 @@ RUN pip install --no-cache-dir --prefix=/usr .
 # ============================================================
 FROM quay.io/hummingbird/python:latest
 
-LABEL name="mcp-airlock-crunchtools" \
+LABEL name="mcp-trentina-crunchtools" \
       version="0.4.0" \
       summary="Secure MCP server for quarantined web content extraction" \
       description="Three-layer defense against prompt injection: deterministic sanitization + Prompt Guard 2 classifier + quarantined LLM" \
       maintainer="crunchtools.com" \
-      url="https://github.com/crunchtools/mcp-airlock" \
+      url="https://github.com/crunchtools/mcp-trentina" \
       io.k8s.display-name="MCP Airlock CrunchTools" \
       io.openshift.tags="mcp,security,prompt-injection,sanitization,quarantine" \
-      org.opencontainers.image.source="https://github.com/crunchtools/mcp-airlock" \
+      org.opencontainers.image.source="https://github.com/crunchtools/mcp-trentina" \
       org.opencontainers.image.description="Secure MCP server for quarantined web content extraction" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later" \
       com.meta.llama.built-with="Built with Llama" \
@@ -101,4 +101,4 @@ ENV QUARANTINE_DB=/data/quarantine.db
 ENV CLASSIFIER_MODEL_PATH=/models/prompt-guard-2-86m
 
 EXPOSE 8019
-ENTRYPOINT ["python", "-m", "mcp_airlock_crunchtools"]
+ENTRYPOINT ["python", "-m", "mcp_trentina_crunchtools"]

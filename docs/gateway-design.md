@@ -259,7 +259,7 @@ through. ~200 lines of FastMCP server code + ~100 lines of profile loader +
 middleware makes these clean v2 additions.
 
 Tokens never appear in config files (only env var names do); env file lives at
-`/srv/mcp-airlock.crunchtools.com/config/profile-tokens.env` with chmod 600 +
+`/srv/mcp-trentina.crunchtools.com/config/profile-tokens.env` with chmod 600 +
 chcon etc_t per the crunchtools convention.
 
 ---
@@ -376,7 +376,7 @@ blast radius, autonomous agent), then Josui.
    backend + a narrowed http backend set.
 2. Replace the 14 `mcp_servers:` entries in Hermes `config.yaml` with one
    `airlock-gateway` entry pointing at
-   `http://mcp-airlock:8019/gateway/kagetora/mcp` (Bearer
+   `http://mcp-trentina:8019/gateway/kagetora/mcp` (Bearer
    `${AIRLOCK_GATEWAY_KAGETORA_TOKEN}`).
 3. Restart kagetora; verify a call exercises both an http backend
    (`mcp-gemini__gemini_query_tool`) and the internal backend
@@ -403,19 +403,19 @@ prompt tokens.
 
 ## Deployment (lotor)
 
-Same `/srv/mcp-airlock.crunchtools.com/` layout the airlock service already
+Same `/srv/mcp-trentina.crunchtools.com/` layout the airlock service already
 uses on lotor. Adds:
 
-- `/srv/mcp-airlock.crunchtools.com/config/profiles.yaml` — profile definitions
-- `/srv/mcp-airlock.crunchtools.com/config/profile-tokens.env` — bearer tokens
+- `/srv/mcp-trentina.crunchtools.com/config/profiles.yaml` — profile definitions
+- `/srv/mcp-trentina.crunchtools.com/config/profile-tokens.env` — bearer tokens
   (chmod 600, chcon etc_t, env-file passed to systemd unit)
-- `/srv/mcp-airlock.crunchtools.com/data/audit.db` — already exists for L1/L2/L3
+- `/srv/mcp-trentina.crunchtools.com/data/audit.db` — already exists for L1/L2/L3
   events; gains gateway-passthrough rows
 - Cockpit plugin gains the Gateway tab — same `cockpit-airlock/` package, lives
   in `/usr/share/cockpit/airlock/`
 
 No new container, no new port, no new systemd unit. The existing
-`mcp-airlock.crunchtools.com.service` stays as-is; the airlock binary gains a
+`mcp-trentina.crunchtools.com.service` stays as-is; the airlock binary gains a
 new endpoint family on its existing `127.0.0.1:8019` listener.
 
 Cockpit visualization comes free with the existing Cockpit instance on lotor —
@@ -426,7 +426,7 @@ the image bumps.
 
 ## Cascade integration
 
-mcp-airlock is already in the cascade (FROM-graph parent: the Hummingbird Python
+mcp-trentina is already in the cascade (FROM-graph parent: the Hummingbird Python
 3.13 base; dispatch fanout already covers it). The version bump for this work
 goes through the existing build pipeline:
 
@@ -528,7 +528,7 @@ Each phase is independently mergeable behind a feature flag (`AIRLOCK_GATEWAY_EN
 
 ## References
 
-- Existing airlock 3-layer defense: `src/mcp_airlock_crunchtools/sanitize/`,
+- Existing airlock 3-layer defense: `src/mcp_trentina_crunchtools/sanitize/`,
   `quarantine/` (this repo)
 - crunchtools MCP fleet on lotor: see [[mcp-centralization-lotor]] memory note
 - Autonomous-agent constitution profile §V (kill switches): drives the L3

@@ -1,4 +1,4 @@
-# mcp-airlock-crunchtools
+# mcp-trentina-crunchtools
 
 Secure MCP server for quarantined web content extraction — two-layer defense against prompt injection.
 
@@ -6,7 +6,7 @@ Secure MCP server for quarantined web content extraction — two-layer defense a
 
 ```bash
 uv sync --all-extras
-uv run mcp-airlock-crunchtools
+uv run mcp-trentina-crunchtools
 ```
 
 ## Environment Variables
@@ -16,7 +16,7 @@ uv run mcp-airlock-crunchtools
 - `QUARANTINE_SEARCH_MODEL` — Gemini model for L0 search grounding (default: gemini-2.5-flash; must support google_search)
 - `QUARANTINE_FALLBACK` — "layer1" (default) or "fail"
 - `QUARANTINE_MAX_CONTENT` — Max chars to Q-Agent (default: 100000)
-- `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-airlock/airlock.db)
+- `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-trentina/trentina.db)
 - `QUARANTINE_TRUST_CONFIG` — Trust allowlist JSON path
 
 ## Tools (6)

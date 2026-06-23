@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from mcp_airlock_crunchtools.models import FetchInput, ReadInput, ScanInput
+from mcp_trentina_crunchtools.models import FetchInput, ReadInput, ScanInput
 
 
 class TestFetchInput:

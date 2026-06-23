@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_airlock_crunchtools.errors import BlockedSourceError, ContentSizeError
-from mcp_airlock_crunchtools.quarantine.classifier import ClassifierResult
-from mcp_airlock_crunchtools.tools.content import (
+from mcp_trentina_crunchtools.errors import BlockedSourceError, ContentSizeError
+from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
+from mcp_trentina_crunchtools.tools.content import (
     deep_scan_content,
     quarantine_content,
     safe_content,
@@ -30,15 +30,15 @@ class TestSafeContent:
         """Clean text/plain passes through unchanged."""
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.content.classify",
+                "mcp_trentina_crunchtools.tools.content.classify",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.is_blocked",
+                "mcp_trentina_crunchtools.tools.content.is_blocked",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.get_config",
+                "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
         ):
             mock_config.return_value.max_content = 100_000
@@ -57,24 +57,24 @@ class TestSafeContent:
         html = "<p>Hello</p>"
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.content.classify",
+                "mcp_trentina_crunchtools.tools.content.classify",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.is_blocked",
+                "mcp_trentina_crunchtools.tools.content.is_blocked",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.get_config",
+                "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_airlock_crunchtools.tools.content.sanitize",
+                "mcp_trentina_crunchtools.tools.content.sanitize",
             ) as mock_sanitize,
             patch(
-                "mcp_airlock_crunchtools.tools.content.sanitize_text",
+                "mcp_trentina_crunchtools.tools.content.sanitize_text",
             ) as mock_sanitize_text,
         ):
-            from mcp_airlock_crunchtools.sanitize.pipeline import PipelineResult, PipelineStats
+            from mcp_trentina_crunchtools.sanitize.pipeline import PipelineResult, PipelineStats
 
             mock_sanitize.return_value = PipelineResult(
                 content="Hello",
@@ -98,18 +98,18 @@ class TestSafeContent:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.content.classify",
+                "mcp_trentina_crunchtools.tools.content.classify",
                 return_value=malicious,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.is_blocked",
+                "mcp_trentina_crunchtools.tools.content.is_blocked",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.record_detection",
+                "mcp_trentina_crunchtools.tools.content.record_detection",
             ) as mock_record,
             patch(
-                "mcp_airlock_crunchtools.tools.content.get_config",
+                "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
         ):
             mock_config.return_value.max_content = 100_000
@@ -127,7 +127,7 @@ class TestSafeContent:
     async def test_safe_content_size_limit(self) -> None:
         """Oversized content rejected with ContentSizeError."""
         with patch(
-            "mcp_airlock_crunchtools.tools.content.get_config",
+            "mcp_trentina_crunchtools.tools.content.get_config",
         ) as mock_config:
             mock_config.return_value.max_content = 10
 
@@ -140,24 +140,24 @@ class TestSafeContent:
         html = "<!DOCTYPE html><html><body>Hi</body></html>"
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.content.classify",
+                "mcp_trentina_crunchtools.tools.content.classify",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.is_blocked",
+                "mcp_trentina_crunchtools.tools.content.is_blocked",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.get_config",
+                "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_airlock_crunchtools.tools.content.sanitize",
+                "mcp_trentina_crunchtools.tools.content.sanitize",
             ) as mock_sanitize,
             patch(
-                "mcp_airlock_crunchtools.tools.content.sanitize_text",
+                "mcp_trentina_crunchtools.tools.content.sanitize_text",
             ) as mock_sanitize_text,
         ):
-            from mcp_airlock_crunchtools.sanitize.pipeline import PipelineResult, PipelineStats
+            from mcp_trentina_crunchtools.sanitize.pipeline import PipelineResult, PipelineStats
 
             mock_sanitize.return_value = PipelineResult(
                 content="Hi",
@@ -183,18 +183,18 @@ class TestQuarantineContent:
         """Q-Agent extraction returns structured content."""
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.content.classify",
+                "mcp_trentina_crunchtools.tools.content.classify",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.is_blocked",
+                "mcp_trentina_crunchtools.tools.content.is_blocked",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.get_config",
+                "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_airlock_crunchtools.tools.content.quarantine_extract",
+                "mcp_trentina_crunchtools.tools.content.quarantine_extract",
                 return_value={
                     "content": {"extracted_text": "extracted stuff"},
                     "usage": {"prompt_tokens": 100},
@@ -221,18 +221,18 @@ class TestQuarantineContent:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.content.classify",
+                "mcp_trentina_crunchtools.tools.content.classify",
                 return_value=malicious,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.is_blocked",
+                "mcp_trentina_crunchtools.tools.content.is_blocked",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.get_config",
+                "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_airlock_crunchtools.tools.content.quarantine_extract",
+                "mcp_trentina_crunchtools.tools.content.quarantine_extract",
                 return_value={
                     "content": {"extracted_text": "extracted"},
                     "usage": {},
@@ -258,11 +258,11 @@ class TestScanContent:
         """Clean content returns low risk response."""
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.content.classify",
+                "mcp_trentina_crunchtools.tools.content.classify",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.get_config",
+                "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
         ):
             mock_config.return_value.max_content = 100_000
@@ -283,11 +283,11 @@ class TestScanContent:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.content.classify",
+                "mcp_trentina_crunchtools.tools.content.classify",
                 return_value=malicious,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.content.get_config",
+                "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
         ):
             mock_config.return_value.max_content = 100_000
@@ -306,10 +306,10 @@ class TestScanContent:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.content.classify",
+                "mcp_trentina_crunchtools.tools.content.classify",
             ) as mock_classify,
             patch(
-                "mcp_airlock_crunchtools.tools.content.get_config",
+                "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
         ):
             mock_classify.return_value = None
@@ -327,10 +327,10 @@ class TestScanContent:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.content.classify",
+                "mcp_trentina_crunchtools.tools.content.classify",
             ) as mock_classify,
             patch(
-                "mcp_airlock_crunchtools.tools.content.get_config",
+                "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
         ):
             mock_classify.return_value = None
@@ -355,10 +355,10 @@ class TestBlocklist:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.content.is_blocked",
+                "mcp_trentina_crunchtools.tools.content.is_blocked",
             ) as mock_is_blocked,
             patch(
-                "mcp_airlock_crunchtools.tools.content.get_config",
+                "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
         ):
             mock_config.return_value.max_content = 100_000
