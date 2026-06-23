@@ -146,7 +146,7 @@ justification = "classifier_result dict values are typed as Any — float() cast
 
 [[exceptions]]
 check = "generic_names"
-path = "cockpit-airlock/airlock.js"
+path = "cockpit-trentina/airlock.js"
 pattern = "data"
 justification = "D-Bus signal/callback handlers receive a generic payload object — 'data' is the Cockpit D-Bus API convention for response payloads"
 
@@ -157,49 +157,49 @@ justification = "D-Bus signal/callback handlers receive a generic payload object
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-airlock/airlock.js"
+path = "cockpit-trentina/airlock.js"
 pattern = "formatTime"
 justification = "UI display helper — semantic name clarifies intent in single-file Cockpit plugin"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-airlock/airlock.js"
+path = "cockpit-trentina/airlock.js"
 pattern = "truncateSource"
 justification = "UI display helper — semantic name clarifies intent in single-file Cockpit plugin"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-airlock/airlock.js"
+path = "cockpit-trentina/airlock.js"
 pattern = "scoreBar"
 justification = "UI display helper — generates HTML for L2 classifier score visualization"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-airlock/airlock.js"
+path = "cockpit-trentina/airlock.js"
 pattern = "renderPage"
 justification = "UI lifecycle function — builds the initial DOM structure for the Cockpit panel"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-airlock/airlock.js"
+path = "cockpit-trentina/airlock.js"
 pattern = "renderDetail"
 justification = "UI lifecycle function — populates pipeline detail card on event selection"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-airlock/airlock.js"
+path = "cockpit-trentina/airlock.js"
 pattern = "setupSignals"
 justification = "UI lifecycle function — registers D-Bus signal listeners for live event streaming"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-airlock/airlock.js"
+path = "cockpit-trentina/airlock.js"
 pattern = "showDetectionAlert"
 justification = "UI lifecycle function — creates and auto-dismisses PatternFly alert banners for injection detections"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-airlock/airlock.js"
+path = "cockpit-trentina/airlock.js"
 pattern = "init"
 justification = "UI lifecycle function — entry point that orchestrates page render, D-Bus connection, and signal setup"
 
