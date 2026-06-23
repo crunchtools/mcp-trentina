@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from mcp_airlock_crunchtools.gateway.guards import check_parameter_guards
-from mcp_airlock_crunchtools.gateway.profile import Backend, ParameterConstraint
+from mcp_trentina_crunchtools.gateway.guards import check_parameter_guards
+from mcp_trentina_crunchtools.gateway.profile import Backend, ParameterConstraint
 
 
 def _backend(
@@ -37,7 +37,9 @@ class TestParameterGuards:
         result = check_parameter_guards(
             "send_gmail_message",
             {"to": "scott@gmail.com"},
-            _backend({"send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}}),
+            _backend({
+                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+            }),
         )
         assert result is None
 
@@ -53,7 +55,9 @@ class TestParameterGuards:
         result = check_parameter_guards(
             "send_gmail_message",
             {"to": "evil@example.com"},
-            _backend({"send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}}),
+            _backend({
+                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+            }),
         )
         assert result is not None
         assert "not in allow list" in result
@@ -78,7 +82,9 @@ class TestParameterGuards:
         result = check_parameter_guards(
             "send_gmail_message",
             {"subject": "hello"},
-            _backend({"send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}}),
+            _backend({
+                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+            }),
         )
         assert result is None
 
@@ -86,7 +92,9 @@ class TestParameterGuards:
         result = check_parameter_guards(
             "send_gmail_message",
             {"to": None},
-            _backend({"send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}}),
+            _backend({
+                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+            }),
         )
         assert result is None
 
@@ -117,7 +125,9 @@ class TestParameterGuards:
         result = check_parameter_guards(
             "send_gmail_message",
             {},
-            _backend({"send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}}),
+            _backend({
+                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+            }),
         )
         assert result is None
 
@@ -126,7 +136,9 @@ class TestParameterGuards:
         result = check_parameter_guards(
             "send_gmail_message",
             {"to": secret},
-            _backend({"send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}}),
+            _backend({
+                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+            }),
         )
         assert result is not None
         assert secret not in result

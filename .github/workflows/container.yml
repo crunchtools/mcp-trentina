@@ -9,8 +9,8 @@ on:
   workflow_dispatch:
 
 env:
-  QUAY_IMAGE: quay.io/crunchtools/mcp-airlock
-  GHCR_IMAGE: ghcr.io/crunchtools/mcp-airlock
+  QUAY_IMAGE: quay.io/crunchtools/mcp-trentina
+  GHCR_IMAGE: ghcr.io/crunchtools/mcp-trentina
 
 jobs:
   build-and-push-quay:

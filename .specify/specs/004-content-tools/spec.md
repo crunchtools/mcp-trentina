@@ -5,7 +5,7 @@
 > **Version:** 0.2.0
 > **Author:** Scott McCarty / Josui
 > **Date:** 2026-03-10
-> **GitHub Issue:** [#5](https://github.com/crunchtools/mcp-airlock/issues/5)
+> **GitHub Issue:** [#5](https://github.com/crunchtools/mcp-trentina/issues/5)
 
 ## Overview
 

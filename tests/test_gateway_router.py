@@ -8,16 +8,16 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr
 
-from mcp_airlock_crunchtools.database import get_gateway_call_stats
-from mcp_airlock_crunchtools.gateway.backend import BackendCall
-from mcp_airlock_crunchtools.gateway.errors import BackendCallError, BackendNotInProfileError
-from mcp_airlock_crunchtools.gateway.profile import (
+from mcp_trentina_crunchtools.database import get_gateway_call_stats
+from mcp_trentina_crunchtools.gateway.backend import BackendCall
+from mcp_trentina_crunchtools.gateway.errors import BackendCallError, BackendNotInProfileError
+from mcp_trentina_crunchtools.gateway.profile import (
     AuthConfig,
     Backend,
     ParameterConstraint,
     Profile,
 )
-from mcp_airlock_crunchtools.gateway.router import (
+from mcp_trentina_crunchtools.gateway.router import (
     NAMESPACE_SEP,
     PROTOCOL_VERSION,
     route_jsonrpc,
@@ -46,7 +46,7 @@ def _profile() -> Profile:
 
 
 def _mixed_profile() -> Profile:
-    """Profile mixing an http backend with an internal:// (airlock-tools) backend."""
+    """Profile mixing an http backend with an internal:// (trentina-tools) backend."""
     p = Profile(
         name="mixed",
         auth=AuthConfig(bearer_token_env="TEST"),
@@ -67,7 +67,7 @@ class TestRouter:
         resp = await route_jsonrpc(_profile(), {"jsonrpc": "2.0", "id": 1, "method": "initialize"})
         assert resp["id"] == 1
         assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
-        assert resp["result"]["serverInfo"]["name"] == "mcp-airlock-gateway:testp"
+        assert resp["result"]["serverInfo"]["name"] == "mcp-trentina-gateway:testp"
         assert "tools" in resp["result"]["capabilities"]
 
     async def test_ping_returns_empty_result(self) -> None:
@@ -91,7 +91,7 @@ class TestRouter:
             return [{"name": "jira_search", "description": "", "inputSchema": {}}]
 
         with patch(
-            "mcp_airlock_crunchtools.gateway.router.list_backend_tools",
+            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
             side_effect=fake_list,
         ):
             resp = await route_jsonrpc(
@@ -111,7 +111,7 @@ class TestRouter:
             return [{"name": "jira_search", "description": "", "inputSchema": {}}]
 
         with patch(
-            "mcp_airlock_crunchtools.gateway.router.list_backend_tools",
+            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
             side_effect=fake_list,
         ):
             resp = await route_jsonrpc(
@@ -139,7 +139,7 @@ class TestRouter:
             )
 
         with patch(
-            "mcp_airlock_crunchtools.gateway.router.call_backend_tool",
+            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
             side_effect=fake_call,
         ):
             resp = await route_jsonrpc(
@@ -204,11 +204,11 @@ class TestRouter:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.gateway.router.list_backend_tools",
+                "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
                 side_effect=fake_list,
             ),
             patch(
-                "mcp_airlock_crunchtools.gateway.router.list_internal_tools",
+                "mcp_trentina_crunchtools.gateway.router.list_internal_tools",
                 side_effect=fake_internal_list,
             ),
         ):
@@ -243,11 +243,11 @@ class TestRouter:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.gateway.router.call_internal_tool",
+                "mcp_trentina_crunchtools.gateway.router.call_internal_tool",
                 side_effect=fake_internal_call,
             ),
             patch(
-                "mcp_airlock_crunchtools.gateway.router.call_backend_tool",
+                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
                 side_effect=fail_http,
             ),
         ):
@@ -288,7 +288,7 @@ class TestRouter:
 
     async def test_tools_call_records_audit_on_success(self, tmp_path: Any) -> None:
         """Successful tools/call writes an audit row to gateway_calls."""
-        import mcp_airlock_crunchtools.database as db_mod
+        import mcp_trentina_crunchtools.database as db_mod
 
         db_mod._db = None
         db_path = str(tmp_path / "audit_test.db")
@@ -304,10 +304,10 @@ class TestRouter:
         tool_name = f"mcp-slack{NAMESPACE_SEP}slack_list_channels"
         with (
             patch(
-                "mcp_airlock_crunchtools.gateway.router.call_backend_tool",
+                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
                 side_effect=fake_call,
             ),
-            patch("mcp_airlock_crunchtools.database.get_config") as mock_cfg,
+            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
         ):
             mock_cfg.return_value.db_path = db_path
             mock_cfg.return_value.ensure_db_dir = lambda: None
@@ -330,7 +330,7 @@ class TestRouter:
 
     async def test_tools_call_records_audit_on_failure(self, tmp_path: Any) -> None:
         """Failed tools/call writes an audit row with error_message."""
-        import mcp_airlock_crunchtools.database as db_mod
+        import mcp_trentina_crunchtools.database as db_mod
 
         db_mod._db = None
         db_path = str(tmp_path / "audit_fail_test.db")
@@ -343,10 +343,10 @@ class TestRouter:
         tool_name = f"mcp-slack{NAMESPACE_SEP}slack_list_channels"
         with (
             patch(
-                "mcp_airlock_crunchtools.gateway.router.call_backend_tool",
+                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
                 side_effect=fail_call,
             ),
-            patch("mcp_airlock_crunchtools.database.get_config") as mock_cfg,
+            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
         ):
             mock_cfg.return_value.db_path = db_path
             mock_cfg.return_value.ensure_db_dir = lambda: None
@@ -429,7 +429,7 @@ class TestRouter:
         )
         p.auth.bearer_token = SecretStr("x")
         with patch(
-            "mcp_airlock_crunchtools.gateway.router.call_backend_tool",
+            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
             side_effect=fake_call,
         ):
             resp = await route_jsonrpc(

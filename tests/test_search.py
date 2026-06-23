@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from mcp_airlock_crunchtools.errors import BlockedSourceError, QuarantineAgentError
-from mcp_airlock_crunchtools.quarantine.agent import (
+from mcp_trentina_crunchtools.errors import BlockedSourceError, QuarantineAgentError
+from mcp_trentina_crunchtools.quarantine.agent import (
     _build_search_request_body,
     _enforce_search_quarantine,
     _extract_grounding_sources,
@@ -16,8 +16,8 @@ from mcp_airlock_crunchtools.quarantine.agent import (
     resolve_grounding_urls,
     search_grounded,
 )
-from mcp_airlock_crunchtools.quarantine.classifier import ClassifierResult
-from mcp_airlock_crunchtools.tools.search import (
+from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
+from mcp_trentina_crunchtools.tools.search import (
     _sanitize_l0_output,
     quarantine_search,
     safe_search,
@@ -82,10 +82,10 @@ class TestL0SearchGrounded:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.quarantine.agent.get_config",
+                "mcp_trentina_crunchtools.quarantine.agent.get_config",
             ) as mock_config,
             patch(
-                "mcp_airlock_crunchtools.quarantine.agent.httpx.AsyncClient",
+                "mcp_trentina_crunchtools.quarantine.agent.httpx.AsyncClient",
             ) as mock_client_cls,
         ):
             cfg = MagicMock()
@@ -116,7 +116,7 @@ class TestL0SearchGrounded:
     async def test_l0_missing_api_key(self) -> None:
         """Raises QuarantineAgentError when API key is missing."""
         with patch(
-            "mcp_airlock_crunchtools.quarantine.agent.get_config",
+            "mcp_trentina_crunchtools.quarantine.agent.get_config",
         ) as mock_config:
             cfg = MagicMock()
             cfg.has_api_key = False
@@ -130,14 +130,14 @@ class TestL0SearchGrounded:
         """Canary in plain text raises QuarantineAgentError."""
         with (
             patch(
-                "mcp_airlock_crunchtools.quarantine.agent.get_config",
+                "mcp_trentina_crunchtools.quarantine.agent.get_config",
             ) as mock_config,
             patch(
-                "mcp_airlock_crunchtools.quarantine.agent._generate_canary",
+                "mcp_trentina_crunchtools.quarantine.agent._generate_canary",
                 return_value="CANARY-abc123",
             ),
             patch(
-                "mcp_airlock_crunchtools.quarantine.agent.httpx.AsyncClient",
+                "mcp_trentina_crunchtools.quarantine.agent.httpx.AsyncClient",
             ) as mock_client_cls,
         ):
             cfg = MagicMock()
@@ -253,7 +253,7 @@ class TestRedirectResolution:
         ]
 
         with patch(
-            "mcp_airlock_crunchtools.quarantine.agent.httpx.AsyncClient",
+            "mcp_trentina_crunchtools.quarantine.agent.httpx.AsyncClient",
         ) as mock_client_cls:
             mock_resp = MagicMock()
             mock_resp.url = httpx.URL("https://example.com/final")
@@ -279,7 +279,7 @@ class TestRedirectResolution:
         ]
 
         with patch(
-            "mcp_airlock_crunchtools.quarantine.agent.httpx.AsyncClient",
+            "mcp_trentina_crunchtools.quarantine.agent.httpx.AsyncClient",
         ) as mock_client_cls:
             mock_http = AsyncMock()
             mock_http.__aenter__ = AsyncMock(return_value=mock_http)
@@ -304,7 +304,7 @@ class TestRedirectResolution:
         ]
 
         with patch(
-            "mcp_airlock_crunchtools.quarantine.agent.httpx.AsyncClient",
+            "mcp_trentina_crunchtools.quarantine.agent.httpx.AsyncClient",
         ) as mock_client_cls:
             mock_http = AsyncMock()
             mock_http.head.side_effect = httpx.TimeoutException("timeout")
@@ -355,17 +355,17 @@ class TestSafeSearch:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.search.search_grounded",
+                "mcp_trentina_crunchtools.tools.search.search_grounded",
                 new_callable=AsyncMock,
                 return_value=mock_raw,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.resolve_grounding_urls",
+                "mcp_trentina_crunchtools.tools.search.resolve_grounding_urls",
                 new_callable=AsyncMock,
                 return_value=mock_raw["sources"],
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.classify",
+                "mcp_trentina_crunchtools.tools.search.classify",
                 return_value=None,
             ),
         ):
@@ -390,17 +390,17 @@ class TestSafeSearch:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.search.search_grounded",
+                "mcp_trentina_crunchtools.tools.search.search_grounded",
                 new_callable=AsyncMock,
                 return_value=mock_raw,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.resolve_grounding_urls",
+                "mcp_trentina_crunchtools.tools.search.resolve_grounding_urls",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.classify",
+                "mcp_trentina_crunchtools.tools.search.classify",
                 return_value=malicious,
             ),
             pytest.raises(BlockedSourceError),
@@ -411,7 +411,7 @@ class TestSafeSearch:
     async def test_safe_search_blocks_on_l0_failure(self) -> None:
         """L0 failure raises BlockedSourceError."""
         with patch(
-            "mcp_airlock_crunchtools.tools.search.search_grounded",
+            "mcp_trentina_crunchtools.tools.search.search_grounded",
             new_callable=AsyncMock,
             side_effect=QuarantineAgentError("HTTP 500"),
         ), pytest.raises(BlockedSourceError):
@@ -436,24 +436,24 @@ class TestQuarantineSearch:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.search.search_grounded",
+                "mcp_trentina_crunchtools.tools.search.search_grounded",
                 new_callable=AsyncMock,
                 return_value=mock_raw,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.resolve_grounding_urls",
+                "mcp_trentina_crunchtools.tools.search.resolve_grounding_urls",
                 new_callable=AsyncMock,
                 return_value=mock_raw["sources"],
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.classify",
+                "mcp_trentina_crunchtools.tools.search.classify",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.get_config",
+                "mcp_trentina_crunchtools.tools.search.get_config",
             ) as mock_config,
             patch(
-                "mcp_airlock_crunchtools.tools.search.quarantine_extract",
+                "mcp_trentina_crunchtools.tools.search.quarantine_extract",
                 new_callable=AsyncMock,
                 return_value={
                     "content": {"extracted_text": "structured bootc info"},
@@ -489,24 +489,24 @@ class TestQuarantineSearch:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.search.search_grounded",
+                "mcp_trentina_crunchtools.tools.search.search_grounded",
                 new_callable=AsyncMock,
                 return_value=mock_raw,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.resolve_grounding_urls",
+                "mcp_trentina_crunchtools.tools.search.resolve_grounding_urls",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.classify",
+                "mcp_trentina_crunchtools.tools.search.classify",
                 return_value=malicious,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.get_config",
+                "mcp_trentina_crunchtools.tools.search.get_config",
             ) as mock_config,
             patch(
-                "mcp_airlock_crunchtools.tools.search.quarantine_extract",
+                "mcp_trentina_crunchtools.tools.search.quarantine_extract",
                 new_callable=AsyncMock,
                 return_value={
                     "content": {"extracted_text": "extracted"},
@@ -529,7 +529,7 @@ class TestQuarantineSearch:
     async def test_quarantine_search_l0_failure(self) -> None:
         """L0 error returns empty results (no raise)."""
         with patch(
-            "mcp_airlock_crunchtools.tools.search.search_grounded",
+            "mcp_trentina_crunchtools.tools.search.search_grounded",
             new_callable=AsyncMock,
             side_effect=QuarantineAgentError("HTTP 500"),
         ):
@@ -552,21 +552,21 @@ class TestQuarantineSearch:
 
         with (
             patch(
-                "mcp_airlock_crunchtools.tools.search.search_grounded",
+                "mcp_trentina_crunchtools.tools.search.search_grounded",
                 new_callable=AsyncMock,
                 return_value=mock_raw,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.resolve_grounding_urls",
+                "mcp_trentina_crunchtools.tools.search.resolve_grounding_urls",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.classify",
+                "mcp_trentina_crunchtools.tools.search.classify",
                 return_value=None,
             ),
             patch(
-                "mcp_airlock_crunchtools.tools.search.get_config",
+                "mcp_trentina_crunchtools.tools.search.get_config",
             ) as mock_config,
         ):
             cfg = MagicMock()

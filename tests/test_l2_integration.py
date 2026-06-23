@@ -16,12 +16,12 @@ from typing import Any
 
 import pytest
 
-from mcp_airlock_crunchtools.quarantine.classifier import (
+from mcp_trentina_crunchtools.quarantine.classifier import (
     classify,
     is_classifier_available,
     reset_classifier,
 )
-from mcp_airlock_crunchtools.sanitize.pipeline import sanitize_text
+from mcp_trentina_crunchtools.sanitize.pipeline import sanitize_text
 
 requires_model = pytest.mark.skipif(
     not is_classifier_available(),

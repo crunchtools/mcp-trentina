@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcp_airlock_crunchtools.sanitize.directives import sanitize_directives
+from mcp_trentina_crunchtools.sanitize.directives import sanitize_directives
 
 
 class TestDirectiveStripping:

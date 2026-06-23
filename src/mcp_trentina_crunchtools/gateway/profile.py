@@ -89,7 +89,7 @@ class Backend(BaseModel):
         ...,
         description=(
             "Backend location. Either a streamable-http URL (http(s)://) or "
-            "internal://<label> for airlock's own in-process tool surface."
+            "internal://<label> for trentina's own in-process tool surface."
         ),
     )
     tools_allow: list[str] = Field(
@@ -121,7 +121,7 @@ class Backend(BaseModel):
     @field_validator("url")
     @classmethod
     def url_scheme_supported(cls, v: str) -> str:
-        """Allow http(s):// (remote MCP) or internal://<label> (airlock's own tools).
+        """Allow http(s):// (remote MCP) or internal://<label> (trentina's own tools).
 
         SSE and stdio are not supported. An internal:// URL must carry a
         URL-safe slug label after the scheme (cosmetic, but required so the
@@ -143,7 +143,7 @@ class Backend(BaseModel):
 
     @property
     def is_internal(self) -> bool:
-        """True when this backend resolves to airlock's in-process tool surface."""
+        """True when this backend resolves to trentina's in-process tool surface."""
         return self.url.startswith(INTERNAL_SCHEME)
 
     @field_validator("tools_allow", "tools_deny")

@@ -5,7 +5,7 @@
 > **Version:** 0.3.0
 > **Author:** Scott McCarty / Josui
 > **Date:** 2026-03-10
-> **GitHub Issue:** [#6](https://github.com/crunchtools/mcp-airlock/issues/6)
+> **GitHub Issue:** [#6](https://github.com/crunchtools/mcp-trentina/issues/6)
 
 ## Overview
 
@@ -1073,7 +1073,7 @@ instructions=(
 No new env vars. Existing `GEMINI_API_KEY` powers everything.
 
 ```bash
-systemctl restart mcp-airlock.crunchtools.com.service
+systemctl restart mcp-trentina.crunchtools.com.service
 ```
 
 ### Compatibility Check

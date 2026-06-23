@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 
-from mcp_airlock_crunchtools.sanitize.pipeline import sanitize, sanitize_text
+from mcp_trentina_crunchtools.sanitize.pipeline import sanitize, sanitize_text
 
 
 class TestHiddenDivInjection:

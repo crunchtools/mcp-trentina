@@ -1,4 +1,4 @@
-"""Pydantic input validation models for mcp-airlock-crunchtools."""
+"""Pydantic input validation models for mcp-trentina-crunchtools."""
 
 from __future__ import annotations
 

@@ -101,12 +101,12 @@ jobs:
 
       - name: Build container image
         run: |
-          docker build -f Containerfile --build-arg HF_TOKEN=${{ secrets.HF_TOKEN }} -t mcp-airlock:scan .
+          docker build -f Containerfile --build-arg HF_TOKEN=${{ secrets.HF_TOKEN }} -t mcp-trentina:scan .
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: "mcp-airlock:scan"
+          image-ref: "mcp-trentina:scan"
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH"

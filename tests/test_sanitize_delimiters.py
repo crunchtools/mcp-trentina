@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcp_airlock_crunchtools.sanitize.delimiters import sanitize_delimiters
+from mcp_trentina_crunchtools.sanitize.delimiters import sanitize_delimiters
 
 
 class TestDelimiterSanitization:

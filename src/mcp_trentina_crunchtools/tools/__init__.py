@@ -1,4 +1,4 @@
-"""Tool implementations for mcp-airlock-crunchtools."""
+"""Tool implementations for mcp-trentina-crunchtools."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from .fetch import quarantine_fetch, safe_fetch
 from .read import quarantine_read, safe_read
 from .scan import deep_quarantine_scan, quarantine_scan
 from .search import quarantine_search, safe_search
-from .stats import get_airlock_stats
+from .stats import get_trentina_stats
 
 __all__ = [
     "deep_quarantine_scan",
@@ -22,5 +22,5 @@ __all__ = [
     "safe_read",
     "safe_search",
     "scan_content",
-    "get_airlock_stats",
+    "get_trentina_stats",
 ]

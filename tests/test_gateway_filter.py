@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp_airlock_crunchtools.gateway.filter import filter_tools
-from mcp_airlock_crunchtools.gateway.profile import Backend
+from mcp_trentina_crunchtools.gateway.filter import filter_tools
+from mcp_trentina_crunchtools.gateway.profile import Backend
 
 
 def _tool(name: str) -> dict[str, Any]:

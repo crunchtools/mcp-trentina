@@ -277,7 +277,7 @@ def _enforce_search_quarantine(request_body: dict[str, Any]) -> None:
     """Enforce L0 search constraints.
 
     ONLY google_search grounding is permitted. No functionDeclarations,
-    no other tools. This is the ONLY place in airlock where any agent
+    no other tools. This is the ONLY place in trentina where any agent
     has tool access.
     """
     if "functionDeclarations" in request_body:

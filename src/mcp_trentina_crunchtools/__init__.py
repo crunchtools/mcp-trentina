@@ -1,4 +1,4 @@
-"""mcp-airlock-crunchtools: Quarantined web content extraction + MCP gateway."""
+"""mcp-trentina-crunchtools: Quarantined web content extraction + MCP gateway."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -21,9 +21,9 @@ if TYPE_CHECKING:
 
 
 def main() -> None:
-    """Entry point for mcp-airlock-crunchtools."""
+    """Entry point for mcp-trentina-crunchtools."""
     parser = argparse.ArgumentParser(
-        prog="mcp-airlock-crunchtools",
+        prog="mcp-trentina-crunchtools",
         description="MCP server for quarantined web content extraction and gateway",
     )
     parser.add_argument(
@@ -53,7 +53,7 @@ def main() -> None:
         loop.run_until_complete(start_dbus())
         loop.close()
 
-    gateway_enabled = os.environ.get("AIRLOCK_GATEWAY_ENABLED", "").strip().lower() in _TRUTHY
+    gateway_enabled = os.environ.get("TRENTINA_GATEWAY_ENABLED", "").strip().lower() in _TRUTHY
 
     match args.transport:
         case "stdio":
@@ -68,9 +68,9 @@ def main() -> None:
 
 
 def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
-    """Run airlock with gateway routes wired in via FastMCP's custom_route API.
+    """Run trentina with gateway routes wired in via FastMCP's custom_route API.
 
-    Loads profiles from AIRLOCK_PROFILES_PATH and registers
+    Loads profiles from TRENTINA_PROFILES_PATH and registers
     POST /gateway/{profile}/mcp endpoints on the FastMCP app. Airlock's own
     tools are bound as the in-process internal backend so profiles can surface
     them (via an ``internal://<label>`` backend) through the same gateway
@@ -86,7 +86,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     from .gateway import load_profiles, register_internal_server, register_with_fastmcp
 
     profiles_path = Path(
-        os.environ.get("AIRLOCK_PROFILES_PATH", "/etc/airlock/profiles.yaml")
+        os.environ.get("TRENTINA_PROFILES_PATH", "/etc/trentina/profiles.yaml")
     )
     logger.info("gateway: loading profiles from %s", profiles_path)
     registry = load_profiles(profiles_path)

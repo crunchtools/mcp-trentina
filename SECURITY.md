@@ -1,6 +1,6 @@
 # Security Design Document
 
-This document describes the security architecture of mcp-airlock-crunchtools.
+This document describes the security architecture of mcp-trentina-crunchtools.
 
 ## 1. Threat Model
 
@@ -111,6 +111,6 @@ Before each release:
 
 ## 5. Reporting Security Issues
 
-Report security vulnerabilities using [GitHub's private security advisory](https://github.com/crunchtools/mcp-airlock/security/advisories/new).
+Report security vulnerabilities using [GitHub's private security advisory](https://github.com/crunchtools/mcp-trentina/security/advisories/new).
 
 Do NOT open public issues for security vulnerabilities.

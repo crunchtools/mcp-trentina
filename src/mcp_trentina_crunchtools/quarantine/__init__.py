@@ -1,4 +1,4 @@
-"""Layer 2: Q-Agent quarantine for mcp-airlock-crunchtools."""
+"""Layer 2: Q-Agent quarantine for mcp-trentina-crunchtools."""
 
 from __future__ import annotations
 

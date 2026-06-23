@@ -20,12 +20,12 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from mcp_airlock_crunchtools.quarantine.agent import quarantine_detect
-from mcp_airlock_crunchtools.quarantine.classifier import (
+from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
+from mcp_trentina_crunchtools.quarantine.classifier import (
     classify,
     is_classifier_available,
 )
-from mcp_airlock_crunchtools.sanitize.pipeline import sanitize_text
+from mcp_trentina_crunchtools.sanitize.pipeline import sanitize_text
 
 _has_classifier = is_classifier_available()
 
@@ -304,7 +304,7 @@ class TestL3UniqueCatches:
         """Verify Q-Agent detects the injection via semantic reasoning."""
         with (
             patch(
-                "mcp_airlock_crunchtools.quarantine.agent.get_config"
+                "mcp_trentina_crunchtools.quarantine.agent.get_config"
             ) as mock_config,
             patch(
                 "httpx.AsyncClient.post",
@@ -337,7 +337,7 @@ class TestL3BenignNoFalsePositives:
         """Normal content should not be flagged as injection."""
         with (
             patch(
-                "mcp_airlock_crunchtools.quarantine.agent.get_config"
+                "mcp_trentina_crunchtools.quarantine.agent.get_config"
             ) as mock_config,
             patch(
                 "httpx.AsyncClient.post",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from unittest.mock import patch
 
-from mcp_airlock_crunchtools import database
+from mcp_trentina_crunchtools import database
 
 
 def _fresh_db() -> sqlite3.Connection:

@@ -1,21 +1,21 @@
-# Gourmand exceptions for mcp-airlock-crunchtools
+# Gourmand exceptions for mcp-trentina-crunchtools
 # Each exception must have a documented justification
 
 [[exceptions]]
 check = "generic_names"
-path = "src/mcp_airlock_crunchtools/sanitize/*.py"
+path = "src/mcp_trentina_crunchtools/sanitize/*.py"
 pattern = "stats"
 justification = "stats is the domain-standard name for sanitization statistics returned by each pipeline stage"
 
 [[exceptions]]
 check = "generic_names"
-path = "src/mcp_airlock_crunchtools/database.py"
+path = "src/mcp_trentina_crunchtools/database.py"
 pattern = "query"
 justification = "query() is the standard database accessor function name matching feed-reader and other server patterns"
 
 [[exceptions]]
 check = "generic_names"
-path = "src/mcp_airlock_crunchtools/quarantine/agent.py"
+path = "src/mcp_trentina_crunchtools/quarantine/agent.py"
 pattern = "response"
 justification = "response is the standard variable name for httpx HTTP response objects"
 
@@ -27,61 +27,61 @@ justification = "type: ignore[call-arg] required to test Pydantic extra='forbid'
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "src/mcp_airlock_crunchtools/sanitize/encoded.py"
+path = "src/mcp_trentina_crunchtools/sanitize/encoded.py"
 pattern = "_decode_base64_safe"
 justification = "Error isolation boundary — decoding untrusted base64 requires its own try/except with specific exception types"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "src/mcp_airlock_crunchtools/sanitize/encoded.py"
+path = "src/mcp_trentina_crunchtools/sanitize/encoded.py"
 pattern = "_decode_hex_safe"
 justification = "Error isolation boundary — decoding untrusted hex requires its own try/except with specific exception types"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "src/mcp_airlock_crunchtools/sanitize/exfiltration.py"
+path = "src/mcp_trentina_crunchtools/sanitize/exfiltration.py"
 pattern = "_is_suspicious_url"
 justification = "Predicate function used as filter callback in list comprehension for URL classification"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "src/mcp_airlock_crunchtools/sanitize/html.py"
+path = "src/mcp_trentina_crunchtools/sanitize/html.py"
 pattern = "_is_hidden"
 justification = "Used as function reference in _CHECK_FUNCTIONS dict — extracted per ruff C901 complexity limits"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "src/mcp_airlock_crunchtools/sanitize/html.py"
+path = "src/mcp_trentina_crunchtools/sanitize/html.py"
 pattern = "_is_off_screen"
 justification = "Used as function reference in _CHECK_FUNCTIONS dict — extracted per ruff C901 complexity limits"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "src/mcp_airlock_crunchtools/sanitize/html.py"
+path = "src/mcp_trentina_crunchtools/sanitize/html.py"
 pattern = "_has_same_color_text"
 justification = "Used as function reference in _CHECK_FUNCTIONS dict — extracted per ruff C901 complexity limits"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "src/mcp_airlock_crunchtools/sanitize/html.py"
+path = "src/mcp_trentina_crunchtools/sanitize/html.py"
 pattern = "_normalize_color"
 justification = "Complex CSS color normalization logic extracted per ruff C901 — handles named colors, hex3, hex6, and rgb()"
 
 [[exceptions]]
 check = "silent_fallbacks"
-path = "src/mcp_airlock_crunchtools/quarantine/agent.py"
+path = "src/mcp_trentina_crunchtools/quarantine/agent.py"
 pattern = "quarantine_extract"
 justification = "Intentional fallback controlled by QUARANTINE_FALLBACK config — returns degraded content with confidence=low when Q-Agent unavailable"
 
 [[exceptions]]
 check = "silent_fallbacks"
-path = "src/mcp_airlock_crunchtools/quarantine/agent.py"
+path = "src/mcp_trentina_crunchtools/quarantine/agent.py"
 pattern = "quarantine_detect"
 justification = "Detection is best-effort by design — safe default (injection_detected=False) with explanatory summary when Q-Agent unavailable"
 
 [[exceptions]]
 check = "primitive_obsession"
-path = "src/mcp_airlock_crunchtools/sanitize/encoded.py"
+path = "src/mcp_trentina_crunchtools/sanitize/encoded.py"
 pattern = "500"
 justification = "500 is the literal value in the MAX_BASE64_DECODE_LENGTH constant definition — the literal must exist somewhere"
 
@@ -106,25 +106,25 @@ justification = "Test fixture containing sample prompt injection payloads for in
 
 [[exceptions]]
 check = "lint_suppression"
-path = "src/mcp_airlock_crunchtools/dbus_interface.py"
+path = "src/mcp_trentina_crunchtools/dbus_interface.py"
 pattern = "type: ignore[name-defined]"
 justification = "dbus-fast uses string annotations (\"s\", \"u\") as D-Bus type signatures, not Python types — mypy cannot resolve them"
 
 [[exceptions]]
 check = "lint_suppression"
-path = "src/mcp_airlock_crunchtools/dbus_interface.py"
+path = "src/mcp_trentina_crunchtools/dbus_interface.py"
 pattern = "noqa: N802"
 justification = "D-Bus specification requires PascalCase method and signal names (e.g. GetStats, RequestProcessed)"
 
 [[exceptions]]
 check = "lint_suppression"
-path = "src/mcp_airlock_crunchtools/dbus_interface.py"
+path = "src/mcp_trentina_crunchtools/dbus_interface.py"
 pattern = "noqa: F821"
 justification = "dbus-fast D-Bus type signature strings (\"s\", \"u\") are forward references resolved at D-Bus registration, not Python names"
 
 [[exceptions]]
 check = "lint_suppression"
-path = "src/mcp_airlock_crunchtools/dbus_interface.py"
+path = "src/mcp_trentina_crunchtools/dbus_interface.py"
 pattern = "noqa: F401"
 justification = "_has_dbus_fast() imports dbus_fast solely to check availability — the import is intentionally unused"
 
@@ -132,13 +132,13 @@ justification = "_has_dbus_fast() imports dbus_fast solely to check availability
 
 [[exceptions]]
 check = "lint_suppression"
-path = "src/mcp_airlock_crunchtools/tools/content.py"
+path = "src/mcp_trentina_crunchtools/tools/content.py"
 pattern = "type: ignore[arg-type]"
 justification = "classifier_result dict values are typed as Any — float() cast is safe but mypy cannot verify dict value types through conditional access"
 
 [[exceptions]]
 check = "lint_suppression"
-path = "src/mcp_airlock_crunchtools/tools/scan.py"
+path = "src/mcp_trentina_crunchtools/tools/scan.py"
 pattern = "type: ignore[arg-type]"
 justification = "classifier_result dict values are typed as Any — float() cast is safe but mypy cannot verify dict value types through conditional access"
 
@@ -205,24 +205,24 @@ justification = "UI lifecycle function — entry point that orchestrates page re
 
 [[exceptions]]
 check = "generic_names"
-path = "src/mcp_airlock_crunchtools/gateway/router.py"
+path = "src/mcp_trentina_crunchtools/gateway/router.py"
 pattern = "result"
 justification = "result is the JSON-RPC 2.0 wire-protocol field name for success responses (https://www.jsonrpc.org/specification §5.1); renaming would obscure the protocol mapping"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "src/mcp_airlock_crunchtools/__init__.py"
+path = "src/mcp_trentina_crunchtools/__init__.py"
 pattern = "_run_with_gateway"
 justification = "Configuration gate isolated from the main() match statement so the gateway-disabled path stays a single mcp.run() call with no imports of starlette/uvicorn at startup time"
 
 [[exceptions]]
 check = "lint_suppression"
-path = "src/mcp_airlock_crunchtools/__init__.py"
+path = "src/mcp_trentina_crunchtools/__init__.py"
 pattern = "type: ignore"
 justification = "Starlette's lifespan callable type signature uses opaque generics; the [no-untyped-def] ignore is the standard pattern for framework-supplied callbacks"
 
 [[exceptions]]
 check = "lint_suppression"
-path = "src/mcp_airlock_crunchtools/gateway/app.py"
+path = "src/mcp_trentina_crunchtools/gateway/app.py"
 pattern = "type: ignore"
 justification = "FastMCP's custom_route decorator has no type stubs; the [misc] ignore is the standard pattern for typed code calling into untyped framework APIs"

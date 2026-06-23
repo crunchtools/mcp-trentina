@@ -1,4 +1,4 @@
-# mcp-airlock-crunchtools Constitution
+# mcp-trentina-crunchtools Constitution
 
 > **Version:** 1.0.2
 > **Ratified:** 2026-03-10
@@ -6,7 +6,7 @@
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.1.0
 > **Profile:** MCP Server
 
-This constitution establishes the core principles, constraints, and workflows that govern all development on mcp-airlock-crunchtools.
+This constitution establishes the core principles, constraints, and workflows that govern all development on mcp-trentina-crunchtools.
 
 ---
 
@@ -88,9 +88,9 @@ Every release MUST be available through all three channels simultaneously:
 
 | Channel | Command | Use Case |
 |---------|---------|----------|
-| uvx | `uvx mcp-airlock-crunchtools` | Zero-install, Claude Code |
-| pip | `pip install mcp-airlock-crunchtools` | Virtual environments |
-| Container | `podman run quay.io/crunchtools/mcp-airlock` | Isolated, systemd |
+| uvx | `uvx mcp-trentina-crunchtools` | Zero-install, Claude Code |
+| pip | `pip install mcp-trentina-crunchtools` | Virtual environments |
+| Container | `podman run quay.io/crunchtools/mcp-trentina` | Isolated, systemd |
 
 ### 7. Three Transport Modes
 
@@ -190,7 +190,7 @@ Every code change must pass through these gates in order:
 - Required LABELs: `maintainer`, `description`.
 - Required OCI labels:
   ```
-  org.opencontainers.image.source=https://github.com/crunchtools/mcp-airlock
+  org.opencontainers.image.source=https://github.com/crunchtools/mcp-trentina
   org.opencontainers.image.description=Quarantined web content extraction with prompt injection defense
   org.opencontainers.image.licenses=AGPL-3.0-or-later
   ```
@@ -208,12 +208,12 @@ Container CI workflows MUST use two separate jobs:
 
 | Context | Name |
 |---------|------|
-| GitHub repo | `crunchtools/mcp-airlock` |
-| PyPI package | `mcp-airlock-crunchtools` |
-| CLI command | `mcp-airlock-crunchtools` |
-| Python module | `mcp_airlock_crunchtools` |
-| Container image | `quay.io/crunchtools/mcp-airlock` |
-| systemd service | `mcp-airlock.service` |
+| GitHub repo | `crunchtools/mcp-trentina` |
+| PyPI package | `mcp-trentina-crunchtools` |
+| CLI command | `mcp-trentina-crunchtools` |
+| Python module | `mcp_trentina_crunchtools` |
+| Container image | `quay.io/crunchtools/mcp-trentina` |
+| systemd service | `mcp-trentina.service` |
 | HTTP port | 8019 |
 | License | AGPL-3.0-or-later |
 

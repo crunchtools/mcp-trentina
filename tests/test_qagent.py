@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from mcp_airlock_crunchtools.config import DEFAULT_MODEL
-from mcp_airlock_crunchtools.errors import QuarantineAgentError
-from mcp_airlock_crunchtools.quarantine.agent import (
+from mcp_trentina_crunchtools.config import DEFAULT_MODEL
+from mcp_trentina_crunchtools.errors import QuarantineAgentError
+from mcp_trentina_crunchtools.quarantine.agent import (
     _CANARY_PREFIX,
     MAX_EXTRACTED_TEXT,
     _build_request_body,
@@ -22,7 +22,7 @@ from mcp_airlock_crunchtools.quarantine.agent import (
     quarantine_detect,
     quarantine_extract,
 )
-from mcp_airlock_crunchtools.quarantine.prompts import (
+from mcp_trentina_crunchtools.quarantine.prompts import (
     DETECTION_RESPONSE_SCHEMA,
     DETECTION_SYSTEM_PROMPT,
     EXTRACTION_RESPONSE_SCHEMA,
@@ -128,7 +128,7 @@ class TestQuarantineExtract:
         mock_resp = _mock_gemini_response(extraction_json)
 
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
         ):
             mock_config.return_value.has_api_key = True
@@ -155,7 +155,7 @@ class TestQuarantineExtract:
         mock_resp = _mock_gemini_response(extraction_json)
 
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
         ):
             mock_config.return_value.has_api_key = True
@@ -170,7 +170,7 @@ class TestQuarantineExtract:
     @pytest.mark.asyncio
     async def test_fallback_on_error(self) -> None:
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
         ):
             mock_config.return_value.has_api_key = True
@@ -197,7 +197,7 @@ class TestQuarantineDetect:
         mock_resp = _mock_gemini_response(detection_json)
 
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
         ):
             mock_config.return_value.has_api_key = True
@@ -225,7 +225,7 @@ class TestQuarantineDetect:
         mock_resp = _mock_gemini_response(detection_json)
 
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
         ):
             mock_config.return_value.has_api_key = True
@@ -240,7 +240,7 @@ class TestQuarantineDetect:
     @pytest.mark.asyncio
     async def test_fallback_on_error(self) -> None:
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
         ):
             mock_config.return_value.has_api_key = True
@@ -314,9 +314,9 @@ class TestPostExtractionSanitization:
         mock_resp = _mock_gemini_response(extraction_json)
 
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
-            patch("mcp_airlock_crunchtools.quarantine.agent.sanitize_text") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.quarantine.agent.sanitize_text") as mock_sanitize,
         ):
             mock_config.return_value.has_api_key = True
             mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
@@ -344,7 +344,7 @@ class TestPostExtractionSanitization:
         mock_resp = _mock_gemini_response(extraction_json)
 
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
         ):
             mock_config.return_value.has_api_key = True
@@ -366,9 +366,9 @@ class TestPostExtractionSanitization:
         mock_resp = _mock_gemini_response(extraction_json)
 
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
-            patch("mcp_airlock_crunchtools.quarantine.agent.sanitize_text") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.quarantine.agent.sanitize_text") as mock_sanitize,
         ):
             mock_config.return_value.has_api_key = True
             mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
@@ -394,7 +394,7 @@ class TestLayer1ContextInDetection:
         mock_resp = _mock_gemini_response(detection_json)
 
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
         ):
             mock_config.return_value.has_api_key = True
@@ -422,7 +422,7 @@ class TestLayer1ContextInDetection:
         mock_resp = _mock_gemini_response(detection_json)
 
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
         ):
             mock_config.return_value.has_api_key = True
@@ -497,7 +497,7 @@ class TestPostExtractionTruncation:
         mock_resp = _mock_gemini_response(extraction_json)
 
         with (
-            patch("mcp_airlock_crunchtools.quarantine.agent.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
         ):
             mock_config.return_value.has_api_key = True

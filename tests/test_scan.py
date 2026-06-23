@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mcp_airlock_crunchtools.tools.scan import (
+from mcp_trentina_crunchtools.tools.scan import (
     _build_layer1_context,
     _build_scan_result,
     deep_quarantine_scan,
@@ -80,15 +80,15 @@ class TestDeepScanVsStandardScan:
     @pytest.mark.asyncio
     async def test_deep_scan_passes_raw_content(self) -> None:
         with (
-            patch("mcp_airlock_crunchtools.tools.scan.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.tools.scan.get_config") as mock_config,
             patch(
-                "mcp_airlock_crunchtools.tools.scan._fetch_content",
+                "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_airlock_crunchtools.tools.scan.looks_like_html") as mock_html,
-            patch("mcp_airlock_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
+            patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
             patch(
-                "mcp_airlock_crunchtools.tools.scan.quarantine_detect",
+                "mcp_trentina_crunchtools.tools.scan.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):
@@ -121,15 +121,15 @@ class TestDeepScanVsStandardScan:
     @pytest.mark.asyncio
     async def test_standard_scan_passes_sanitized_content(self) -> None:
         with (
-            patch("mcp_airlock_crunchtools.tools.scan.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.tools.scan.get_config") as mock_config,
             patch(
-                "mcp_airlock_crunchtools.tools.scan._fetch_content",
+                "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_airlock_crunchtools.tools.scan.looks_like_html") as mock_html,
-            patch("mcp_airlock_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
+            patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
             patch(
-                "mcp_airlock_crunchtools.tools.scan.quarantine_detect",
+                "mcp_trentina_crunchtools.tools.scan.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):
@@ -162,15 +162,15 @@ class TestDeepScanVsStandardScan:
     @pytest.mark.asyncio
     async def test_deep_scan_no_qagent_without_api_key(self) -> None:
         with (
-            patch("mcp_airlock_crunchtools.tools.scan.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.tools.scan.get_config") as mock_config,
             patch(
-                "mcp_airlock_crunchtools.tools.scan._fetch_content",
+                "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_airlock_crunchtools.tools.scan.looks_like_html") as mock_html,
-            patch("mcp_airlock_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
+            patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
             patch(
-                "mcp_airlock_crunchtools.tools.scan.quarantine_detect",
+                "mcp_trentina_crunchtools.tools.scan.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):

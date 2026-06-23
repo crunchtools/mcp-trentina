@@ -9,9 +9,9 @@
 
 ## Overview
 
-Five hardening improvements to mcp-airlock's two-layer defense system. Adds canary tokens to detect Q-Agent compromise, replaces debug assertions with security-grade runtime checks, gives the Q-Agent Layer 1 context during scans, adds a `deep_quarantine_scan` diagnostic tool, and runs Q-Agent output through Layer 1 sanitization before returning it to the P-Agent.
+Five hardening improvements to mcp-trentina's two-layer defense system. Adds canary tokens to detect Q-Agent compromise, replaces debug assertions with security-grade runtime checks, gives the Q-Agent Layer 1 context during scans, adds a `deep_quarantine_scan` diagnostic tool, and runs Q-Agent output through Layer 1 sanitization before returning it to the P-Agent.
 
-Reference: RT #1408 (Security research for mcp-airlock)
+Reference: RT #1408 (Security research for mcp-trentina)
 
 ---
 
@@ -25,7 +25,7 @@ If an attacker's injected instructions convince the Q-Agent to leak its system p
 
 Generate a unique canary token per Q-Agent request using `secrets.token_hex(16)`. Inject it into the system prompt at call time. After parsing the Q-Agent's JSON response, check whether the canary appears anywhere in the serialized output.
 
-**Why per-request, not static:** mcp-airlock is AGPL — the source code is public. A hardcoded canary (e.g., `AIRLOCK-9f3a7c2e`) would be visible to any attacker reading the repo. They could craft injections that specifically avoid outputting that string. A per-request canary generated with `secrets.token_hex(16)` is unpredictable even to an attacker who knows the mechanism.
+**Why per-request, not static:** mcp-trentina is AGPL — the source code is public. A hardcoded canary (e.g., `AIRLOCK-9f3a7c2e`) would be visible to any attacker reading the repo. They could craft injections that specifically avoid outputting that string. A per-request canary generated with `secrets.token_hex(16)` is unpredictable even to an attacker who knows the mechanism.
 
 ### Behavior
 
