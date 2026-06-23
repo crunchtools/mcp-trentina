@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_TIMEOUT = 60.0
-BATCH_SIZE = 20
+BATCH_SIZE = 5
 DEFAULT_COMPRESS_MODEL = "gemini-2.5-flash-lite"
 
 _cache: dict[str, str] = {}
@@ -227,6 +227,11 @@ async def _call_compress_model(
         logger.warning("compress: Gemini API call failed", exc_info=True)
         return []
 
+    return _parse_compress_response(data)
+
+
+def _parse_compress_response(data: dict[str, Any]) -> list[tuple[str, str]]:
+    """Extract compressed descriptions from a Gemini API response."""
     try:
         candidates = data.get("candidates", [])
         if not candidates:
