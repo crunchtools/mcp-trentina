@@ -1,9 +1,9 @@
 {
     "tools": {
         "index": {
-            "label": "Airlock",
+            "label": "Trentina",
             "keywords": [
-                { "matches": ["airlock", "prompt injection", "quarantine", "sanitize", "defense"] }
+                { "matches": ["trentina", "prompt injection", "quarantine", "sanitize", "defense"] }
             ]
         }
     },

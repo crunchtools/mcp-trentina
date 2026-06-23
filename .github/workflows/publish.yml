@@ -39,11 +39,11 @@ jobs:
       - name: Install rpm-build
         run: sudo apt-get update && sudo apt-get install -y rpm
 
-      - name: Build cockpit-airlock RPM
+      - name: Build cockpit-trentina RPM
         run: make rpm
 
       - name: Verify RPM
-        run: rpm -qip dist/noarch/cockpit-airlock-*.noarch.rpm
+        run: rpm -qip dist/noarch/cockpit-trentina-*.noarch.rpm
 
       - name: Upload RPM to release
         if: github.event_name == 'release'
@@ -51,11 +51,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \
-            dist/noarch/cockpit-airlock-*.noarch.rpm
+            dist/noarch/cockpit-trentina-*.noarch.rpm
 
       - name: Upload RPM as artifact
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: cockpit-airlock-rpm
-          path: dist/noarch/cockpit-airlock-*.noarch.rpm
+          name: cockpit-trentina-rpm
+          path: dist/noarch/cockpit-trentina-*.noarch.rpm
