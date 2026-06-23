@@ -6,6 +6,7 @@ Results are cached in SQLite and looked up synchronously during tools/list.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -130,7 +131,31 @@ async def precompress_all(
                     backend_name,
                     exc_info=True,
                 )
+            await asyncio.sleep(2)
     return stats
+
+
+def _find_uncached(tools: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Return (hash, description) pairs for tools not already in cache."""
+    uncached: list[tuple[str, str]] = []
+    for tool in tools:
+        desc = tool.get("description", "")
+        if not desc:
+            continue
+        h = _hash_description(desc)
+        if h not in _cache:
+            uncached.append((h, desc))
+    return uncached
+
+
+def _store_result(batch: list[tuple[str, str]], h: str, compressed_text: str) -> bool:
+    """Store a compression result if it's actually shorter. Returns True if stored."""
+    original = next((desc for bh, desc in batch if bh == h), None)
+    if original is None or len(compressed_text) >= len(original):
+        return False
+    _cache[h] = compressed_text
+    save_compression(h, original, compressed_text, _get_model())
+    return True
 
 
 async def _precompress_backend(backend_name: str, backend: Backend) -> int:
@@ -143,38 +168,21 @@ async def _precompress_backend(backend_name: str, backend: Backend) -> int:
         logger.warning("compress: could not list tools for %s", backend_name)
         return 0
 
-    uncached: list[tuple[str, str]] = []
-    for tool in tools:
-        desc = tool.get("description", "")
-        if not desc:
-            continue
-        h = _hash_description(desc)
-        if h not in _cache:
-            uncached.append((h, desc))
-
+    uncached = _find_uncached(tools)
     if not uncached:
         logger.info("compress: %s — all %d descriptions already cached", backend_name, len(tools))
         return 0
 
-    logger.info(
-        "compress: %s — %d uncached descriptions to compress",
-        backend_name,
-        len(uncached),
-    )
+    logger.info("compress: %s — %d uncached descriptions to compress", backend_name, len(uncached))
 
     compressed_count = 0
     for i in range(0, len(uncached), BATCH_SIZE):
+        if i > 0:
+            await asyncio.sleep(3)
         batch = uncached[i : i + BATCH_SIZE]
-        results = await _call_compress_model(batch)
-        for h, compressed_text in results:
-            original = next((desc for bh, desc in batch if bh == h), None)
-            if original is None:
-                continue
-            if len(compressed_text) >= len(original):
-                continue
-            _cache[h] = compressed_text
-            save_compression(h, original, compressed_text, _get_model())
-            compressed_count += 1
+        for h, text in await _call_compress_model(batch):
+            if _store_result(batch, h, text):
+                compressed_count += 1
 
     logger.info("compress: %s — compressed %d descriptions", backend_name, compressed_count)
     return compressed_count
