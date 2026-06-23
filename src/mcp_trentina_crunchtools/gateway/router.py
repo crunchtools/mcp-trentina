@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 from .. import __version__
 from ..database import record_gateway_call
 from .backend import call_backend_tool, list_backend_tools
+from .compress import compress_tools
 from .errors import BackendCallError, BackendNotInProfileError
 from .filter import filter_tools
 from .guards import check_parameter_guards
@@ -142,6 +143,8 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
             )
             continue
         filtered = filter_tools(backend_tools, backend)
+        if backend.compress_descriptions:
+            filtered = compress_tools(filtered)
         for tool in filtered:
             namespaced_tool = dict(tool)
             namespaced_tool["name"] = f"{backend_name}{NAMESPACE_SEP}{tool['name']}"
