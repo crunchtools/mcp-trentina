@@ -101,19 +101,23 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
 
     load_compression_cache()
 
-    import threading
+    from contextlib import asynccontextmanager
+    from typing import Any
 
-    def _bg_compress_thread() -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            stats = loop.run_until_complete(precompress_all(registry))
-            if stats:
-                logger.info("gateway: pre-compressed tools: %s", stats)
-        except Exception:
-            logger.warning("gateway: pre-compression failed", exc_info=True)
-        finally:
-            loop.close()
+    @asynccontextmanager
+    async def _lifespan(_app: Any):
+        async def _bg_compress() -> None:
+            await asyncio.sleep(3)
+            try:
+                stats = await precompress_all(registry)
+                if stats:
+                    logger.info("gateway: pre-compressed tools: %s", stats)
+            except Exception:
+                logger.warning("gateway: pre-compression failed", exc_info=True)
 
-    threading.Thread(target=_bg_compress_thread, daemon=True).start()
+        task = asyncio.create_task(_bg_compress())
+        yield
+        task.cancel()
 
+    mcp_server.settings.lifespan = _lifespan
     mcp_server.run(transport="streamable-http", host=host, port=port)
