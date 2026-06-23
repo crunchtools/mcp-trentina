@@ -84,7 +84,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     no gateway when the operator asked for one.
     """
     from .gateway import load_profiles, register_internal_server, register_with_fastmcp
-    from .gateway.compress import load_compression_cache, precompress_all
+    from .gateway.compress import load_compression_cache
 
     profiles_path = Path(
         os.environ.get("TRENTINA_PROFILES_PATH", "/etc/trentina/profiles.yaml")
@@ -101,23 +101,9 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
 
     load_compression_cache()
 
-    from contextlib import asynccontextmanager
-    from typing import Any
+    # NOTE: Pre-compression at startup is disabled pending #29.
+    # The compress_descriptions profile flag still works for cached
+    # descriptions loaded from SQLite — only the automatic pre-compression
+    # on startup is disabled until the event loop integration is resolved.
 
-    @asynccontextmanager
-    async def _lifespan(_app: Any):
-        async def _bg_compress() -> None:
-            await asyncio.sleep(3)
-            try:
-                stats = await precompress_all(registry)
-                if stats:
-                    logger.info("gateway: pre-compressed tools: %s", stats)
-            except Exception:
-                logger.warning("gateway: pre-compression failed", exc_info=True)
-
-        task = asyncio.create_task(_bg_compress())
-        yield
-        task.cancel()
-
-    mcp_server.settings.lifespan = _lifespan
     mcp_server.run(transport="streamable-http", host=host, port=port)
