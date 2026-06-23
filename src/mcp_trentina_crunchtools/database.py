@@ -46,6 +46,16 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
 
 CREATE INDEX IF NOT EXISTS idx_gateway_calls_timestamp ON gateway_calls(timestamp);
 CREATE INDEX IF NOT EXISTS idx_gateway_calls_profile_tool ON gateway_calls(profile, backend, tool);
+
+CREATE TABLE IF NOT EXISTS tool_compressions (
+    description_hash TEXT PRIMARY KEY,
+    original_description TEXT NOT NULL,
+    compressed_description TEXT NOT NULL,
+    model TEXT NOT NULL,
+    compressed_at TEXT NOT NULL,
+    original_length INTEGER NOT NULL,
+    compressed_length INTEGER NOT NULL
+);
 """
 
 
@@ -199,4 +209,54 @@ def get_gateway_call_stats(
             }
             for r in rows
         ],
+    }
+
+
+def get_all_compressions() -> dict[str, str]:
+    """Load all cached compressions as {description_hash: compressed_description}."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT description_hash, compressed_description FROM tool_compressions"
+    ).fetchall()
+    return {row["description_hash"]: row["compressed_description"] for row in rows}
+
+
+def save_compression(
+    description_hash: str,
+    original: str,
+    compressed: str,
+    model: str,
+) -> None:
+    """Persist a compressed description to SQLite."""
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        "INSERT OR REPLACE INTO tool_compressions "
+        "(description_hash, original_description, compressed_description, "
+        "model, compressed_at, original_length, compressed_length) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (description_hash, original, compressed, model, now, len(original), len(compressed)),
+    )
+    db.commit()
+
+
+def get_compression_stats() -> dict[str, Any]:
+    """Aggregate compression savings from the tool_compressions table."""
+    db = get_db()
+    row = db.execute(
+        "SELECT COUNT(*) as cnt, "
+        "COALESCE(SUM(original_length), 0) as orig, "
+        "COALESCE(SUM(compressed_length), 0) as comp "
+        "FROM tool_compressions"
+    ).fetchone()
+    total = row["cnt"] if row else 0
+    orig = row["orig"] if row else 0
+    comp = row["comp"] if row else 0
+    savings = round((1 - comp / orig) * 100) if orig > 0 else 0
+    return {
+        "tools_compressed": total,
+        "original_chars": orig,
+        "compressed_chars": comp,
+        "savings_percent": savings,
+        "estimated_tokens_saved": (orig - comp) // 4,
     }

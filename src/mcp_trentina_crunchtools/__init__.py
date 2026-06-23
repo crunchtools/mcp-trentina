@@ -7,7 +7,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 __version__ = "0.5.0"
 
@@ -84,6 +84,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     no gateway when the operator asked for one.
     """
     from .gateway import load_profiles, register_internal_server, register_with_fastmcp
+    from .gateway.compress import load_compression_cache, precompress_all
 
     profiles_path = Path(
         os.environ.get("TRENTINA_PROFILES_PATH", "/etc/trentina/profiles.yaml")
@@ -98,4 +99,22 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
         len(registry),
     )
 
-    mcp_server.run(transport="streamable-http", host=host, port=port)
+    load_compression_cache()
+
+    async def _bg_compress() -> None:
+        try:
+            stats = await precompress_all(registry)
+            if stats:
+                logger.info("gateway: pre-compressed tools: %s", stats)
+        except Exception:
+            logger.warning("gateway: pre-compression failed", exc_info=True)
+
+    original_run = mcp_server.run
+
+    def _run_with_compression(**kwargs: Any) -> None:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_bg_compress())
+        loop.close()
+        original_run(**kwargs)
+
+    _run_with_compression(transport="streamable-http", host=host, port=port)
