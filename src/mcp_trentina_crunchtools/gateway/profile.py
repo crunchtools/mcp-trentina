@@ -117,6 +117,10 @@ class Backend(BaseModel):
             "Validated at call time before the backend is contacted."
         ),
     )
+    compress_descriptions: bool = Field(
+        default=False,
+        description="Compress verbose tool descriptions via LLM at gateway startup",
+    )
 
     @field_validator("url")
     @classmethod
