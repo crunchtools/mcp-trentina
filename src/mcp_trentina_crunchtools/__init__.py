@@ -84,7 +84,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     no gateway when the operator asked for one.
     """
     from .gateway import load_profiles, register_internal_server, register_with_fastmcp
-    from .gateway.compress import load_compression_cache
+    from .gateway.compress import load_compression_cache, set_profiles
 
     profiles_path = Path(
         os.environ.get("TRENTINA_PROFILES_PATH", "/etc/trentina/profiles.yaml")
@@ -100,10 +100,6 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     )
 
     load_compression_cache()
-
-    # NOTE: Pre-compression at startup is disabled pending #29.
-    # The compress_descriptions profile flag still works for cached
-    # descriptions loaded from SQLite — only the automatic pre-compression
-    # on startup is disabled until the event loop integration is resolved.
+    set_profiles(registry)
 
     mcp_server.run(transport="streamable-http", host=host, port=port)
