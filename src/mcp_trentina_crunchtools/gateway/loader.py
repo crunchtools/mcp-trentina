@@ -78,15 +78,16 @@ def _build_profile(name: str, body: Any) -> Profile:
     return profile
 
 
-def load_profiles(path: Path | str) -> dict[str, Profile]:
+def load_profiles(path: Path | str) -> tuple[dict[str, Profile], dict[str, Any]]:
     """Load profile registry from YAML.
 
     Args:
         path: Path to the profiles YAML file.
 
     Returns:
-        Mapping from profile name to fully-populated `Profile` (bearer tokens
-        resolved from env vars and stored as `SecretStr`).
+        Tuple of (profile registry, raw config dict).  The raw config is
+        returned so callers can access ``llm_providers`` and ``matrix``
+        sections without re-parsing.
 
     Raises:
         ProfileConfigError: file missing, YAML invalid, schema violated, or
@@ -126,4 +127,4 @@ def load_profiles(path: Path | str) -> dict[str, Profile]:
         len(registry),
         ", ".join(sorted(registry)),
     )
-    return registry
+    return registry, cfg_data
