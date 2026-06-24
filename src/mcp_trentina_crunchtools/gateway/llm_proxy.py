@@ -23,7 +23,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from starlette.responses import Response, StreamingResponse
 
 from .errors import ProfileConfigError
@@ -49,6 +49,15 @@ _LLM_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH"]
 
 _PLAIN = "text/plain"
 
+_llm_client: httpx.AsyncClient | None = None
+
+
+def _get_llm_client() -> httpx.AsyncClient:
+    global _llm_client
+    if _llm_client is None:
+        _llm_client = httpx.AsyncClient(timeout=_LLM_TIMEOUT)
+    return _llm_client
+
 
 class LlmProvider(BaseModel):
     """One LLM provider driver entry."""
@@ -68,16 +77,18 @@ class LlmProvider(BaseModel):
     api_key_env: str = Field(
         ..., description="Env var holding the real API key",
     )
-    api_key: str = Field(
-        default="", exclude=True, description="Resolved key (load-time)",
+    api_key: SecretStr = Field(
+        default=SecretStr(""),
+        exclude=True,
+        description="Resolved key (load-time)",
     )
 
     @field_validator("upstream")
     @classmethod
-    def upstream_is_https(cls, v: str) -> str:
-        if not v.startswith(("http://", "https://")):
+    def upstream_must_be_https(cls, v: str) -> str:
+        if not v.startswith("https://"):
             raise ValueError(
-                f"upstream must start with http(s)://: {v!r}",
+                f"upstream must start with https://: {v!r}",
             )
         return v.rstrip("/")
 
@@ -109,7 +120,7 @@ def load_llm_providers(
                 f"llm_providers.{name}: env var "
                 f"{provider.api_key_env} not set or empty",
             )
-        provider.api_key = key
+        provider.api_key = SecretStr(key)
         providers[name] = provider
 
     if providers:
@@ -161,14 +172,15 @@ async def _proxy_llm(
         upstream_url = f"{upstream_url}?{request.url.query}"
 
     fwd_headers = _forward_headers(request)
+    key_value = provider.api_key.get_secret_value()
     fwd_headers[provider.auth_header] = (
-        f"{provider.auth_prefix}{provider.api_key}"
+        f"{provider.auth_prefix}{key_value}"
     )
 
     body = await request.body()
+    client = _get_llm_client()
 
     try:
-        client = httpx.AsyncClient(timeout=_LLM_TIMEOUT)
         resp = await client.send(
             client.build_request(
                 request.method, upstream_url,
@@ -192,7 +204,7 @@ async def _proxy_llm(
             status_code=502, media_type=_PLAIN,
         )
 
-    return _streaming_response(resp, client)
+    return _streaming_response(resp)
 
 
 def _forward_headers(request: Request) -> dict[str, str]:
@@ -202,10 +214,7 @@ def _forward_headers(request: Request) -> dict[str, str]:
     }
 
 
-def _streaming_response(
-    resp: httpx.Response,
-    client: httpx.AsyncClient,
-) -> StreamingResponse:
+def _streaming_response(resp: httpx.Response) -> StreamingResponse:
     resp_headers = {
         k: v for k, v in resp.headers.items()
         if k.lower() not in _STRIP_RESPONSE_HEADERS
@@ -217,7 +226,6 @@ def _streaming_response(
                 yield chunk
         finally:
             await resp.aclose()
-            await client.aclose()
 
     ct = resp.headers.get("content-type", "application/json")
     return StreamingResponse(
