@@ -1,8 +1,9 @@
 """Tool description compression for the gateway.
 
-Pre-compresses verbose tool descriptions at startup using Gemini.
-Results are cached in SQLite and looked up synchronously during tools/list.
-Compression is best-effort: failures at any level are logged and skipped.
+Compresses verbose tool descriptions via Gemini, triggered lazily on the
+first tools/list request.  Results are cached in SQLite and looked up
+synchronously on subsequent calls.  Compression is best-effort: failures
+at any level are logged and skipped.
 """
 
 from __future__ import annotations
@@ -30,8 +31,14 @@ BATCH_SIZE = 5
 DELAY_BETWEEN_BACKENDS = 2
 DELAY_BETWEEN_BATCHES = 3
 DEFAULT_COMPRESS_MODEL = "gemini-2.5-flash-lite"
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 2.0
+_RETRYABLE_STATUS_CODES = {429, 503}
 
 _cache: dict[str, str] = {}
+_profiles: dict[str, Profile] | None = None
+_compress_triggered: bool = False
+_compress_task: asyncio.Task[dict[str, int]] | None = None
 
 COMPRESS_SYSTEM_PROMPT = """\
 You are a tool description compressor. Given MCP tool descriptions, produce \
@@ -76,6 +83,27 @@ def load_compression_cache() -> int:
     _cache = get_all_compressions()
     logger.info("compress: loaded %d cached compressions from database", len(_cache))
     return len(_cache)
+
+
+def set_profiles(profiles: dict[str, Profile]) -> None:
+    """Store the profile registry for lazy compression."""
+    global _profiles
+    _profiles = profiles
+
+
+async def maybe_trigger_compression() -> None:
+    """Trigger background compression once on the first call.
+
+    Idempotent: subsequent calls return immediately.  The compression
+    task runs on the current event loop (the same one serving tools/list),
+    so streamablehttp_client works without thread gymnastics.
+    """
+    global _compress_triggered, _compress_task
+    if _compress_triggered or _profiles is None:
+        return
+    _compress_triggered = True
+    _compress_task = asyncio.create_task(precompress_all(_profiles))
+    logger.info("compress: background compression triggered by first tools/list")
 
 
 def compress_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -241,19 +269,30 @@ async def _call_compress_model(
         },
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(GEMINI_TIMEOUT)) as client:
-            resp = await client.post(url, json=request_body)
-            resp.raise_for_status()
-            data = resp.json()
-    except httpx.HTTPStatusError as exc:
-        logger.warning("compress: Gemini %d for %d items", exc.response.status_code, len(items))
-        return []
-    except Exception:
-        logger.warning("compress: Gemini call failed for %d items", len(items))
-        return []
+    for attempt in range(MAX_RETRIES):
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(GEMINI_TIMEOUT)) as client:
+                resp = await client.post(url, json=request_body)
+                resp.raise_for_status()
+                data = resp.json()
+            return _parse_compress_response(data)
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status in _RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES - 1:
+                delay = RETRY_BASE_DELAY * (2**attempt)
+                logger.info(
+                    "compress: Gemini %d, retry %d/%d in %.0fs",
+                    status, attempt + 1, MAX_RETRIES, delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            logger.warning("compress: Gemini %d for %d items", status, len(items))
+            return []
+        except Exception:
+            logger.warning("compress: Gemini call failed for %d items", len(items))
+            return []
 
-    return _parse_compress_response(data)
+    return []
 
 
 def _parse_compress_response(data: dict[str, Any]) -> list[tuple[str, str]]:
@@ -271,7 +310,7 @@ def _parse_compress_response(data: dict[str, Any]) -> list[tuple[str, str]]:
         return []
     except json.JSONDecodeError:
         raw = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-        logger.warning("compress: malformed JSON from Gemini (len=%d): %.100s", len(raw), raw)
+        logger.warning("compress: malformed JSON from Gemini (len=%d): %.200s", len(raw), raw)
         return []
 
     return [

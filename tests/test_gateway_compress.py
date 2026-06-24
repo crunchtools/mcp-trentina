@@ -10,12 +10,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from mcp_trentina_crunchtools.gateway import compress as compress_mod
 from mcp_trentina_crunchtools.gateway.compress import (
     _cache,
     _call_compress_model,
     _hash_description,
     _precompress_backend,
     compress_tools,
+    maybe_trigger_compression,
+    set_profiles,
 )
 
 
@@ -275,3 +278,187 @@ class TestPrecompressBackend:
 
         assert count == 0
         assert _hash_description(original) not in _cache
+
+
+class TestMaybeTriggerCompression:
+    """Tests for the lazy compression trigger."""
+
+    def setup_method(self) -> None:
+        _cache.clear()
+        compress_mod._compress_triggered = False
+        compress_mod._compress_task = None
+        compress_mod._profiles = None
+
+    @pytest.mark.asyncio
+    async def test_triggers_once_only(self) -> None:
+        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+
+        auth = AuthConfig(bearer_token_env="TEST_TOKEN")
+        profile = Profile(
+            name="test",
+            auth=auth,
+            backends={"b": Backend(url="http://x:8000/mcp", compress_descriptions=True)},
+        )
+        set_profiles({"test": profile})
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.compress.precompress_all",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as mock_precompress:
+            await maybe_trigger_compression()
+            await maybe_trigger_compression()
+
+        mock_precompress.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_profiles_is_noop(self) -> None:
+        compress_mod._profiles = None
+        with patch(
+            "mcp_trentina_crunchtools.gateway.compress.precompress_all",
+            new_callable=AsyncMock,
+        ) as mock_precompress:
+            await maybe_trigger_compression()
+
+        mock_precompress.assert_not_called()
+        assert not compress_mod._compress_triggered
+
+    @pytest.mark.asyncio
+    async def test_creates_background_task(self) -> None:
+        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+
+        auth = AuthConfig(bearer_token_env="TEST_TOKEN")
+        profile = Profile(
+            name="test",
+            auth=auth,
+            backends={"b": Backend(url="http://x:8000/mcp", compress_descriptions=True)},
+        )
+        set_profiles({"test": profile})
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.compress.precompress_all",
+            new_callable=AsyncMock,
+            return_value={},
+        ):
+            await maybe_trigger_compression()
+
+        assert compress_mod._compress_task is not None
+        assert compress_mod._compress_triggered is True
+
+
+class TestRetryLogic:
+    """Tests for Gemini API retry on 429/503."""
+
+    def _gemini_response(self, items: list[tuple[str, str]]) -> dict[str, Any]:
+        compressed = [{"id": h, "text": text} for h, text in items]
+        return {
+            "candidates": [{
+                "content": {
+                    "parts": [{"text": json.dumps({"compressed": compressed})}]
+                }
+            }]
+        }
+
+    @pytest.mark.asyncio
+    async def test_retries_on_503(self) -> None:
+        success_resp = MagicMock()
+        success_resp.json.return_value = self._gemini_response([("h1", "Short.")])
+        success_resp.raise_for_status.return_value = None
+
+        error_resp = MagicMock()
+        error_resp.status_code = 503
+        error_503 = httpx.HTTPStatusError("503", request=MagicMock(), response=error_resp)
+
+        with patch("mcp_trentina_crunchtools.gateway.compress.get_config") as mock_config:
+            mock_config.return_value.has_api_key = True
+            mock_config.return_value.api_key.get_secret_value.return_value = "key"
+
+            with patch("mcp_trentina_crunchtools.gateway.compress.httpx") as mock_httpx:
+                mock_client = AsyncMock()
+                mock_client.post.side_effect = [error_503, success_resp]
+
+                mock_httpx.AsyncClient.return_value.__aenter__.return_value = mock_client
+                mock_httpx.Timeout = httpx.Timeout
+                mock_httpx.HTTPStatusError = httpx.HTTPStatusError
+
+                with patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01):
+                    result = await _call_compress_model([("h1", "Long description")])
+
+        assert len(result) == 1
+        assert result[0] == ("h1", "Short.")
+        assert mock_client.post.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_retries_on_429(self) -> None:
+        success_resp = MagicMock()
+        success_resp.json.return_value = self._gemini_response([("h1", "Short.")])
+        success_resp.raise_for_status.return_value = None
+
+        error_resp = MagicMock()
+        error_resp.status_code = 429
+        error_429 = httpx.HTTPStatusError("429", request=MagicMock(), response=error_resp)
+
+        with patch("mcp_trentina_crunchtools.gateway.compress.get_config") as mock_config:
+            mock_config.return_value.has_api_key = True
+            mock_config.return_value.api_key.get_secret_value.return_value = "key"
+
+            with patch("mcp_trentina_crunchtools.gateway.compress.httpx") as mock_httpx:
+                mock_client = AsyncMock()
+                mock_client.post.side_effect = [error_429, success_resp]
+
+                mock_httpx.AsyncClient.return_value.__aenter__.return_value = mock_client
+                mock_httpx.Timeout = httpx.Timeout
+                mock_httpx.HTTPStatusError = httpx.HTTPStatusError
+
+                with patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01):
+                    result = await _call_compress_model([("h1", "Long description")])
+
+        assert len(result) == 1
+        assert mock_client.post.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_gives_up_after_max_retries(self) -> None:
+        error_resp = MagicMock()
+        error_resp.status_code = 503
+        error_503 = httpx.HTTPStatusError("503", request=MagicMock(), response=error_resp)
+
+        with patch("mcp_trentina_crunchtools.gateway.compress.get_config") as mock_config:
+            mock_config.return_value.has_api_key = True
+            mock_config.return_value.api_key.get_secret_value.return_value = "key"
+
+            with patch("mcp_trentina_crunchtools.gateway.compress.httpx") as mock_httpx:
+                mock_client = AsyncMock()
+                mock_client.post.side_effect = error_503
+
+                mock_httpx.AsyncClient.return_value.__aenter__.return_value = mock_client
+                mock_httpx.Timeout = httpx.Timeout
+                mock_httpx.HTTPStatusError = httpx.HTTPStatusError
+
+                with patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01):
+                    result = await _call_compress_model([("h1", "desc")])
+
+        assert result == []
+        assert mock_client.post.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_400(self) -> None:
+        error_resp = MagicMock()
+        error_resp.status_code = 400
+        error_400 = httpx.HTTPStatusError("400", request=MagicMock(), response=error_resp)
+
+        with patch("mcp_trentina_crunchtools.gateway.compress.get_config") as mock_config:
+            mock_config.return_value.has_api_key = True
+            mock_config.return_value.api_key.get_secret_value.return_value = "key"
+
+            with patch("mcp_trentina_crunchtools.gateway.compress.httpx") as mock_httpx:
+                mock_client = AsyncMock()
+                mock_client.post.side_effect = error_400
+
+                mock_httpx.AsyncClient.return_value.__aenter__.return_value = mock_client
+                mock_httpx.Timeout = httpx.Timeout
+                mock_httpx.HTTPStatusError = httpx.HTTPStatusError
+
+                result = await _call_compress_model([("h1", "desc")])
+
+        assert result == []
+        assert mock_client.post.call_count == 1
