@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 from .. import __version__
 from ..database import record_gateway_call
 from .backend import call_backend_tool, list_backend_tools
-from .compress import compress_tools
+from .compress import compress_tools, maybe_trigger_compression
 from .errors import BackendCallError, BackendNotInProfileError
 from .filter import filter_tools
 from .guards import check_parameter_guards
@@ -127,6 +127,7 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
     the rest of the fleet stays usable. The consumer still sees the union
     of healthy backends.
     """
+    await maybe_trigger_compression()
     aggregated: list[dict[str, Any]] = []
     for backend_name, backend in profile.backends.items():
         try:
