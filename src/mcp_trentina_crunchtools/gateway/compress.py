@@ -288,8 +288,8 @@ async def _call_compress_model(
                 continue
             logger.warning("compress: Gemini %d for %d items", status, len(items))
             return []
-        except Exception:
-            logger.warning("compress: Gemini call failed for %d items", len(items))
+        except Exception as exc:
+            logger.warning("compress: Gemini call failed for %d items: %s", len(items), exc)
             return []
 
     return []
