@@ -42,11 +42,24 @@ _MATRIX_METHODS = [
 
 _PLAIN = "text/plain"
 
+_matrix_client: httpx.AsyncClient | None = None
+
+
+def _get_matrix_client() -> httpx.AsyncClient:
+    global _matrix_client
+    if _matrix_client is None:
+        _matrix_client = httpx.AsyncClient(timeout=_SYNC_TIMEOUT)
+    return _matrix_client
+
 
 def register_matrix_routes(
     mcp_server: Any, *, upstream: str = _DEFAULT_UPSTREAM,
 ) -> None:
     """Wire ``/matrix/{path:path}`` onto the FastMCP server."""
+    if not upstream.startswith("https://"):
+        raise ValueError(
+            f"Matrix upstream must start with https://: {upstream!r}",
+        )
     upstream = upstream.rstrip("/")
 
     @mcp_server.custom_route(  # type: ignore[untyped-decorator]
@@ -55,7 +68,9 @@ def register_matrix_routes(
     async def matrix_proxy_endpoint(request: Request) -> Response:
         return await _proxy_matrix(request, upstream)
 
-    logger.info("matrix_proxy: registered /matrix/{path} → %s", upstream)
+    logger.info(
+        "matrix_proxy: registered /matrix/{path} → %s", upstream,
+    )
 
 
 async def _proxy_matrix(request: Request, upstream: str) -> Response:
@@ -71,9 +86,9 @@ async def _proxy_matrix(request: Request, upstream: str) -> Response:
     }
 
     body = await request.body()
+    client = _get_matrix_client()
 
     try:
-        client = httpx.AsyncClient(timeout=_SYNC_TIMEOUT)
         resp = await client.send(
             client.build_request(
                 request.method, upstream_url,
@@ -105,7 +120,6 @@ async def _proxy_matrix(request: Request, upstream: str) -> Response:
                 yield chunk
         finally:
             await resp.aclose()
-            await client.aclose()
 
     ct = resp.headers.get("content-type", "application/json")
     return StreamingResponse(
