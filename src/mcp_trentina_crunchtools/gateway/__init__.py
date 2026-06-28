@@ -14,6 +14,7 @@ from __future__ import annotations
 from .app import gateway_app, register_with_fastmcp
 from .auth import verify_bearer
 from .backend import BackendCall, call_backend_tool, list_backend_tools
+from .circuit import CircuitBreaker, breaker
 from .errors import AuthError, GatewayError, ProfileConfigError
 from .filter import filter_tools
 from .guards import check_parameter_guards
@@ -32,11 +33,13 @@ __all__ = [
     "AuthError",
     "Backend",
     "BackendCall",
+    "CircuitBreaker",
     "DefenseConfig",
     "ParameterConstraint",
     "GatewayError",
     "Profile",
     "ProfileConfigError",
+    "breaker",
     "check_parameter_guards",
     "call_backend_tool",
     "call_internal_tool",
