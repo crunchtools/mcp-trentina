@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
+from .circuit import breaker
 from .errors import BackendCallError
 
 if TYPE_CHECKING:
@@ -43,15 +44,22 @@ async def list_backend_tools(backend_name: str, backend: Backend) -> list[dict[s
     caller does the `<backend>__<tool>` rewrite.
 
     Raises:
-        BackendCallError: connection failure, protocol error, or timeout.
+        BackendCallError: connection failure, protocol error, timeout, or
+            circuit open.
     """
+    if not breaker.allow(backend.url):
+        raise BackendCallError(
+            f"backend {backend_name!r} circuit open — skipped"
+        )
+
     headers = backend.headers or None
     try:
         tools_result = await asyncio.wait_for(
             _do_list_tools(backend.url, headers),
-            timeout=backend.timeout_seconds,
+            timeout=backend.list_timeout_seconds,
         )
     except Exception as exc:
+        breaker.record_failure(backend.url)
         logger.warning(
             "gateway: list_tools failed for backend=%s url=%s err=%s",
             backend_name,
@@ -62,6 +70,7 @@ async def list_backend_tools(backend_name: str, backend: Backend) -> list[dict[s
             f"backend {backend_name!r} list_tools failed: {type(exc).__name__}"
         ) from exc
 
+    breaker.record_success(backend.url)
     return [_serialize_tool(tool) for tool in tools_result.tools]
 
 
@@ -77,8 +86,14 @@ async def call_backend_tool(
     L1/L2/L3 defense pipeline before returning.
 
     Raises:
-        BackendCallError: connection failure, protocol error, or timeout.
+        BackendCallError: connection failure, protocol error, timeout, or
+            circuit open.
     """
+    if not breaker.allow(backend.url):
+        raise BackendCallError(
+            f"backend {backend_name!r} circuit open — skipped"
+        )
+
     headers = backend.headers or None
     try:
         result = await asyncio.wait_for(
@@ -86,6 +101,7 @@ async def call_backend_tool(
             timeout=backend.timeout_seconds,
         )
     except Exception as exc:
+        breaker.record_failure(backend.url)
         logger.warning(
             "gateway: call_tool failed backend=%s tool=%s err=%s",
             backend_name,
@@ -96,6 +112,7 @@ async def call_backend_tool(
             f"backend {backend_name!r} call_tool failed: {type(exc).__name__}"
         ) from exc
 
+    breaker.record_success(backend.url)
     content: list[dict[str, Any]] = [_serialize_content_block(b) for b in result.content]
     structured = getattr(result, "structuredContent", None)
     return BackendCall(

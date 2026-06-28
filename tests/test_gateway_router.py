@@ -10,6 +10,7 @@ from pydantic import SecretStr
 
 from mcp_trentina_crunchtools.database import get_gateway_call_stats
 from mcp_trentina_crunchtools.gateway.backend import BackendCall
+from mcp_trentina_crunchtools.gateway.circuit import breaker
 from mcp_trentina_crunchtools.gateway.errors import BackendCallError, BackendNotInProfileError
 from mcp_trentina_crunchtools.gateway.profile import (
     AuthConfig,
@@ -446,3 +447,77 @@ class TestRouter:
             )
         assert called["tool"] == "send_gmail_message"
         assert resp["result"]["content"] == [{"type": "text", "text": "sent"}]
+
+    async def test_tools_list_parallel_all_healthy(self) -> None:
+        """Parallel fetch returns tools from all healthy backends."""
+        call_order: list[str] = []
+
+        async def fake_list(backend_name: str, _backend: Backend) -> list[dict[str, Any]]:
+            call_order.append(backend_name)
+            return [{"name": f"{backend_name}_tool", "description": "", "inputSchema": {}}]
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            side_effect=fake_list,
+        ):
+            resp = await route_jsonrpc(
+                _profile(), {"jsonrpc": "2.0", "id": 40, "method": "tools/list"}
+            )
+
+        names = sorted(str(t["name"]) for t in resp["result"]["tools"])
+        assert f"mcp-atlassian{NAMESPACE_SEP}mcp-atlassian_tool" in names
+        assert f"mcp-slack{NAMESPACE_SEP}mcp-slack_tool" in names
+        assert len(call_order) == 2
+
+    async def test_tools_list_circuit_open_skips_immediately(self) -> None:
+        """A backend with an open circuit is skipped without blocking."""
+        slack_url = "http://mcp-slack:8005/mcp"
+        atlassian_url = "http://mcp-atlassian:8021/mcp"
+        breaker.reset()
+        for _ in range(3):
+            breaker.record_failure(slack_url)
+
+        async def fake_list(backend_name: str, backend: Backend) -> list[dict[str, Any]]:
+            from mcp_trentina_crunchtools.gateway.circuit import breaker as cb
+
+            if not cb.allow(backend.url):
+                from mcp_trentina_crunchtools.gateway.errors import BackendCallError
+
+                raise BackendCallError(f"backend {backend_name!r} circuit open — skipped")
+            return [{"name": "jira_search", "description": "", "inputSchema": {}}]
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            side_effect=fake_list,
+        ):
+            resp = await route_jsonrpc(
+                _profile(), {"jsonrpc": "2.0", "id": 41, "method": "tools/list"}
+            )
+
+        names = [str(t["name"]) for t in resp["result"]["tools"]]
+        assert names == [f"mcp-atlassian{NAMESPACE_SEP}jira_search"]
+        breaker.reset(atlassian_url)
+        breaker.reset(slack_url)
+
+    async def test_tools_call_circuit_open_returns_error(self) -> None:
+        """A tools/call to a circuit-open backend returns a JSON-RPC error immediately."""
+        slack_url = "http://mcp-slack:8005/mcp"
+        breaker.reset()
+        for _ in range(3):
+            breaker.record_failure(slack_url)
+
+        resp = await route_jsonrpc(
+            _profile(),
+            {
+                "jsonrpc": "2.0",
+                "id": 42,
+                "method": "tools/call",
+                "params": {
+                    "name": f"mcp-slack{NAMESPACE_SEP}slack_list_channels",
+                    "arguments": {},
+                },
+            },
+        )
+        assert resp["error"]["code"] == -32603
+        assert "circuit open" in resp["error"]["message"]
+        breaker.reset()

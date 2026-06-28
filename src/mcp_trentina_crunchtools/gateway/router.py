@@ -17,6 +17,7 @@ inserts the L1/L2/L3 defense pipeline here.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import time
@@ -32,7 +33,7 @@ from .guards import check_parameter_guards
 from .internal import call_internal_tool, list_internal_tools
 
 if TYPE_CHECKING:
-    from .profile import Profile
+    from .profile import Backend, Profile
 
 logger = logging.getLogger(__name__)
 
@@ -123,33 +124,49 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
 async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
     """Aggregate tools/list across the profile's backends, filtered and namespaced.
 
-    A failing backend (down, timing out, refusing) is logged and skipped so
-    the rest of the fleet stays usable. The consumer still sees the union
-    of healthy backends.
+    All backends are queried in parallel via asyncio.gather.  A failing
+    backend (down, circuit open, timing out) is logged and skipped so the
+    rest of the fleet stays usable.  Wall-clock time is the slowest
+    healthy backend, not the sum of all timeouts.
     """
     await maybe_trigger_compression()
+
+    async def _fetch_one(
+        backend_name: str, backend: Backend,
+    ) -> list[dict[str, Any]]:
+        if backend.is_internal:
+            raw_tools = await list_internal_tools()
+        else:
+            raw_tools = await list_backend_tools(backend_name, backend)
+        filtered = filter_tools(raw_tools, backend)
+        if backend.compress_descriptions:
+            filtered = compress_tools(filtered)
+        namespaced: list[dict[str, Any]] = []
+        for tool in filtered:
+            namespaced_tool = dict(tool)
+            namespaced_tool["name"] = f"{backend_name}{NAMESPACE_SEP}{tool['name']}"
+            namespaced.append(namespaced_tool)
+        return namespaced
+
+    tasks = [
+        _fetch_one(name, backend)
+        for name, backend in profile.backends.items()
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
     aggregated: list[dict[str, Any]] = []
-    for backend_name, backend in profile.backends.items():
-        try:
-            if backend.is_internal:
-                backend_tools = await list_internal_tools()
-            else:
-                backend_tools = await list_backend_tools(backend_name, backend)
-        except BackendCallError as exc:
+    for (backend_name, _backend), outcome in zip(
+        profile.backends.items(), results, strict=True,
+    ):
+        if isinstance(outcome, BaseException):
             logger.warning(
                 "gateway: tools/list profile=%s backend=%s skipped: %s",
                 profile.name,
                 backend_name,
-                exc,
+                outcome,
             )
             continue
-        filtered = filter_tools(backend_tools, backend)
-        if backend.compress_descriptions:
-            filtered = compress_tools(filtered)
-        for tool in filtered:
-            namespaced_tool = dict(tool)
-            namespaced_tool["name"] = f"{backend_name}{NAMESPACE_SEP}{tool['name']}"
-            aggregated.append(namespaced_tool)
+        aggregated.extend(outcome)
 
     return _ok(req_id, {"tools": aggregated})
 

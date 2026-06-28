@@ -24,6 +24,7 @@ ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 INTERNAL_SCHEME = "internal://"
 
 MAX_BACKEND_TIMEOUT_SECONDS = 300.0
+MAX_LIST_TIMEOUT_SECONDS = 60.0
 
 
 class AuthConfig(BaseModel):
@@ -109,6 +110,12 @@ class Backend(BaseModel):
         gt=0,
         le=MAX_BACKEND_TIMEOUT_SECONDS,
         description="Per-call backend timeout",
+    )
+    list_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=MAX_LIST_TIMEOUT_SECONDS,
+        description="Timeout for tools/list metadata fetch (shorter than operational calls)",
     )
     parameter_guards: dict[str, dict[str, ParameterConstraint]] = Field(
         default_factory=dict,

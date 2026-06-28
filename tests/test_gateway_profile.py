@@ -136,6 +136,21 @@ class TestProfileModel:
         c = ParameterConstraint(allow=["*@redhat.com", "scott.mccarty@gmail.com", "*"])
         assert len(c.allow) == 3
 
+    def test_list_timeout_defaults(self) -> None:
+        b = Backend(url="http://x/mcp")
+        assert b.list_timeout_seconds == 10.0
+        assert b.timeout_seconds == 30.0
+
+    def test_list_timeout_custom(self) -> None:
+        b = Backend(url="http://x/mcp", list_timeout_seconds=5.0)
+        assert b.list_timeout_seconds == 5.0
+
+    def test_list_timeout_out_of_range(self) -> None:
+        with pytest.raises(ValidationError):
+            Backend(url="http://x/mcp", list_timeout_seconds=0)
+        with pytest.raises(ValidationError):
+            Backend(url="http://x/mcp", list_timeout_seconds=61.0)
+
     def test_defense_defaults(self) -> None:
         d = DefenseConfig()
         assert d.sanitize is True
