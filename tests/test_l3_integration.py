@@ -307,16 +307,21 @@ class TestL3UniqueCatches:
                 "mcp_trentina_crunchtools.quarantine.agent.get_config"
             ) as mock_config,
             patch(
+                "mcp_trentina_crunchtools.quarantine.providers.get_config"
+            ) as mock_prov_config,
+            patch(
                 "httpx.AsyncClient.post",
                 new_callable=AsyncMock,
                 side_effect=_mock_post,
             ),
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = (
-                "test-key"
-            )
-            mock_config.return_value.model = "gemini-2.5-flash-lite"
+            for cfg in (mock_config, mock_prov_config):
+                cfg.return_value.has_api_key = True
+                cfg.return_value.api_key.get_secret_value.return_value = (
+                    "test-key"
+                )
+                cfg.return_value.model = "gemini-2.5-flash-lite"
+                cfg.return_value.provider = "gemini"
 
             result = await quarantine_detect(payload)
 
@@ -340,16 +345,21 @@ class TestL3BenignNoFalsePositives:
                 "mcp_trentina_crunchtools.quarantine.agent.get_config"
             ) as mock_config,
             patch(
+                "mcp_trentina_crunchtools.quarantine.providers.get_config"
+            ) as mock_prov_config,
+            patch(
                 "httpx.AsyncClient.post",
                 new_callable=AsyncMock,
                 side_effect=_mock_post,
             ),
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = (
-                "test-key"
-            )
-            mock_config.return_value.model = "gemini-2.5-flash-lite"
+            for cfg in (mock_config, mock_prov_config):
+                cfg.return_value.has_api_key = True
+                cfg.return_value.api_key.get_secret_value.return_value = (
+                    "test-key"
+                )
+                cfg.return_value.model = "gemini-2.5-flash-lite"
+                cfg.return_value.provider = "gemini"
 
             result = await quarantine_detect(content)
 

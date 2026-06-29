@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
 from mcp_trentina_crunchtools.config import DEFAULT_MODEL
@@ -28,6 +27,7 @@ from mcp_trentina_crunchtools.quarantine.prompts import (
     EXTRACTION_RESPONSE_SCHEMA,
     EXTRACTION_SYSTEM_PROMPT,
 )
+from mcp_trentina_crunchtools.quarantine.providers.base import ProviderResult
 
 
 class TestRequestBodyConstruction:
@@ -90,32 +90,21 @@ class TestRequestBodyConstruction:
         assert body["generationConfig"]["temperature"] == 0.1
 
 
-def _mock_gemini_response(content_json: dict[str, Any]) -> httpx.Response:
-    """Create a mock Gemini API response."""
-    resp_body = {
-        "candidates": [
-            {
-                "content": {
-                    "parts": [
-                        {"text": json.dumps(content_json)},
-                    ],
-                },
-            },
-        ],
-        "usageMetadata": {
-            "promptTokenCount": 100,
-            "candidatesTokenCount": 50,
-        },
-    }
-    return httpx.Response(
-        status_code=200,
-        json=resp_body,
-        request=httpx.Request("POST", "https://example.com"),
+def _mock_provider(content_json: dict[str, Any]) -> MagicMock:
+    """Create a mock provider that returns a ProviderResult with the given JSON."""
+    mock = MagicMock()
+    mock.generate = AsyncMock(
+        return_value=ProviderResult(
+            text=json.dumps(content_json),
+            input_tokens=100,
+            output_tokens=50,
+        )
     )
+    return mock
 
 
 class TestQuarantineExtract:
-    """Test extraction mode with mocked Gemini responses."""
+    """Test extraction mode with mocked provider responses."""
 
     @pytest.mark.asyncio
     async def test_successful_extraction(self) -> None:
@@ -125,17 +114,13 @@ class TestQuarantineExtract:
             "confidence": "high",
             "injection_detected": False,
         }
-        mock_resp = _mock_gemini_response(extraction_json)
+        mock_prov = _mock_provider(extraction_json)
 
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.0-flash-lite"
             mock_config.return_value.fallback = "layer1"
-            mock_post.return_value = mock_resp
 
             resp = await quarantine_extract("page content", "Extract the summary")
 
@@ -152,32 +137,27 @@ class TestQuarantineExtract:
             "injection_detected": True,
             "injection_details": "Found instruction override attempt",
         }
-        mock_resp = _mock_gemini_response(extraction_json)
+        mock_prov = _mock_provider(extraction_json)
 
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.0-flash-lite"
             mock_config.return_value.fallback = "layer1"
-            mock_post.return_value = mock_resp
 
             resp = await quarantine_extract("test", "Extract")
             assert resp["content"]["injection_detected"] is True
 
     @pytest.mark.asyncio
     async def test_fallback_on_error(self) -> None:
+        mock_prov = MagicMock()
+        mock_prov.generate = AsyncMock(side_effect=QuarantineAgentError("timeout"))
+
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.0-flash-lite"
             mock_config.return_value.fallback = "layer1"
-            mock_post.side_effect = httpx.TimeoutException("timeout")
 
             resp = await quarantine_extract("original content", "Extract")
             assert resp["content"]["extracted_text"] == "original content"
@@ -185,7 +165,7 @@ class TestQuarantineExtract:
 
 
 class TestQuarantineDetect:
-    """Test detection mode with mocked Gemini responses."""
+    """Test detection mode with mocked provider responses."""
 
     @pytest.mark.asyncio
     async def test_clean_detection(self) -> None:
@@ -194,17 +174,12 @@ class TestQuarantineDetect:
             "risk_level": "low",
             "summary": "No injection vectors found.",
         }
-        mock_resp = _mock_gemini_response(detection_json)
+        mock_prov = _mock_provider(detection_json)
 
-        with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+        with patch(
+            "mcp_trentina_crunchtools.quarantine.agent.get_provider",
+            return_value=mock_prov,
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.0-flash-lite"
-            mock_post.return_value = mock_resp
-
             resp = await quarantine_detect("clean content")
             assert resp["injection_detected"] is False
             assert resp["risk_level"] == "low"
@@ -222,32 +197,25 @@ class TestQuarantineDetect:
                 },
             ],
         }
-        mock_resp = _mock_gemini_response(detection_json)
+        mock_prov = _mock_provider(detection_json)
 
-        with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+        with patch(
+            "mcp_trentina_crunchtools.quarantine.agent.get_provider",
+            return_value=mock_prov,
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.0-flash-lite"
-            mock_post.return_value = mock_resp
-
             resp = await quarantine_detect("malicious content")
             assert resp["injection_detected"] is True
             assert resp["risk_level"] == "high"
 
     @pytest.mark.asyncio
     async def test_fallback_on_error(self) -> None:
-        with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
-        ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.0-flash-lite"
-            mock_post.side_effect = httpx.TimeoutException("timeout")
+        mock_prov = MagicMock()
+        mock_prov.generate = AsyncMock(side_effect=QuarantineAgentError("timeout"))
 
+        with patch(
+            "mcp_trentina_crunchtools.quarantine.agent.get_provider",
+            return_value=mock_prov,
+        ):
             resp = await quarantine_detect("content")
             assert resp["injection_detected"] is False
             assert resp["risk_level"] == "low"
@@ -298,7 +266,7 @@ class TestRuntimeChecks:
             system_prompt="test",
             response_schema=EXTRACTION_RESPONSE_SCHEMA,
         )
-        _enforce_quarantine(body)  # Should not raise
+        _enforce_quarantine(body)
 
 
 class TestPostExtractionSanitization:
@@ -311,21 +279,14 @@ class TestPostExtractionSanitization:
             "confidence": "high",
             "injection_detected": False,
         }
-        mock_resp = _mock_gemini_response(extraction_json)
+        mock_prov = _mock_provider(extraction_json)
 
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
             patch("mcp_trentina_crunchtools.quarantine.agent.sanitize_text") as mock_sanitize,
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.0-flash-lite"
             mock_config.return_value.fallback = "layer1"
-            mock_post.return_value = mock_resp
-
-            from unittest.mock import MagicMock
-
             mock_result = MagicMock()
             mock_result.content = "Sanitized content."
             mock_sanitize.return_value = mock_result
@@ -341,17 +302,13 @@ class TestPostExtractionSanitization:
             "confidence": "high",
             "injection_detected": False,
         }
-        mock_resp = _mock_gemini_response(extraction_json)
+        mock_prov = _mock_provider(extraction_json)
 
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.0-flash-lite"
             mock_config.return_value.fallback = "layer1"
-            mock_post.return_value = mock_resp
 
             resp = await quarantine_extract("page", "Extract")
             assert resp["content"]["extracted_text"] == "Clean content with no issues."
@@ -363,18 +320,14 @@ class TestPostExtractionSanitization:
             "confidence": "low",
             "injection_detected": False,
         }
-        mock_resp = _mock_gemini_response(extraction_json)
+        mock_prov = _mock_provider(extraction_json)
 
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
             patch("mcp_trentina_crunchtools.quarantine.agent.sanitize_text") as mock_sanitize,
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.0-flash-lite"
             mock_config.return_value.fallback = "layer1"
-            mock_post.return_value = mock_resp
 
             resp = await quarantine_extract("page", "Extract")
             assert resp["content"]["extracted_text"] == ""
@@ -391,26 +344,21 @@ class TestLayer1ContextInDetection:
             "risk_level": "low",
             "summary": "Clean.",
         }
-        mock_resp = _mock_gemini_response(detection_json)
+        mock_prov = _mock_provider(detection_json)
 
-        with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+        with patch(
+            "mcp_trentina_crunchtools.quarantine.agent.get_provider",
+            return_value=mock_prov,
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.0-flash-lite"
-            mock_post.return_value = mock_resp
-
             await quarantine_detect(
                 "test content",
                 layer1_context="Layer 1 found 3 hidden_html vectors",
             )
 
-            call_body = mock_post.call_args[1]["json"]
-            user_text = call_body["contents"][0]["parts"][0]["text"]
-            assert "Layer 1 found 3 hidden_html vectors" in user_text
-            assert "test content" in user_text
+            call_args = mock_prov.generate.call_args
+            user_content = call_args.kwargs.get("user_content", "")
+            assert "Layer 1 found 3 hidden_html vectors" in user_content
+            assert "test content" in user_content
 
     @pytest.mark.asyncio
     async def test_no_context_when_none(self) -> None:
@@ -419,22 +367,17 @@ class TestLayer1ContextInDetection:
             "risk_level": "low",
             "summary": "Clean.",
         }
-        mock_resp = _mock_gemini_response(detection_json)
+        mock_prov = _mock_provider(detection_json)
 
-        with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+        with patch(
+            "mcp_trentina_crunchtools.quarantine.agent.get_provider",
+            return_value=mock_prov,
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.0-flash-lite"
-            mock_post.return_value = mock_resp
-
             await quarantine_detect("test content", layer1_context=None)
 
-            call_body = mock_post.call_args[1]["json"]
-            user_text = call_body["contents"][0]["parts"][0]["text"]
-            assert user_text == "test content"
+            call_args = mock_prov.generate.call_args
+            user_content = call_args.kwargs.get("user_content", "")
+            assert user_content == "test content"
 
 
 class TestSystemPrompts:
@@ -494,17 +437,13 @@ class TestPostExtractionTruncation:
             "confidence": "high",
             "injection_detected": False,
         }
-        mock_resp = _mock_gemini_response(extraction_json)
+        mock_prov = _mock_provider(extraction_json)
 
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post,
+            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
         ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.5-flash-lite"
             mock_config.return_value.fallback = "layer1"
-            mock_post.return_value = mock_resp
 
             resp = await quarantine_extract("page", "Extract")
             assert len(resp["content"]["extracted_text"]) == MAX_EXTRACTED_TEXT
