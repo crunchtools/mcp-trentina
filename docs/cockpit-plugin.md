@@ -39,13 +39,13 @@ Click any event row to see the full detection details including which layers fir
 
 ## Architecture
 
-The plugin connects to Trentina's D-Bus interface (`com.crunchtools.Airlock1`) on the system bus. Cockpit's built-in `cockpit.dbus()` API handles the connection — no additional dependencies needed.
+The plugin connects to Trentina's D-Bus interface (`com.crunchtools.Trentina1`) on the system bus. Cockpit's built-in `cockpit.dbus()` API handles the connection — no additional dependencies needed.
 
 ```
 ┌─────────────────┐         D-Bus          ┌─────────────────┐
 │  Cockpit Web UI  │ ◄──────────────────── │    Trentina     │
 │  (browser)       │   com.crunchtools     │    (systemd)    │
-│                  │   .Airlock1           │                 │
+│                  │   .Trentina1           │                 │
 │  PatternFly 6    │                       │  Events ring    │
 │  No React        │                       │  buffer         │
 └─────────────────┘                       └─────────────────┘

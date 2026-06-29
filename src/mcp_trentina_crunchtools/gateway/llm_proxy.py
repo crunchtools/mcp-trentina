@@ -61,6 +61,14 @@ def _get_llm_client() -> httpx.AsyncClient:
     return _llm_client
 
 
+async def close_llm_client() -> None:
+    """Close the LLM proxy httpx client. Called on application shutdown."""
+    global _llm_client
+    if _llm_client is not None:
+        await _llm_client.aclose()
+        _llm_client = None
+
+
 class LlmProvider(BaseModel):
     """One LLM provider driver entry."""
 
@@ -155,19 +163,38 @@ def register_llm_routes(
     )
 
 
+def _sanitize_proxy_path(raw_path: str) -> str | None:
+    """Strip path traversal sequences. Returns None if the path is malicious."""
+    from urllib.parse import unquote
+
+    decoded = unquote(raw_path)
+    segments = decoded.replace("\\", "/").split("/")
+    clean = [s for s in segments if s not in (".", "..")]
+    if len(clean) != len(segments):
+        return None
+    return "/".join(clean)
+
+
 async def _proxy_llm(
     request: Request,
     providers: dict[str, LlmProvider],
 ) -> Response:
     """Forward one LLM request to the upstream provider."""
     provider_name = request.path_params.get("provider", "")
-    path = request.path_params.get("path", "")
+    raw_path = request.path_params.get("path", "")
 
     provider = providers.get(provider_name)
     if provider is None:
         return Response(
             content="LLM provider not found or disabled",
             status_code=404, media_type=_PLAIN,
+        )
+
+    path = _sanitize_proxy_path(raw_path)
+    if path is None:
+        return Response(
+            content="Path traversal rejected",
+            status_code=400, media_type=_PLAIN,
         )
 
     upstream_url = f"{provider.upstream}/{path}"

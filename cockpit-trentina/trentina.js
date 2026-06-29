@@ -1,18 +1,28 @@
 /*
- * cockpit-airlock — Cockpit plugin for mcp-airlock-crunchtools
+ * cockpit-trentina — Cockpit plugin for mcp-trentina-crunchtools
  *
- * Connects to com.crunchtools.Airlock1 on the system D-Bus and renders
+ * Connects to com.crunchtools.Trentina1 on the system D-Bus and renders
  * live pipeline events using PatternFly 6 CSS classes (no React).
  */
 
 (function () {
     "use strict";
 
-    var client = cockpit.dbus("com.crunchtools.Airlock1", { bus: "system" });
-    var airlockObj = client.proxy("com.crunchtools.Airlock1", "/com/crunchtools/Airlock1");
+    var client = cockpit.dbus("com.crunchtools.Trentina1", { bus: "system" });
+    var airlockObj = client.proxy("com.crunchtools.Trentina1", "/com/crunchtools/Trentina1");
 
     var maxTableRows = 200;
     var selectedEvent = null;
+
+    function escapeHtml(str) {
+        if (!str) return "";
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#x27;");
+    }
 
     function riskClass(level) {
         switch (level) {
@@ -54,7 +64,7 @@
         var html = '<div class="pf-v6-c-page">' +
             '<main class="pf-v6-c-page__main">' +
             '<section class="pf-v6-c-page__main-section">' +
-            '<div class="pf-v6-c-content"><h1>Airlock Defense Pipeline</h1></div>' +
+            '<div class="pf-v6-c-content"><h1>Trentina Defense Pipeline</h1></div>' +
             '</section>' +
             '<section class="pf-v6-c-page__main-section pf-m-light">' +
             '<div class="pf-v6-l-grid pf-m-gutter">' +
@@ -106,14 +116,14 @@
             '<dl class="pf-v6-c-description-list pf-m-horizontal">' +
             '<div class="pf-v6-c-description-list__group">' +
             '<dt class="pf-v6-c-description-list__term">L1 Sanitize</dt>' +
-            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l1_sanitize.active) + ' ' + layers.l1_sanitize.description + '</dd></div>' +
+            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l1_sanitize.active) + ' ' + escapeHtml(layers.l1_sanitize.description) + '</dd></div>' +
             '<div class="pf-v6-c-description-list__group">' +
             '<dt class="pf-v6-c-description-list__term">L2 Classify</dt>' +
-            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l2_classifier.active) + ' ' + layers.l2_classifier.description + '</dd></div>' +
+            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l2_classifier.active) + ' ' + escapeHtml(layers.l2_classifier.description) + '</dd></div>' +
             '<div class="pf-v6-c-description-list__group">' +
             '<dt class="pf-v6-c-description-list__term">L3 Q-Agent</dt>' +
-            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l3_qagent.active) + ' ' + layers.l3_qagent.description +
-            (layers.l3_qagent.model ? ' (' + layers.l3_qagent.model + ')' : '') + '</dd></div>' +
+            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l3_qagent.active) + ' ' + escapeHtml(layers.l3_qagent.description) +
+            (layers.l3_qagent.model ? ' (' + escapeHtml(layers.l3_qagent.model) + ')' : '') + '</dd></div>' +
             '</dl>';
     }
 
@@ -149,12 +159,12 @@
 
         tr.innerHTML =
             '<td class="pf-v6-c-table__td">' + formatTime(ev.timestamp) + '</td>' +
-            '<td class="pf-v6-c-table__td"><code>' + (d.tool || "") + '</code></td>' +
-            '<td class="pf-v6-c-table__td" title="' + (d.source || "") + '">' + truncateSource(d.source || "") + '</td>' +
-            '<td class="pf-v6-c-table__td"><span class="pf-v6-c-label pf-m-compact ' + riskClass("low") + '"><span class="pf-v6-c-label__content">' + (d.trust_level || "") + '</span></span></td>' +
-            '<td class="pf-v6-c-table__td"><span class="pf-v6-c-label pf-m-compact ' + riskClass(d.risk_level) + '"><span class="pf-v6-c-label__content">' + (d.risk_level || "").toUpperCase() + '</span></span></td>' +
+            '<td class="pf-v6-c-table__td"><code>' + escapeHtml(d.tool) + '</code></td>' +
+            '<td class="pf-v6-c-table__td" title="' + escapeHtml(d.source) + '">' + escapeHtml(truncateSource(d.source || "")) + '</td>' +
+            '<td class="pf-v6-c-table__td"><span class="pf-v6-c-label pf-m-compact ' + riskClass("low") + '"><span class="pf-v6-c-label__content">' + escapeHtml(d.trust_level) + '</span></span></td>' +
+            '<td class="pf-v6-c-table__td"><span class="pf-v6-c-label pf-m-compact ' + riskClass(d.risk_level) + '"><span class="pf-v6-c-label__content">' + escapeHtml((d.risk_level || "").toUpperCase()) + '</span></span></td>' +
             '<td class="pf-v6-c-table__td">' + (d.l1_detections || 0) + '</td>' +
-            '<td class="pf-v6-c-table__td">' + (d.l2_label || "—") + (d.l2_score !== null && d.l2_score !== undefined ? ' (' + (d.l2_score * 100).toFixed(1) + '%)' : '') + '</td>';
+            '<td class="pf-v6-c-table__td">' + escapeHtml(d.l2_label || "—") + (d.l2_score !== null && d.l2_score !== undefined ? ' (' + (d.l2_score * 100).toFixed(1) + '%)' : '') + '</td>';
 
         tr.addEventListener("click", function () {
             selectedEvent = ev;
@@ -261,7 +271,7 @@
             '<div class="pf-v6-c-alert__icon"><i class="fas fa-exclamation-circle"></i></div>' +
             '<p class="pf-v6-c-alert__title">Injection Detected</p>' +
             '<div class="pf-v6-c-alert__description">' +
-            '<strong>' + layer + '</strong> flagged <code>' + source + '</code> as <strong>' + severity + '</strong>' +
+            '<strong>' + escapeHtml(layer) + '</strong> flagged <code>' + escapeHtml(source) + '</code> as <strong>' + escapeHtml(severity) + '</strong>' +
             '</div>';
 
         section.insertBefore(alert, section.firstChild);
