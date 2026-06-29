@@ -1,6 +1,6 @@
-"""Q-Agent — Quarantined Gemini REST API client.
+"""Q-Agent — Quarantined LLM client with pluggable provider backends.
 
-Uses raw httpx to call Gemini REST API. NO google-genai SDK.
+Uses raw httpx via provider drivers. NO SDKs.
 This is the architectural enforcement of the Q-Agent quarantine:
 - No function declarations (no tools)
 - No SDK (no accidental tool configuration)
@@ -27,6 +27,7 @@ from .prompts import (
     EXTRACTION_SYSTEM_PROMPT,
     SEARCH_L0_SYSTEM_PROMPT,
 )
+from .providers import get_provider
 
 logger = logging.getLogger(__name__)
 
@@ -112,71 +113,45 @@ async def _call_gemini(
     response_schema: dict[str, Any],
     user_prompt: str | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """Call Gemini REST API and return parsed JSON response and canary.
+    """Call the configured LLM provider and return parsed JSON response and canary.
 
-    Returns a tuple of (parsed_response, canary_token) so callers can
-    check for canary leakage after processing.
+    Delegates to the pluggable provider driver (Gemini, OpenAI, Anthropic,
+    or Ollama). Canary injection, quarantine enforcement, and response
+    parsing stay here — the provider only handles the HTTP call.
     """
-    config = get_config()
-
-    if not config.has_api_key:
-        raise QuarantineAgentError("GEMINI_API_KEY not configured")
-
     canary = _generate_canary()
     prompted = _inject_canary(system_prompt, canary)
 
-    api_key = config.api_key.get_secret_value()
-    model = config.model
-    url = f"{GEMINI_API_BASE}/{model}:generateContent?key={api_key}"
+    user_text = content
+    if user_prompt:
+        user_text = f"{user_prompt}\n\n---\n\n{content}"
 
-    request_body = _build_request_body(content, prompted, response_schema, user_prompt)
-
-    _enforce_quarantine(request_body)
+    provider = get_provider()
+    provider_result = await provider.generate(
+        system_prompt=prompted,
+        user_content=user_text,
+        response_schema=response_schema,
+        temperature=0.1,
+        max_output_tokens=MAX_OUTPUT_TOKENS,
+    )
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(GEMINI_TIMEOUT)) as http_client:
-            resp = await http_client.post(
-                url,
-                json=request_body,
-                headers={"Content-Type": "application/json"},
-            )
-            resp.raise_for_status()
-
-            resp_json = resp.json()
-
-            candidates = resp_json.get("candidates", [])
-            if not candidates:
-                raise QuarantineAgentError("No candidates in Gemini response")
-
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if not parts:
-                raise QuarantineAgentError("No parts in Gemini response")
-
-            text_content = parts[0].get("text", "")
-            parsed: dict[str, Any] = json.loads(text_content)
-
-            if _check_canary(parsed, canary):
-                raise QuarantineAgentError(
-                    "SECURITY: canary token leaked in Q-Agent response — "
-                    "Q-Agent compromise detected"
-                )
-
-            usage_metadata = resp_json.get("usageMetadata", {})
-            parsed["_usage"] = {
-                "input_tokens": usage_metadata.get("promptTokenCount", 0),
-                "output_tokens": usage_metadata.get("candidatesTokenCount", 0),
-            }
-
-            return parsed, canary
-
-    except httpx.HTTPStatusError as exc:
-        raise QuarantineAgentError(f"HTTP {exc.response.status_code}") from exc
-    except httpx.TimeoutException as exc:
-        raise QuarantineAgentError("Request timed out") from exc
+        parsed: dict[str, Any] = json.loads(provider_result.text)
     except json.JSONDecodeError as exc:
-        raise QuarantineAgentError("Invalid JSON in Gemini response") from exc
-    except httpx.RequestError as exc:
-        raise QuarantineAgentError(str(exc)) from exc
+        raise QuarantineAgentError("Invalid JSON in provider response") from exc
+
+    if _check_canary(parsed, canary):
+        raise QuarantineAgentError(
+            "SECURITY: canary token leaked in Q-Agent response — "
+            "Q-Agent compromise detected"
+        )
+
+    parsed["_usage"] = {
+        "input_tokens": provider_result.input_tokens,
+        "output_tokens": provider_result.output_tokens,
+    }
+
+    return parsed, canary
 
 
 async def quarantine_extract(content: str, prompt: str) -> dict[str, Any]:

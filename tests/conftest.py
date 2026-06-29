@@ -5,14 +5,11 @@ from __future__ import annotations
 import pytest
 
 from mcp_trentina_crunchtools.gateway.circuit import breaker
+from mcp_trentina_crunchtools.quarantine.providers import reset_provider
 
 
 @pytest.fixture(autouse=True)
-def _reset_circuit_breaker() -> None:
-    """Reset the global circuit breaker before every test.
-
-    The module-level ``breaker`` singleton accumulates state across tests.
-    Without this fixture, a test that opens a circuit and then fails before
-    calling ``breaker.reset()`` leaks that state into subsequent tests.
-    """
+def _reset_singletons() -> None:
+    """Reset global singletons before every test."""
     breaker.reset()
+    reset_provider()

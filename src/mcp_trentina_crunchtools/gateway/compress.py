@@ -1,9 +1,9 @@
 """Tool description compression for the gateway.
 
-Compresses verbose tool descriptions via Gemini, triggered lazily on the
-first tools/list request.  Results are cached in SQLite and looked up
-synchronously on subsequent calls.  Compression is best-effort: failures
-at any level are logged and skipped.
+Compresses verbose tool descriptions via the configured LLM provider,
+triggered lazily on the first tools/list request.  Results are cached in
+SQLite and looked up synchronously on subsequent calls.  Compression is
+best-effort: failures at any level are logged and skipped.
 """
 
 from __future__ import annotations
@@ -12,25 +12,19 @@ import asyncio
 import hashlib
 import json
 import logging
-import os
 from typing import TYPE_CHECKING, Any
 
-import httpx
-
-from ..config import get_config
 from ..database import get_all_compressions, save_compression
+from ..quarantine.providers import get_provider
 
 if TYPE_CHECKING:
     from .profile import Backend, Profile
 
 logger = logging.getLogger(__name__)
 
-GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-GEMINI_TIMEOUT = 60.0
 BATCH_SIZE = 5
 DELAY_BETWEEN_BACKENDS = 2
 DELAY_BETWEEN_BATCHES = 3
-DEFAULT_COMPRESS_MODEL = "gemini-2.5-flash-lite"
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2.0
 _RETRYABLE_STATUS_CODES = {429, 503}
@@ -192,7 +186,7 @@ def _store_result(batch: list[tuple[str, str]], h: str, compressed_text: str) ->
     if original is None or len(compressed_text) >= len(original):
         return False
     _cache[h] = compressed_text
-    save_compression(h, original, compressed_text, _get_model())
+    save_compression(h, original, compressed_text, "provider")
     return True
 
 
@@ -250,84 +244,54 @@ async def _compress_batch_with_fallback(
 async def _call_compress_model(
     items: list[tuple[str, str]],
 ) -> list[tuple[str, str]]:
-    """Call Gemini to compress a batch of descriptions.
+    """Call the configured provider to compress a batch of descriptions.
 
-    Retries up to MAX_RETRIES times on transient errors (429, 503) with
-    exponential backoff. Returns [(hash, compressed_text)] for successful
-    compressions, or empty list on permanent failure.
+    Retries up to MAX_RETRIES times on transient errors with exponential
+    backoff. Returns [(hash, compressed_text)] for successful compressions,
+    or empty list on permanent failure.
     """
-    config = get_config()
-    if not config.has_api_key:
-        return []
-
     descriptions_payload = [{"id": h, "text": desc} for h, desc in items]
     user_content = json.dumps({"descriptions": descriptions_payload})
 
-    model = _get_model()
-    api_key = config.api_key.get_secret_value()
-    url = f"{GEMINI_API_BASE}/{model}:generateContent?key={api_key}"
-
-    request_body = {
-        "system_instruction": {"parts": [{"text": COMPRESS_SYSTEM_PROMPT}]},
-        "contents": [{"role": "user", "parts": [{"text": user_content}]}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": COMPRESS_RESPONSE_SCHEMA,
-            "temperature": 0.1,
-            "maxOutputTokens": 4096,
-        },
-    }
-
     for attempt in range(MAX_RETRIES):
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(GEMINI_TIMEOUT)) as client:
-                resp = await client.post(url, json=request_body)
-                resp.raise_for_status()
-                data = resp.json()
-            return _parse_compress_response(data)
-        except httpx.HTTPStatusError as exc:
-            status = exc.response.status_code
-            if status in _RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES - 1:
+            provider = get_provider()
+            provider_result = await provider.generate(
+                system_prompt=COMPRESS_SYSTEM_PROMPT,
+                user_content=user_content,
+                response_schema=COMPRESS_RESPONSE_SCHEMA,
+                temperature=0.1,
+                max_output_tokens=4096,
+            )
+            parsed = json.loads(provider_result.text)
+            return _parse_compress_response(parsed)
+        except Exception as exc:
+            exc_msg = str(exc)
+            is_retryable = any(f"HTTP {code}" in exc_msg for code in _RETRYABLE_STATUS_CODES)
+            if is_retryable and attempt < MAX_RETRIES - 1:
                 delay = RETRY_BASE_DELAY * (2**attempt)
                 logger.info(
-                    "compress: Gemini %d, retry %d/%d in %.0fs",
-                    status, attempt + 1, MAX_RETRIES, delay,
+                    "compress: provider error, retry %d/%d in %.0fs: %s",
+                    attempt + 1, MAX_RETRIES, delay, exc,
                 )
                 await asyncio.sleep(delay)
                 continue
-            logger.warning("compress: Gemini %d for %d items", status, len(items))
-            return []
-        except Exception as exc:
-            logger.warning("compress: Gemini call failed for %d items: %s", len(items), exc)
+            logger.warning("compress: provider call failed for %d items: %s", len(items), exc)
             return []
 
     return []
 
 
-def _parse_compress_response(gemini_response: dict[str, Any]) -> list[tuple[str, str]]:
-    """Extract compressed descriptions from a Gemini API response."""
-    try:
-        candidates = gemini_response.get("candidates", [])
-        if not candidates:
-            logger.warning("compress: Gemini returned no candidates")
-            return []
-        text = candidates[0]["content"]["parts"][0]["text"]
-        parsed = json.loads(text)
-        compressed_list = parsed.get("compressed", [])
-    except (KeyError, IndexError) as exc:
-        logger.warning("compress: unexpected response structure: %s", exc)
+def _parse_compress_response(parsed: dict[str, Any]) -> list[tuple[str, str]]:
+    """Extract compressed descriptions from a parsed provider response."""
+    compressed_list = parsed.get("compressed", [])
+    if not isinstance(compressed_list, list):
+        logger.warning("compress: unexpected response structure")
         return []
-    except json.JSONDecodeError:
-        raw = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-        logger.warning("compress: malformed JSON from Gemini (len=%d): %.200s", len(raw), raw)
-        return []
-
     return [
         (item["id"], item["text"])
         for item in compressed_list
-        if "id" in item and "text" in item
+        if isinstance(item, dict) and "id" in item and "text" in item
     ]
 
 
-def _get_model() -> str:
-    return os.environ.get("TRENTINA_COMPRESS_MODEL", DEFAULT_COMPRESS_MODEL)
