@@ -85,8 +85,8 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     """
     from .gateway import load_profiles, register_internal_server, register_with_fastmcp
     from .gateway.compress import load_compression_cache, set_profiles
-    from .gateway.llm_proxy import close_llm_client, load_llm_providers, register_llm_routes
-    from .gateway.matrix_proxy import close_matrix_client, register_matrix_routes
+    from .gateway.llm_proxy import load_llm_providers, register_llm_routes
+    from .gateway.matrix_proxy import register_matrix_routes
 
     profiles_path = Path(
         os.environ.get("TRENTINA_PROFILES_PATH", "/etc/trentina/profiles.yaml")
@@ -111,15 +111,5 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
 
     load_compression_cache()
     set_profiles(registry)
-
-    import atexit
-
-    def _shutdown_proxy_clients() -> None:
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(close_llm_client())
-        loop.run_until_complete(close_matrix_client())
-        loop.close()
-
-    atexit.register(_shutdown_proxy_clients)
 
     mcp_server.run(transport="streamable-http", host=host, port=port)

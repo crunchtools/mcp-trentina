@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from starlette.responses import Response, StreamingResponse
 
 from .errors import ProfileConfigError
+from .proxy_utils import sanitize_proxy_path
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -163,18 +164,6 @@ def register_llm_routes(
     )
 
 
-def _sanitize_proxy_path(raw_path: str) -> str | None:
-    """Strip path traversal sequences. Returns None if the path is malicious."""
-    from urllib.parse import unquote
-
-    decoded = unquote(raw_path)
-    segments = decoded.replace("\\", "/").split("/")
-    clean = [s for s in segments if s not in (".", "..")]
-    if len(clean) != len(segments):
-        return None
-    return "/".join(clean)
-
-
 async def _proxy_llm(
     request: Request,
     providers: dict[str, LlmProvider],
@@ -190,7 +179,7 @@ async def _proxy_llm(
             status_code=404, media_type=_PLAIN,
         )
 
-    path = _sanitize_proxy_path(raw_path)
+    path = sanitize_proxy_path(raw_path)
     if path is None:
         return Response(
             content="Path traversal rejected",

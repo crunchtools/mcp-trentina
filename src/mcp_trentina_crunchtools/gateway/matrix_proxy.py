@@ -86,10 +86,10 @@ def register_matrix_routes(
 
 async def _proxy_matrix(request: Request, upstream: str) -> Response:
     """Forward one Matrix Client-Server API request."""
-    from .llm_proxy import _sanitize_proxy_path
+    from .proxy_utils import sanitize_proxy_path
 
     raw_path = request.path_params.get("path", "")
-    path = _sanitize_proxy_path(raw_path)
+    path = sanitize_proxy_path(raw_path)
     if path is None:
         return Response(
             content="Path traversal rejected",

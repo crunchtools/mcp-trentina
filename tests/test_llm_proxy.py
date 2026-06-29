@@ -10,37 +10,37 @@ from pydantic import ValidationError
 from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
 from mcp_trentina_crunchtools.gateway.llm_proxy import (
     LlmProvider,
-    _sanitize_proxy_path,
     load_llm_providers,
 )
+from mcp_trentina_crunchtools.gateway.proxy_utils import sanitize_proxy_path
 
 
 class TestSanitizeProxyPath:
     """Path traversal prevention for proxy endpoints."""
 
     def test_clean_path_passes(self) -> None:
-        assert _sanitize_proxy_path("v1/chat/completions") == "v1/chat/completions"
+        assert sanitize_proxy_path("v1/chat/completions") == "v1/chat/completions"
 
     def test_empty_path_passes(self) -> None:
-        assert _sanitize_proxy_path("") == ""
+        assert sanitize_proxy_path("") == ""
 
     def test_dotdot_rejected(self) -> None:
-        assert _sanitize_proxy_path("../admin") is None
+        assert sanitize_proxy_path("../admin") is None
 
     def test_dotdot_middle_rejected(self) -> None:
-        assert _sanitize_proxy_path("v1/../admin/secret") is None
+        assert sanitize_proxy_path("v1/../admin/secret") is None
 
     def test_encoded_dotdot_rejected(self) -> None:
-        assert _sanitize_proxy_path("v1/%2e%2e/admin") is None
+        assert sanitize_proxy_path("v1/%2e%2e/admin") is None
 
     def test_backslash_dotdot_rejected(self) -> None:
-        assert _sanitize_proxy_path("v1\\..\\admin") is None
+        assert sanitize_proxy_path("v1\\..\\admin") is None
 
     def test_single_dot_rejected(self) -> None:
-        assert _sanitize_proxy_path("v1/./completions") is None
+        assert sanitize_proxy_path("v1/./completions") is None
 
     def test_deep_path_passes(self) -> None:
-        assert _sanitize_proxy_path("v1beta/models/gemini-pro:generateContent") == (
+        assert sanitize_proxy_path("v1beta/models/gemini-pro:generateContent") == (
             "v1beta/models/gemini-pro:generateContent"
         )
 
