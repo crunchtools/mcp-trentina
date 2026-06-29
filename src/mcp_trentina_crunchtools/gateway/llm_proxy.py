@@ -27,7 +27,12 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from starlette.responses import Response, StreamingResponse
 
 from .errors import ProfileConfigError
-from .proxy_utils import sanitize_proxy_path
+from .proxy_utils import (
+    PLAIN_TEXT,
+    filter_response_headers,
+    forward_request_headers,
+    sanitize_proxy_path,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -40,17 +45,7 @@ _LLM_TIMEOUT = httpx.Timeout(
     connect=10.0, read=300.0, write=10.0, pool=5.0,
 )
 
-_STRIP_REQUEST_HEADERS = frozenset({
-    "host", "content-length", "transfer-encoding", "connection",
-})
-
-_STRIP_RESPONSE_HEADERS = frozenset({
-    "content-encoding", "content-length", "transfer-encoding", "connection",
-})
-
-_LLM_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH"]
-
-_PLAIN = "text/plain"
+LLM_HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH"]
 
 _llm_client: httpx.AsyncClient | None = None
 
@@ -105,19 +100,20 @@ class LlmProvider(BaseModel):
 
 
 def load_llm_providers(
-    config: dict[str, Any],
+    llm_section: dict[str, Any],
 ) -> dict[str, LlmProvider]:
-    """Parse ``llm_providers:`` and resolve API keys.
+    """Parse LLM provider entries and resolve API keys.
 
-    Returns only enabled providers.  Fails closed on a missing env var.
+    Accepts the ``llm_providers`` config section directly (not the full
+    gateway config). Returns only enabled providers. Fails closed on a
+    missing env var.
     """
-    section = config.get("llm_providers")
-    if not section or not isinstance(section, dict):
+    if not llm_section:
         logger.info("llm_proxy: no llm_providers — disabled")
         return {}
 
     providers: dict[str, LlmProvider] = {}
-    for name, body in section.items():
+    for name, body in llm_section.items():
         if not isinstance(body, dict):
             raise ProfileConfigError(
                 f"llm_providers.{name}: must be a mapping",
@@ -155,7 +151,7 @@ def register_llm_routes(
         return await _proxy_llm(request, providers)
 
     mcp_server.custom_route(
-        "/llm/{provider}/{path:path}", methods=_LLM_METHODS,
+        "/llm/{provider}/{path:path}", methods=LLM_HTTP_METHODS,
     )(llm_proxy_endpoint)
 
     logger.info(
@@ -176,27 +172,27 @@ async def _proxy_llm(
     if provider is None:
         return Response(
             content="LLM provider not found or disabled",
-            status_code=404, media_type=_PLAIN,
+            status_code=404, media_type=PLAIN_TEXT,
         )
 
     path = sanitize_proxy_path(raw_path)
     if path is None:
         return Response(
             content="Path traversal rejected",
-            status_code=400, media_type=_PLAIN,
+            status_code=400, media_type=PLAIN_TEXT,
         )
 
     upstream_url = f"{provider.upstream}/{path}"
     if request.url.query:
         upstream_url = f"{upstream_url}?{request.url.query}"
 
-    fwd_headers = _forward_headers(request)
+    fwd_headers = forward_request_headers(list(request.headers.items()))
     key_value = provider.api_key.get_secret_value()
     fwd_headers[provider.auth_header] = (
         f"{provider.auth_prefix}{key_value}"
     )
 
-    body = await request.body()
+    has_body = request.method in ("POST", "PUT", "PATCH")
     client = _get_llm_client()
 
     try:
@@ -204,14 +200,14 @@ async def _proxy_llm(
             client.build_request(
                 request.method, upstream_url,
                 headers=fwd_headers,
-                content=body if body else None,
+                content=request.stream() if has_body else None,
             ),
             stream=True,
         )
     except httpx.TimeoutException:
         return Response(
             content="LLM upstream timeout",
-            status_code=504, media_type=_PLAIN,
+            status_code=504, media_type=PLAIN_TEXT,
         )
     except httpx.ConnectError as exc:
         logger.warning(
@@ -220,24 +216,14 @@ async def _proxy_llm(
         )
         return Response(
             content="LLM upstream unreachable",
-            status_code=502, media_type=_PLAIN,
+            status_code=502, media_type=PLAIN_TEXT,
         )
 
     return _streaming_response(resp)
 
 
-def _forward_headers(request: Request) -> dict[str, str]:
-    return {
-        k: v for k, v in request.headers.items()
-        if k.lower() not in _STRIP_REQUEST_HEADERS
-    }
-
-
 def _streaming_response(resp: httpx.Response) -> StreamingResponse:
-    resp_headers = {
-        k: v for k, v in resp.headers.items()
-        if k.lower() not in _STRIP_RESPONSE_HEADERS
-    }
+    resp_headers = filter_response_headers(list(resp.headers.items()))
 
     async def stream_body() -> AsyncIterator[bytes]:
         try:

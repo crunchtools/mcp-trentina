@@ -252,8 +252,9 @@ async def _call_compress_model(
 ) -> list[tuple[str, str]]:
     """Call Gemini to compress a batch of descriptions.
 
-    Returns [(hash, compressed_text)] for successful compressions.
-    Returns empty list on any failure — caller handles fallback.
+    Retries up to MAX_RETRIES times on transient errors (429, 503) with
+    exponential backoff. Returns [(hash, compressed_text)] for successful
+    compressions, or empty list on permanent failure.
     """
     config = get_config()
     if not config.has_api_key:

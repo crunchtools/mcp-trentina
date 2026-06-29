@@ -186,9 +186,9 @@ profiles:
 """
         )
         monkeypatch.setenv("AIRLOCK_PROFILE_JOSUI_TOKEN", "tok-josui")
-        registry, _ = load_profiles(cfg)
-        assert set(registry) == {"josui"}
-        token = registry["josui"].auth.bearer_token
+        gateway_cfg = load_profiles(cfg)
+        assert set(gateway_cfg.profiles) == {"josui"}
+        token = gateway_cfg.profiles["josui"].auth.bearer_token
         assert token is not None
         assert token.get_secret_value() == "tok-josui"
 
@@ -233,9 +233,9 @@ profiles:
         )
         monkeypatch.setenv("AIRLOCK_PROFILE_KAGETORA_TOKEN", "tok")
         monkeypatch.setenv("MCP_MEMORY_API_KEY", "memsecret")
-        registry, _ = load_profiles(cfg)
+        gateway_cfg = load_profiles(cfg)
         assert (
-            registry["kagetora"].backends["memory"].headers["Authorization"]
+            gateway_cfg.profiles["kagetora"].backends["memory"].headers["Authorization"]
             == "Bearer memsecret"
         )
 

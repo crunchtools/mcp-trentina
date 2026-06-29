@@ -128,12 +128,16 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
     backend (down, circuit open, timing out) is logged and skipped so the
     rest of the fleet stays usable.  Wall-clock time is the slowest
     healthy backend, not the sum of all timeouts.
+
+    On the first call, triggers background tool description compression
+    for backends with ``compress_descriptions: true``.
     """
     await maybe_trigger_compression()
 
     async def _fetch_one(
         backend_name: str, backend: Backend,
     ) -> list[dict[str, Any]]:
+        """Fetch, filter, compress, and namespace tools for one backend."""
         if backend.is_internal:
             raw_tools = await list_internal_tools()
         else:

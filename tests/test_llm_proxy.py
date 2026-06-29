@@ -84,62 +84,55 @@ class TestLlmProviderModel:
 
 
 class TestLoadLlmProviders:
-    """Provider loading from config dict."""
+    """Provider loading from the llm_providers config section."""
 
-    def test_no_section_returns_empty(self) -> None:
+    def test_empty_section_returns_empty(self) -> None:
         assert load_llm_providers({}) == {}
-        assert load_llm_providers({"other": "stuff"}) == {}
 
     def test_disabled_provider_skipped(self) -> None:
-        config: dict[str, Any] = {
-            "llm_providers": {
-                "anthropic": {
-                    "enabled": False,
-                    "upstream": "https://api.anthropic.com",
-                    "auth_header": "x-api-key",
-                    "api_key_env": "ANTHROPIC_API_KEY",
-                }
+        section: dict[str, Any] = {
+            "anthropic": {
+                "enabled": False,
+                "upstream": "https://api.anthropic.com",
+                "auth_header": "x-api-key",
+                "api_key_env": "ANTHROPIC_API_KEY",
             }
         }
-        assert load_llm_providers(config) == {}
+        assert load_llm_providers(section) == {}
 
     def test_missing_api_key_env_fails_closed(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.delenv("MISSING_KEY_FOR_TEST", raising=False)
-        config: dict[str, Any] = {
-            "llm_providers": {
-                "test": {
-                    "enabled": True,
-                    "upstream": "https://example.com",
-                    "auth_header": "Authorization",
-                    "api_key_env": "MISSING_KEY_FOR_TEST",
-                }
+        section: dict[str, Any] = {
+            "test": {
+                "enabled": True,
+                "upstream": "https://example.com",
+                "auth_header": "Authorization",
+                "api_key_env": "MISSING_KEY_FOR_TEST",
             }
         }
         with pytest.raises(ProfileConfigError, match="not set or empty"):
-            load_llm_providers(config)
+            load_llm_providers(section)
 
     def test_valid_provider_loaded(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("TEST_LLM_KEY", "sk-test")
-        config: dict[str, Any] = {
-            "llm_providers": {
-                "openai": {
-                    "enabled": True,
-                    "upstream": "https://api.openai.com",
-                    "auth_header": "Authorization",
-                    "auth_prefix": "Bearer ",
-                    "api_key_env": "TEST_LLM_KEY",
-                }
+        section: dict[str, Any] = {
+            "openai": {
+                "enabled": True,
+                "upstream": "https://api.openai.com",
+                "auth_header": "Authorization",
+                "auth_prefix": "Bearer ",
+                "api_key_env": "TEST_LLM_KEY",
             }
         }
-        providers = load_llm_providers(config)
+        providers = load_llm_providers(section)
         assert "openai" in providers
         assert providers["openai"].api_key.get_secret_value() == "sk-test"
 
     def test_non_dict_entry_raises(self) -> None:
-        config: dict[str, Any] = {"llm_providers": {"bad": "not-a-dict"}}
+        section: dict[str, Any] = {"bad": "not-a-dict"}
         with pytest.raises(ProfileConfigError, match="must be a mapping"):
-            load_llm_providers(config)
+            load_llm_providers(section)
