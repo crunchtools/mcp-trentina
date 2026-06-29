@@ -119,6 +119,9 @@ async def _call_gemini(
     Delegates to the pluggable provider driver (Gemini, OpenAI, Anthropic,
     or Ollama). Canary injection, quarantine enforcement, and response
     parsing stay here — the provider only handles the HTTP call.
+
+    Args:
+        provider_name: LLM provider override (default: global config).
     """
     canary = _generate_canary()
     prompted = _inject_canary(system_prompt, canary)
@@ -165,6 +168,9 @@ async def quarantine_extract(
     Post-extraction: runs extracted_text through Layer 1 sanitize_text()
     to strip any injection patterns the Q-Agent may have been tricked
     into embedding in its output.
+
+    Args:
+        provider_name: LLM provider override (default: global config).
     """
     try:
         parsed, _canary = await _call_gemini(
