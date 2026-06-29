@@ -146,7 +146,7 @@ justification = "classifier_result dict values are typed as Any — float() cast
 
 [[exceptions]]
 check = "generic_names"
-path = "cockpit-trentina/airlock.js"
+path = "cockpit-trentina/trentina.js"
 pattern = "data"
 justification = "D-Bus signal/callback handlers receive a generic payload object — 'data' is the Cockpit D-Bus API convention for response payloads"
 
@@ -157,49 +157,49 @@ justification = "D-Bus signal/callback handlers receive a generic payload object
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-trentina/airlock.js"
+path = "cockpit-trentina/trentina.js"
 pattern = "formatTime"
 justification = "UI display helper — semantic name clarifies intent in single-file Cockpit plugin"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-trentina/airlock.js"
+path = "cockpit-trentina/trentina.js"
 pattern = "truncateSource"
 justification = "UI display helper — semantic name clarifies intent in single-file Cockpit plugin"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-trentina/airlock.js"
+path = "cockpit-trentina/trentina.js"
 pattern = "scoreBar"
 justification = "UI display helper — generates HTML for L2 classifier score visualization"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-trentina/airlock.js"
+path = "cockpit-trentina/trentina.js"
 pattern = "renderPage"
 justification = "UI lifecycle function — builds the initial DOM structure for the Cockpit panel"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-trentina/airlock.js"
+path = "cockpit-trentina/trentina.js"
 pattern = "renderDetail"
 justification = "UI lifecycle function — populates pipeline detail card on event selection"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-trentina/airlock.js"
+path = "cockpit-trentina/trentina.js"
 pattern = "setupSignals"
 justification = "UI lifecycle function — registers D-Bus signal listeners for live event streaming"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-trentina/airlock.js"
+path = "cockpit-trentina/trentina.js"
 pattern = "showDetectionAlert"
 justification = "UI lifecycle function — creates and auto-dismisses PatternFly alert banners for injection detections"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "cockpit-trentina/airlock.js"
+path = "cockpit-trentina/trentina.js"
 pattern = "init"
 justification = "UI lifecycle function — entry point that orchestrates page render, D-Bus connection, and signal setup"
 
@@ -226,3 +226,15 @@ check = "lint_suppression"
 path = "src/mcp_trentina_crunchtools/gateway/app.py"
 pattern = "type: ignore"
 justification = "FastMCP's custom_route decorator has no type stubs; the [misc] ignore is the standard pattern for typed code calling into untyped framework APIs"
+
+[[exceptions]]
+check = "summary_litter"
+path = "deprecation/README.md"
+pattern = "README.md"
+justification = "PyPI requires README.md in the deprecation shim package — it tells users the package was renamed to mcp-trentina-crunchtools"
+
+[[exceptions]]
+check = "lint_suppression"
+path = "deprecation/src/mcp_airlock_crunchtools/__init__.py"
+pattern = "noqa: F401,F403"
+justification = "Wildcard re-export is the entire purpose of the deprecation shim — it forwards all public names from the renamed package"

@@ -29,6 +29,8 @@ from starlette.responses import Response, StreamingResponse
 from .errors import ProfileConfigError
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
@@ -140,11 +142,12 @@ def register_llm_routes(
     if not providers:
         return
 
-    @mcp_server.custom_route(  # type: ignore[untyped-decorator]
-        "/llm/{provider}/{path:path}", methods=_LLM_METHODS,
-    )
     async def llm_proxy_endpoint(request: Request) -> Response:
         return await _proxy_llm(request, providers)
+
+    mcp_server.custom_route(
+        "/llm/{provider}/{path:path}", methods=_LLM_METHODS,
+    )(llm_proxy_endpoint)
 
     logger.info(
         "llm_proxy: registered /llm/{provider}/{path} "
@@ -220,7 +223,7 @@ def _streaming_response(resp: httpx.Response) -> StreamingResponse:
         if k.lower() not in _STRIP_RESPONSE_HEADERS
     }
 
-    async def body():  # type: ignore[no-untyped-def]
+    async def stream_body() -> AsyncIterator[bytes]:
         try:
             async for chunk in resp.aiter_bytes():
                 yield chunk
@@ -229,6 +232,6 @@ def _streaming_response(resp: httpx.Response) -> StreamingResponse:
 
     ct = resp.headers.get("content-type", "application/json")
     return StreamingResponse(
-        body(), status_code=resp.status_code,
+        stream_body(), status_code=resp.status_code,
         headers=resp_headers, media_type=ct,
     )
