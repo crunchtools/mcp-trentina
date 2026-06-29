@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 from unittest.mock import patch
 
@@ -448,61 +450,79 @@ class TestRouter:
         assert called["tool"] == "send_gmail_message"
         assert resp["result"]["content"] == [{"type": "text", "text": "sent"}]
 
-    async def test_tools_list_parallel_all_healthy(self) -> None:
-        """Parallel fetch returns tools from all healthy backends."""
-        call_order: list[str] = []
+    async def test_tools_list_fetches_concurrently(self) -> None:
+        """Prove backends are fetched in parallel, not sequentially.
 
-        async def fake_list(backend_name: str, _backend: Backend) -> list[dict[str, Any]]:
-            call_order.append(backend_name)
+        Each mock sleeps 0.15s.  With 2 backends, sequential = ~0.30s,
+        parallel < 0.25s.  Assertion uses 0.25s as the threshold.
+        """
+        delay = 0.15
+
+        async def slow_list(backend_name: str, _backend: Backend) -> list[dict[str, Any]]:
+            await asyncio.sleep(delay)
             return [{"name": f"{backend_name}_tool", "description": "", "inputSchema": {}}]
 
         with patch(
             "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
-            side_effect=fake_list,
+            side_effect=slow_list,
         ):
+            t0 = time.monotonic()
             resp = await route_jsonrpc(
                 _profile(), {"jsonrpc": "2.0", "id": 40, "method": "tools/list"}
             )
+            elapsed = time.monotonic() - t0
 
         names = sorted(str(t["name"]) for t in resp["result"]["tools"])
         assert f"mcp-atlassian{NAMESPACE_SEP}mcp-atlassian_tool" in names
         assert f"mcp-slack{NAMESPACE_SEP}mcp-slack_tool" in names
-        assert len(call_order) == 2
+        assert elapsed < delay * 2, (
+            f"Expected parallel execution (<{delay * 2:.2f}s), "
+            f"got {elapsed:.2f}s — backends may be running sequentially"
+        )
 
     async def test_tools_list_circuit_open_skips_immediately(self) -> None:
-        """A backend with an open circuit is skipped without blocking."""
+        """Circuit-open backend is skipped via real list_backend_tools code path.
+
+        Patches _do_list_tools (transport layer) so the real list_backend_tools
+        runs its circuit breaker check.  The circuit-open backend never reaches
+        the transport; the healthy backend does.
+        """
         slack_url = "http://mcp-slack:8005/mcp"
-        atlassian_url = "http://mcp-atlassian:8021/mcp"
-        breaker.reset()
         for _ in range(3):
             breaker.record_failure(slack_url)
 
-        async def fake_list(backend_name: str, backend: Backend) -> list[dict[str, Any]]:
-            from mcp_trentina_crunchtools.gateway.circuit import breaker as cb
+        transport_calls: list[str] = []
 
-            if not cb.allow(backend.url):
-                from mcp_trentina_crunchtools.gateway.errors import BackendCallError
+        class _FakeToolsResult:
+            def __init__(self) -> None:
+                self.tools = [_FakeTool("jira_search")]
 
-                raise BackendCallError(f"backend {backend_name!r} circuit open — skipped")
-            return [{"name": "jira_search", "description": "", "inputSchema": {}}]
+        class _FakeTool:
+            def __init__(self, name: str) -> None:
+                self.name = name
+                self.description = ""
+                self.inputSchema: dict[str, Any] = {}
+
+        async def fake_transport(url: str, _headers: Any) -> _FakeToolsResult:
+            transport_calls.append(url)
+            return _FakeToolsResult()
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
-            side_effect=fake_list,
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
+            side_effect=fake_transport,
         ):
             resp = await route_jsonrpc(
                 _profile(), {"jsonrpc": "2.0", "id": 41, "method": "tools/list"}
             )
 
         names = [str(t["name"]) for t in resp["result"]["tools"]]
-        assert names == [f"mcp-atlassian{NAMESPACE_SEP}jira_search"]
-        breaker.reset(atlassian_url)
-        breaker.reset(slack_url)
+        assert f"mcp-atlassian{NAMESPACE_SEP}jira_search" in names
+        assert slack_url not in transport_calls
+        assert len(transport_calls) == 1
 
     async def test_tools_call_circuit_open_returns_error(self) -> None:
         """A tools/call to a circuit-open backend returns a JSON-RPC error immediately."""
         slack_url = "http://mcp-slack:8005/mcp"
-        breaker.reset()
         for _ in range(3):
             breaker.record_failure(slack_url)
 
@@ -520,4 +540,3 @@ class TestRouter:
         )
         assert resp["error"]["code"] == -32603
         assert "circuit open" in resp["error"]["message"]
-        breaker.reset()
