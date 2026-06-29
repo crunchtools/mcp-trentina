@@ -7,9 +7,9 @@ import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
+from mcp_trentina_crunchtools.errors import QuarantineAgentError
 from mcp_trentina_crunchtools.gateway import compress as compress_mod
 from mcp_trentina_crunchtools.gateway.compress import (
     _cache,
@@ -20,6 +20,7 @@ from mcp_trentina_crunchtools.gateway.compress import (
     maybe_trigger_compression,
     set_profiles,
 )
+from mcp_trentina_crunchtools.quarantine.providers.base import ProviderResult
 
 
 def _tool(name: str, description: str, schema: dict | None = None) -> dict[str, Any]:
@@ -163,63 +164,40 @@ class TestDatabaseRoundTrip:
 
 
 class TestCallCompressModel:
-    """Test the Gemini API call with mocked httpx."""
+    """Test the provider-based compression call."""
 
     @pytest.mark.asyncio
     async def test_successful_compression(self) -> None:
-        mock_response = {
-            "candidates": [{
-                "content": {
-                    "parts": [{"text": json.dumps({
-                        "compressed": [
-                            {"id": "abc123", "text": "Short description."},
-                        ]
-                    })}]
-                }
-            }]
-        }
-
-        with patch("mcp_trentina_crunchtools.gateway.compress.get_config") as mock_config:
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-
-            with patch("mcp_trentina_crunchtools.gateway.compress.httpx") as mock_httpx:
-                mock_resp = MagicMock()
-                mock_resp.json.return_value = mock_response
-                mock_resp.raise_for_status.return_value = None
-
-                mock_client = AsyncMock()
-                mock_client.post.return_value = mock_resp
-
-                mock_httpx.AsyncClient.return_value.__aenter__.return_value = mock_client
-                mock_httpx.Timeout = httpx.Timeout
-
-                result = await _call_compress_model([("abc123", "Long verbose description")])
-
+        compressed_json = json.dumps({
+            "compressed": [{"id": "abc123", "text": "Short description."}]
+        })
+        mock_prov = MagicMock()
+        mock_prov.generate = AsyncMock(
+            return_value=ProviderResult(
+                text=compressed_json, input_tokens=10, output_tokens=5,
+            )
+        )
+        with patch(
+            "mcp_trentina_crunchtools.gateway.compress.get_provider",
+            return_value=mock_prov,
+        ):
+            result = await _call_compress_model(
+                [("abc123", "Long verbose description")],
+            )
         assert len(result) == 1
         assert result[0] == ("abc123", "Short description.")
 
     @pytest.mark.asyncio
-    async def test_no_api_key_returns_empty(self) -> None:
-        with patch("mcp_trentina_crunchtools.gateway.compress.get_config") as mock_config:
-            mock_config.return_value.has_api_key = False
+    async def test_provider_failure_returns_empty(self) -> None:
+        mock_prov = MagicMock()
+        mock_prov.generate = AsyncMock(
+            side_effect=QuarantineAgentError("provider error"),
+        )
+        with patch(
+            "mcp_trentina_crunchtools.gateway.compress.get_provider",
+            return_value=mock_prov,
+        ):
             result = await _call_compress_model([("h1", "desc")])
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_api_failure_returns_empty(self) -> None:
-        with patch("mcp_trentina_crunchtools.gateway.compress.get_config") as mock_config:
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "key"
-
-            with patch("mcp_trentina_crunchtools.gateway.compress.httpx.AsyncClient") as mock_cls:
-                mock_client = AsyncMock()
-                mock_client.post.side_effect = httpx.HTTPError("timeout")
-                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client.__aexit__ = AsyncMock(return_value=False)
-                mock_cls.return_value = mock_client
-
-                result = await _call_compress_model([("h1", "desc")])
         assert result == []
 
 
@@ -347,118 +325,81 @@ class TestMaybeTriggerCompression:
 
 
 class TestRetryLogic:
-    """Tests for Gemini API retry on 429/503."""
+    """Tests for provider retry on transient errors."""
 
-    def _gemini_response(self, items: list[tuple[str, str]]) -> dict[str, Any]:
-        compressed = [{"id": h, "text": text} for h, text in items]
-        return {
-            "candidates": [{
-                "content": {
-                    "parts": [{"text": json.dumps({"compressed": compressed})}]
-                }
-            }]
-        }
+    def _success_result(self) -> ProviderResult:
+        compressed_json = json.dumps({
+            "compressed": [{"id": "h1", "text": "Short."}]
+        })
+        return ProviderResult(text=compressed_json, input_tokens=10, output_tokens=5)
 
     @pytest.mark.asyncio
     async def test_retries_on_503(self) -> None:
-        success_resp = MagicMock()
-        success_resp.json.return_value = self._gemini_response([("h1", "Short.")])
-        success_resp.raise_for_status.return_value = None
-
-        error_resp = MagicMock()
-        error_resp.status_code = 503
-        error_503 = httpx.HTTPStatusError("503", request=MagicMock(), response=error_resp)
-
-        with patch("mcp_trentina_crunchtools.gateway.compress.get_config") as mock_config:
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "key"
-
-            with patch("mcp_trentina_crunchtools.gateway.compress.httpx") as mock_httpx:
-                mock_client = AsyncMock()
-                mock_client.post.side_effect = [error_503, success_resp]
-
-                mock_httpx.AsyncClient.return_value.__aenter__.return_value = mock_client
-                mock_httpx.Timeout = httpx.Timeout
-                mock_httpx.HTTPStatusError = httpx.HTTPStatusError
-
-                with patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01):
-                    result = await _call_compress_model([("h1", "Long description")])
-
+        mock_prov = MagicMock()
+        mock_prov.generate = AsyncMock(
+            side_effect=[
+                QuarantineAgentError("HTTP 503"),
+                self._success_result(),
+            ]
+        )
+        with (
+            patch(
+                "mcp_trentina_crunchtools.gateway.compress.get_provider",
+                return_value=mock_prov,
+            ),
+            patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01),
+        ):
+            result = await _call_compress_model([("h1", "Long description")])
         assert len(result) == 1
-        assert result[0] == ("h1", "Short.")
-        assert mock_client.post.call_count == 2
+        assert mock_prov.generate.call_count == 2
 
     @pytest.mark.asyncio
     async def test_retries_on_429(self) -> None:
-        success_resp = MagicMock()
-        success_resp.json.return_value = self._gemini_response([("h1", "Short.")])
-        success_resp.raise_for_status.return_value = None
-
-        error_resp = MagicMock()
-        error_resp.status_code = 429
-        error_429 = httpx.HTTPStatusError("429", request=MagicMock(), response=error_resp)
-
-        with patch("mcp_trentina_crunchtools.gateway.compress.get_config") as mock_config:
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "key"
-
-            with patch("mcp_trentina_crunchtools.gateway.compress.httpx") as mock_httpx:
-                mock_client = AsyncMock()
-                mock_client.post.side_effect = [error_429, success_resp]
-
-                mock_httpx.AsyncClient.return_value.__aenter__.return_value = mock_client
-                mock_httpx.Timeout = httpx.Timeout
-                mock_httpx.HTTPStatusError = httpx.HTTPStatusError
-
-                with patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01):
-                    result = await _call_compress_model([("h1", "Long description")])
-
+        mock_prov = MagicMock()
+        mock_prov.generate = AsyncMock(
+            side_effect=[
+                QuarantineAgentError("HTTP 429"),
+                self._success_result(),
+            ]
+        )
+        with (
+            patch(
+                "mcp_trentina_crunchtools.gateway.compress.get_provider",
+                return_value=mock_prov,
+            ),
+            patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01),
+        ):
+            result = await _call_compress_model([("h1", "Long description")])
         assert len(result) == 1
-        assert mock_client.post.call_count == 2
+        assert mock_prov.generate.call_count == 2
 
     @pytest.mark.asyncio
     async def test_gives_up_after_max_retries(self) -> None:
-        error_resp = MagicMock()
-        error_resp.status_code = 503
-        error_503 = httpx.HTTPStatusError("503", request=MagicMock(), response=error_resp)
-
-        with patch("mcp_trentina_crunchtools.gateway.compress.get_config") as mock_config:
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "key"
-
-            with patch("mcp_trentina_crunchtools.gateway.compress.httpx") as mock_httpx:
-                mock_client = AsyncMock()
-                mock_client.post.side_effect = error_503
-
-                mock_httpx.AsyncClient.return_value.__aenter__.return_value = mock_client
-                mock_httpx.Timeout = httpx.Timeout
-                mock_httpx.HTTPStatusError = httpx.HTTPStatusError
-
-                with patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01):
-                    result = await _call_compress_model([("h1", "desc")])
-
+        mock_prov = MagicMock()
+        mock_prov.generate = AsyncMock(
+            side_effect=QuarantineAgentError("HTTP 503"),
+        )
+        with (
+            patch(
+                "mcp_trentina_crunchtools.gateway.compress.get_provider",
+                return_value=mock_prov,
+            ),
+            patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01),
+        ):
+            result = await _call_compress_model([("h1", "desc")])
         assert result == []
-        assert mock_client.post.call_count == 3
+        assert mock_prov.generate.call_count == 3
 
     @pytest.mark.asyncio
     async def test_no_retry_on_400(self) -> None:
-        error_resp = MagicMock()
-        error_resp.status_code = 400
-        error_400 = httpx.HTTPStatusError("400", request=MagicMock(), response=error_resp)
-
-        with patch("mcp_trentina_crunchtools.gateway.compress.get_config") as mock_config:
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "key"
-
-            with patch("mcp_trentina_crunchtools.gateway.compress.httpx") as mock_httpx:
-                mock_client = AsyncMock()
-                mock_client.post.side_effect = error_400
-
-                mock_httpx.AsyncClient.return_value.__aenter__.return_value = mock_client
-                mock_httpx.Timeout = httpx.Timeout
-                mock_httpx.HTTPStatusError = httpx.HTTPStatusError
-
-                result = await _call_compress_model([("h1", "desc")])
-
+        mock_prov = MagicMock()
+        mock_prov.generate = AsyncMock(
+            side_effect=QuarantineAgentError("HTTP 400"),
+        )
+        with patch(
+            "mcp_trentina_crunchtools.gateway.compress.get_provider",
+            return_value=mock_prov,
+        ):
+            result = await _call_compress_model([("h1", "desc")])
         assert result == []
-        assert mock_client.post.call_count == 1
+        assert mock_prov.generate.call_count == 1

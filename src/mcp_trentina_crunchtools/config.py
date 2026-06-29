@@ -12,6 +12,7 @@ from pydantic import SecretStr
 
 _config: Config | None = None
 
+DEFAULT_PROVIDER = "gemini"
 DEFAULT_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_SEARCH_MODEL = "gemini-2.5-flash"
 DEFAULT_FALLBACK = "layer1"
@@ -19,6 +20,9 @@ DEFAULT_MAX_CONTENT = 100_000
 DEFAULT_DB_PATH = "/data/trentina.db"
 DEFAULT_CLASSIFIER_THRESHOLD = 0.5
 DEFAULT_CLASSIFIER_MODEL_PATH = "/models/prompt-guard-2-86m"
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_OLLAMA_MODEL = "qwen2.5:0.5b"
+SUPPORTED_PROVIDERS = ("gemini", "openai", "anthropic", "ollama")
 
 
 class Config:
@@ -29,8 +33,19 @@ class Config:
     """
 
     def __init__(self) -> None:
+        self.provider: str = os.environ.get(
+            "TRENTINA_MODEL_PROVIDER", DEFAULT_PROVIDER,
+        )
+
         raw_key = os.environ.get("GEMINI_API_KEY", "")
         self.api_key: SecretStr = SecretStr(raw_key) if raw_key else SecretStr("")
+        self.openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
+        self.anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
+        self.ollama_base_url: str = os.environ.get(
+            "OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL,
+        )
+        self.ollama_model: str = os.environ.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
+
         self.model: str = os.environ.get("QUARANTINE_MODEL", DEFAULT_MODEL)
         self.search_model: str = os.environ.get(
             "QUARANTINE_SEARCH_MODEL", DEFAULT_SEARCH_MODEL
