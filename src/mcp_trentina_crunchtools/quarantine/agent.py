@@ -112,6 +112,7 @@ async def _call_gemini(
     system_prompt: str,
     response_schema: dict[str, Any],
     user_prompt: str | None = None,
+    provider_name: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Call the configured LLM provider and return parsed JSON response and canary.
 
@@ -126,7 +127,7 @@ async def _call_gemini(
     if user_prompt:
         user_text = f"{user_prompt}\n\n---\n\n{content}"
 
-    provider = get_provider()
+    provider = get_provider(provider_name)
     provider_result = await provider.generate(
         system_prompt=prompted,
         user_content=user_text,
@@ -154,7 +155,11 @@ async def _call_gemini(
     return parsed, canary
 
 
-async def quarantine_extract(content: str, prompt: str) -> dict[str, Any]:
+async def quarantine_extract(
+    content: str,
+    prompt: str,
+    provider_name: str | None = None,
+) -> dict[str, Any]:
     """Run Q-Agent in extraction mode. Returns structured content.
 
     Post-extraction: runs extracted_text through Layer 1 sanitize_text()
@@ -167,6 +172,7 @@ async def quarantine_extract(content: str, prompt: str) -> dict[str, Any]:
             system_prompt=EXTRACTION_SYSTEM_PROMPT,
             response_schema=EXTRACTION_RESPONSE_SCHEMA,
             user_prompt=prompt,
+            provider_name=provider_name,
         )
     except QuarantineAgentError:
         config = get_config()
@@ -208,6 +214,7 @@ async def quarantine_extract(content: str, prompt: str) -> dict[str, Any]:
 async def quarantine_detect(
     content: str,
     layer1_context: str | None = None,
+    provider_name: str | None = None,
 ) -> dict[str, Any]:
     """Run Q-Agent in detection-only mode. Returns threat assessment.
 
@@ -216,6 +223,7 @@ async def quarantine_detect(
         layer1_context: Optional Layer 1 stats summary to prepend to
             the content, giving the Q-Agent context about what was
             already detected by deterministic scanning.
+        provider_name: LLM provider override (default: global config).
     """
     scan_content = content
     if layer1_context:
@@ -226,6 +234,7 @@ async def quarantine_detect(
             content=scan_content,
             system_prompt=DETECTION_SYSTEM_PROMPT,
             response_schema=DETECTION_RESPONSE_SCHEMA,
+            provider_name=provider_name,
         )
     except QuarantineAgentError as exc:
         logger.warning("Q-Agent detection failed: %s", exc)

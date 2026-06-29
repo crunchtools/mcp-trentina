@@ -15,6 +15,8 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from ..config import SUPPORTED_PROVIDERS
+
 PROFILE_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 BACKEND_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 GLOB_PATTERN_RE = re.compile(r"^[a-zA-Z0-9_*][a-zA-Z0-9_*-]*$")
@@ -192,6 +194,23 @@ class DefenseConfig(BaseModel):
         description="L2 score above which to trigger L3 (when quarantine=true)",
     )
     audit: bool = Field(default=True, description="Write passthrough rows to SQLite")
+    provider: str | None = Field(
+        default=None,
+        description=(
+            "LLM provider override for this profile "
+            "(falls back to TRENTINA_MODEL_PROVIDER)"
+        ),
+    )
+
+    @field_validator("provider")
+    @classmethod
+    def provider_is_supported(cls, v: str | None) -> str | None:
+        """If set, must be a known provider name."""
+        if v is not None and v not in SUPPORTED_PROVIDERS:
+            raise ValueError(
+                f"Unknown provider {v!r}. Supported: {', '.join(SUPPORTED_PROVIDERS)}"
+            )
+        return v
 
 
 class Profile(BaseModel):
