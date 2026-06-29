@@ -18,6 +18,8 @@ import httpx
 from starlette.responses import Response, StreamingResponse
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
@@ -62,11 +64,12 @@ def register_matrix_routes(
         )
     upstream = upstream.rstrip("/")
 
-    @mcp_server.custom_route(  # type: ignore[untyped-decorator]
-        "/matrix/{path:path}", methods=_MATRIX_METHODS,
-    )
     async def matrix_proxy_endpoint(request: Request) -> Response:
         return await _proxy_matrix(request, upstream)
+
+    mcp_server.custom_route(
+        "/matrix/{path:path}", methods=_MATRIX_METHODS,
+    )(matrix_proxy_endpoint)
 
     logger.info(
         "matrix_proxy: registered /matrix/{path} → %s", upstream,
@@ -114,7 +117,7 @@ async def _proxy_matrix(request: Request, upstream: str) -> Response:
         if k.lower() not in _STRIP_RESPONSE_HEADERS
     }
 
-    async def body_stream():  # type: ignore[no-untyped-def]
+    async def stream_body() -> AsyncIterator[bytes]:
         try:
             async for chunk in resp.aiter_bytes():
                 yield chunk
@@ -123,6 +126,6 @@ async def _proxy_matrix(request: Request, upstream: str) -> Response:
 
     ct = resp.headers.get("content-type", "application/json")
     return StreamingResponse(
-        body_stream(), status_code=resp.status_code,
+        stream_body(), status_code=resp.status_code,
         headers=resp_headers, media_type=ct,
     )

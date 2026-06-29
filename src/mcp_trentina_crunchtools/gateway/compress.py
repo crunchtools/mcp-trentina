@@ -114,21 +114,21 @@ def compress_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not _cache:
         return tools
 
-    result: list[dict[str, Any]] = []
+    compressed_tools: list[dict[str, Any]] = []
     for tool in tools:
         desc = tool.get("description", "")
         if not desc:
-            result.append(tool)
+            compressed_tools.append(tool)
             continue
         h = _hash_description(desc)
         compressed = _cache.get(h)
         if compressed is not None:
             tool_copy = dict(tool)
             tool_copy["description"] = compressed
-            result.append(tool_copy)
+            compressed_tools.append(tool_copy)
         else:
-            result.append(tool)
-    return result
+            compressed_tools.append(tool)
+    return compressed_tools
 
 
 async def precompress_all(
@@ -295,10 +295,10 @@ async def _call_compress_model(
     return []
 
 
-def _parse_compress_response(data: dict[str, Any]) -> list[tuple[str, str]]:
+def _parse_compress_response(gemini_response: dict[str, Any]) -> list[tuple[str, str]]:
     """Extract compressed descriptions from a Gemini API response."""
     try:
-        candidates = data.get("candidates", [])
+        candidates = gemini_response.get("candidates", [])
         if not candidates:
             logger.warning("compress: Gemini returned no candidates")
             return []
