@@ -236,3 +236,39 @@ class TestGetProviderFactory:
         with pytest.raises(QuarantineAgentError, match="OPENAI_API_KEY"):
             get_provider()
         config_mod._config = None
+
+    def test_explicit_provider_name_overrides_global(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "gemini")
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        from mcp_trentina_crunchtools import config as config_mod
+        config_mod._config = None
+        default_provider = get_provider()
+        assert isinstance(default_provider, GeminiProvider)
+        override_provider = get_provider("openai")
+        assert isinstance(override_provider, OpenAIProvider)
+        config_mod._config = None
+
+    def test_per_name_caching(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        from mcp_trentina_crunchtools import config as config_mod
+        config_mod._config = None
+        p1 = get_provider("gemini")
+        p2 = get_provider("gemini")
+        assert p1 is p2
+        p3 = get_provider("openai")
+        assert p3 is not p1
+        assert isinstance(p3, OpenAIProvider)
+        config_mod._config = None
+
+    def test_none_falls_back_to_global(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "gemini")
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        from mcp_trentina_crunchtools import config as config_mod
+        config_mod._config = None
+        p = get_provider(None)
+        assert isinstance(p, GeminiProvider)
+        config_mod._config = None

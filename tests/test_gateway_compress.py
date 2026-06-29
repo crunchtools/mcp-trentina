@@ -324,6 +324,48 @@ class TestMaybeTriggerCompression:
         assert compress_mod._compress_triggered is True
 
 
+class TestProviderOverride:
+    """Test that per-profile provider is threaded through compression."""
+
+    @pytest.mark.asyncio
+    async def test_call_compress_model_passes_provider_name(self) -> None:
+        compressed_json = json.dumps({
+            "compressed": [{"id": "abc", "text": "Short."}]
+        })
+        mock_prov = MagicMock()
+        mock_prov.generate = AsyncMock(
+            return_value=ProviderResult(
+                text=compressed_json, input_tokens=10, output_tokens=5,
+            )
+        )
+        with patch(
+            "mcp_trentina_crunchtools.gateway.compress.get_provider",
+            return_value=mock_prov,
+        ) as mock_get:
+            await _call_compress_model(
+                [("abc", "Long description")], provider_name="anthropic",
+            )
+        mock_get.assert_called_with("anthropic")
+
+    @pytest.mark.asyncio
+    async def test_call_compress_model_none_uses_default(self) -> None:
+        compressed_json = json.dumps({
+            "compressed": [{"id": "abc", "text": "Short."}]
+        })
+        mock_prov = MagicMock()
+        mock_prov.generate = AsyncMock(
+            return_value=ProviderResult(
+                text=compressed_json, input_tokens=10, output_tokens=5,
+            )
+        )
+        with patch(
+            "mcp_trentina_crunchtools.gateway.compress.get_provider",
+            return_value=mock_prov,
+        ) as mock_get:
+            await _call_compress_model([("abc", "Long description")])
+        mock_get.assert_called_with(None)
+
+
 class TestRetryLogic:
     """Tests for provider retry on transient errors."""
 

@@ -139,9 +139,10 @@ async def precompress_all(
     """Pre-compress descriptions for all compression-enabled backends.
 
     Best-effort: each backend is independent. A failure in one backend
-    does not affect others. Deduplicates by URL.
+    does not affect others. Deduplicates by URL. Uses the first profile's
+    defense.provider for each unique backend URL.
     """
-    seen_urls: set[str] = set()
+    seen_urls: dict[str, str | None] = {}
     stats: dict[str, int] = {}
 
     for profile in profiles.values():
@@ -152,10 +153,12 @@ async def precompress_all(
                 continue
             if backend.url in seen_urls:
                 continue
-            seen_urls.add(backend.url)
+            seen_urls[backend.url] = profile.defense.provider
 
             try:
-                count = await _precompress_backend(backend_name, backend)
+                count = await _precompress_backend(
+                    backend_name, backend, provider_name=profile.defense.provider,
+                )
                 stats[backend_name] = count
             except Exception:
                 logger.warning("compress: backend %s failed, skipping", backend_name)
@@ -190,7 +193,11 @@ def _store_result(batch: list[tuple[str, str]], h: str, compressed_text: str) ->
     return True
 
 
-async def _precompress_backend(backend_name: str, backend: Backend) -> int:
+async def _precompress_backend(
+    backend_name: str,
+    backend: Backend,
+    provider_name: str | None = None,
+) -> int:
     """Fetch tools from one backend, compress uncached descriptions."""
     from .backend import list_backend_tools
 
@@ -211,7 +218,7 @@ async def _precompress_backend(backend_name: str, backend: Backend) -> int:
         if i > 0:
             await asyncio.sleep(DELAY_BETWEEN_BATCHES)
         batch = uncached[i : i + BATCH_SIZE]
-        results = await _compress_batch_with_fallback(batch)
+        results = await _compress_batch_with_fallback(batch, provider_name=provider_name)
         for h, text in results:
             if _store_result(batch, h, text):
                 compressed_count += 1
@@ -223,9 +230,10 @@ async def _precompress_backend(backend_name: str, backend: Backend) -> int:
 
 async def _compress_batch_with_fallback(
     batch: list[tuple[str, str]],
+    provider_name: str | None = None,
 ) -> list[tuple[str, str]]:
     """Try batch compression, fall back to one-at-a-time on failure."""
-    results = await _call_compress_model(batch)
+    results = await _call_compress_model(batch, provider_name=provider_name)
     if results:
         return results
 
@@ -236,13 +244,14 @@ async def _compress_batch_with_fallback(
     all_results: list[tuple[str, str]] = []
     for item in batch:
         await asyncio.sleep(1)
-        single = await _call_compress_model([item])
+        single = await _call_compress_model([item], provider_name=provider_name)
         all_results.extend(single)
     return all_results
 
 
 async def _call_compress_model(
     items: list[tuple[str, str]],
+    provider_name: str | None = None,
 ) -> list[tuple[str, str]]:
     """Call the configured provider to compress a batch of descriptions.
 
@@ -255,7 +264,7 @@ async def _call_compress_model(
 
     for attempt in range(MAX_RETRIES):
         try:
-            provider = get_provider()
+            provider = get_provider(provider_name)
             provider_result = await provider.generate(
                 system_prompt=COMPRESS_SYSTEM_PROMPT,
                 user_content=user_content,
