@@ -100,8 +100,11 @@ Each profile configures its own defense pipeline:
 | `classify` | bool | `true` | Layer 2 — Prompt Guard 2 classifier |
 | `classify_threshold` | float | `0.5` | L2 confidence threshold (lower = more aggressive) |
 | `quarantine` | bool | `true` | Layer 3 — Q-Agent semantic analysis |
+| `provider` | string | `null` | LLM provider override (`gemini`, `openai`, `anthropic`, `ollama`) |
 
 An autonomous agent might set `classify_threshold: 0.3` (flag more aggressively) and `quarantine: false` (skip L3 to save tokens). A human-supervised agent can afford `quarantine: true` since L3 only fires when L2 flags something.
+
+The `provider` field lets each profile use a different LLM for L3 Q-Agent operations and tool description compression. When omitted, the profile uses the global `TRENTINA_MODEL_PROVIDER` environment variable. All provider API keys must be present in the environment regardless of which profiles use them.
 
 ## Backend Headers
 

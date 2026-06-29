@@ -166,6 +166,53 @@ class TestProfileModel:
         with pytest.raises(ValidationError):
             DefenseConfig(quarantine_threshold=-0.1)
 
+    def test_defense_provider_defaults_to_none(self) -> None:
+        d = DefenseConfig()
+        assert d.provider is None
+
+    def test_defense_provider_valid_values(self) -> None:
+        for name in ("gemini", "openai", "anthropic", "ollama"):
+            d = DefenseConfig(provider=name)
+            assert d.provider == name
+
+    def test_defense_provider_invalid_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="Unknown provider"):
+            DefenseConfig(provider="unsupported-llm")
+
+    def test_defense_provider_in_profile_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cfg = tmp_path / "profiles.yaml"
+        cfg.write_text(
+            """
+profiles:
+  josui:
+    auth:
+      bearer_token_env: TEST_TOK
+    defense:
+      provider: anthropic
+"""
+        )
+        monkeypatch.setenv("TEST_TOK", "x")
+        gateway_cfg = load_profiles(cfg)
+        assert gateway_cfg.profiles["josui"].defense.provider == "anthropic"
+
+    def test_defense_provider_omitted_in_yaml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cfg = tmp_path / "profiles.yaml"
+        cfg.write_text(
+            """
+profiles:
+  takeda:
+    auth:
+      bearer_token_env: TEST_TOK
+"""
+        )
+        monkeypatch.setenv("TEST_TOK", "x")
+        gateway_cfg = load_profiles(cfg)
+        assert gateway_cfg.profiles["takeda"].defense.provider is None
+
 
 class TestLoader:
     """End-to-end tests for the YAML profile loader."""
