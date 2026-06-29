@@ -48,12 +48,14 @@ class OpenAIProvider(Provider):
         }
 
         if response_schema is not None:
+            schema_copy = dict(response_schema)
+            schema_copy["additionalProperties"] = False
             request_body["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
                     "name": "response",
                     "strict": True,
-                    "schema": response_schema,
+                    "schema": schema_copy,
                 },
             }
 

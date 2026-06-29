@@ -75,7 +75,10 @@ class AnthropicProvider(Provider):
             if not content_blocks:
                 raise QuarantineAgentError("No content in Anthropic response")
 
-            text = content_blocks[0].get("text", "")
+            text = content_blocks[0].get("text", "").strip()
+            if text.startswith("```"):
+                lines = text.split("\n")
+                text = "\n".join(lines[1:-1]).strip()
             usage = resp_json.get("usage", {})
 
             return ProviderResult(
