@@ -14,6 +14,32 @@ OPENAI_TIMEOUT = 60.0
 DEFAULT_MODEL = "gpt-4o-mini"
 
 
+_UNSUPPORTED_KEYS = {"maxLength", "minLength", "minimum", "maximum", "multipleOf"}
+
+
+def _add_additional_properties(schema: dict[str, Any]) -> dict[str, Any]:
+    """Prepare a JSON Schema for OpenAI's strict mode.
+
+    Recursively adds additionalProperties: false to all object types and
+    strips constraints OpenAI doesn't support (maxLength, minimum, etc.).
+    """
+    import copy
+
+    schema = copy.deepcopy(schema)
+    for key in _UNSUPPORTED_KEYS:
+        schema.pop(key, None)
+    if schema.get("type") == "object":
+        schema["additionalProperties"] = False
+        props = schema.get("properties", {})
+        schema["required"] = list(props.keys())
+        for prop in props.values():
+            if isinstance(prop, dict):
+                prop.update(_add_additional_properties(prop))
+    if "items" in schema and isinstance(schema["items"], dict):
+        schema["items"] = _add_additional_properties(schema["items"])
+    return schema
+
+
 class OpenAIProvider(Provider):
     """OpenAI Chat Completions API provider using raw httpx."""
 
@@ -48,8 +74,7 @@ class OpenAIProvider(Provider):
         }
 
         if response_schema is not None:
-            schema_copy = dict(response_schema)
-            schema_copy["additionalProperties"] = False
+            schema_copy = _add_additional_properties(response_schema)
             request_body["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
