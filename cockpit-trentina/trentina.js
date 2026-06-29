@@ -97,8 +97,8 @@
         document.body.innerHTML = html;
     }
 
-    function renderLayerStatus(data) {
-        var layers = JSON.parse(data);
+    function renderLayerStatus(layer_json) {
+        var layers = JSON.parse(layer_json);
         var el = document.getElementById("layer-status-body");
         if (!el) return;
 
@@ -117,8 +117,8 @@
             '</dl>';
     }
 
-    function renderStats(data) {
-        var info = JSON.parse(data);
+    function renderStats(stats_json) {
+        var info = JSON.parse(stats_json);
         var el = document.getElementById("blocklist-body");
         if (!el) return;
 
@@ -171,8 +171,8 @@
             tbody.removeChild(tbody.lastChild);
     }
 
-    function renderRecentEvents(data) {
-        var events = JSON.parse(data);
+    function renderRecentEvents(events_json) {
+        var events = JSON.parse(events_json);
         for (var i = 0; i < events.length; i++) {
             addEventRow(events[i], false);
         }
