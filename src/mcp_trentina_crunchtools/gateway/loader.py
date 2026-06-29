@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,15 @@ from pydantic import SecretStr, ValidationError
 
 from .errors import ProfileConfigError
 from .profile import Profile
+
+
+@dataclass(frozen=True)
+class GatewayConfig:
+    """Parsed gateway configuration with typed accessors."""
+
+    profiles: dict[str, Profile]
+    llm_providers: dict[str, Any] = field(default_factory=dict)
+    matrix: dict[str, Any] = field(default_factory=dict)
 
 logger = logging.getLogger(__name__)
 
@@ -78,16 +88,11 @@ def _build_profile(name: str, body: Any) -> Profile:
     return profile
 
 
-def load_profiles(path: Path | str) -> tuple[dict[str, Profile], dict[str, Any]]:
-    """Load profile registry from YAML.
+def load_profiles(path: Path | str) -> GatewayConfig:
+    """Load gateway configuration from YAML.
 
-    Args:
-        path: Path to the profiles YAML file.
-
-    Returns:
-        Tuple of (profile registry, raw config dict).  The raw config is
-        returned so callers can access ``llm_providers`` and ``matrix``
-        sections without re-parsing.
+    Returns a ``GatewayConfig`` with typed accessors for profiles,
+    llm_providers, and matrix configuration sections.
 
     Raises:
         ProfileConfigError: file missing, YAML invalid, schema violated, or
@@ -127,4 +132,12 @@ def load_profiles(path: Path | str) -> tuple[dict[str, Profile], dict[str, Any]]
         len(registry),
         ", ".join(sorted(registry)),
     )
-    return registry, cfg_data
+
+    llm_section = cfg_data.get("llm_providers", {})
+    matrix_section = cfg_data.get("matrix", {})
+
+    return GatewayConfig(
+        profiles=registry,
+        llm_providers=llm_section if isinstance(llm_section, dict) else {},
+        matrix=matrix_section if isinstance(matrix_section, dict) else {},
+    )

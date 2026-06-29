@@ -17,6 +17,13 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from starlette.responses import Response, StreamingResponse
 
+from .proxy_utils import (
+    PLAIN_TEXT,
+    filter_response_headers,
+    forward_request_headers,
+    sanitize_proxy_path,
+)
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -30,19 +37,9 @@ _SYNC_TIMEOUT = httpx.Timeout(
     connect=10.0, read=120.0, write=10.0, pool=5.0,
 )
 
-_STRIP_REQUEST_HEADERS = frozenset({
-    "host", "content-length", "transfer-encoding", "connection",
-})
-
-_STRIP_RESPONSE_HEADERS = frozenset({
-    "content-encoding", "content-length", "transfer-encoding", "connection",
-})
-
-_MATRIX_METHODS = [
+MATRIX_HTTP_METHODS = [
     "GET", "POST", "PUT", "DELETE", "OPTIONS",
 ]
-
-_PLAIN = "text/plain"
 
 _matrix_client: httpx.AsyncClient | None = None
 
@@ -52,6 +49,14 @@ def _get_matrix_client() -> httpx.AsyncClient:
     if _matrix_client is None:
         _matrix_client = httpx.AsyncClient(timeout=_SYNC_TIMEOUT)
     return _matrix_client
+
+
+async def close_matrix_client() -> None:
+    """Close the Matrix proxy httpx client. Called on application shutdown."""
+    global _matrix_client
+    if _matrix_client is not None:
+        await _matrix_client.aclose()
+        _matrix_client = None
 
 
 def register_matrix_routes(
@@ -68,7 +73,7 @@ def register_matrix_routes(
         return await _proxy_matrix(request, upstream)
 
     mcp_server.custom_route(
-        "/matrix/{path:path}", methods=_MATRIX_METHODS,
+        "/matrix/{path:path}", methods=MATRIX_HTTP_METHODS,
     )(matrix_proxy_endpoint)
 
     logger.info(
@@ -78,17 +83,21 @@ def register_matrix_routes(
 
 async def _proxy_matrix(request: Request, upstream: str) -> Response:
     """Forward one Matrix Client-Server API request."""
-    path = request.path_params.get("path", "")
+    raw_path = request.path_params.get("path", "")
+    path = sanitize_proxy_path(raw_path)
+    if path is None:
+        return Response(
+            content="Path traversal rejected",
+            status_code=400, media_type=PLAIN_TEXT,
+        )
+
     upstream_url = f"{upstream}/{path}"
     if request.url.query:
         upstream_url = f"{upstream_url}?{request.url.query}"
 
-    fwd_headers: dict[str, str] = {
-        k: v for k, v in request.headers.items()
-        if k.lower() not in _STRIP_REQUEST_HEADERS
-    }
+    fwd_headers = forward_request_headers(list(request.headers.items()))
 
-    body = await request.body()
+    has_body = request.method in ("POST", "PUT", "PATCH")
     client = _get_matrix_client()
 
     try:
@@ -96,26 +105,23 @@ async def _proxy_matrix(request: Request, upstream: str) -> Response:
             client.build_request(
                 request.method, upstream_url,
                 headers=fwd_headers,
-                content=body if body else None,
+                content=request.stream() if has_body else None,
             ),
             stream=True,
         )
     except httpx.TimeoutException:
         return Response(
             content="Matrix upstream timeout",
-            status_code=504, media_type=_PLAIN,
+            status_code=504, media_type=PLAIN_TEXT,
         )
     except httpx.ConnectError as exc:
         logger.warning("matrix_proxy: connect error: %s", exc)
         return Response(
             content="Matrix upstream unreachable",
-            status_code=502, media_type=_PLAIN,
+            status_code=502, media_type=PLAIN_TEXT,
         )
 
-    resp_headers = {
-        k: v for k, v in resp.headers.items()
-        if k.lower() not in _STRIP_RESPONSE_HEADERS
-    }
+    resp_headers = filter_response_headers(list(resp.headers.items()))
 
     async def stream_body() -> AsyncIterator[bytes]:
         try:

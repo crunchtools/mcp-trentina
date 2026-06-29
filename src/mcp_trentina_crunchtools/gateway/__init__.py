@@ -24,7 +24,7 @@ from .internal import (
     list_internal_tools,
     register_internal_server,
 )
-from .loader import load_profiles
+from .loader import GatewayConfig, load_profiles
 from .profile import AuthConfig, Backend, DefenseConfig, ParameterConstraint, Profile
 from .router import route_jsonrpc
 
@@ -36,6 +36,7 @@ __all__ = [
     "CircuitBreaker",
     "DefenseConfig",
     "ParameterConstraint",
+    "GatewayConfig",
     "GatewayError",
     "Profile",
     "ProfileConfigError",

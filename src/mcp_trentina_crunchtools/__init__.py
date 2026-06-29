@@ -92,24 +92,25 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
         os.environ.get("TRENTINA_PROFILES_PATH", "/etc/trentina/profiles.yaml")
     )
     logger.info("gateway: loading profiles from %s", profiles_path)
-    registry, raw_config = load_profiles(profiles_path)
+    gateway_config = load_profiles(profiles_path)
 
     register_internal_server(mcp_server)
-    register_with_fastmcp(mcp_server, registry)
+    register_with_fastmcp(mcp_server, gateway_config.profiles)
     logger.info(
         "gateway: registered %d profile(s) at /gateway/<profile>/mcp",
-        len(registry),
+        len(gateway_config.profiles),
     )
 
-    llm_providers = load_llm_providers(raw_config)
+    llm_providers = load_llm_providers(gateway_config.llm_providers)
     register_llm_routes(mcp_server, llm_providers)
 
-    matrix_cfg = raw_config.get("matrix", {})
-    if isinstance(matrix_cfg, dict) and matrix_cfg.get("enabled"):
-        matrix_upstream = matrix_cfg.get("upstream", "https://matrix-client.matrix.org")
+    if gateway_config.matrix.get("enabled"):
+        matrix_upstream = gateway_config.matrix.get(
+            "upstream", "https://matrix-client.matrix.org",
+        )
         register_matrix_routes(mcp_server, upstream=matrix_upstream)
 
     load_compression_cache()
-    set_profiles(registry)
+    set_profiles(gateway_config.profiles)
 
     mcp_server.run(transport="streamable-http", host=host, port=port)
