@@ -54,6 +54,14 @@ def _get_matrix_client() -> httpx.AsyncClient:
     return _matrix_client
 
 
+async def close_matrix_client() -> None:
+    """Close the Matrix proxy httpx client. Called on application shutdown."""
+    global _matrix_client
+    if _matrix_client is not None:
+        await _matrix_client.aclose()
+        _matrix_client = None
+
+
 def register_matrix_routes(
     mcp_server: Any, *, upstream: str = _DEFAULT_UPSTREAM,
 ) -> None:
@@ -78,7 +86,16 @@ def register_matrix_routes(
 
 async def _proxy_matrix(request: Request, upstream: str) -> Response:
     """Forward one Matrix Client-Server API request."""
-    path = request.path_params.get("path", "")
+    from .llm_proxy import _sanitize_proxy_path
+
+    raw_path = request.path_params.get("path", "")
+    path = _sanitize_proxy_path(raw_path)
+    if path is None:
+        return Response(
+            content="Path traversal rejected",
+            status_code=400, media_type=_PLAIN,
+        )
+
     upstream_url = f"{upstream}/{path}"
     if request.url.query:
         upstream_url = f"{upstream_url}?{request.url.query}"

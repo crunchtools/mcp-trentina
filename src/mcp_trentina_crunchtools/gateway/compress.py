@@ -92,14 +92,22 @@ def set_profiles(profiles: dict[str, Profile]) -> None:
 
 
 async def maybe_trigger_compression() -> None:
-    """Trigger background compression once on the first call.
+    """Trigger background compression on the first call, retrying on failure.
 
-    Idempotent: subsequent calls return immediately.  The compression
-    task runs on the current event loop (the same one serving tools/list),
-    so streamablehttp_client works without thread gymnastics.
+    On success, subsequent calls return immediately. If the previous task
+    failed, allows re-triggering so transient errors don't permanently
+    disable compression.
     """
     global _compress_triggered, _compress_task
-    if _compress_triggered or _profiles is None:
+    if _profiles is None:
+        return
+    if _compress_task is not None and _compress_task.done() and _compress_task.exception():
+        logger.warning(
+            "compress: previous task failed: %s — allowing retry",
+            _compress_task.exception(),
+        )
+        _compress_triggered = False
+    if _compress_triggered:
         return
     _compress_triggered = True
     _compress_task = asyncio.create_task(precompress_all(_profiles))
