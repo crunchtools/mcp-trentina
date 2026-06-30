@@ -1,17 +1,17 @@
-"""Backend MCP connection management.
+"""Backend MCP connection management with connection pooling and tool list caching.
 
-Phase 1 opens a fresh `streamablehttp_client` session per call. No connection
-pooling — that arrives in Phase 2 as an optimization. Each call to a backend
-establishes its own MCP session, performs the requested op, and tears down.
-
-Simple lifecycle, visible chokepoint, easy to debug. Pool-sharing under load
-is the next step once Phase 1 architecture is proven.
+Maintains one persistent MCP session per backend URL (connection pool) and
+caches tool lists per URL with a configurable TTL. Cache misses use the
+pooled session; stale sessions are evicted and recreated transparently.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +26,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+BACKEND_CACHE_TTL: float = float(
+    os.environ.get("TRENTINA_BACKEND_CACHE_TTL", "90")
+)
+
 
 @dataclass(frozen=True)
 class BackendCall:
@@ -36,12 +40,96 @@ class BackendCall:
     structured_content: dict[str, Any] | None
 
 
-async def list_backend_tools(backend_name: str, backend: Backend) -> list[dict[str, Any]]:
+@dataclass
+class _PooledSession:
+    """A long-lived MCP session for one backend URL."""
+
+    session: ClientSession
+    exit_stack: contextlib.AsyncExitStack
+    created_at: float
+
+
+_session_pool: dict[str, _PooledSession] = {}
+
+
+async def _create_pooled_session(
+    url: str, headers: dict[str, str] | None,
+) -> _PooledSession:
+    """Open transport + ClientSession + initialize, store in pool."""
+    stack = contextlib.AsyncExitStack()
+    try:
+        read, write, _ = await stack.enter_async_context(
+            streamablehttp_client(url, headers=headers)
+        )
+        session = await stack.enter_async_context(
+            ClientSession(read, write)
+        )
+        await session.initialize()
+    except BaseException:
+        await stack.aclose()
+        raise
+    pooled = _PooledSession(
+        session=session, exit_stack=stack, created_at=time.monotonic(),
+    )
+    _session_pool[url] = pooled
+    logger.info("pool: created session for %s", url)
+    return pooled
+
+
+async def _get_or_create_session(
+    url: str, headers: dict[str, str] | None,
+) -> ClientSession:
+    """Return a pooled session, creating one if needed."""
+    pooled = _session_pool.get(url)
+    if pooled is not None:
+        return pooled.session
+    entry = await _create_pooled_session(url, headers)
+    return entry.session
+
+
+async def _evict_session(url: str) -> None:
+    """Close and remove a pooled session."""
+    pooled = _session_pool.pop(url, None)
+    if pooled is not None:
+        with contextlib.suppress(Exception):
+            await pooled.exit_stack.aclose()
+        logger.info("pool: evicted session for %s", url)
+
+
+async def shutdown_pool() -> None:
+    """Close all pooled sessions."""
+    urls = list(_session_pool.keys())
+    for url in urls:
+        await _evict_session(url)
+
+
+def reset_pool() -> None:
+    """Drop all pool references without async cleanup (for testing)."""
+    _session_pool.clear()
+
+
+@dataclass
+class _CachedToolList:
+    """Cached list_tools result for one backend URL."""
+
+    tools: list[dict[str, Any]]
+    cached_at: float
+
+
+_tool_list_cache: dict[str, _CachedToolList] = {}
+
+
+def reset_tool_list_cache() -> None:
+    """Clear the backend tool list cache (for testing)."""
+    _tool_list_cache.clear()
+
+
+async def list_backend_tools(
+    backend_name: str, backend: Backend,
+) -> list[dict[str, Any]]:
     """Fetch the tool list from one backend MCP server.
 
-    Returns the raw tool list as the backend reported it (no allowlist filtering
-    here — that's `filter.py`'s job). Tool names are NOT yet namespaced; the
-    caller does the `<backend>__<tool>` rewrite.
+    Checks the per-URL cache first. On miss, uses the connection pool.
 
     Raises:
         BackendCallError: connection failure, protocol error, timeout, or
@@ -51,6 +139,12 @@ async def list_backend_tools(backend_name: str, backend: Backend) -> list[dict[s
         raise BackendCallError(
             f"backend {backend_name!r} circuit open — skipped"
         )
+
+    cached = _tool_list_cache.get(backend.url)
+    if cached is not None:
+        age = time.monotonic() - cached.cached_at
+        if age < BACKEND_CACHE_TTL:
+            return cached.tools
 
     headers = backend.headers or None
     try:
@@ -71,7 +165,11 @@ async def list_backend_tools(backend_name: str, backend: Backend) -> list[dict[s
         ) from exc
 
     breaker.record_success(backend.url)
-    return [_serialize_tool(tool) for tool in tools_result.tools]
+    tools = [_serialize_tool(tool) for tool in tools_result.tools]
+    _tool_list_cache[backend.url] = _CachedToolList(
+        tools=tools, cached_at=time.monotonic(),
+    )
+    return tools
 
 
 async def call_backend_tool(
@@ -81,9 +179,6 @@ async def call_backend_tool(
     arguments: dict[str, Any],
 ) -> BackendCall:
     """Invoke a tool on a backend MCP server, returning the raw result.
-
-    Phase 1 passes the response through verbatim. Phase 2 wraps it in the
-    L1/L2/L3 defense pipeline before returning.
 
     Raises:
         BackendCallError: connection failure, protocol error, timeout, or
@@ -113,7 +208,9 @@ async def call_backend_tool(
         ) from exc
 
     breaker.record_success(backend.url)
-    content: list[dict[str, Any]] = [_serialize_content_block(b) for b in result.content]
+    content: list[dict[str, Any]] = [
+        _serialize_content_block(b) for b in result.content
+    ]
     structured = getattr(result, "structuredContent", None)
     return BackendCall(
         content=content,
@@ -123,17 +220,13 @@ async def call_backend_tool(
 
 
 async def _do_list_tools(url: str, headers: dict[str, str] | None) -> Any:
-    """Open a session and call list_tools.
-
-    Extracted as a separate coroutine so `asyncio.wait_for` can wrap it
-    cleanly (the connection setup and the protocol call both need the
-    timeout, not just the call).
-    """
-    async with (
-        streamablehttp_client(url, headers=headers) as (read, write, _),
-        ClientSession(read, write) as session,
-    ):
-        await session.initialize()
+    """Call list_tools on a pooled session, retrying once on stale session."""
+    session = await _get_or_create_session(url, headers)
+    try:
+        return await session.list_tools()
+    except Exception:
+        await _evict_session(url)
+        session = await _get_or_create_session(url, headers)
         return await session.list_tools()
 
 
@@ -143,16 +236,13 @@ async def _do_call_tool(
     tool_name: str,
     arguments: dict[str, Any],
 ) -> Any:
-    """Open a session and call_tool, parallel to `_do_list_tools`.
-
-    Separate coroutine so `asyncio.wait_for` covers the full lifecycle of
-    the backend session, not just the protocol call.
-    """
-    async with (
-        streamablehttp_client(url, headers=headers) as (read, write, _),
-        ClientSession(read, write) as session,
-    ):
-        await session.initialize()
+    """Call call_tool on a pooled session, retrying once on stale session."""
+    session = await _get_or_create_session(url, headers)
+    try:
+        return await session.call_tool(tool_name, arguments=arguments)
+    except Exception:
+        await _evict_session(url)
+        session = await _get_or_create_session(url, headers)
         return await session.call_tool(tool_name, arguments=arguments)
 
 
@@ -168,13 +258,15 @@ def _serialize_tool(tool: Any) -> dict[str, Any]:
         if value is None:
             continue
         if hasattr(value, "model_dump"):
-            value = value.model_dump(mode="json", by_alias=True, exclude_none=True)
+            value = value.model_dump(
+                mode="json", by_alias=True, exclude_none=True,
+            )
         out[extra] = value
     return out
 
 
 def _serialize_content_block(block: Any) -> dict[str, Any]:
-    """Convert an MCP content block (TextContent, ImageContent, etc.) to a dict."""
+    """Convert an MCP content block to a dict."""
     kind = getattr(block, "type", None)
     if kind == "text":
         return {"type": "text", "text": getattr(block, "text", "")}
@@ -185,5 +277,8 @@ def _serialize_content_block(block: Any) -> dict[str, Any]:
             "mimeType": getattr(block, "mimeType", ""),
         }
     if kind == "resource":
-        return {"type": "resource", "resource": getattr(block, "resource", {})}
+        return {
+            "type": "resource",
+            "resource": getattr(block, "resource", {}),
+        }
     return {"type": kind or "unknown", "_repr": repr(block)[:200]}
