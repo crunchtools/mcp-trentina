@@ -12,7 +12,6 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway import backend as backend_mod
 from mcp_trentina_crunchtools.gateway.backend import (
     _tool_list_cache,
     call_backend_tool,
@@ -260,26 +259,6 @@ class TestBackendToolListCache:
             await list_backend_tools("rotv", _backend())
 
         assert call_count == 1
-
-    async def test_cache_expires_after_ttl(self) -> None:
-        call_count = 0
-
-        async def counting_transport(_url: str, _headers: Any) -> _FakeToolsResult:
-            nonlocal call_count
-            call_count += 1
-            return _FakeToolsResult()
-
-        with (
-            patch(
-                "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
-                side_effect=counting_transport,
-            ),
-            patch.object(backend_mod, "BACKEND_CACHE_TTL", 0.0),
-        ):
-            await list_backend_tools("rotv", _backend())
-            await list_backend_tools("rotv", _backend())
-
-        assert call_count == 2
 
     async def test_cache_keyed_by_url(self) -> None:
         urls_called: list[str] = []

@@ -20,14 +20,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .. import __version__
 from ..database import record_gateway_call
-from .backend import call_backend_tool, list_backend_tools
+from .backend import call_backend_tool, list_backend_tools, on_backend_cache_evict
 from .compress import compress_tools, maybe_trigger_compression
 from .errors import BackendCallError, BackendNotInProfileError
 from .filter import filter_tools
@@ -42,25 +40,25 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = "2024-11-05"
 NAMESPACE_SEP = "__"
 
-PROFILE_CACHE_TTL: float = float(
-    os.environ.get("TRENTINA_PROFILE_CACHE_TTL", "300")
-)
+_profile_tools_cache: dict[str, list[dict[str, Any]]] = {}
+_profile_backend_urls: dict[str, set[str]] = {}
 
 
-@dataclass
-class _CachedProfileTools:
-    """Cached fully-assembled tool list for one profile."""
+def _on_backend_evicted(url: str) -> None:
+    """Clear any profile cache whose backend set includes this URL."""
+    for name, urls in list(_profile_backend_urls.items()):
+        if url in urls:
+            _profile_tools_cache.pop(name, None)
+            _profile_backend_urls.pop(name, None)
 
-    tools: list[dict[str, Any]]
-    cached_at: float
 
-
-_profile_tools_cache: dict[str, _CachedProfileTools] = {}
+on_backend_cache_evict(_on_backend_evicted)
 
 
 def reset_profile_tools_cache() -> None:
     """Clear the profile-level tool list cache (for testing)."""
     _profile_tools_cache.clear()
+    _profile_backend_urls.clear()
 
 
 def _audit(
@@ -151,9 +149,7 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
     """
     cached = _profile_tools_cache.get(profile.name)
     if cached is not None:
-        age = time.monotonic() - cached.cached_at
-        if age < PROFILE_CACHE_TTL:
-            return _ok(req_id, {"tools": cached.tools})
+        return _ok(req_id, {"tools": cached})
 
     await maybe_trigger_compression()
 
@@ -195,9 +191,10 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
             continue
         aggregated.extend(outcome)
 
-    _profile_tools_cache[profile.name] = _CachedProfileTools(
-        tools=aggregated, cached_at=time.monotonic(),
-    )
+    _profile_tools_cache[profile.name] = aggregated
+    _profile_backend_urls[profile.name] = {
+        b.url for b in profile.backends.values() if not b.is_internal
+    }
     return _ok(req_id, {"tools": aggregated})
 
 

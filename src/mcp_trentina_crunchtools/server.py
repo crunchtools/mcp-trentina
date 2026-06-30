@@ -7,6 +7,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from .tools import (
+    cache_flush,
     deep_quarantine_scan,
     deep_scan_content,
     get_trentina_stats,
@@ -266,3 +267,18 @@ async def quarantine_search_tool(
 async def quarantine_stats_tool() -> dict[str, Any]:
     """Get trentina configuration, Q-Agent status, and blocklist summary."""
     return await get_trentina_stats()
+
+
+@mcp.tool()
+async def cache_flush_tool(
+    backend: str | None = None,
+) -> dict[str, Any]:
+    """Flush gateway tool list caches.
+
+    With no arguments, flushes all cached tool lists. With a backend
+    name, flushes just that backend's cache.
+
+    Args:
+        backend: Backend name to flush (e.g. "rt", "wiki"). Omit to flush all.
+    """
+    return await cache_flush(backend)

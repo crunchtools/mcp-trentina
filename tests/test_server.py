@@ -11,9 +11,9 @@ class TestServerRegistration:
     """Test that all tools are registered correctly."""
 
     def test_tool_count(self) -> None:
-        """Verify exactly 13 tools are registered."""
+        """Verify exactly 14 tools are registered."""
         tools = asyncio.run(mcp._list_tools())
-        assert len(tools) == 13, f"Expected 13 tools, got {len(tools)}"
+        assert len(tools) == 14, f"Expected 14 tools, got {len(tools)}"
 
     def test_expected_tools_registered(self) -> None:
         """Verify all expected tool names are present."""
@@ -33,6 +33,7 @@ class TestServerRegistration:
             "safe_search_tool",
             "quarantine_search_tool",
             "quarantine_stats_tool",
+            "cache_flush_tool",
         }
         assert tool_names == expected
 

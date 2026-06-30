@@ -11,7 +11,6 @@ import pytest
 from pydantic import SecretStr
 
 from mcp_trentina_crunchtools.database import get_gateway_call_stats
-from mcp_trentina_crunchtools.gateway import router as router_mod
 from mcp_trentina_crunchtools.gateway.backend import BackendCall
 from mcp_trentina_crunchtools.gateway.circuit import breaker
 from mcp_trentina_crunchtools.gateway.errors import BackendCallError, BackendNotInProfileError
@@ -571,32 +570,6 @@ class TestProfileToolsCache:
             )
 
         assert call_count == first_count
-
-    async def test_profile_cache_expires_after_ttl(self) -> None:
-        call_count = 0
-
-        async def counting_list(
-            _bn: str, _b: Backend,
-        ) -> list[dict[str, Any]]:
-            nonlocal call_count
-            call_count += 1
-            return [{"name": "tool_a", "description": "", "inputSchema": {}}]
-
-        with (
-            patch(
-                "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
-                side_effect=counting_list,
-            ),
-            patch.object(router_mod, "PROFILE_CACHE_TTL", 0.0),
-        ):
-            await route_jsonrpc(
-                _profile(), {"jsonrpc": "2.0", "id": 52, "method": "tools/list"},
-            )
-            await route_jsonrpc(
-                _profile(), {"jsonrpc": "2.0", "id": 53, "method": "tools/list"},
-            )
-
-        assert call_count == 4
 
     async def test_profile_cache_keyed_by_name(self) -> None:
         async def fake_list(

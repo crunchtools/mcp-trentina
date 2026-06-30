@@ -110,7 +110,10 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
         )
         register_matrix_routes(mcp_server, upstream=matrix_upstream)
 
+    from .gateway.backend import load_tool_list_cache
+
     load_compression_cache()
+    load_tool_list_cache()
     set_profiles(gateway_config.profiles)
 
     mcp_server.run(transport="streamable-http", host=host, port=port)

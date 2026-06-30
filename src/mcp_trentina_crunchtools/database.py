@@ -56,6 +56,12 @@ CREATE TABLE IF NOT EXISTS tool_compressions (
     original_length INTEGER NOT NULL,
     compressed_length INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tool_list_cache (
+    backend_url TEXT PRIMARY KEY,
+    tools_json TEXT NOT NULL,
+    cached_at TEXT NOT NULL
+);
 """
 
 
@@ -260,3 +266,46 @@ def get_compression_stats() -> dict[str, Any]:
         "savings_percent": savings,
         "estimated_tokens_saved": (orig - comp) // 4,
     }
+
+
+def get_all_tool_lists() -> dict[str, list[dict[str, Any]]]:
+    """Load all cached tool lists as {backend_url: tools_list}."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT backend_url, tools_json FROM tool_list_cache"
+    ).fetchall()
+    result: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        result[row["backend_url"]] = json.loads(row["tools_json"])
+    return result
+
+
+def save_tool_list(
+    backend_url: str, tools: list[dict[str, Any]],
+) -> None:
+    """Persist a tool list to SQLite."""
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    db.execute(
+        "INSERT OR REPLACE INTO tool_list_cache "
+        "(backend_url, tools_json, cached_at) VALUES (?, ?, ?)",
+        (backend_url, json.dumps(tools), now),
+    )
+    db.commit()
+
+
+def delete_tool_list(backend_url: str) -> None:
+    """Delete one backend's cached tool list."""
+    db = get_db()
+    db.execute(
+        "DELETE FROM tool_list_cache WHERE backend_url = ?",
+        (backend_url,),
+    )
+    db.commit()
+
+
+def delete_all_tool_lists() -> None:
+    """Flush all cached tool lists."""
+    db = get_db()
+    db.execute("DELETE FROM tool_list_cache")
+    db.commit()

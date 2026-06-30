@@ -1,23 +1,22 @@
-"""Backend MCP connection management with tool list caching.
+"""Backend MCP connection management with persistent tool list caching.
 
 Opens a fresh MCP session per call (streamablehttp_client creates anyio
 task groups that cannot cross task boundaries, so pooling is not viable).
-Caches tool lists per URL with a configurable TTL to avoid redundant
-backend round-trips.
+Caches tool lists per URL indefinitely — invalidated on backend failure
+or explicit flush, persisted in SQLite across restarts.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
+from ..database import delete_all_tool_lists, delete_tool_list, save_tool_list
 from .circuit import breaker
 from .errors import BackendCallError
 
@@ -25,10 +24,6 @@ if TYPE_CHECKING:
     from .profile import Backend
 
 logger = logging.getLogger(__name__)
-
-BACKEND_CACHE_TTL: float = float(
-    os.environ.get("TRENTINA_BACKEND_CACHE_TTL", "600")
-)
 
 
 @dataclass(frozen=True)
@@ -40,20 +35,60 @@ class BackendCall:
     structured_content: dict[str, Any] | None
 
 
-@dataclass
-class _CachedToolList:
-    """Cached list_tools result for one backend URL."""
+_tool_list_cache: dict[str, list[dict[str, Any]]] = {}
 
-    tools: list[dict[str, Any]]
-    cached_at: float
+_on_evict_callbacks: list[Any] = []
 
 
-_tool_list_cache: dict[str, _CachedToolList] = {}
+def on_backend_cache_evict(callback: Any) -> None:
+    """Register a callback(url) to fire when a backend cache entry is evicted."""
+    _on_evict_callbacks.append(callback)
+
+
+def _evict_backend_cache(url: str) -> None:
+    """Remove a backend's cached tool list and notify listeners."""
+    if _tool_list_cache.pop(url, None) is not None:
+        delete_tool_list(url)
+        for cb in _on_evict_callbacks:
+            cb(url)
+        logger.info("cache: evicted backend %s", url)
+
+
+def evict_backend_cache_by_name(url: str) -> int:
+    """Evict cache for a specific backend. Returns 1 if evicted, 0 if not found."""
+    if url in _tool_list_cache:
+        _evict_backend_cache(url)
+        return 1
+    return 0
+
+
+def flush_all_caches() -> int:
+    """Flush all backend caches + SQLite. Returns count evicted."""
+    count = len(_tool_list_cache)
+    urls = list(_tool_list_cache.keys())
+    for url in urls:
+        _tool_list_cache.pop(url, None)
+        for cb in _on_evict_callbacks:
+            cb(url)
+    delete_all_tool_lists()
+    logger.info("cache: flushed all %d backend caches", count)
+    return count
+
+
+def load_tool_list_cache() -> int:
+    """Populate in-memory cache from SQLite at startup. Returns count loaded."""
+    from ..database import get_all_tool_lists
+
+    loaded = get_all_tool_lists()
+    _tool_list_cache.update(loaded)
+    logger.info("cache: loaded %d tool lists from database", len(loaded))
+    return len(loaded)
 
 
 def reset_tool_list_cache() -> None:
-    """Clear the backend tool list cache (for testing)."""
+    """Clear the in-memory cache without touching SQLite (for testing)."""
     _tool_list_cache.clear()
+    _on_evict_callbacks.clear()
 
 
 async def list_backend_tools(
@@ -61,7 +96,8 @@ async def list_backend_tools(
 ) -> list[dict[str, Any]]:
     """Fetch the tool list from one backend MCP server.
 
-    Checks the per-URL cache first. On miss, opens a fresh session.
+    Returns from in-memory cache if available. On miss, fetches from
+    the backend and persists to SQLite.
 
     Raises:
         BackendCallError: connection failure, protocol error, timeout, or
@@ -74,9 +110,7 @@ async def list_backend_tools(
 
     cached = _tool_list_cache.get(backend.url)
     if cached is not None:
-        age = time.monotonic() - cached.cached_at
-        if age < BACKEND_CACHE_TTL:
-            return cached.tools
+        return cached
 
     headers = backend.headers or None
     try:
@@ -86,7 +120,7 @@ async def list_backend_tools(
         )
     except Exception as exc:
         breaker.record_failure(backend.url)
-        _tool_list_cache.pop(backend.url, None)
+        _evict_backend_cache(backend.url)
         logger.warning(
             "gateway: list_tools failed for backend=%s url=%s err=%s",
             backend_name,
@@ -99,9 +133,8 @@ async def list_backend_tools(
 
     breaker.record_success(backend.url)
     tools = [_serialize_tool(tool) for tool in tools_result.tools]
-    _tool_list_cache[backend.url] = _CachedToolList(
-        tools=tools, cached_at=time.monotonic(),
-    )
+    _tool_list_cache[backend.url] = tools
+    save_tool_list(backend.url, tools)
     return tools
 
 
@@ -130,7 +163,7 @@ async def call_backend_tool(
         )
     except Exception as exc:
         breaker.record_failure(backend.url)
-        _tool_list_cache.pop(backend.url, None)
+        _evict_backend_cache(backend.url)
         logger.warning(
             "gateway: call_tool failed backend=%s tool=%s err=%s",
             backend_name,
