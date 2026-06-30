@@ -281,4 +281,4 @@ def _serialize_content_block(block: Any) -> dict[str, Any]:
             "type": "resource",
             "resource": getattr(block, "resource", {}),
         }
-    return {"type": kind or "unknown", "_repr": repr(block)[:200]}
+    return {"type": kind or "unknown"}
