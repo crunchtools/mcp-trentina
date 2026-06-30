@@ -1,14 +1,14 @@
-"""Backend MCP connection management with connection pooling and tool list caching.
+"""Backend MCP connection management with tool list caching.
 
-Maintains one persistent MCP session per backend URL (connection pool) and
-caches tool lists per URL with a configurable TTL. Cache misses use the
-pooled session; stale sessions are evicted and recreated transparently.
+Opens a fresh MCP session per call (streamablehttp_client creates anyio
+task groups that cannot cross task boundaries, so pooling is not viable).
+Caches tool lists per URL with a configurable TTL to avoid redundant
+backend round-trips.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import os
 import time
@@ -41,74 +41,6 @@ class BackendCall:
 
 
 @dataclass
-class _PooledSession:
-    """A long-lived MCP session for one backend URL."""
-
-    session: ClientSession
-    exit_stack: contextlib.AsyncExitStack
-    created_at: float
-
-
-_session_pool: dict[str, _PooledSession] = {}
-
-
-async def _create_pooled_session(
-    url: str, headers: dict[str, str] | None,
-) -> _PooledSession:
-    """Open transport + ClientSession + initialize, store in pool."""
-    stack = contextlib.AsyncExitStack()
-    try:
-        read, write, _ = await stack.enter_async_context(
-            streamablehttp_client(url, headers=headers)
-        )
-        session = await stack.enter_async_context(
-            ClientSession(read, write)
-        )
-        await session.initialize()
-    except BaseException:
-        await stack.aclose()
-        raise
-    pooled = _PooledSession(
-        session=session, exit_stack=stack, created_at=time.monotonic(),
-    )
-    _session_pool[url] = pooled
-    logger.info("pool: created session for %s", url)
-    return pooled
-
-
-async def _get_or_create_session(
-    url: str, headers: dict[str, str] | None,
-) -> ClientSession:
-    """Return a pooled session, creating one if needed."""
-    pooled = _session_pool.get(url)
-    if pooled is not None:
-        return pooled.session
-    entry = await _create_pooled_session(url, headers)
-    return entry.session
-
-
-async def _evict_session(url: str) -> None:
-    """Close and remove a pooled session."""
-    pooled = _session_pool.pop(url, None)
-    if pooled is not None:
-        with contextlib.suppress(Exception):
-            await pooled.exit_stack.aclose()
-        logger.info("pool: evicted session for %s", url)
-
-
-async def shutdown_pool() -> None:
-    """Close all pooled sessions."""
-    urls = list(_session_pool.keys())
-    for url in urls:
-        await _evict_session(url)
-
-
-def reset_pool() -> None:
-    """Drop all pool references without async cleanup (for testing)."""
-    _session_pool.clear()
-
-
-@dataclass
 class _CachedToolList:
     """Cached list_tools result for one backend URL."""
 
@@ -124,12 +56,16 @@ def reset_tool_list_cache() -> None:
     _tool_list_cache.clear()
 
 
+def reset_pool() -> None:
+    """No-op kept for test fixture compatibility."""
+
+
 async def list_backend_tools(
     backend_name: str, backend: Backend,
 ) -> list[dict[str, Any]]:
     """Fetch the tool list from one backend MCP server.
 
-    Checks the per-URL cache first. On miss, uses the connection pool.
+    Checks the per-URL cache first. On miss, opens a fresh session.
 
     Raises:
         BackendCallError: connection failure, protocol error, timeout, or
@@ -220,13 +156,12 @@ async def call_backend_tool(
 
 
 async def _do_list_tools(url: str, headers: dict[str, str] | None) -> Any:
-    """Call list_tools on a pooled session, retrying once on stale session."""
-    session = await _get_or_create_session(url, headers)
-    try:
-        return await session.list_tools()
-    except Exception:
-        await _evict_session(url)
-        session = await _get_or_create_session(url, headers)
+    """Open a fresh session and call list_tools."""
+    async with (
+        streamablehttp_client(url, headers=headers) as (read, write, _),
+        ClientSession(read, write) as session,
+    ):
+        await session.initialize()
         return await session.list_tools()
 
 
@@ -236,13 +171,12 @@ async def _do_call_tool(
     tool_name: str,
     arguments: dict[str, Any],
 ) -> Any:
-    """Call call_tool on a pooled session, retrying once on stale session."""
-    session = await _get_or_create_session(url, headers)
-    try:
-        return await session.call_tool(tool_name, arguments=arguments)
-    except Exception:
-        await _evict_session(url)
-        session = await _get_or_create_session(url, headers)
+    """Open a fresh session and call_tool."""
+    async with (
+        streamablehttp_client(url, headers=headers) as (read, write, _),
+        ClientSession(read, write) as session,
+    ):
+        await session.initialize()
         return await session.call_tool(tool_name, arguments=arguments)
 
 
