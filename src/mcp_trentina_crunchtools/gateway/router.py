@@ -20,7 +20,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .. import __version__
@@ -39,6 +41,26 @@ logger = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = "2024-11-05"
 NAMESPACE_SEP = "__"
+
+PROFILE_CACHE_TTL: float = float(
+    os.environ.get("TRENTINA_PROFILE_CACHE_TTL", "45")
+)
+
+
+@dataclass
+class _CachedProfileTools:
+    """Cached fully-assembled tool list for one profile."""
+
+    tools: list[dict[str, Any]]
+    cached_at: float
+
+
+_profile_tools_cache: dict[str, _CachedProfileTools] = {}
+
+
+def reset_profile_tools_cache() -> None:
+    """Clear the profile-level tool list cache (for testing)."""
+    _profile_tools_cache.clear()
 
 
 def _audit(
@@ -124,14 +146,15 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
 async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
     """Aggregate tools/list across the profile's backends, filtered and namespaced.
 
-    All backends are queried in parallel via asyncio.gather.  A failing
-    backend (down, circuit open, timing out) is logged and skipped so the
-    rest of the fleet stays usable.  Wall-clock time is the slowest
-    healthy backend, not the sum of all timeouts.
-
-    On the first call, triggers background tool description compression
-    for backends with ``compress_descriptions: true``.
+    Checks the per-profile cache first. On miss, queries all backends in
+    parallel and caches the assembled result.
     """
+    cached = _profile_tools_cache.get(profile.name)
+    if cached is not None:
+        age = time.monotonic() - cached.cached_at
+        if age < PROFILE_CACHE_TTL:
+            return _ok(req_id, {"tools": cached.tools})
+
     await maybe_trigger_compression()
 
     async def _fetch_one(
@@ -172,6 +195,9 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
             continue
         aggregated.extend(outcome)
 
+    _profile_tools_cache[profile.name] = _CachedProfileTools(
+        tools=aggregated, cached_at=time.monotonic(),
+    )
     return _ok(req_id, {"tools": aggregated})
 
 
