@@ -1,4 +1,4 @@
-"""Tests for gateway/backend.py — circuit breaker, tool list cache, connection pool.
+"""Tests for gateway/backend.py — circuit breaker and tool list cache.
 
 Patches at the transport layer (_do_list_tools, _do_call_tool) so the real
 list_backend_tools / call_backend_tool run their circuit breaker checks,
@@ -8,13 +8,12 @@ timeout wrapping, caching, and success/failure recording.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from mcp_trentina_crunchtools.gateway import backend as backend_mod
 from mcp_trentina_crunchtools.gateway.backend import (
-    _PooledSession,
     _tool_list_cache,
     call_backend_tool,
     list_backend_tools,
@@ -319,151 +318,3 @@ class TestBackendToolListCache:
 
         with pytest.raises(BackendCallError, match="circuit open"):
             await list_backend_tools("rotv", _backend())
-
-
-@pytest.mark.asyncio
-class TestSessionPool:
-    """Connection pool (Feature D) tests."""
-
-    async def test_pool_reuses_session(self) -> None:
-        mock_session = AsyncMock()
-        mock_session.initialize = AsyncMock()
-        mock_session.list_tools = AsyncMock(return_value=_FakeToolsResult())
-
-        with (
-            patch(
-                "mcp_trentina_crunchtools.gateway.backend.streamablehttp_client",
-            ) as mock_transport,
-            patch(
-                "mcp_trentina_crunchtools.gateway.backend.ClientSession",
-            ) as mock_cs,
-        ):
-            mock_transport.return_value.__aenter__ = AsyncMock(
-                return_value=(AsyncMock(), AsyncMock(), AsyncMock()),
-            )
-            mock_transport.return_value.__aexit__ = AsyncMock()
-            mock_cs.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-            mock_cs.return_value.__aexit__ = AsyncMock()
-
-            await list_backend_tools("rotv", _backend())
-            # Clear cache so second call goes through pool
-            _tool_list_cache.clear()
-            await list_backend_tools("rotv", _backend())
-
-        assert mock_transport.call_count == 1
-        assert mock_session.initialize.call_count == 1
-        assert mock_session.list_tools.call_count == 2
-
-    async def test_pool_evicts_stale_session(self) -> None:
-        call_count = 0
-        mock_session_good = AsyncMock()
-        mock_session_good.initialize = AsyncMock()
-        mock_session_good.list_tools = AsyncMock(return_value=_FakeToolsResult())
-
-        mock_session_bad = AsyncMock()
-        mock_session_bad.initialize = AsyncMock()
-        mock_session_bad.list_tools = AsyncMock(
-            side_effect=ConnectionError("broken"),
-        )
-
-        with (
-            patch(
-                "mcp_trentina_crunchtools.gateway.backend.streamablehttp_client",
-            ) as mock_transport,
-            patch(
-                "mcp_trentina_crunchtools.gateway.backend.ClientSession",
-            ) as mock_cs,
-        ):
-            mock_transport.return_value.__aenter__ = AsyncMock(
-                return_value=(AsyncMock(), AsyncMock(), AsyncMock()),
-            )
-            mock_transport.return_value.__aexit__ = AsyncMock()
-
-            def session_factory(*_args: Any, **_kwargs: Any) -> Any:
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    mock_cs.return_value.__aenter__ = AsyncMock(
-                        return_value=mock_session_bad,
-                    )
-                else:
-                    mock_cs.return_value.__aenter__ = AsyncMock(
-                        return_value=mock_session_good,
-                    )
-                return mock_cs.return_value
-
-            mock_cs.side_effect = session_factory
-            mock_cs.return_value.__aexit__ = AsyncMock()
-
-            tools = await list_backend_tools("rotv", _backend())
-
-        assert len(tools) == 1
-        assert mock_transport.call_count == 2
-
-    async def test_shutdown_pool_closes_all(self) -> None:
-        from mcp_trentina_crunchtools.gateway.backend import (
-            _session_pool,
-            shutdown_pool,
-        )
-
-        mock_stack_a = AsyncMock()
-        mock_stack_b = AsyncMock()
-        _session_pool["http://a:8000/mcp"] = _PooledSession(
-            session=AsyncMock(), exit_stack=mock_stack_a, created_at=0.0,
-        )
-        _session_pool["http://b:8000/mcp"] = _PooledSession(
-            session=AsyncMock(), exit_stack=mock_stack_b, created_at=0.0,
-        )
-
-        await shutdown_pool()
-
-        assert len(_session_pool) == 0
-        mock_stack_a.aclose.assert_called_once()
-        mock_stack_b.aclose.assert_called_once()
-
-    async def test_call_tool_retries_on_stale_session(self) -> None:
-        mock_session_bad = AsyncMock()
-        mock_session_bad.initialize = AsyncMock()
-        mock_session_bad.call_tool = AsyncMock(
-            side_effect=ConnectionError("broken"),
-        )
-
-        mock_session_good = AsyncMock()
-        mock_session_good.initialize = AsyncMock()
-        mock_session_good.call_tool = AsyncMock(return_value=_FakeCallResult())
-
-        call_count = 0
-
-        with (
-            patch(
-                "mcp_trentina_crunchtools.gateway.backend.streamablehttp_client",
-            ) as mock_transport,
-            patch(
-                "mcp_trentina_crunchtools.gateway.backend.ClientSession",
-            ) as mock_cs,
-        ):
-            mock_transport.return_value.__aenter__ = AsyncMock(
-                return_value=(AsyncMock(), AsyncMock(), AsyncMock()),
-            )
-            mock_transport.return_value.__aexit__ = AsyncMock()
-
-            def session_factory(*_args: Any, **_kwargs: Any) -> Any:
-                nonlocal call_count
-                call_count += 1
-                if call_count == 1:
-                    mock_cs.return_value.__aenter__ = AsyncMock(
-                        return_value=mock_session_bad,
-                    )
-                else:
-                    mock_cs.return_value.__aenter__ = AsyncMock(
-                        return_value=mock_session_good,
-                    )
-                return mock_cs.return_value
-
-            mock_cs.side_effect = session_factory
-            mock_cs.return_value.__aexit__ = AsyncMock()
-
-            result = await call_backend_tool("rotv", _backend(), "some_tool", {})
-
-        assert result.is_error is False
-        assert mock_transport.call_count == 2
