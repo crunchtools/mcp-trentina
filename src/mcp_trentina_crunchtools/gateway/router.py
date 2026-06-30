@@ -43,7 +43,7 @@ PROTOCOL_VERSION = "2024-11-05"
 NAMESPACE_SEP = "__"
 
 PROFILE_CACHE_TTL: float = float(
-    os.environ.get("TRENTINA_PROFILE_CACHE_TTL", "45")
+    os.environ.get("TRENTINA_PROFILE_CACHE_TTL", "300")
 )
 
 

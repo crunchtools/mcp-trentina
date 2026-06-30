@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 BACKEND_CACHE_TTL: float = float(
-    os.environ.get("TRENTINA_BACKEND_CACHE_TTL", "90")
+    os.environ.get("TRENTINA_BACKEND_CACHE_TTL", "600")
 )
 
 
@@ -54,10 +54,6 @@ _tool_list_cache: dict[str, _CachedToolList] = {}
 def reset_tool_list_cache() -> None:
     """Clear the backend tool list cache (for testing)."""
     _tool_list_cache.clear()
-
-
-def reset_pool() -> None:
-    """No-op kept for test fixture compatibility."""
 
 
 async def list_backend_tools(
@@ -90,6 +86,7 @@ async def list_backend_tools(
         )
     except Exception as exc:
         breaker.record_failure(backend.url)
+        _tool_list_cache.pop(backend.url, None)
         logger.warning(
             "gateway: list_tools failed for backend=%s url=%s err=%s",
             backend_name,
@@ -133,6 +130,7 @@ async def call_backend_tool(
         )
     except Exception as exc:
         breaker.record_failure(backend.url)
+        _tool_list_cache.pop(backend.url, None)
         logger.warning(
             "gateway: call_tool failed backend=%s tool=%s err=%s",
             backend_name,
