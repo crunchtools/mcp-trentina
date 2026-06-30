@@ -11,6 +11,7 @@ import pytest
 from pydantic import SecretStr
 
 from mcp_trentina_crunchtools.database import get_gateway_call_stats
+from mcp_trentina_crunchtools.gateway import router as router_mod
 from mcp_trentina_crunchtools.gateway.backend import BackendCall
 from mcp_trentina_crunchtools.gateway.circuit import breaker
 from mcp_trentina_crunchtools.gateway.errors import BackendCallError, BackendNotInProfileError
@@ -23,6 +24,7 @@ from mcp_trentina_crunchtools.gateway.profile import (
 from mcp_trentina_crunchtools.gateway.router import (
     NAMESPACE_SEP,
     PROTOCOL_VERSION,
+    _profile_tools_cache,
     route_jsonrpc,
 )
 
@@ -540,3 +542,90 @@ class TestRouter:
         )
         assert resp["error"]["code"] == -32603
         assert "circuit open" in resp["error"]["message"]
+
+
+@pytest.mark.asyncio
+class TestProfileToolsCache:
+    """Profile-level tool list cache (Feature B) tests."""
+
+    async def test_profile_cache_hit_skips_backend_calls(self) -> None:
+        call_count = 0
+
+        async def counting_list(
+            _bn: str, _b: Backend,
+        ) -> list[dict[str, Any]]:
+            nonlocal call_count
+            call_count += 1
+            return [{"name": "tool_a", "description": "", "inputSchema": {}}]
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            side_effect=counting_list,
+        ):
+            await route_jsonrpc(
+                _profile(), {"jsonrpc": "2.0", "id": 50, "method": "tools/list"},
+            )
+            first_count = call_count
+            await route_jsonrpc(
+                _profile(), {"jsonrpc": "2.0", "id": 51, "method": "tools/list"},
+            )
+
+        assert call_count == first_count
+
+    async def test_profile_cache_expires_after_ttl(self) -> None:
+        call_count = 0
+
+        async def counting_list(
+            _bn: str, _b: Backend,
+        ) -> list[dict[str, Any]]:
+            nonlocal call_count
+            call_count += 1
+            return [{"name": "tool_a", "description": "", "inputSchema": {}}]
+
+        with (
+            patch(
+                "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+                side_effect=counting_list,
+            ),
+            patch.object(router_mod, "PROFILE_CACHE_TTL", 0.0),
+        ):
+            await route_jsonrpc(
+                _profile(), {"jsonrpc": "2.0", "id": 52, "method": "tools/list"},
+            )
+            await route_jsonrpc(
+                _profile(), {"jsonrpc": "2.0", "id": 53, "method": "tools/list"},
+            )
+
+        assert call_count == 4
+
+    async def test_profile_cache_keyed_by_name(self) -> None:
+        async def fake_list(
+            _bn: str, _b: Backend,
+        ) -> list[dict[str, Any]]:
+            return [{"name": "tool_a", "description": "", "inputSchema": {}}]
+
+        p2 = Profile(
+            name="other",
+            auth=AuthConfig(bearer_token_env="TEST"),
+            backends={
+                "mcp-slack": Backend(
+                    url="http://mcp-slack:8005/mcp",
+                    tools_allow=["*"],
+                ),
+            },
+        )
+        p2.auth.bearer_token = SecretStr("x")
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            side_effect=fake_list,
+        ):
+            await route_jsonrpc(
+                _profile(), {"jsonrpc": "2.0", "id": 54, "method": "tools/list"},
+            )
+            await route_jsonrpc(
+                p2, {"jsonrpc": "2.0", "id": 55, "method": "tools/list"},
+            )
+
+        assert "testp" in _profile_tools_cache
+        assert "other" in _profile_tools_cache
