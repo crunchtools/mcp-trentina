@@ -38,6 +38,7 @@ uv run mypy src                # Type check
 uv run pytest -v               # Test
 podman run --rm -v .:/repo:Z quay.io/crunchtools/gourmand:latest --full /repo  # Slop detection
 podman build -f Containerfile . # Container
+uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across providers — see docs/benchmark.md
 ```
 
 ## Architecture

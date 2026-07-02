@@ -39,3 +39,6 @@ Thumbs.db
 uv.lock
 .mcpregistry_github_token
 .mcpregistry_registry_token
+
+# Benchmark output (issue #43) — generated per run, not source
+benchmarks/results/
