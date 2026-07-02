@@ -238,3 +238,27 @@ check = "lint_suppression"
 path = "deprecation/src/mcp_airlock_crunchtools/__init__.py"
 pattern = "noqa: F401,F403"
 justification = "Wildcard re-export is the entire purpose of the deprecation shim — it forwards all public names from the renamed package"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/gateway/sessions.py"
+pattern = "_remove"
+justification = "Called from 3 sites: delete_session, create_session (eviction loop), and _expire_stale — gourmand miscounted because create_session calls it inside a while loop"
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/gateway/circuit.py"
+pattern = "_notify"
+justification = "Circuit breaker callbacks must not crash the breaker — catching and logging ensures a broken notification callback cannot prevent circuit state from updating correctly"
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/__init__.py"
+pattern = "on_circuit_change"
+justification = "Circuit state change handler catches RuntimeError when no event loop is available (sync context during testing) — legitimate fallback to skip async notification"
+
+[[exceptions]]
+check = "conditional_wrapper"
+path = "src/mcp_trentina_crunchtools/__init__.py"
+pattern = "on_circuit_change"
+justification = "Early returns filter out non-notifiable state transitions (e.g. OPEN→HALF_OPEN probe) before expensive broadcast — guard clauses not conditional wrapping"
