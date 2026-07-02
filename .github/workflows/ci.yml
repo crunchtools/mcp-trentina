@@ -38,6 +38,36 @@ jobs:
         env:
           GEMINI_API_KEY: "test_key_for_ci"
 
+  live-l3:
+    name: Live L3 Detection (Gemini)
+    runs-on: ubuntu-latest
+    env:
+      HAS_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      # Runs the corpus attacks through live Gemini and fails only on a genuine
+      # detection regression. Skipped without the key (fork PRs); skips itself as
+      # inconclusive on a provider outage, so Google availability never reddens a PR.
+      - name: Run live L3 detection
+        if: env.HAS_GEMINI_KEY == 'true'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TRENTINA_LIVE_L3: "1"
+          QUARANTINE_MODEL: "gemini-2.5-flash"
+        run: uv run pytest tests/test_l3_live.py -v
+
   gourmand:
     name: Code Quality (Gourmand)
     runs-on: ubuntu-latest
