@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+StateChangeCallback = Callable[[str, "State", "State"], None]
 
 DEFAULT_FAILURE_THRESHOLD = 3
 DEFAULT_COOLDOWN_SECONDS = 60.0
@@ -55,6 +58,21 @@ class CircuitBreaker:
         self._threshold = failure_threshold
         self._cooldown = cooldown_seconds
         self._circuits: dict[str, _CircuitState] = {}
+        self._on_state_change_callbacks: list[StateChangeCallback] = []
+
+    def on_state_change(self, callback: StateChangeCallback) -> None:
+        """Register a callback fired on every circuit state transition.
+
+        Signature: ``callback(url, old_state, new_state)``
+        """
+        self._on_state_change_callbacks.append(callback)
+
+    def _notify(self, url: str, old: State, new: State) -> None:
+        for cb in self._on_state_change_callbacks:
+            try:
+                cb(url, old, new)
+            except Exception:
+                logger.warning("circuit: state-change callback failed", exc_info=True)
 
     def _get(self, url: str) -> _CircuitState:
         circuit = self._circuits.get(url)
@@ -83,6 +101,7 @@ class CircuitBreaker:
             circuit.state = State.HALF_OPEN
             circuit.probe_in_flight = True
             logger.info("circuit: %s half-open, allowing probe", url)
+            self._notify(url, State.OPEN, State.HALF_OPEN)
             return True
 
         if circuit.probe_in_flight:
@@ -93,23 +112,26 @@ class CircuitBreaker:
     def record_success(self, url: str) -> None:
         """Record a successful call — reset failures and close the circuit."""
         circuit = self._get(url)
-        was_open = circuit.state is not State.CLOSED
+        old_state = circuit.state
         circuit.consecutive_failures = 0
         circuit.probe_in_flight = False
         circuit.state = State.CLOSED
-        if was_open:
+        if old_state is not State.CLOSED:
             logger.info("circuit: %s closed after successful probe", url)
+            self._notify(url, old_state, State.CLOSED)
 
     def record_failure(self, url: str) -> None:
         """Record a failed call — increment counter, open if threshold reached."""
         circuit = self._get(url)
+        old_state = circuit.state
         circuit.consecutive_failures += 1
         circuit.probe_in_flight = False
 
-        if circuit.state is State.HALF_OPEN:
+        if old_state is State.HALF_OPEN:
             circuit.state = State.OPEN
             circuit.opened_at = time.monotonic()
             logger.warning("circuit: %s re-opened after failed probe", url)
+            self._notify(url, old_state, State.OPEN)
             return
 
         if circuit.consecutive_failures >= self._threshold:
@@ -120,6 +142,8 @@ class CircuitBreaker:
                 url,
                 circuit.consecutive_failures,
             )
+            if old_state is not State.OPEN:
+                self._notify(url, old_state, State.OPEN)
 
     def get_state(self, url: str) -> State:
         """Return the current state for *url* (for diagnostics/logging)."""
