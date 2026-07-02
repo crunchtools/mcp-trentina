@@ -45,13 +45,13 @@ class TestGatewayApp:
         )
         assert resp.status_code == 401
 
-    def test_get_returns_405(self, client: TestClient) -> None:
+    def test_get_without_auth_returns_401(self, client: TestClient) -> None:
         resp = client.get("/alice/mcp")
-        assert resp.status_code == 405
+        assert resp.status_code == 401
 
-    def test_delete_returns_405(self, client: TestClient) -> None:
+    def test_delete_without_auth_returns_401(self, client: TestClient) -> None:
         resp = client.delete("/alice/mcp")
-        assert resp.status_code == 405
+        assert resp.status_code == 401
 
     def test_empty_body_400(self, client: TestClient) -> None:
         resp = client.post(

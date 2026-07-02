@@ -28,6 +28,8 @@ class GatewayConfig:
     profiles: dict[str, Profile]
     llm_providers: dict[str, Any] = field(default_factory=dict)
     matrix: dict[str, Any] = field(default_factory=dict)
+    session_ttl_seconds: float = 300.0
+    max_sessions_per_profile: int = 10
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +137,16 @@ def load_profiles(path: Path | str) -> GatewayConfig:
 
     llm_section = cfg_data.get("llm_providers", {})
     matrix_section = cfg_data.get("matrix", {})
+    gateway_section = cfg_data.get("gateway", {})
+    if not isinstance(gateway_section, dict):
+        gateway_section = {}
 
     return GatewayConfig(
         profiles=registry,
         llm_providers=llm_section if isinstance(llm_section, dict) else {},
         matrix=matrix_section if isinstance(matrix_section, dict) else {},
+        session_ttl_seconds=float(gateway_section.get("session_ttl_seconds", 300.0)),
+        max_sessions_per_profile=int(
+            gateway_section.get("max_sessions_per_profile", 10)
+        ),
     )
