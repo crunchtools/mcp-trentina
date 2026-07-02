@@ -34,7 +34,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 RISK_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "critical": 3}
-VALID_RISK = set(RISK_ORDER)
 
 
 @dataclass(frozen=True)

@@ -31,7 +31,7 @@ from typing import Any
 import pytest
 
 from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
-from tests.adversarial_corpus import ATTACKS
+from tests.adversarial_corpus import ATTACKS, Case
 
 DETECTION_FLOOR = 0.90
 MIN_COMPLETION = 0.75
@@ -86,7 +86,13 @@ async def test_live_detection_floor() -> None:
             await asyncio.sleep(min(RETRY_MAX_DELAY, RETRY_BASE_DELAY * 2**attempt))
         return result
 
-    results = [(c, await _detect(c.payload)) for c in ATTACKS]
+    sem = asyncio.Semaphore(4)
+
+    async def _bounded(case: Case) -> tuple[Case, dict[str, Any]]:
+        async with sem:
+            return case, await _detect(case.payload)
+
+    results = await asyncio.gather(*[_bounded(c) for c in ATTACKS])
 
     completed = [
         (c, r) for c, r in results
