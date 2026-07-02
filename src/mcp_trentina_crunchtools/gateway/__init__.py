@@ -1,9 +1,9 @@
 """Gateway subpackage — per-consumer MCP proxy with tool-allowlist filtering.
 
-Phase 1 scope: profile loader, bearer-token auth, JSON-RPC dispatch,
-tool-name allowlist filter on tools/list responses, transparent tools/call
-passthrough to backend MCP servers. No defense pipeline application yet —
-that arrives in Phase 2.
+Phase 2 scope: Streamable HTTP transport with session persistence and
+``tools/listChanged`` notifications on circuit breaker state changes.
+Builds on Phase 1 (profile loader, bearer-token auth, JSON-RPC dispatch,
+tool-name allowlist filter, tools/call passthrough).
 
 See docs/gateway-design.md and .specify/specs/006-gateway-mode/ for the
 full design and phase plan.
@@ -27,6 +27,7 @@ from .internal import (
 from .loader import GatewayConfig, load_profiles
 from .profile import AuthConfig, Backend, DefenseConfig, ParameterConstraint, Profile
 from .router import route_jsonrpc
+from .sessions import Session, SessionRegistry, session_registry
 
 __all__ = [
     "AuthConfig",
@@ -53,5 +54,8 @@ __all__ = [
     "register_internal_server",
     "register_with_fastmcp",
     "route_jsonrpc",
+    "Session",
+    "SessionRegistry",
+    "session_registry",
     "verify_bearer",
 ]

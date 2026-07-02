@@ -9,6 +9,13 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from .gateway.circuit import CircuitBreaker
+    from .gateway.profile import Profile
+    from .gateway.sessions import SessionRegistry
+
 __version__ = "0.5.0"
 
 DEFAULT_PORT = 8019
@@ -84,9 +91,11 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     no gateway when the operator asked for one.
     """
     from .gateway import load_profiles, register_internal_server, register_with_fastmcp
+    from .gateway.circuit import breaker
     from .gateway.compress import load_compression_cache, set_profiles
     from .gateway.llm_proxy import load_llm_providers, register_llm_routes
     from .gateway.matrix_proxy import register_matrix_routes
+    from .gateway.sessions import session_registry
 
     profiles_path = Path(
         os.environ.get("TRENTINA_PROFILES_PATH", "/etc/trentina/profiles.yaml")
@@ -94,8 +103,14 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     logger.info("gateway: loading profiles from %s", profiles_path)
     gateway_config = load_profiles(profiles_path)
 
+    session_registry.session_ttl = gateway_config.session_ttl_seconds
+    session_registry.max_sessions_per_profile = gateway_config.max_sessions_per_profile
+
     register_internal_server(mcp_server)
-    register_with_fastmcp(mcp_server, gateway_config.profiles)
+    register_with_fastmcp(mcp_server, gateway_config.profiles, session_registry)
+
+    _wire_circuit_notifications(breaker, session_registry, gateway_config.profiles)
+
     logger.info(
         "gateway: registered %d profile(s) at /gateway/<profile>/mcp",
         len(gateway_config.profiles),
@@ -117,3 +132,56 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     set_profiles(gateway_config.profiles)
 
     mcp_server.run(transport="streamable-http", host=host, port=port)
+
+
+def _wire_circuit_notifications(
+    circuit_breaker: CircuitBreaker,
+    sessions: SessionRegistry,
+    profiles: Mapping[str, Profile],
+) -> None:
+    """Connect circuit breaker state changes to session notification broadcast.
+
+    When a circuit opens or closes, determines which profiles use the
+    affected backend URL and broadcasts ``tools/listChanged`` to all
+    active sessions for those profiles.
+    """
+    import asyncio
+
+    from .gateway.circuit import State
+    from .gateway.router import reset_profile_tools_cache
+
+    pending_tasks: set[asyncio.Task[int]] = set()
+
+    def on_circuit_change(url: str, old_state: State, new_state: State) -> None:
+        if old_state == new_state:
+            return
+
+        should_notify = (
+            (old_state is State.CLOSED and new_state is State.OPEN)
+            or (old_state is State.HALF_OPEN and new_state is State.CLOSED)
+            or (old_state is State.HALF_OPEN and new_state is State.OPEN)
+        )
+        if not should_notify:
+            return
+
+        reset_profile_tools_cache()
+
+        affected = sessions.profiles_for_backend_url(url, dict(profiles))
+        for profile_name in affected:
+            try:
+                loop = asyncio.get_running_loop()
+                task = loop.create_task(
+                    sessions.broadcast_tools_changed(profile_name)
+                )
+                pending_tasks.add(task)
+                task.add_done_callback(pending_tasks.discard)
+            except RuntimeError:
+                logger.debug(
+                    "gateway: no event loop for notification broadcast "
+                    "(url=%s profile=%s)",
+                    url,
+                    profile_name,
+                )
+
+    circuit_breaker.on_state_change(on_circuit_change)
+    logger.info("gateway: circuit breaker → session notification wired")

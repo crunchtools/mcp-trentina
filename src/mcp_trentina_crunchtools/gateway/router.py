@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PROTOCOL_VERSION = "2024-11-05"
+PROTOCOL_VERSION = "2025-03-26"
 NAMESPACE_SEP = "__"
 
 _profile_tools_cache: dict[str, list[dict[str, Any]]] = {}
@@ -114,7 +114,7 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
             req_id,
             {
                 "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {"tools": {"listChanged": False}},
+                "capabilities": {"tools": {"listChanged": True}},
                 "serverInfo": {
                     "name": f"mcp-trentina-gateway:{profile.name}",
                     "version": __version__,
