@@ -221,6 +221,7 @@ async def quarantine_detect(
     content: str,
     layer1_context: str | None = None,
     provider_name: str | None = None,
+    include_usage: bool = False,
 ) -> dict[str, Any]:
     """Run Q-Agent in detection-only mode. Returns threat assessment.
 
@@ -230,6 +231,10 @@ async def quarantine_detect(
             the content, giving the Q-Agent context about what was
             already detected by deterministic scanning.
         provider_name: LLM provider override (default: global config).
+        include_usage: When True, keep the provider token counts under a
+            ``usage`` key in the returned dict. Off by default so normal
+            callers get a clean threat assessment; the provider benchmark
+            (issue #43) turns it on to compute per-call cost.
     """
     scan_content = content
     if layer1_context:
@@ -250,7 +255,9 @@ async def quarantine_detect(
             "summary": f"Q-Agent detection failed: {exc}",
         }
     else:
-        parsed.pop("_usage", None)
+        usage = parsed.pop("_usage", None)
+        if include_usage and usage is not None:
+            parsed["usage"] = usage
         return parsed
 
 

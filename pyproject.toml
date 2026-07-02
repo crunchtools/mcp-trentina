@@ -76,6 +76,12 @@ max-statements = 50
 "tests/*" = ["S105", "S106", "S108", "PLC0415", "PLR2004", "ARG002", "ARG005", "RUF003", "PT018", "TC003"]
 "src/mcp_trentina_crunchtools/dbus_interface.py" = ["UP037", "C901", "TRY300"]
 "src/mcp_trentina_crunchtools/gateway/app.py" = ["C901", "PLR0911", "PLR0912"]
+# E402: the benchmark inserts the repo root on sys.path before importing the
+# corpus and package, so those imports intentionally follow that setup.
+# PLR0915: render_markdown is a linear report builder — many append statements,
+# no real branching. Kept inline (one caller) to satisfy Gourmand's
+# single-use-helper rule rather than split into helpers.
+"benchmarks/provider_benchmark.py" = ["E402", "PLR0915"]
 
 [tool.mypy]
 python_version = "3.12"
