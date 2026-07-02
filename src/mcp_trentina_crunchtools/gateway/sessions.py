@@ -63,10 +63,16 @@ class SessionRegistry:
 
         profile_sessions = self._profile_index.get(profile_name, set())
         while len(profile_sessions) >= self.max_sessions_per_profile:
-            oldest = self._oldest_session_for_profile(profile_name)
-            if oldest is None:
+            oldest_id: str | None = None
+            oldest_time = float("inf")
+            for sid in profile_sessions:
+                s = self._sessions.get(sid)
+                if s is not None and s.last_access < oldest_time:
+                    oldest_time = s.last_access
+                    oldest_id = sid
+            if oldest_id is None:
                 break
-            self._remove(oldest)
+            self._remove(oldest_id)
             profile_sessions = self._profile_index.get(profile_name, set())
             logger.info(
                 "sessions: evicted oldest session for profile=%s (limit=%d)",
@@ -192,17 +198,6 @@ class SessionRegistry:
         for sid in expired:
             self._remove(sid)
             logger.debug("sessions: expired session=%s", sid[:8])
-
-    def _oldest_session_for_profile(self, profile_name: str) -> str | None:
-        ids = self._profile_index.get(profile_name, set())
-        oldest_id = None
-        oldest_time = float("inf")
-        for sid in ids:
-            session = self._sessions.get(sid)
-            if session is not None and session.last_access < oldest_time:
-                oldest_time = session.last_access
-                oldest_id = sid
-        return oldest_id
 
 
 session_registry = SessionRegistry()

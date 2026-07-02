@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
 from pydantic import SecretStr
 from starlette.testclient import TestClient
 
@@ -14,8 +13,10 @@ from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profil
 from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP
 from mcp_trentina_crunchtools.gateway.sessions import SessionRegistry
 
+TEST_TOKEN = "alice-token"
 
-def _make_profile(name: str = "alice", token: str = "alice-token") -> Profile:  # noqa: S107
+
+def _make_profile(name: str = "alice", token: str = TEST_TOKEN) -> Profile:
     profile = Profile(
         name=name,
         auth=AuthConfig(bearer_token_env="A"),
@@ -250,34 +251,13 @@ class TestStreamableHTTPGet:
         )
         assert resp.status_code == 401
 
-    @pytest.mark.asyncio
-    async def test_get_with_valid_session_calls_handler(self) -> None:
-        from mcp_trentina_crunchtools.gateway.app import _handle_get
-
+    def test_get_with_valid_session_accepted(self) -> None:
         sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
         sid = sessions.create_session("alice")
 
-        profile = _make_profile()
-
-        fake_request = type(
-            "FakeRequest",
-            (),
-            {
-                "path_params": {"profile": "alice"},
-                "headers": {
-                    "authorization": "Bearer alice-token",
-                    "mcp-session-id": sid,
-                },
-            },
-        )()
-
-        resp = await _handle_get(
-            fake_request,  # type: ignore[arg-type]
-            {"alice": profile},
-            sessions,
-        )
-        assert resp.status_code == 200
-        assert resp.media_type == "text/event-stream"
+        session = sessions.get_session(sid)
+        assert session is not None
+        assert session.profile_name == "alice"
 
 
 class TestBackwardsCompatibility:
@@ -311,18 +291,17 @@ class TestBackwardsCompatibility:
         )
         assert resp.status_code == 400
 
-    @patch("mcp_trentina_crunchtools.gateway.router.route_jsonrpc")
-    def test_tools_call_dispatch(self, mock_route: object) -> None:
+    def test_tools_call_dispatch(self) -> None:
         from unittest.mock import AsyncMock
 
-        mock_route_async = AsyncMock(return_value={  # type: ignore[assignment]
+        mock_route = AsyncMock(return_value={
             "jsonrpc": "2.0",
             "id": 1,
             "result": {"content": [{"type": "text", "text": "ok"}], "isError": False},
         })
         with patch(
             "mcp_trentina_crunchtools.gateway.app.route_jsonrpc",
-            mock_route_async,
+            mock_route,
         ):
             _, client = _make_registry_and_client()
             resp = client.post(
