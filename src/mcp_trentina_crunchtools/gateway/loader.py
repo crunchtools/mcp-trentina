@@ -77,6 +77,15 @@ def _build_profile(name: str, body: Any) -> Profile:
         raise ProfileConfigError(f"Profile {name!r}: env var {env_name} not set or empty")
     profile.auth.bearer_token = SecretStr(token_value)
 
+    for provider_name, override in profile.llm_keys.items():
+        key_value = os.environ.get(override.api_key_env, "")
+        if not key_value:
+            raise ProfileConfigError(
+                f"Profile {name!r} llm_keys {provider_name!r}: env var "
+                f"{override.api_key_env} not set or empty"
+            )
+        override.api_key = SecretStr(key_value)
+
     for backend_name, backend in profile.backends.items():
         if backend.headers:
             backend.headers = {
