@@ -25,7 +25,7 @@ from mcp_trentina_crunchtools.gateway.profile import Backend
 def _backend(
     url: str = "http://mcp-rotv:8080/mcp",
     timeout: float = 30.0,
-    list_timeout: float = 10.0,
+    list_timeout: float = 30.0,
 ) -> Backend:
     return Backend(url=url, timeout_seconds=timeout, list_timeout_seconds=list_timeout)
 
