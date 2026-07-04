@@ -147,10 +147,10 @@ class Backend(BaseModel):
         description="Per-call backend timeout",
     )
     list_timeout_seconds: float = Field(
-        default=10.0,
+        default=30.0,
         gt=0,
         le=MAX_LIST_TIMEOUT_SECONDS,
-        description="Timeout for tools/list metadata fetch (shorter than operational calls)",
+        description="Timeout for tools/list metadata fetch (streamable-HTTP handshake needs headroom)",
     )
     parameter_guards: dict[str, dict[str, ParameterConstraint]] = Field(
         default_factory=dict,

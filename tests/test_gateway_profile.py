@@ -139,7 +139,7 @@ class TestProfileModel:
 
     def test_list_timeout_defaults(self) -> None:
         b = Backend(url="http://x/mcp")
-        assert b.list_timeout_seconds == 10.0
+        assert b.list_timeout_seconds == 30.0
         assert b.timeout_seconds == 30.0
 
     def test_list_timeout_custom(self) -> None:
