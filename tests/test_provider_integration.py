@@ -14,6 +14,17 @@ import pytest
 
 from mcp_trentina_crunchtools.quarantine.providers.base import ProviderResult
 
+CI_TEST_KEY = "test_key_for_ci"
+
+
+def _has_real_key(env_name: str) -> bool:
+    """True only for a real provider key — the CI test value boots the app but
+    is rejected by the live API, so live integration tests must skip on it.
+    """
+    value = os.environ.get(env_name, "")
+    return bool(value) and value != CI_TEST_KEY
+
+
 SIMPLE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -25,8 +36,8 @@ SIMPLE_SCHEMA = {
 
 
 @pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY not set",
+    not _has_real_key("OPENAI_API_KEY"),
+    reason="OPENAI_API_KEY not set (or CI test key)",
 )
 @pytest.mark.asyncio
 class TestOpenAIIntegration:
@@ -53,8 +64,8 @@ class TestOpenAIIntegration:
 
 
 @pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="ANTHROPIC_API_KEY not set",
+    not _has_real_key("ANTHROPIC_API_KEY"),
+    reason="ANTHROPIC_API_KEY not set (or CI test key)",
 )
 @pytest.mark.asyncio
 class TestAnthropicIntegration:
@@ -81,8 +92,8 @@ class TestAnthropicIntegration:
 
 
 @pytest.mark.skipif(
-    not os.environ.get("GEMINI_API_KEY"),
-    reason="GEMINI_API_KEY not set",
+    not _has_real_key("GEMINI_API_KEY"),
+    reason="GEMINI_API_KEY not set (or CI test key)",
 )
 @pytest.mark.asyncio
 class TestGeminiIntegration:
