@@ -19,6 +19,7 @@ from ..config import SUPPORTED_PROVIDERS
 
 PROFILE_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 BACKEND_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
+PROVIDER_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 GLOB_PATTERN_RE = re.compile(r"^[a-zA-Z0-9_*][a-zA-Z0-9_*-]*$")
 GUARD_VALUE_RE = re.compile(r"^[a-zA-Z0-9_*@.\-+/ ]+$")
 ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
@@ -52,6 +53,38 @@ class AuthConfig(BaseModel):
         if not ENV_NAME_RE.match(v):
             raise ValueError(
                 f"bearer_token_env {v!r} must be an UPPERCASE env-var identifier"
+            )
+        return v
+
+
+class LlmKeyOverride(BaseModel):
+    """Per-profile provider API key for the LLM reverse proxy.
+
+    `api_key_env` is the env var name holding the profile's own provider key;
+    `api_key` is resolved at load time and never serialized. When a profile
+    declares one of these for a provider, the LLM proxy injects this key
+    instead of the global provider key, isolating the profile's rate-limit
+    quota and token accounting.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    api_key_env: str = Field(
+        ..., description="Env var name whose value is this profile's provider API key"
+    )
+    api_key: SecretStr = Field(
+        default=SecretStr(""),
+        exclude=True,
+        description="Resolved key (load-time only)",
+    )
+
+    @field_validator("api_key_env")
+    @classmethod
+    def env_name_is_uppercase_identifier(cls, v: str) -> str:
+        """Reject lowercase, leading digits, or non-identifier characters."""
+        if not ENV_NAME_RE.match(v):
+            raise ValueError(
+                f"api_key_env {v!r} must be an UPPERCASE env-var identifier"
             )
         return v
 
@@ -224,6 +257,13 @@ class Profile(BaseModel):
         default_factory=dict,
         description="Backend MCP servers reachable from this profile",
     )
+    llm_keys: dict[str, LlmKeyOverride] = Field(
+        default_factory=dict,
+        description=(
+            "Per-provider API key overrides for the LLM proxy, keyed by "
+            "provider name (must match a configured llm_providers entry)."
+        ),
+    )
     defense: DefenseConfig = Field(default_factory=DefenseConfig)
 
     @field_validator("name")
@@ -241,4 +281,19 @@ class Profile(BaseModel):
         for name in v:
             if not BACKEND_NAME_RE.match(name):
                 raise ValueError(f"Backend name {name!r} must match ^[a-z][a-z0-9-]*$")
+        return v
+
+    @field_validator("llm_keys")
+    @classmethod
+    def llm_key_names_match_re(
+        cls, v: dict[str, LlmKeyOverride]
+    ) -> dict[str, LlmKeyOverride]:
+        """Each llm_keys dict key must be a provider slug (matches PROVIDER_NAME_RE).
+
+        Cross-validation against configured llm_providers happens at wiring time
+        in register_llm_routes (the provider list is not available here).
+        """
+        for name in v:
+            if not PROVIDER_NAME_RE.match(name):
+                raise ValueError(f"Provider name {name!r} must match ^[a-z][a-z0-9-]*$")
         return v
