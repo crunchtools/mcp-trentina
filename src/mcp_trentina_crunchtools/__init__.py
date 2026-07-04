@@ -117,7 +117,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     )
 
     llm_providers = load_llm_providers(gateway_config.llm_providers)
-    register_llm_routes(mcp_server, llm_providers)
+    register_llm_routes(mcp_server, llm_providers, gateway_config.profiles)
 
     if gateway_config.matrix.get("enabled"):
         matrix_upstream = gateway_config.matrix.get(

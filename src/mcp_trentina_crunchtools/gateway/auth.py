@@ -44,3 +44,42 @@ def verify_bearer(authorization_header: str | None, profile: Profile) -> None:
     expected = profile.auth.bearer_token.get_secret_value()
     if not hmac.compare_digest(presented.encode("utf-8"), expected.encode("utf-8")):
         raise AuthError("invalid token")
+
+
+def resolve_profile_by_token(
+    authorization_header: str | None, registry: dict[str, Profile]
+) -> Profile | None:
+    """Resolve which profile a bearer token belongs to, or None.
+
+    Used by the LLM proxy, which — unlike the gateway routes — carries no
+    profile in its URL. The presented token is compared in constant time
+    against every profile's resolved bearer token; the first match wins.
+
+    Constant-time comparison runs for every profile so a valid token cannot be
+    distinguished from an invalid one by response timing. The number of
+    profiles is not secret.
+
+    Args:
+        authorization_header: Raw `Authorization` header value, or None.
+        registry: Loaded profile registry (name -> Profile).
+
+    Returns:
+        The matching Profile, or None if the header is missing, malformed, or
+        matches no profile.
+    """
+    if not authorization_header:
+        return None
+
+    scheme, _, presented = authorization_header.partition(" ")
+    if scheme.lower() != "bearer" or not presented:
+        return None
+
+    presented_bytes = presented.encode("utf-8")
+    match: Profile | None = None
+    for profile in registry.values():
+        if profile.auth.bearer_token is None:
+            continue
+        expected = profile.auth.bearer_token.get_secret_value().encode("utf-8")
+        if hmac.compare_digest(presented_bytes, expected) and match is None:
+            match = profile
+    return match

@@ -14,7 +14,22 @@ API key theft is particularly dangerous because:
 
 ## How It Works
 
-Trentina exposes LLM API proxy endpoints at `/llm/{provider}/{path}` that mirror the upstream APIs. The agent sends requests using its normal auth. Trentina strips the agent's auth, injects the real API key from its own environment, forwards to the upstream provider, and returns the response. Streaming (SSE) and non-streaming responses are forwarded transparently.
+Trentina exposes LLM API proxy endpoints at `/llm/{provider}/{path}` that mirror the upstream APIs. The agent authenticates with its **gateway bearer token** (the same token it uses for `/gateway/{profile}/mcp`). Trentina resolves which profile the token belongs to, strips the agent's `Authorization` header, injects the real API key for that profile, forwards to the upstream provider, and returns the response. Streaming (SSE) and non-streaming responses are forwarded transparently.
+
+### Per-Profile Keys and Rate-Limit Isolation
+
+Each profile injects **its own** provider key, declared in the profile's `llm_keys` section. This gives every consumer its own rate-limit bucket and its own token accounting on the provider's dashboard — heavy agentic traffic from one consumer can no longer exhaust another's quota (see [#53](https://github.com/crunchtools/mcp-trentina/issues/53)).
+
+Authentication is **mandatory**:
+
+| Condition | Result |
+|-----------|--------|
+| Unknown or disabled `{provider}` | `404` |
+| Missing / malformed / unrecognized bearer token | `401` |
+| Authenticated profile has no `llm_keys` entry for `{provider}` | `502` |
+| Authenticated profile has a key for `{provider}` | Inject the profile's key, forward |
+
+The caller's `Authorization` header is never forwarded upstream. Trentina's own Q-Agent is unaffected — it calls providers directly (not through `/llm/`) and continues to use the global `GEMINI_API_KEY`.
 
 ### What This Buys You
 
@@ -56,7 +71,27 @@ Each provider entry specifies:
 | `upstream` | Base URL to forward requests to |
 | `auth_header` | HTTP header name for the API key |
 | `auth_prefix` | Optional prefix before the key value (e.g., `"Bearer "`) |
-| `api_key_env` | Environment variable holding the real API key |
+| `api_key_env` | Environment variable holding the real API key (used by Trentina's own Q-Agent path; the LLM proxy uses per-profile keys) |
+
+Each **profile** then declares the key it wants the proxy to inject, under `llm_keys`:
+
+```yaml
+profiles:
+  kagetora:
+    auth:
+      bearer_token_env: AIRLOCK_PROFILE_KAGETORA_TOKEN
+    llm_keys:
+      gemini:
+        api_key_env: KAGETORA_GEMINI_API_KEY
+  takeda:
+    auth:
+      bearer_token_env: AIRLOCK_PROFILE_TAKEDA_TOKEN
+    llm_keys:
+      gemini:
+        api_key_env: TAKEDA_GEMINI_API_KEY
+```
+
+The provider name under `llm_keys` must match a configured `llm_providers` entry — a dangling reference fails the server closed at startup.
 
 ### Architecture
 
@@ -71,11 +106,12 @@ Each provider entry specifies:
 
 ### Request Flow
 
-1. Agent sends `POST /llm/gemini/v1beta/models/gemini-2.5-flash:generateContent`
-2. Trentina looks up the `gemini` provider config
-3. Strips hop-by-hop headers, injects `x-goog-api-key: <real key>`
-4. Forwards to `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
-5. Streams the response back to the agent
+1. Agent sends `POST /llm/gemini/v1beta/models/gemini-2.5-flash:generateContent` with `Authorization: Bearer <profile gateway token>`
+2. Trentina looks up the `gemini` provider config and resolves the caller profile from the bearer token (`401` if it matches none)
+3. Looks up the profile's `llm_keys.gemini` key (`502` if the profile has none)
+4. Strips hop-by-hop headers **and the caller's `Authorization`**, injects `x-goog-api-key: <profile's real key>`
+5. Forwards to `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
+6. Streams the response back to the agent
 
 ### Relationship to Network Isolation
 
