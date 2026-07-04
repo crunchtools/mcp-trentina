@@ -1,7 +1,7 @@
 # Specification: Per-Profile LLM Proxy Keys
 
 > **Spec ID:** 011-per-profile-llm-key
-> **Status:** Draft
+> **Status:** Implemented
 > **Version:** 0.1.0
 > **Author:** Scott McCarty
 > **Date:** 2026-07-03

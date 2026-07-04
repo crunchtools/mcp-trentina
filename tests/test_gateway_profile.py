@@ -13,6 +13,7 @@ from mcp_trentina_crunchtools.gateway.profile import (
     AuthConfig,
     Backend,
     DefenseConfig,
+    LlmKeyOverride,
     ParameterConstraint,
     Profile,
 )
@@ -212,6 +213,84 @@ profiles:
         monkeypatch.setenv("TEST_TOK", "x")
         gateway_cfg = load_profiles(cfg)
         assert gateway_cfg.profiles["takeda"].defense.provider is None
+
+
+class TestLlmKeys:
+    """Per-profile LLM proxy key overrides."""
+
+    def test_llm_key_override_valid(self) -> None:
+        override = LlmKeyOverride(api_key_env="KAGETORA_GEMINI_API_KEY")
+        assert override.api_key_env == "KAGETORA_GEMINI_API_KEY"
+        assert override.api_key.get_secret_value() == ""
+
+    def test_llm_key_override_bad_env_name(self) -> None:
+        with pytest.raises(ValidationError, match="UPPERCASE"):
+            LlmKeyOverride(api_key_env="lowercase-key")
+
+    def test_llm_key_override_extra_forbidden(self) -> None:
+        with pytest.raises(ValidationError):
+            LlmKeyOverride(api_key_env="KEY", surprise="nope")
+
+    def test_profile_with_llm_keys(self) -> None:
+        p = Profile(
+            name="kagetora",
+            auth=AuthConfig(bearer_token_env="AIRLOCK_PROFILE_KAGETORA_TOKEN"),
+            llm_keys={"gemini": LlmKeyOverride(api_key_env="KAGETORA_GEMINI_API_KEY")},
+        )
+        assert p.llm_keys["gemini"].api_key_env == "KAGETORA_GEMINI_API_KEY"
+
+    def test_profile_llm_keys_default_empty(self) -> None:
+        p = Profile(name="t", auth=AuthConfig(bearer_token_env="TEST"))
+        assert p.llm_keys == {}
+
+    def test_bad_provider_name_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="Provider name"):
+            Profile(
+                name="t",
+                auth=AuthConfig(bearer_token_env="TEST"),
+                llm_keys={"Bad_Name": LlmKeyOverride(api_key_env="KEY")},
+            )
+
+    def test_llm_key_env_resolved_by_loader(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cfg = tmp_path / "profiles.yaml"
+        cfg.write_text(
+            """
+profiles:
+  kagetora:
+    auth:
+      bearer_token_env: KAGETORA_TOK
+    llm_keys:
+      gemini:
+        api_key_env: KAGETORA_GEMINI_API_KEY
+"""
+        )
+        monkeypatch.setenv("KAGETORA_TOK", "tok")
+        monkeypatch.setenv("KAGETORA_GEMINI_API_KEY", "gm-secret")
+        gateway_cfg = load_profiles(cfg)
+        key = gateway_cfg.profiles["kagetora"].llm_keys["gemini"].api_key
+        assert key.get_secret_value() == "gm-secret"
+
+    def test_llm_key_env_missing_fails_closed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cfg = tmp_path / "profiles.yaml"
+        cfg.write_text(
+            """
+profiles:
+  kagetora:
+    auth:
+      bearer_token_env: KAGETORA_TOK
+    llm_keys:
+      gemini:
+        api_key_env: KAGETORA_GEMINI_API_KEY
+"""
+        )
+        monkeypatch.setenv("KAGETORA_TOK", "tok")
+        monkeypatch.delenv("KAGETORA_GEMINI_API_KEY", raising=False)
+        with pytest.raises(ProfileConfigError, match="KAGETORA_GEMINI_API_KEY"):
+            load_profiles(cfg)
 
 
 class TestLoader:

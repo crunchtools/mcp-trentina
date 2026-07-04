@@ -9,6 +9,14 @@ profiles:
     auth:
       bearer_token_env: AIRLOCK_PROFILE_KAGETORA_TOKEN
 
+    # Per-profile LLM proxy key. When kagetora calls /llm/gemini/... with this
+    # profile's bearer token, the proxy injects KAGETORA_GEMINI_API_KEY instead
+    # of the global key — isolating kagetora's rate-limit quota and token spend.
+    # The provider name must match a configured llm_providers entry.
+    llm_keys:
+      gemini:
+        api_key_env: KAGETORA_GEMINI_API_KEY
+
     backends:
       # ── Internal (airlock's own tools) ──────────────────────────
       web:

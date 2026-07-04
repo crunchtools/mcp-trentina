@@ -5,14 +5,17 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools.gateway.auth import verify_bearer
+from mcp_trentina_crunchtools.gateway.auth import (
+    resolve_profile_by_token,
+    verify_bearer,
+)
 from mcp_trentina_crunchtools.gateway.errors import AuthError
 from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Profile
 
 
-def _profile_with_token(value: str) -> Profile:
+def _profile_with_token(value: str, name: str = "t") -> Profile:
     """Build a Profile with a pre-resolved bearer token for test convenience."""
-    p = Profile(name="t", auth=AuthConfig(bearer_token_env="TEST"))
+    p = Profile(name=name, auth=AuthConfig(bearer_token_env="TEST"))
     p.auth.bearer_token = SecretStr(value)
     return p
 
@@ -62,3 +65,50 @@ class TestVerifyBearer:
         p = Profile(name="t", auth=AuthConfig(bearer_token_env="TEST"))
         with pytest.raises(AuthError, match="not resolved"):
             verify_bearer("Bearer x", p)
+
+
+class TestResolveProfileByToken:
+    """Reverse token->profile resolution for the LLM proxy (no profile in URL)."""
+
+    def _registry(self) -> dict[str, Profile]:
+        return {
+            "kagetora": _profile_with_token("kagetora-token", "kagetora"),
+            "takeda": _profile_with_token("takeda-token", "takeda"),
+        }
+
+    def test_matching_token_resolves_profile(self) -> None:
+        registry = self._registry()
+        result = resolve_profile_by_token("Bearer takeda-token", registry)
+        assert result is not None
+        assert result.name == "takeda"
+
+    def test_unknown_token_returns_none(self) -> None:
+        assert resolve_profile_by_token("Bearer nope", self._registry()) is None
+
+    def test_missing_header_returns_none(self) -> None:
+        assert resolve_profile_by_token(None, self._registry()) is None
+        assert resolve_profile_by_token("", self._registry()) is None
+
+    def test_malformed_header_returns_none(self) -> None:
+        registry = self._registry()
+        assert resolve_profile_by_token("kagetora-token", registry) is None
+        assert resolve_profile_by_token("Basic kagetora-token", registry) is None
+        assert resolve_profile_by_token("Bearer ", registry) is None
+
+    def test_case_insensitive_scheme(self) -> None:
+        registry = self._registry()
+        result = resolve_profile_by_token("bearer kagetora-token", registry)
+        assert result is not None
+        assert result.name == "kagetora"
+
+    def test_unresolved_token_profiles_skipped(self) -> None:
+        """A profile whose token was never resolved must never match."""
+        registry: dict[str, Profile] = {
+            "unresolved": Profile(
+                name="unresolved", auth=AuthConfig(bearer_token_env="TEST")
+            ),
+        }
+        assert resolve_profile_by_token("Bearer anything", registry) is None
+
+    def test_empty_registry_returns_none(self) -> None:
+        assert resolve_profile_by_token("Bearer x", {}) is None
