@@ -112,3 +112,13 @@ class TestResolveProfileByToken:
 
     def test_empty_registry_returns_none(self) -> None:
         assert resolve_profile_by_token("Bearer x", {}) is None
+
+    def test_duplicate_token_returns_first_match(self) -> None:
+        """Docstring guarantees first-match-wins for a duplicate-token misconfig."""
+        registry: dict[str, Profile] = {
+            "first": _profile_with_token("shared-token", "first"),
+            "second": _profile_with_token("shared-token", "second"),
+        }
+        result = resolve_profile_by_token("Bearer shared-token", registry)
+        assert result is not None
+        assert result.name == "first"
