@@ -1,7 +1,7 @@
 # Implementation Plan: Per-Profile LLM Proxy Keys
 
 > **Spec ID:** 011-per-profile-llm-key
-> **Status:** Planning
+> **Status:** Complete
 > **Last Updated:** 2026-07-03
 
 ## Summary

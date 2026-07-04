@@ -200,6 +200,12 @@ class TestValidateProfileLlmKeys:
         profiles = {"josui": _profile("josui", "tok", {})}
         validate_profile_llm_keys(providers, profiles)  # no raise
 
+    def test_dangling_reference_with_no_providers_fails_closed(self) -> None:
+        """llm_keys referencing a provider is a misconfig even when none are enabled."""
+        profiles = {"kagetora": _profile("kagetora", "tok", {"gemini": "k-key"})}
+        with pytest.raises(ProfileConfigError, match="not a configured"):
+            validate_profile_llm_keys({}, profiles)
+
 
 class _FakeUpstreamResp:
     """Minimal stand-in for httpx.Response used by _streaming_response."""

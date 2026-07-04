@@ -80,6 +80,6 @@ def resolve_profile_by_token(
         if profile.auth.bearer_token is None:
             continue
         expected = profile.auth.bearer_token.get_secret_value().encode("utf-8")
-        if hmac.compare_digest(presented_bytes, expected):
+        if hmac.compare_digest(presented_bytes, expected) and match is None:
             match = profile
     return match

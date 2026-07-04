@@ -171,11 +171,15 @@ def register_llm_routes(
 
     The endpoint authenticates each request against the caller's gateway
     bearer token (via ``profiles``) and injects that profile's provider key.
+
+    Cross-validation runs before the no-providers early return: a profile that
+    declares ``llm_keys`` for a provider that does not exist is a misconfig
+    regardless of whether any providers ended up enabled.
     """
+    validate_profile_llm_keys(providers, profiles)
+
     if not providers:
         return
-
-    validate_profile_llm_keys(providers, profiles)
 
     async def llm_proxy_endpoint(request: Request) -> Response:
         return await _proxy_llm(request, providers, profiles)
