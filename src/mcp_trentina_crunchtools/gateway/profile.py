@@ -159,6 +159,10 @@ class Backend(BaseModel):
             "Validated at call time before the backend is contacted."
         ),
     )
+    validate_output_schema: bool = Field(
+        default=True,
+        description="Validate tool results against the backend's outputSchema (disable for buggy backends)",
+    )
     compress_descriptions: bool = Field(
         default=False,
         description="Compress verbose tool descriptions via LLM at gateway startup",

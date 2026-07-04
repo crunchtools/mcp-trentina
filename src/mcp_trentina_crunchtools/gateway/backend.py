@@ -158,7 +158,10 @@ async def call_backend_tool(
     headers = backend.headers or None
     try:
         result = await asyncio.wait_for(
-            _do_call_tool(backend.url, headers, tool_name, arguments),
+            _do_call_tool(
+                backend.url, headers, tool_name, arguments,
+                validate_output=backend.validate_output_schema,
+            ),
             timeout=backend.timeout_seconds,
         )
     except Exception as exc:
@@ -201,6 +204,8 @@ async def _do_call_tool(
     headers: dict[str, str] | None,
     tool_name: str,
     arguments: dict[str, Any],
+    *,
+    validate_output: bool = True,
 ) -> Any:
     """Open a fresh session and call_tool."""
     async with (
@@ -208,7 +213,14 @@ async def _do_call_tool(
         ClientSession(read, write) as session,
     ):
         await session.initialize()
+        if not validate_output:
+            session._tool_output_schemas.clear()
+            session._validate_tool_result = _noop_validate  # type: ignore[assignment]
         return await session.call_tool(tool_name, arguments=arguments)
+
+
+async def _noop_validate(name: str, result: Any) -> None:
+    """Skip client-side output schema validation."""
 
 
 def _serialize_tool(tool: Any) -> dict[str, Any]:
