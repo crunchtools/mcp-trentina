@@ -19,7 +19,7 @@ uv run mcp-trentina-crunchtools
 - `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-trentina/trentina.db)
 - `QUARANTINE_TRUST_CONFIG` — Trust allowlist JSON path
 
-## Tools (6)
+## Tools
 
 ### Safe (Layer 1 only)
 - safe_fetch, safe_read
@@ -29,6 +29,10 @@ uv run mcp-trentina-crunchtools
 
 ### Stats
 - quarantine_stats
+
+### Gateway admin
+- cache_flush — flush tool-list caches (all or one backend)
+- reconnect_backend — reset one backend's circuit breaker + re-probe after it restarts, without restarting the gateway
 
 ## Development
 

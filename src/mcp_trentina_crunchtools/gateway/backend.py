@@ -207,15 +207,22 @@ async def _do_call_tool(
     *,
     validate_output: bool = True,
 ) -> Any:
-    """Open a fresh session and call_tool."""
+    """Open a fresh session and call_tool.
+
+    When ``validate_output`` is False, client-side output-schema validation is
+    disabled for buggy backends: the cached schemas are cleared and the
+    validator is replaced with a no-op. The SDK internals are reached through
+    an ``Any`` alias so the method override type-checks without a suppression.
+    """
     async with (
         streamablehttp_client(url, headers=headers) as (read, write, _),
         ClientSession(read, write) as session,
     ):
         await session.initialize()
         if not validate_output:
-            session._tool_output_schemas.clear()
-            session._validate_tool_result = _noop_validate  # type: ignore[assignment]
+            internals: Any = session
+            internals._tool_output_schemas.clear()
+            internals._validate_tool_result = _noop_validate
         return await session.call_tool(tool_name, arguments=arguments)
 
 
