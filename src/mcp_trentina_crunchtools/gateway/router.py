@@ -55,6 +55,17 @@ def _on_backend_evicted(url: str) -> None:
 on_backend_cache_evict(_on_backend_evicted)
 
 
+def invalidate_profile_cache_for_backend(url: str) -> None:
+    """Drop any profile aggregate that includes *url* so it rebuilds fresh.
+
+    Used by the reconnect tool: after re-warming a backend's tool cache, a
+    profile aggregate assembled while that backend was failing would still
+    omit its tools, so it must be evicted even when the backend cache was
+    already cold (in which case the eviction cascade never fired).
+    """
+    _on_backend_evicted(url)
+
+
 def reset_profile_tools_cache() -> None:
     """Clear the profile-level tool list cache (for testing)."""
     _profile_tools_cache.clear()

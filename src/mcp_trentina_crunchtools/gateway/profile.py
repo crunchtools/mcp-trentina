@@ -150,7 +150,10 @@ class Backend(BaseModel):
         default=30.0,
         gt=0,
         le=MAX_LIST_TIMEOUT_SECONDS,
-        description="Timeout for tools/list metadata fetch (streamable-HTTP handshake needs headroom)",
+        description=(
+            "Timeout for tools/list metadata fetch "
+            "(streamable-HTTP handshake needs headroom)"
+        ),
     )
     parameter_guards: dict[str, dict[str, ParameterConstraint]] = Field(
         default_factory=dict,
@@ -161,7 +164,10 @@ class Backend(BaseModel):
     )
     validate_output_schema: bool = Field(
         default=True,
-        description="Validate tool results against the backend's outputSchema (disable for buggy backends)",
+        description=(
+            "Validate tool results against the backend's outputSchema "
+            "(disable for buggy backends)"
+        ),
     )
     compress_descriptions: bool = Field(
         default=False,

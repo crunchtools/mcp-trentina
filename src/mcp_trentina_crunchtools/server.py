@@ -16,6 +16,7 @@ from .tools import (
     quarantine_read,
     quarantine_scan,
     quarantine_search,
+    reconnect_backend,
     safe_content,
     safe_fetch,
     safe_read,
@@ -282,3 +283,18 @@ async def cache_flush_tool(
         backend: Backend name to flush (e.g. "rt", "wiki"). Omit to flush all.
     """
     return await cache_flush(backend)
+
+
+@mcp.tool()
+async def reconnect_backend_tool(backend: str) -> dict[str, Any]:
+    """Recover a single backend after it restarts, without restarting the gateway.
+
+    Resets the backend's circuit breaker, evicts its stale tool cache, and
+    forces a fresh probe that re-warms the cache. Use this when a backend
+    container was restarted and its calls now fail (cache_flush alone does not
+    reset the circuit breaker).
+
+    Args:
+        backend: Backend name to reconnect (e.g. "postiz", "slack", "jira").
+    """
+    return await reconnect_backend(backend)
