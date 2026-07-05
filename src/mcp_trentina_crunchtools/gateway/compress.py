@@ -85,6 +85,11 @@ def set_profiles(profiles: dict[str, Profile]) -> None:
     _profiles = profiles
 
 
+def get_profiles() -> dict[str, Profile] | None:
+    """Return the loaded profile registry, or None if the gateway is not up."""
+    return _profiles
+
+
 async def maybe_trigger_compression() -> None:
     """Trigger background compression on the first call, retrying on failure.
 
