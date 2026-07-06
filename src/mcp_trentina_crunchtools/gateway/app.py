@@ -15,12 +15,13 @@ notifications (e.g. ``tools/listChanged`` on circuit breaker state changes).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING, Any
 
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from .auth import verify_bearer
@@ -35,6 +36,8 @@ from .router import route_jsonrpc
 from .sessions import SessionRegistry, session_registry
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from starlette.requests import Request
 
     from .profile import Profile
@@ -42,6 +45,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 MCP_SESSION_ID_HEADER = "mcp-session-id"
+
+SSE_KEEPALIVE_SECONDS = 25.0
+"""Idle gap between keepalive frames. Under common proxy/gateway idle
+timeouts (~60s) so quiet connections don't hit 504 upstream-timeout drops."""
+
+SSE_RETRY_MS = 15000
+"""Reconnect hint (ms) sent on stream open. Standard SSE clients honour
+``retry:`` and back off at the protocol layer, bypassing app-level retry caps."""
 
 
 def gateway_app(
@@ -95,16 +106,13 @@ async def _handle_get(
     registry: dict[str, Profile],
     sessions: SessionRegistry,
 ) -> Response:
-    """Open an SSE stream for server-push notifications.
+    """Open a long-lived SSE stream for server-push notifications.
 
     Requires a valid ``Mcp-Session-Id`` header.  The stream stays open
-    until the client disconnects; ``tools/listChanged`` notifications
-    are pushed when circuit breaker state affects this session's profile.
-
-    Phase 2 implementation: validates the session exists and returns 200
-    with an ``text/event-stream`` content type.  Actual long-lived SSE
-    streaming requires an ASGI streaming response that will be connected
-    to the session notification pipeline in a follow-up.
+    until the client disconnects; ``notifications/tools/listChanged`` frames
+    are delivered when circuit breaker state affects this session's profile
+    (see :meth:`SessionRegistry.broadcast_tools_changed`).  Keepalive comment
+    frames are interleaved during idle periods to hold the socket open.
     """
     profile_name = request.path_params.get("profile", "")
     profile = registry.get(profile_name)
@@ -127,28 +135,47 @@ async def _handle_get(
     if session.profile_name != profile_name:
         return _plain(403, "Session does not belong to this profile")
 
-    import asyncio
-    from collections.abc import AsyncIterator  # noqa: TC003
-
-    from starlette.responses import StreamingResponse
-
-    async def event_stream() -> AsyncIterator[str]:
-        yield f"event: endpoint\ndata: /gateway/{profile_name}/mcp\n\n"
-        try:
-            while True:
-                await asyncio.sleep(30)
-                yield ": keepalive\n\n"
-        except asyncio.CancelledError:
-            return
-
     return StreamingResponse(
-        event_stream(),
+        _sse_event_stream(sessions, session_id),
         media_type="text/event-stream",
         headers={
             MCP_SESSION_ID_HEADER: session_id,
             "Cache-Control": "no-cache",
         },
     )
+
+
+async def _sse_event_stream(
+    sessions: SessionRegistry,
+    session_id: str,
+    keepalive_seconds: float = SSE_KEEPALIVE_SECONDS,
+) -> AsyncIterator[str]:
+    """Yield SSE frames for one server-push stream.
+
+    Subscribes a notification queue for ``session_id`` and drains it as
+    MCP-compliant ``event: message`` frames.  When no notification arrives
+    within ``keepalive_seconds``, emits a comment keepalive instead.  Always
+    deregisters the queue on disconnect (``CancelledError``) or exit.
+
+    The ``retry:`` reconnect hint is emitted before any data so it is set
+    even if the client reconnects immediately.
+    """
+    queue = sessions.subscribe(session_id)
+    try:
+        yield f"retry: {SSE_RETRY_MS}\n\n"
+        while True:
+            try:
+                notification = await asyncio.wait_for(
+                    queue.get(), timeout=keepalive_seconds
+                )
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+                continue
+            yield f"event: message\ndata: {json.dumps(notification)}\n\n"
+    except asyncio.CancelledError:
+        return
+    finally:
+        sessions.unsubscribe(session_id, queue)
 
 
 async def _handle_delete(
