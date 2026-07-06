@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from unittest.mock import patch
 
+import pytest
 from pydantic import SecretStr
 from starlette.testclient import TestClient
 
-from mcp_trentina_crunchtools.gateway.app import MCP_SESSION_ID_HEADER, gateway_app
+from mcp_trentina_crunchtools import _wire_circuit_notifications
+from mcp_trentina_crunchtools.gateway.app import (
+    MCP_SESSION_ID_HEADER,
+    SSE_RETRY_MS,
+    _sse_event_stream,
+    gateway_app,
+)
 from mcp_trentina_crunchtools.gateway.circuit import CircuitBreaker, State
 from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
 from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP
@@ -258,6 +267,122 @@ class TestStreamableHTTPGet:
         session = sessions.get_session(sid)
         assert session is not None
         assert session.profile_name == "alice"
+
+
+class TestSSEEventStream:
+    """The long-lived SSE stream that carries server-push notifications."""
+
+    @pytest.mark.asyncio
+    async def test_first_frame_is_retry_hint(self) -> None:
+        sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = sessions.create_session("alice")
+        stream = _sse_event_stream(sessions, sid, keepalive_seconds=5.0)
+        try:
+            first = await stream.__anext__()
+            assert first == f"retry: {SSE_RETRY_MS}\n\n"
+        finally:
+            await stream.aclose()
+
+    @pytest.mark.asyncio
+    async def test_stream_subscribes_on_open(self) -> None:
+        sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = sessions.create_session("alice")
+        stream = _sse_event_stream(sessions, sid, keepalive_seconds=5.0)
+        try:
+            await stream.__anext__()  # retry frame; subscription is now live
+            assert sessions.subscriber_count(sid) == 1
+        finally:
+            await stream.aclose()
+
+    @pytest.mark.asyncio
+    async def test_broadcast_delivers_message_frame(self) -> None:
+        sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = sessions.create_session("alice")
+        stream = _sse_event_stream(sessions, sid, keepalive_seconds=5.0)
+        try:
+            await stream.__anext__()  # drain retry frame, register subscription
+
+            count = await sessions.broadcast_tools_changed("alice")
+            assert count == 1
+
+            frame = await stream.__anext__()
+            assert frame.startswith("event: message\ndata: ")
+            payload = json.loads(frame.split("data: ", 1)[1].strip())
+            assert payload["method"] == "notifications/tools/listChanged"
+            assert "event: endpoint" not in frame
+        finally:
+            await stream.aclose()
+
+    @pytest.mark.asyncio
+    async def test_keepalive_on_idle(self) -> None:
+        sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = sessions.create_session("alice")
+        stream = _sse_event_stream(sessions, sid, keepalive_seconds=0.01)
+        try:
+            await stream.__anext__()  # retry frame
+            frame = await stream.__anext__()  # nothing queued → keepalive
+            assert frame == ": keepalive\n\n"
+        finally:
+            await stream.aclose()
+
+    @pytest.mark.asyncio
+    async def test_close_unsubscribes(self) -> None:
+        sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = sessions.create_session("alice")
+        stream = _sse_event_stream(sessions, sid, keepalive_seconds=5.0)
+        await stream.__anext__()
+        assert sessions.subscriber_count(sid) == 1
+        await stream.aclose()
+        assert sessions.subscriber_count(sid) == 0
+
+
+class TestCircuitToSSEDelivery:
+    """End-to-end: a circuit trip reaches a subscribed session's queue."""
+
+    @pytest.mark.asyncio
+    async def test_circuit_open_delivers_listchanged(self) -> None:
+        backend_url = "http://mcp-slack:8005/mcp"
+        profile = _make_profile()
+        profiles = {"alice": profile}
+        sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        cb = CircuitBreaker(failure_threshold=2, cooldown_seconds=0.01)
+
+        _wire_circuit_notifications(cb, sessions, profiles)
+
+        sid = sessions.create_session("alice")
+        queue = sessions.subscribe(sid)
+
+        cb.record_failure(backend_url)
+        cb.record_failure(backend_url)
+
+        for _ in range(50):
+            if not queue.empty():
+                break
+            await asyncio.sleep(0.01)
+
+        assert not queue.empty()
+        notification = queue.get_nowait()
+        assert notification["method"] == "notifications/tools/listChanged"
+
+    @pytest.mark.asyncio
+    async def test_unaffected_profile_not_notified(self) -> None:
+        profile = _make_profile()  # backend http://mcp-slack:8005/mcp
+        profiles = {"alice": profile}
+        sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        cb = CircuitBreaker(failure_threshold=2, cooldown_seconds=0.01)
+
+        _wire_circuit_notifications(cb, sessions, profiles)
+
+        sid = sessions.create_session("alice")
+        queue = sessions.subscribe(sid)
+
+        cb.record_failure("http://other:9000/mcp")
+        cb.record_failure("http://other:9000/mcp")
+
+        for _ in range(10):
+            await asyncio.sleep(0.01)
+
+        assert queue.empty()
 
 
 class TestBackwardsCompatibility:

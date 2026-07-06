@@ -13,6 +13,7 @@ affects a profile's tool list.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -23,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SESSION_TTL = 300.0
 DEFAULT_MAX_SESSIONS_PER_PROFILE = 10
+
+SUBSCRIBER_QUEUE_MAXSIZE = 32
+"""Bound per subscriber queue so a stalled SSE reader can't grow memory
+without limit. listChanged is idempotent, so dropping a frame on a full
+queue is harmless — the client re-requests tools/list on the next one."""
 
 
 @dataclass
@@ -44,14 +50,47 @@ class SessionRegistry:
     _sessions: dict[str, Session] = field(default_factory=dict)
     _profile_index: dict[str, set[str]] = field(default_factory=dict)
     _notification_callback: Any = field(default=None)
+    _subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = field(
+        default_factory=dict
+    )
 
     def set_notification_callback(self, callback: Any) -> None:
         """Register a callback for pushing notifications to transport sessions.
 
-        The callback signature is:
+        Optional escape hatch for transports other than the built-in SSE GET
+        stream (which delivers via :meth:`subscribe` queues).  When set, the
+        callback is invoked in addition to any subscriber queues.  Signature:
             async def callback(session_id: str, notification: dict) -> None
         """
         self._notification_callback = callback
+
+    def subscribe(self, session_id: str) -> asyncio.Queue[dict[str, Any]]:
+        """Register an SSE stream's notification queue for a session.
+
+        Returns a fresh bounded queue that :meth:`broadcast_tools_changed`
+        pushes onto.  The GET SSE handler drains it and must call
+        :meth:`unsubscribe` when the stream closes.
+        """
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(
+            maxsize=SUBSCRIBER_QUEUE_MAXSIZE
+        )
+        self._subscribers.setdefault(session_id, set()).add(queue)
+        return queue
+
+    def unsubscribe(
+        self, session_id: str, queue: asyncio.Queue[dict[str, Any]]
+    ) -> None:
+        """Deregister an SSE stream's queue (call on stream close/disconnect)."""
+        subs = self._subscribers.get(session_id)
+        if subs is None:
+            return
+        subs.discard(queue)
+        if not subs:
+            del self._subscribers[session_id]
+
+    def subscriber_count(self, session_id: str) -> int:
+        """Number of live SSE streams subscribed to a session (diagnostics/tests)."""
+        return len(self._subscribers.get(session_id, ()))
 
     def create_session(self, profile_name: str) -> str:
         """Create a new session for a profile.  Returns the session ID.
@@ -132,31 +171,49 @@ class SessionRegistry:
     async def broadcast_tools_changed(self, profile_name: str) -> int:
         """Push ``notifications/tools/listChanged`` to all sessions for a profile.
 
-        Returns the number of sessions notified.
+        Delivers to each session's live SSE subscriber queues (the built-in
+        transport) and, when set, to :attr:`_notification_callback`.  Returns
+        the number of sessions that received at least one delivery.
         """
         sessions = self.get_sessions_for_profile(profile_name)
         if not sessions:
             return 0
 
-        notification = {
+        notification: dict[str, Any] = {
             "jsonrpc": "2.0",
             "method": "notifications/tools/listChanged",
         }
 
         notified = 0
         for session in sessions:
+            delivered = False
+
             if self._notification_callback is not None:
                 try:
                     await self._notification_callback(
                         session.session_id, notification
                     )
-                    notified += 1
+                    delivered = True
                 except Exception:
                     logger.warning(
                         "sessions: failed to notify session=%s",
                         session.session_id[:8],
                         exc_info=True,
                     )
+
+            for queue in list(self._subscribers.get(session.session_id, ())):
+                try:
+                    queue.put_nowait(dict(notification))
+                    delivered = True
+                except asyncio.QueueFull:
+                    logger.warning(
+                        "sessions: subscriber queue full, dropped "
+                        "listChanged for session=%s",
+                        session.session_id[:8],
+                    )
+
+            if delivered:
+                notified += 1
         if notified:
             logger.info(
                 "sessions: broadcast tools/listChanged to %d session(s) "
@@ -176,9 +233,11 @@ class SessionRegistry:
         """Clear all sessions (for testing)."""
         self._sessions.clear()
         self._profile_index.clear()
+        self._subscribers.clear()
 
     def _remove(self, session_id: str) -> bool:
         session = self._sessions.pop(session_id, None)
+        self._subscribers.pop(session_id, None)
         if session is None:
             return False
         profile_set = self._profile_index.get(session.profile_name)
