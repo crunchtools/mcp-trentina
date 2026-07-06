@@ -10,8 +10,14 @@
 # rules (your styleguide/constitution) are fetched from YOUR base branch, not the
 # PR. The one thing you don't trust — the proposed change — is only ever read.
 #
-# Two jobs, two independent required checks. Mark both required in branch
-# protection so either failing blocks the merge.
+# Two jobs with DIFFERENT authority:
+#   • guard   — a real blocking gate. Mark it a REQUIRED status check so a PR
+#               that tampers with your workflow files is rejected.
+#   • review  — ADVISORY. It posts findings as PR comments and always passes;
+#               do NOT mark it required. An LLM reviewer is non-deterministic,
+#               so it must never hold merge authority. (Opt into blocking with
+#               `blocking: true` on the review job only if you accept that
+#               tradeoff — and even then, keep it out of branch protection.)
 
 name: Gatehouse
 
@@ -66,6 +72,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: crunchtools/gatehouse/.github/workflows/review.yml@v0.2.0
+    uses: crunchtools/gatehouse/.github/workflows/review.yml@v0.4.0
     secrets:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
