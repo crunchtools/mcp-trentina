@@ -183,3 +183,84 @@ class TestBroadcast:
 
         count = await registry.broadcast_tools_changed("alice")
         assert count == 1
+
+
+class TestSubscribers:
+    @pytest.mark.asyncio
+    async def test_broadcast_delivers_to_subscriber_queue(self) -> None:
+        registry = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = registry.create_session("alice")
+        queue = registry.subscribe(sid)
+
+        count = await registry.broadcast_tools_changed("alice")
+        assert count == 1
+
+        notification = queue.get_nowait()
+        assert notification["method"] == "notifications/tools/listChanged"
+        assert notification["jsonrpc"] == "2.0"
+
+    @pytest.mark.asyncio
+    async def test_broadcast_delivers_to_all_subscribers_of_session(self) -> None:
+        registry = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = registry.create_session("alice")
+        q1 = registry.subscribe(sid)
+        q2 = registry.subscribe(sid)
+
+        count = await registry.broadcast_tools_changed("alice")
+        assert count == 1
+        assert q1.get_nowait()["method"] == "notifications/tools/listChanged"
+        assert q2.get_nowait()["method"] == "notifications/tools/listChanged"
+
+    @pytest.mark.asyncio
+    async def test_broadcast_only_targets_matching_profile(self) -> None:
+        registry = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        alice_sid = registry.create_session("alice")
+        bob_sid = registry.create_session("bob")
+        alice_q = registry.subscribe(alice_sid)
+        bob_q = registry.subscribe(bob_sid)
+
+        count = await registry.broadcast_tools_changed("alice")
+        assert count == 1
+        assert not alice_q.empty()
+        assert bob_q.empty()
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_stops_delivery(self) -> None:
+        registry = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = registry.create_session("alice")
+        queue = registry.subscribe(sid)
+        assert registry.subscriber_count(sid) == 1
+
+        registry.unsubscribe(sid, queue)
+        assert registry.subscriber_count(sid) == 0
+
+        count = await registry.broadcast_tools_changed("alice")
+        assert count == 0
+        assert queue.empty()
+
+    @pytest.mark.asyncio
+    async def test_callback_and_subscriber_count_session_once(self) -> None:
+        registry = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        callback = AsyncMock()
+        registry.set_notification_callback(callback)
+        sid = registry.create_session("alice")
+        queue = registry.subscribe(sid)
+
+        count = await registry.broadcast_tools_changed("alice")
+        assert count == 1
+        assert callback.call_count == 1
+        assert not queue.empty()
+
+    def test_delete_session_drops_subscribers(self) -> None:
+        registry = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = registry.create_session("alice")
+        registry.subscribe(sid)
+        registry.delete_session(sid)
+        assert registry.subscriber_count(sid) == 0
+
+    def test_reset_clears_subscribers(self) -> None:
+        registry = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = registry.create_session("alice")
+        registry.subscribe(sid)
+        registry.reset()
+        assert registry.subscriber_count(sid) == 0
