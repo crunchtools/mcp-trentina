@@ -252,6 +252,9 @@ async def _route_tools_call(
     t0 = time.monotonic()
     try:
         if backend.is_internal:
+            # Set profile context so internal tools can access per-profile API keys
+            from .context import set_current_profile
+            set_current_profile(profile)
             call_result = await call_internal_tool(tool_name, arguments)
         else:
             call_result = await call_backend_tool(
