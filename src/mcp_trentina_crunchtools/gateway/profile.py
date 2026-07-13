@@ -244,6 +244,13 @@ class DefenseConfig(BaseModel):
             "(falls back to TRENTINA_MODEL_PROVIDER)"
         ),
     )
+    model: str | None = Field(
+        default=None,
+        description=(
+            "LLM model override for this profile "
+            "(falls back to QUARANTINE_MODEL)"
+        ),
+    )
 
     @field_validator("provider")
     @classmethod

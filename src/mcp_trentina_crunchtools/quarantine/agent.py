@@ -16,6 +16,7 @@ import secrets
 from typing import Any
 
 import httpx
+from pydantic import SecretStr
 
 from ..config import get_config
 from ..errors import QuarantineAgentError
@@ -28,6 +29,13 @@ from .prompts import (
     SEARCH_L0_SYSTEM_PROMPT,
 )
 from .providers import get_provider
+
+try:
+    from ..gateway.context import get_current_profile
+except ImportError:
+    # Standalone mode (no gateway)
+    def get_current_profile():
+        return None
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +129,7 @@ async def _call_gemini(
     parsing stay here — the provider only handles the HTTP call.
 
     Args:
-        provider_name: LLM provider override (default: global config).
+        provider_name: LLM provider override (default: global config or profile override).
     """
     canary = _generate_canary()
     prompted = _inject_canary(system_prompt, canary)
@@ -130,7 +138,35 @@ async def _call_gemini(
     if user_prompt:
         user_text = f"{user_prompt}\n\n---\n\n{content}"
 
-    provider = get_provider(provider_name)
+    # Check for profile context (gateway mode with per-profile keys)
+    profile = get_current_profile()
+    api_key: SecretStr | None = None
+    model: str | None = None
+
+    if profile is not None:
+        # Resolve provider from profile defense config or global default
+        resolved_provider = provider_name or profile.defense.provider or get_config().provider
+
+        # Get per-profile API key if configured
+        if resolved_provider in profile.llm_keys:
+            api_key = profile.llm_keys[resolved_provider].api_key
+            logger.info(
+                "quarantine: using profile %s override key for provider %s",
+                profile.name,
+                resolved_provider,
+            )
+
+        # Get per-profile model if configured
+        model = profile.defense.model
+
+        provider = get_provider(
+            provider_name=resolved_provider,
+            api_key=api_key,
+            model=model,
+        )
+    else:
+        # Standalone mode — use global config
+        provider = get_provider(provider_name)
     provider_result = await provider.generate(
         system_prompt=prompted,
         user_content=user_text,
