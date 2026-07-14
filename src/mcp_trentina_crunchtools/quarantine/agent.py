@@ -144,17 +144,21 @@ async def _call_gemini(
     model: str | None = None
 
     if profile is not None:
-        # Gateway mode: REQUIRE per-profile API key, no fallback to global
+        # Gateway mode: REQUIRE per-profile API key for key-based providers only
         resolved_provider = provider_name or profile.defense.provider or get_config().provider
 
-        if resolved_provider not in profile.llm_keys:
-            raise QuarantineAgentError(
-                f"Profile {profile.name!r} has no API key configured for provider "
-                f"{resolved_provider!r}. Add llm_keys.{resolved_provider} to the "
-                f"profile configuration."
-            )
+        # Ollama doesn't use API keys, skip the key check
+        if resolved_provider == "ollama":
+            api_key = None
+        else:
+            if resolved_provider not in profile.llm_keys:
+                raise QuarantineAgentError(
+                    f"Profile {profile.name!r} has no API key configured for provider "
+                    f"{resolved_provider!r}. Add llm_keys.{resolved_provider} to the "
+                    f"profile configuration."
+                )
+            api_key = profile.llm_keys[resolved_provider].api_key
 
-        api_key = profile.llm_keys[resolved_provider].api_key
         model = profile.defense.model
         logger.info(
             "quarantine: profile=%s using dedicated key for provider=%s model=%s",

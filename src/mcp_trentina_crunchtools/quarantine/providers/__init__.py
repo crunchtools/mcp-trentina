@@ -38,9 +38,9 @@ def get_provider(
     resolved_provider = provider_name or config.provider
     resolved_model = model or config.model
 
-    # Build cache key from resolved values (use key prefix for uniqueness)
-    key_prefix = api_key.get_secret_value()[:8] if api_key else "global"
-    cache_key = (resolved_provider, key_prefix, resolved_model)
+    # Build cache key from resolved values (use full key value for uniqueness)
+    key_value = api_key.get_secret_value() if api_key else "global"
+    cache_key = (resolved_provider, key_value, resolved_model)
 
     if cache_key in _provider_cache:
         return _provider_cache[cache_key]
