@@ -144,20 +144,24 @@ async def _call_gemini(
     model: str | None = None
 
     if profile is not None:
-        # Resolve provider from profile defense config or global default
+        # Gateway mode: REQUIRE per-profile API key, no fallback to global
         resolved_provider = provider_name or profile.defense.provider or get_config().provider
 
-        # Get per-profile API key if configured
-        if resolved_provider in profile.llm_keys:
-            api_key = profile.llm_keys[resolved_provider].api_key
-            logger.info(
-                "quarantine: using profile %s override key for provider %s",
-                profile.name,
-                resolved_provider,
+        if resolved_provider not in profile.llm_keys:
+            raise QuarantineAgentError(
+                f"Profile {profile.name!r} has no API key configured for provider "
+                f"{resolved_provider!r}. Add llm_keys.{resolved_provider} to the "
+                f"profile configuration."
             )
 
-        # Get per-profile model if configured
+        api_key = profile.llm_keys[resolved_provider].api_key
         model = profile.defense.model
+        logger.info(
+            "quarantine: profile=%s using dedicated key for provider=%s model=%s",
+            profile.name,
+            resolved_provider,
+            model or "(default)",
+        )
 
         provider = get_provider(
             provider_name=resolved_provider,
