@@ -4,81 +4,115 @@ from __future__ import annotations
 
 import logging
 
+from pydantic import SecretStr
+
 from ...config import get_config
 from ...errors import QuarantineAgentError
 from .base import Provider, ProviderResult
 
 logger = logging.getLogger(__name__)
 
-_provider_cache: dict[str, Provider] = {}
+_provider_cache: dict[tuple[str, str, str], Provider] = {}
 
 __all__ = ["Provider", "ProviderResult", "get_provider"]
 
 _DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 
-def get_provider(provider_name: str | None = None) -> Provider:
-    """Return a provider instance, cached per provider name.
+def get_provider(
+    provider_name: str | None = None,
+    api_key: SecretStr | None = None,
+    model: str | None = None,
+) -> Provider:
+    """Return a provider instance, cached per (provider, api_key, model) tuple.
 
     Args:
         provider_name: Explicit provider to use. When None, falls back
             to TRENTINA_MODEL_PROVIDER from config (the global default).
+        api_key: API key override for this provider. When None, falls back
+            to the global config key for the provider.
+        model: Model override for this provider. When None, falls back
+            to QUARANTINE_MODEL from config.
     """
     config = get_config()
-    resolved = provider_name or config.provider
+    resolved_provider = provider_name or config.provider
+    resolved_model = model or config.model
 
-    if resolved in _provider_cache:
-        return _provider_cache[resolved]
+    # Build cache key from resolved values (use full key value for uniqueness)
+    key_value = api_key.get_secret_value() if api_key else "global"
+    cache_key = (resolved_provider, key_value, resolved_model)
 
-    match resolved:
+    if cache_key in _provider_cache:
+        return _provider_cache[cache_key]
+
+    match resolved_provider:
         case "gemini":
             from .gemini import GeminiProvider
 
-            if not config.has_api_key:
+            key_value = (
+                api_key.get_secret_value()
+                if api_key
+                else config.api_key.get_secret_value()
+            )
+            if not key_value:
                 raise QuarantineAgentError("GEMINI_API_KEY not configured")
             provider: Provider = GeminiProvider(
-                api_key=config.api_key.get_secret_value(),
-                model=config.model,
+                api_key=key_value,
+                model=resolved_model,
             )
 
         case "openai":
             from .openai import OpenAIProvider
 
-            key = config.openai_api_key
-            if not key:
+            key_value = (
+                api_key.get_secret_value() if api_key else config.openai_api_key
+            )
+            if not key_value:
                 raise QuarantineAgentError("OPENAI_API_KEY not configured")
-            model = config.model if config.model != _DEFAULT_GEMINI_MODEL else "gpt-4o-mini"
-            provider = OpenAIProvider(api_key=key, model=model)
+            default_model = (
+                resolved_model
+                if resolved_model != _DEFAULT_GEMINI_MODEL
+                else "gpt-4o-mini"
+            )
+            provider = OpenAIProvider(api_key=key_value, model=default_model)
 
         case "anthropic":
             from .anthropic import AnthropicProvider
 
-            key = config.anthropic_api_key
-            if not key:
+            key_value = (
+                api_key.get_secret_value() if api_key else config.anthropic_api_key
+            )
+            if not key_value:
                 raise QuarantineAgentError("ANTHROPIC_API_KEY not configured")
-            model = (
-                config.model
-                if config.model != _DEFAULT_GEMINI_MODEL
+            default_model = (
+                resolved_model
+                if resolved_model != _DEFAULT_GEMINI_MODEL
                 else "claude-haiku-4-5-20251001"
             )
-            provider = AnthropicProvider(api_key=key, model=model)
+            provider = AnthropicProvider(api_key=key_value, model=default_model)
 
         case "ollama":
             from .ollama import OllamaProvider
 
+            # Ollama doesn't use API keys
             provider = OllamaProvider(
-                model=config.ollama_model,
+                model=resolved_model if resolved_model != _DEFAULT_GEMINI_MODEL else config.ollama_model,
                 base_url=config.ollama_base_url,
             )
 
         case _:
             raise QuarantineAgentError(
-                f"Unknown provider {resolved!r}. "
+                f"Unknown provider {resolved_provider!r}. "
                 "Supported: gemini, openai, anthropic, ollama"
             )
 
-    _provider_cache[resolved] = provider
-    logger.info("provider: initialized %s", resolved)
+    _provider_cache[cache_key] = provider
+    logger.info(
+        "provider: initialized %s (model=%s, key=%s)",
+        resolved_provider,
+        resolved_model,
+        "override" if api_key else "global",
+    )
     return provider
 
 

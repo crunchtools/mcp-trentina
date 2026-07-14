@@ -78,10 +78,19 @@ def _build_profile(name: str, body: Any) -> Profile:
     profile.auth.bearer_token = SecretStr(token_value)
 
     for provider_name, override in profile.llm_keys.items():
+        # Support EITHER api_key (direct) OR api_key_env (env var reference)
+        if override.api_key.get_secret_value():
+            # Direct key already present in YAML
+            continue
+        if not override.api_key_env:
+            raise ProfileConfigError(
+                f"Profile {name!r} llm_keys.{provider_name}: must provide "
+                f"either 'api_key' or 'api_key_env'"
+            )
         key_value = os.environ.get(override.api_key_env, "")
         if not key_value:
             raise ProfileConfigError(
-                f"Profile {name!r} llm_keys {provider_name!r}: env var "
+                f"Profile {name!r} llm_keys.{provider_name}: env var "
                 f"{override.api_key_env} not set or empty"
             )
         override.api_key = SecretStr(key_value)

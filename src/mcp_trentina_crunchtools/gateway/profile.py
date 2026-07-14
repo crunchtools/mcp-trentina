@@ -60,32 +60,41 @@ class AuthConfig(BaseModel):
 class LlmKeyOverride(BaseModel):
     """Per-profile provider API key for the LLM reverse proxy.
 
-    `api_key_env` is the env var name holding the profile's own provider key;
-    `api_key` is resolved at load time and never serialized. When a profile
-    declares one of these for a provider, the LLM proxy injects this key
-    instead of the global provider key, isolating the profile's rate-limit
-    quota and token accounting.
+    Provide EITHER `api_key` (direct value, for bind-mounted configs) OR
+    `api_key_env` (env var reference). The `api_key` field holds the resolved
+    key at load time and is never serialized to logs/JSON.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    api_key_env: str = Field(
-        ..., description="Env var name whose value is this profile's provider API key"
+    api_key_env: str | None = Field(
+        default=None,
+        description="Env var name whose value is this profile's provider API key",
     )
     api_key: SecretStr = Field(
         default=SecretStr(""),
-        exclude=True,
-        description="Resolved key (load-time only)",
+        description=(
+            "Direct API key value (for bind-mounted configs) or resolved from "
+            "api_key_env at load time. Never serialized."
+        ),
     )
 
     @field_validator("api_key_env")
     @classmethod
-    def env_name_is_uppercase_identifier(cls, v: str) -> str:
+    def env_name_is_uppercase_identifier(cls, v: str | None) -> str | None:
         """Reject lowercase, leading digits, or non-identifier characters."""
-        if not ENV_NAME_RE.match(v):
+        if v is not None and not ENV_NAME_RE.match(v):
             raise ValueError(
                 f"api_key_env {v!r} must be an UPPERCASE env-var identifier"
             )
+        return v
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def coerce_to_secret_str(cls, v: str | SecretStr) -> SecretStr:
+        """Accept plain strings from YAML and wrap in SecretStr."""
+        if isinstance(v, str):
+            return SecretStr(v)
         return v
 
 
@@ -242,6 +251,13 @@ class DefenseConfig(BaseModel):
         description=(
             "LLM provider override for this profile "
             "(falls back to TRENTINA_MODEL_PROVIDER)"
+        ),
+    )
+    model: str | None = Field(
+        default=None,
+        description=(
+            "LLM model override for this profile "
+            "(falls back to QUARANTINE_MODEL)"
         ),
     )
 
