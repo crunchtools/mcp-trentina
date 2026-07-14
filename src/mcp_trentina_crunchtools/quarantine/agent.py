@@ -16,6 +16,7 @@ import secrets
 from typing import Any
 
 import httpx
+from pydantic import SecretStr
 
 from ..config import get_config
 from ..errors import QuarantineAgentError
@@ -28,6 +29,13 @@ from .prompts import (
     SEARCH_L0_SYSTEM_PROMPT,
 )
 from .providers import get_provider
+
+try:
+    from ..gateway.context import get_current_profile
+except ImportError:
+    # Standalone mode (no gateway)
+    def get_current_profile():
+        return None
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +129,7 @@ async def _call_gemini(
     parsing stay here — the provider only handles the HTTP call.
 
     Args:
-        provider_name: LLM provider override (default: global config).
+        provider_name: LLM provider override (default: global config or profile override).
     """
     canary = _generate_canary()
     prompted = _inject_canary(system_prompt, canary)
@@ -130,7 +138,43 @@ async def _call_gemini(
     if user_prompt:
         user_text = f"{user_prompt}\n\n---\n\n{content}"
 
-    provider = get_provider(provider_name)
+    # Check for profile context (gateway mode with per-profile keys)
+    profile = get_current_profile()
+    api_key: SecretStr | None = None
+    model: str | None = None
+
+    if profile is not None:
+        # Gateway mode: REQUIRE per-profile API key for key-based providers only
+        resolved_provider = provider_name or profile.defense.provider or get_config().provider
+
+        # Ollama doesn't use API keys, skip the key check
+        if resolved_provider == "ollama":
+            api_key = None
+        else:
+            if resolved_provider not in profile.llm_keys:
+                raise QuarantineAgentError(
+                    f"Profile {profile.name!r} has no API key configured for provider "
+                    f"{resolved_provider!r}. Add llm_keys.{resolved_provider} to the "
+                    f"profile configuration."
+                )
+            api_key = profile.llm_keys[resolved_provider].api_key
+
+        model = profile.defense.model
+        logger.info(
+            "quarantine: profile=%s using dedicated key for provider=%s model=%s",
+            profile.name,
+            resolved_provider,
+            model or "(default)",
+        )
+
+        provider = get_provider(
+            provider_name=resolved_provider,
+            api_key=api_key,
+            model=model,
+        )
+    else:
+        # Standalone mode — use global config
+        provider = get_provider(provider_name)
     provider_result = await provider.generate(
         system_prompt=prompted,
         user_content=user_text,
