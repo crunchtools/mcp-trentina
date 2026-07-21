@@ -27,8 +27,23 @@ if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 
+def _configure_logging() -> None:
+    """Send application logs to stderr at ``TRENTINA_LOG_LEVEL`` (default INFO).
+
+    Without this the root logger sits at WARNING and every ``logger.info`` in
+    the gateway — session lifecycle above all — is silently discarded, leaving
+    only uvicorn's access log to diagnose from.
+    """
+    level_name = os.environ.get("TRENTINA_LOG_LEVEL", "INFO").strip().upper()
+    logging.basicConfig(
+        level=getattr(logging, level_name, logging.INFO),
+        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    )
+
+
 def main() -> None:
     """Entry point for mcp-trentina-crunchtools."""
+    _configure_logging()
     parser = argparse.ArgumentParser(
         prog="mcp-trentina-crunchtools",
         description="MCP server for quarantined web content extraction and gateway",
@@ -105,6 +120,14 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
 
     session_registry.session_ttl = gateway_config.session_ttl_seconds
     session_registry.max_sessions_per_profile = gateway_config.max_sessions_per_profile
+    logger.info(
+        "gateway: session_ttl=%.0fs max_sessions_per_profile=%d "
+        "(set gateway.session_ttl_seconds / gateway.max_sessions_per_profile "
+        "in %s to change)",
+        gateway_config.session_ttl_seconds,
+        gateway_config.max_sessions_per_profile,
+        profiles_path,
+    )
 
     register_internal_server(mcp_server)
     register_with_fastmcp(mcp_server, gateway_config.profiles, session_registry)
