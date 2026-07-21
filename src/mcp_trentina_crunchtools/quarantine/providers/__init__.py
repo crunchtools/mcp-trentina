@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
-
-from pydantic import SecretStr
+from typing import TYPE_CHECKING
 
 from ...config import get_config
 from ...errors import QuarantineAgentError
 from .base import Provider, ProviderResult
+
+if TYPE_CHECKING:
+    from pydantic import SecretStr
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,9 @@ def get_provider(
 ) -> Provider:
     """Return a provider instance, cached per (provider, api_key, model) tuple.
 
+    The cache key uses the full secret value rather than a prefix so two
+    profiles whose keys share a prefix cannot collide onto one instance.
+
     Args:
         provider_name: Explicit provider to use. When None, falls back
             to TRENTINA_MODEL_PROVIDER from config (the global default).
@@ -38,7 +43,6 @@ def get_provider(
     resolved_provider = provider_name or config.provider
     resolved_model = model or config.model
 
-    # Build cache key from resolved values (use full key value for uniqueness)
     key_value = api_key.get_secret_value() if api_key else "global"
     cache_key = (resolved_provider, key_value, resolved_model)
 
@@ -94,9 +98,13 @@ def get_provider(
         case "ollama":
             from .ollama import OllamaProvider
 
-            # Ollama doesn't use API keys
+            default_model = (
+                resolved_model
+                if resolved_model != _DEFAULT_GEMINI_MODEL
+                else config.ollama_model
+            )
             provider = OllamaProvider(
-                model=resolved_model if resolved_model != _DEFAULT_GEMINI_MODEL else config.ollama_model,
+                model=default_model,
                 base_url=config.ollama_base_url,
             )
 

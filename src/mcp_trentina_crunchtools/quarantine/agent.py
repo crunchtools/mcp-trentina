@@ -13,10 +13,9 @@ from __future__ import annotations
 import json
 import logging
 import secrets
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
-from pydantic import SecretStr
 
 from ..config import get_config
 from ..errors import QuarantineAgentError
@@ -30,11 +29,17 @@ from .prompts import (
 )
 from .providers import get_provider
 
+if TYPE_CHECKING:
+    from pydantic import SecretStr
+
+    from ..gateway.profile import Profile
+
 try:
     from ..gateway.context import get_current_profile
 except ImportError:
-    # Standalone mode (no gateway)
-    def get_current_profile():
+
+    def get_current_profile() -> Profile | None:
+        """Standalone mode: no gateway, so there is never a profile context."""
         return None
 
 logger = logging.getLogger(__name__)
@@ -128,6 +133,12 @@ async def _call_gemini(
     or Ollama). Canary injection, quarantine enforcement, and response
     parsing stay here — the provider only handles the HTTP call.
 
+    Under gateway mode (a profile is bound to the current context) a
+    per-profile API key is mandatory and its absence is a hard error, so one
+    profile can never silently bill against another's key. Ollama is the sole
+    exception — it is keyless, so the requirement does not apply. Without a
+    profile the global config supplies both key and model.
+
     Args:
         provider_name: LLM provider override (default: global config or profile override).
     """
@@ -138,16 +149,13 @@ async def _call_gemini(
     if user_prompt:
         user_text = f"{user_prompt}\n\n---\n\n{content}"
 
-    # Check for profile context (gateway mode with per-profile keys)
     profile = get_current_profile()
     api_key: SecretStr | None = None
     model: str | None = None
 
     if profile is not None:
-        # Gateway mode: REQUIRE per-profile API key for key-based providers only
         resolved_provider = provider_name or profile.defense.provider or get_config().provider
 
-        # Ollama doesn't use API keys, skip the key check
         if resolved_provider == "ollama":
             api_key = None
         else:
@@ -173,7 +181,6 @@ async def _call_gemini(
             model=model,
         )
     else:
-        # Standalone mode — use global config
         provider = get_provider(provider_name)
     provider_result = await provider.generate(
         system_prompt=prompted,

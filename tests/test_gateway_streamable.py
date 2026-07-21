@@ -326,6 +326,59 @@ class TestSSEEventStream:
             await stream.aclose()
 
     @pytest.mark.asyncio
+    async def test_stream_closes_when_session_removed(self) -> None:
+        """An orphaned stream must terminate, not keepalive into the void."""
+        sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = sessions.create_session("alice")
+        stream = _sse_event_stream(sessions, sid, keepalive_seconds=0.01)
+        try:
+            await stream.__anext__()  # retry frame
+            assert await stream.__anext__() == ": keepalive\n\n"
+
+            sessions.delete_session(sid)
+
+            with pytest.raises(StopAsyncIteration):
+                await stream.__anext__()
+            assert sessions.subscriber_count(sid) == 0
+        finally:
+            await stream.aclose()
+
+    @pytest.mark.asyncio
+    async def test_stream_closes_when_session_expires(self) -> None:
+        """TTL expiry reaches the stream too, not just explicit teardown."""
+        sessions = SessionRegistry(session_ttl=0.02, max_sessions_per_profile=10)
+        sid = sessions.create_session("alice")
+        stream = _sse_event_stream(sessions, sid, keepalive_seconds=0.05)
+        try:
+            await stream.__anext__()  # retry frame
+            with pytest.raises(StopAsyncIteration):
+                await stream.__anext__()
+        finally:
+            await stream.aclose()
+
+    @pytest.mark.asyncio
+    async def test_keepalive_does_not_extend_session_lifetime(self) -> None:
+        """The liveness poll must not refresh last_access.
+
+        If it did, any client holding an SSE stream would become immortal and
+        TTL expiry could never fire for it.
+        """
+        sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        sid = sessions.create_session("alice")
+        session = sessions.get_session(sid)
+        assert session is not None
+        before = session.last_access
+
+        stream = _sse_event_stream(sessions, sid, keepalive_seconds=0.01)
+        try:
+            await stream.__anext__()  # retry frame
+            await stream.__anext__()  # keepalive → liveness poll runs
+            await stream.__anext__()  # and again
+            assert session.last_access == before
+        finally:
+            await stream.aclose()
+
+    @pytest.mark.asyncio
     async def test_close_unsubscribes(self) -> None:
         sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
         sid = sessions.create_session("alice")
