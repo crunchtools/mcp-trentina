@@ -55,6 +55,18 @@ SSE_RETRY_MS = 15000
 ``retry:`` and back off at the protocol layer, bypassing app-level retry caps."""
 
 
+def _client_desc(request: Request) -> str:
+    """Identify the caller for correlating a disconnect with one client.
+
+    Source port distinguishes concurrent clients behind the same address,
+    which is what separates one agent terminal from another over a tunnel.
+    """
+    client = request.client
+    peer = f"{client.host}:{client.port}" if client is not None else "unknown"
+    agent = request.headers.get("user-agent", "-")
+    return f"peer={peer} ua={agent!r}"
+
+
 def gateway_app(
     registry: dict[str, Profile],
     sessions: SessionRegistry | None = None,
@@ -130,11 +142,24 @@ async def _handle_get(
 
     session = sessions.get_session(session_id)
     if session is None:
+        logger.warning(
+            "gateway: SSE stream rejected — session=%s profile=%s not found: %s [%s]",
+            session_id[:8],
+            profile_name,
+            sessions.explain_missing(session_id),
+            _client_desc(request),
+        )
         return _plain(404, "Session not found or expired")
 
     if session.profile_name != profile_name:
         return _plain(403, "Session does not belong to this profile")
 
+    logger.info(
+        "gateway: SSE stream opened session=%s profile=%s [%s]",
+        session_id[:8],
+        profile_name,
+        _client_desc(request),
+    )
     return StreamingResponse(
         _sse_event_stream(sessions, session_id),
         media_type="text/event-stream",
@@ -200,6 +225,13 @@ async def _handle_delete(
 
     session = sessions.get_session(session_id)
     if session is None:
+        logger.warning(
+            "gateway: DELETE rejected — session=%s profile=%s not found: %s [%s]",
+            session_id[:8],
+            profile_name,
+            sessions.explain_missing(session_id),
+            _client_desc(request),
+        )
         return _plain(404, "Session not found or expired")
 
     if session.profile_name != profile_name:
@@ -254,6 +286,16 @@ async def _handle_post(
     if session_id:
         session = sessions.get_session(session_id)
         if session is None:
+            logger.warning(
+                "gateway: DISCONNECT — session=%s profile=%s rejected on "
+                "method=%r: %s [%s] census=%s",
+                session_id[:8],
+                profile_name,
+                body.get("method", ""),
+                sessions.explain_missing(session_id),
+                _client_desc(request),
+                sessions.census(),
+            )
             return _plain(404, "Session not found or expired")
         if session.profile_name != profile_name:
             return _plain(403, "Session does not belong to this profile")
@@ -305,6 +347,12 @@ async def _handle_post(
     if method == "initialize":
         new_session_id = sessions.create_session(profile_name)
         headers[MCP_SESSION_ID_HEADER] = new_session_id
+        logger.info(
+            "gateway: initialize session=%s profile=%s [%s]",
+            new_session_id[:8],
+            profile_name,
+            _client_desc(request),
+        )
     elif session_id:
         headers[MCP_SESSION_ID_HEADER] = session_id
 
