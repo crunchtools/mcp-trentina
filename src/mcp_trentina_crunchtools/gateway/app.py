@@ -182,6 +182,10 @@ async def _sse_event_stream(
     within ``keepalive_seconds``, emits a comment keepalive instead.  Always
     deregisters the queue on disconnect (``CancelledError``) or exit.
 
+    Each keepalive tick doubles as a liveness check: once the session is gone
+    the stream closes rather than sending keepalives forever to a session the
+    registry has already dropped.
+
     The ``retry:`` reconnect hint is emitted before any data so it is set
     even if the client reconnects immediately.
     """
@@ -194,6 +198,8 @@ async def _sse_event_stream(
                     queue.get(), timeout=keepalive_seconds
                 )
             except asyncio.TimeoutError:
+                if not sessions.is_active(session_id):
+                    return
                 yield ": keepalive\n\n"
                 continue
             yield f"event: message\ndata: {json.dumps(notification)}\n\n"

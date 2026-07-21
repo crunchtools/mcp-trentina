@@ -61,6 +61,11 @@ def _build_profile(name: str, body: Any) -> Profile:
 
     Resolves the bearer token from `auth.bearer_token_env` and expands any
     ${VAR} references in backend headers. Both fail closed on a missing env var.
+
+    Each `llm_keys` entry supplies its secret one of two ways: `api_key`
+    inline in the YAML, or `api_key_env` naming an environment variable.
+    An inline key is taken as-is; otherwise the env var is required and an
+    entry providing neither is a configuration error.
     """
     if not isinstance(body, dict):
         raise ProfileConfigError(
@@ -78,9 +83,7 @@ def _build_profile(name: str, body: Any) -> Profile:
     profile.auth.bearer_token = SecretStr(token_value)
 
     for provider_name, override in profile.llm_keys.items():
-        # Support EITHER api_key (direct) OR api_key_env (env var reference)
         if override.api_key.get_secret_value():
-            # Direct key already present in YAML
             continue
         if not override.api_key_env:
             raise ProfileConfigError(
