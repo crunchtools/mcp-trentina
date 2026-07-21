@@ -30,6 +30,17 @@ SUBSCRIBER_QUEUE_MAXSIZE = 32
 without limit. listChanged is idempotent, so dropping a frame on a full
 queue is harmless — the client re-requests tools/list on the next one."""
 
+REASON_TTL_EXPIRED = "ttl_expired"
+REASON_EVICTED = "evicted_max_sessions"
+REASON_CLIENT_DELETE = "client_delete"
+REASON_REGISTRY_RESET = "registry_reset"
+
+TOMBSTONE_MAXSIZE = 512
+"""How many ended sessions to remember so a later 404 can name its cause.
+Without this a stale-session 404 is indistinguishable from a bad token or a
+gateway restart, which is exactly the ambiguity that makes disconnects hard
+to diagnose."""
+
 
 @dataclass
 class Session:
@@ -39,6 +50,18 @@ class Session:
     profile_name: str
     created_at: float
     last_access: float
+
+
+@dataclass
+class Tombstone:
+    """Why a session stopped existing, kept for post-mortem on the next 404."""
+
+    session_id: str
+    profile_name: str
+    reason: str
+    ended_at: float
+    lifetime_seconds: float
+    idle_seconds: float
 
 
 @dataclass
@@ -53,6 +76,7 @@ class SessionRegistry:
     _subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = field(
         default_factory=dict
     )
+    _tombstones: dict[str, Tombstone] = field(default_factory=dict)
 
     def set_notification_callback(self, callback: Any) -> None:
         """Register a callback for pushing notifications to transport sessions.
@@ -111,12 +135,17 @@ class SessionRegistry:
                     oldest_id = sid
             if oldest_id is None:
                 break
-            self._remove(oldest_id)
+            evicted_idle = time.monotonic() - oldest_time
+            self._remove(oldest_id, REASON_EVICTED)
             profile_sessions = self._profile_index.get(profile_name, set())
-            logger.info(
-                "sessions: evicted oldest session for profile=%s (limit=%d)",
+            logger.warning(
+                "sessions: EVICTED session=%s profile=%s — at max_sessions_per_profile"
+                "=%d; victim was idle %.1fs. Raise gateway.max_sessions_per_profile "
+                "in profiles.yaml if this is disconnecting live clients.",
+                oldest_id[:8],
                 profile_name,
                 self.max_sessions_per_profile,
+                evicted_idle,
             )
 
         now = time.monotonic()
@@ -131,12 +160,42 @@ class SessionRegistry:
         self._profile_index.setdefault(profile_name, set()).add(session_id)
 
         logger.info(
-            "sessions: created session=%s profile=%s (active=%d)",
+            "sessions: created session=%s profile=%s (active=%d/%d, ttl=%.0fs) "
+            "census=%s",
             session_id[:8],
             profile_name,
             len(self._profile_index.get(profile_name, set())),
+            self.max_sessions_per_profile,
+            self.session_ttl,
+            self.census(),
         )
         return session_id
+
+    def census(self) -> dict[str, int]:
+        """Live session count per profile, for tracking accumulation over time."""
+        return {
+            pname: len(ids) for pname, ids in self._profile_index.items() if ids
+        }
+
+    def explain_missing(self, session_id: str) -> str:
+        """Describe why ``session_id`` is not in the registry.
+
+        Turns an otherwise opaque 404 into a cause: TTL expiry, eviction under
+        the per-profile cap, an explicit client teardown, or a session this
+        process never issued at all (typically a client that outlived a
+        gateway restart).
+        """
+        tomb = self._tombstones.get(session_id)
+        if tomb is None:
+            return (
+                "never issued by this gateway process — client predates a "
+                "gateway restart, or is using a session from another process"
+            )
+        return (
+            f"{tomb.reason} {time.monotonic() - tomb.ended_at:.1f}s ago "
+            f"(profile={tomb.profile_name}, lived {tomb.lifetime_seconds:.1f}s, "
+            f"idle {tomb.idle_seconds:.1f}s when it ended)"
+        )
 
     def get_session(self, session_id: str) -> Session | None:
         """Look up a session by ID, returning None if expired or unknown."""
@@ -148,7 +207,7 @@ class SessionRegistry:
 
     def delete_session(self, session_id: str) -> bool:
         """Explicitly tear down a session.  Returns True if it existed."""
-        return self._remove(session_id)
+        return self._remove(session_id, REASON_CLIENT_DELETE)
 
     def get_sessions_for_profile(self, profile_name: str) -> list[Session]:
         """Return all active sessions for a profile."""
@@ -231,11 +290,14 @@ class SessionRegistry:
 
     def reset(self) -> None:
         """Clear all sessions (for testing)."""
+        for sid in list(self._sessions):
+            self._remove(sid, REASON_REGISTRY_RESET)
         self._sessions.clear()
         self._profile_index.clear()
         self._subscribers.clear()
+        self._tombstones.clear()
 
-    def _remove(self, session_id: str) -> bool:
+    def _remove(self, session_id: str, reason: str) -> bool:
         session = self._sessions.pop(session_id, None)
         self._subscribers.pop(session_id, None)
         if session is None:
@@ -245,18 +307,40 @@ class SessionRegistry:
             profile_set.discard(session_id)
             if not profile_set:
                 del self._profile_index[session.profile_name]
+
+        now = time.monotonic()
+        self._tombstones[session_id] = Tombstone(
+            session_id=session_id,
+            profile_name=session.profile_name,
+            reason=reason,
+            ended_at=now,
+            lifetime_seconds=now - session.created_at,
+            idle_seconds=now - session.last_access,
+        )
+        while len(self._tombstones) > TOMBSTONE_MAXSIZE:
+            self._tombstones.pop(next(iter(self._tombstones)))
         return True
 
     def _expire_stale(self) -> None:
         now = time.monotonic()
         expired = [
-            sid
+            (sid, now - s.last_access)
             for sid, s in self._sessions.items()
             if (now - s.last_access) > self.session_ttl
         ]
-        for sid in expired:
-            self._remove(sid)
-            logger.debug("sessions: expired session=%s", sid[:8])
+        for sid, idle in expired:
+            profile_name = self._sessions[sid].profile_name
+            self._remove(sid, REASON_TTL_EXPIRED)
+            logger.info(
+                "sessions: EXPIRED session=%s profile=%s — idle %.1fs > ttl %.0fs. "
+                "Raise gateway.session_ttl_seconds in profiles.yaml if this is "
+                "disconnecting idle clients. census=%s",
+                sid[:8],
+                profile_name,
+                idle,
+                self.session_ttl,
+                self.census(),
+            )
 
 
 session_registry = SessionRegistry()
