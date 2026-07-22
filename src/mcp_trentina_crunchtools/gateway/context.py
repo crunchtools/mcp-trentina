@@ -8,10 +8,13 @@ tool calls without changing the MCP protocol or tool signatures.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from .profile import Profile
 
 _current_profile: ContextVar[Profile | None] = ContextVar(
@@ -19,12 +22,19 @@ _current_profile: ContextVar[Profile | None] = ContextVar(
 )
 
 
-def set_current_profile(profile: Profile) -> None:
-    """Set the profile for the current async context.
+@contextmanager
+def profile_context(profile: Profile) -> Iterator[None]:
+    """Bind ``profile`` to the current async context for the duration of the block.
 
-    Called by the gateway before dispatching to internal:// tools.
+    Used by the gateway around internal:// tool dispatch. Restoring the
+    previous value on exit is what keeps a profile from leaking into a
+    reused async task, including when the tool call raises.
     """
-    _current_profile.set(profile)
+    token = _current_profile.set(profile)
+    try:
+        yield
+    finally:
+        _current_profile.reset(token)
 
 
 def get_current_profile() -> Profile | None:

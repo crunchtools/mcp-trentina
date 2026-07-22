@@ -246,6 +246,12 @@ pattern = "_remove"
 justification = "Called from 3 sites: delete_session, create_session (eviction loop), and _expire_stale — gourmand miscounted because create_session calls it inside a while loop"
 
 [[exceptions]]
+check = "single_use_helpers"
+path = "tests/test_gateway_router.py"
+pattern = "_profile"
+justification = "Called from 19 sites across the module — gourmand miscounts when the helper is also called from the last class in the file (same class of miscount as the sessions.py _remove exception)"
+
+[[exceptions]]
 check = "redundant_error_handling"
 path = "src/mcp_trentina_crunchtools/gateway/circuit.py"
 pattern = "_notify"

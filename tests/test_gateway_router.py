@@ -13,6 +13,10 @@ from pydantic import SecretStr
 from mcp_trentina_crunchtools.database import get_gateway_call_stats
 from mcp_trentina_crunchtools.gateway.backend import BackendCall
 from mcp_trentina_crunchtools.gateway.circuit import breaker
+from mcp_trentina_crunchtools.gateway.context import (
+    get_current_profile,
+    profile_context,
+)
 from mcp_trentina_crunchtools.gateway.errors import BackendCallError, BackendNotInProfileError
 from mcp_trentina_crunchtools.gateway.profile import (
     AuthConfig,
@@ -602,3 +606,64 @@ class TestProfileToolsCache:
 
         assert "testp" in _profile_tools_cache
         assert "other" in _profile_tools_cache
+
+
+class TestProfileContext:
+    """Covers the ContextVar reset shipped untested in 4d44916."""
+
+    def test_profile_visible_inside_block(self) -> None:
+        profile = _mixed_profile()
+        assert get_current_profile() is None
+        with profile_context(profile):
+            assert get_current_profile() is profile
+        assert get_current_profile() is None
+
+    def test_profile_reset_when_body_raises(self) -> None:
+        """A failing internal tool call must not leak its profile."""
+        profile = _mixed_profile()
+        with pytest.raises(RuntimeError), profile_context(profile):
+            raise RuntimeError("tool blew up")
+        assert get_current_profile() is None
+
+    def test_nested_contexts_restore_outer(self) -> None:
+        outer = _mixed_profile()
+        inner = _profile()
+        with profile_context(outer):
+            with profile_context(inner):
+                assert get_current_profile() is inner
+            assert get_current_profile() is outer
+        assert get_current_profile() is None
+
+    async def test_internal_dispatch_resets_profile_after_call(self) -> None:
+        """End-to-end: routing an internal:// call leaves no residual context."""
+        seen: dict[str, Any] = {}
+
+        async def fake_internal_call(
+            _tool_name: str, _arguments: dict[str, Any]
+        ) -> BackendCall:
+            seen["profile_during_call"] = get_current_profile()
+            return BackendCall(
+                content=[{"type": "text", "text": "ok"}],
+                is_error=False,
+                structured_content=None,
+            )
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.router.call_internal_tool",
+            side_effect=fake_internal_call,
+        ):
+            await route_jsonrpc(
+                _mixed_profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 11,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"web{NAMESPACE_SEP}safe_fetch_tool",
+                        "arguments": {},
+                    },
+                },
+            )
+
+        assert seen["profile_during_call"] is not None
+        assert get_current_profile() is None
