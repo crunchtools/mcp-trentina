@@ -205,6 +205,16 @@ class SessionRegistry:
             session.last_access = time.monotonic()
         return session
 
+    def is_active(self, session_id: str) -> bool:
+        """Whether a session is still registered, WITHOUT refreshing it.
+
+        Deliberately bypasses :meth:`get_session`: a periodic liveness poll
+        from an idle SSE stream must not keep the session alive forever,
+        which is exactly what bumping ``last_access`` would do.
+        """
+        self._expire_stale()
+        return session_id in self._sessions
+
     def delete_session(self, session_id: str) -> bool:
         """Explicitly tear down a session.  Returns True if it existed."""
         return self._remove(session_id, REASON_CLIENT_DELETE)
