@@ -72,7 +72,9 @@ class OllamaProvider(Provider):
             )
 
         except httpx.HTTPStatusError as exc:
-            raise QuarantineAgentError(f"HTTP {exc.response.status_code}") from exc
+            raise QuarantineAgentError(
+                f"HTTP {exc.response.status_code}", status_code=exc.response.status_code
+            ) from exc
         except httpx.TimeoutException as exc:
             raise QuarantineAgentError("Request timed out") from exc
         except httpx.ConnectError as exc:

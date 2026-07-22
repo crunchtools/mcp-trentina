@@ -39,8 +39,9 @@ class SanitizationError(AirlockError):
 class QuarantineAgentError(AirlockError):
     """Raised when the Q-Agent (Gemini) call fails."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, status_code: int | None = None) -> None:
         super().__init__(f"Q-Agent error: {reason}")
+        self.status_code = status_code
 
 
 class BlockedSourceError(AirlockError):

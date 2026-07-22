@@ -13,10 +13,12 @@ from __future__ import annotations
 import json
 import logging
 import secrets
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pydantic import SecretStr
 
 import httpx
-from pydantic import SecretStr
 
 from ..config import get_config
 from ..errors import QuarantineAgentError
@@ -28,13 +30,13 @@ from .prompts import (
     EXTRACTION_SYSTEM_PROMPT,
     SEARCH_L0_SYSTEM_PROMPT,
 )
-from .providers import get_provider
+from .providers import get_fallback_providers, get_provider
 
 try:
     from ..gateway.context import get_current_profile
 except ImportError:
     # Standalone mode (no gateway)
-    def get_current_profile():
+    def get_current_profile() -> None:  # type: ignore[misc]
         return None
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,82 @@ def _inject_canary(system_prompt: str, canary: str) -> str:
 def _check_canary(parsed: dict[str, Any], canary: str) -> bool:
     """Check if the canary leaked into the Q-Agent response."""
     return canary in json.dumps(parsed)
+
+
+_RETRYABLE_STATUS_CODES = frozenset({429, 503})
+
+
+def _is_retryable(exc: QuarantineAgentError) -> bool:
+    """Return True if the error is transient and worth trying the next provider."""
+    if exc.status_code is not None:
+        return exc.status_code in _RETRYABLE_STATUS_CODES
+    msg = str(exc).lower()
+    return "timed out" in msg or "unreachable" in msg
+
+
+async def _call_with_fallback(
+    content: str,
+    system_prompt: str,
+    response_schema: dict[str, Any],
+    user_prompt: str | None = None,
+) -> tuple[dict[str, Any], str]:
+    """Call the provider chain, falling back on retryable errors.
+
+    Builds an ordered list: [primary] + fallback_chain. Iterates until one
+    succeeds, a non-retryable error is raised, or all providers are exhausted.
+    """
+    profile = get_current_profile()
+
+    # Determine primary provider and key from profile or global config
+    if profile is not None:
+        primary_name = profile.defense.provider or get_config().provider
+        if primary_name == "ollama":
+            primary_key = None
+        else:
+            llm_keys = getattr(profile, "llm_keys", {})
+            if primary_name not in llm_keys:
+                raise QuarantineAgentError(
+                    f"Profile {profile.name!r} has no API key configured for provider "
+                    f"{primary_name!r}. Add llm_keys.{primary_name} to the profile configuration."
+                )
+            primary_key = llm_keys[primary_name].api_key
+    else:
+        primary_name = get_config().provider
+        primary_key = None  # get_provider() resolves global key
+
+    chain = [(primary_name, primary_key), *get_fallback_providers(profile)]
+
+    last_exc: QuarantineAgentError | None = None
+    for i, (name, key) in enumerate(chain):
+        try:
+            return await _call_gemini(
+                content=content,
+                system_prompt=system_prompt,
+                response_schema=response_schema,
+                user_prompt=user_prompt,
+                provider_name=name,
+                _api_key_override=key,
+                _bypass_profile=True,
+            )
+        except QuarantineAgentError as exc:
+            if not _is_retryable(exc):
+                raise
+            last_exc = exc
+            next_name = chain[i + 1][0] if i + 1 < len(chain) else None
+            if next_name:
+                logger.warning(
+                    "provider fallback: %s failed (%s), trying %s",
+                    name, exc, next_name,
+                )
+            else:
+                logger.warning(
+                    "provider fallback: %s failed (%s), all providers exhausted",
+                    name, exc,
+                )
+
+    raise QuarantineAgentError(
+        f"all providers exhausted: {[n for n, _ in chain]}"
+    ) from last_exc
 
 
 def _build_request_body(
@@ -121,6 +199,8 @@ async def _call_gemini(
     response_schema: dict[str, Any],
     user_prompt: str | None = None,
     provider_name: str | None = None,
+    _api_key_override: SecretStr | None = None,
+    _bypass_profile: bool = False,
 ) -> tuple[dict[str, Any], str]:
     """Call the configured LLM provider and return parsed JSON response and canary.
 
@@ -130,6 +210,8 @@ async def _call_gemini(
 
     Args:
         provider_name: LLM provider override (default: global config or profile override).
+        _api_key_override: Explicit API key — skips profile resolution when _bypass_profile=True.
+        _bypass_profile: Set by _call_with_fallback() to indicate key + provider are pre-resolved.
     """
     canary = _generate_canary()
     prompted = _inject_canary(system_prompt, canary)
@@ -138,43 +220,54 @@ async def _call_gemini(
     if user_prompt:
         user_text = f"{user_prompt}\n\n---\n\n{content}"
 
-    # Check for profile context (gateway mode with per-profile keys)
-    profile = get_current_profile()
-    api_key: SecretStr | None = None
-    model: str | None = None
-
-    if profile is not None:
-        # Gateway mode: REQUIRE per-profile API key for key-based providers only
-        resolved_provider = provider_name or profile.defense.provider or get_config().provider
-
-        # Ollama doesn't use API keys, skip the key check
-        if resolved_provider == "ollama":
-            api_key = None
-        else:
-            if resolved_provider not in profile.llm_keys:
-                raise QuarantineAgentError(
-                    f"Profile {profile.name!r} has no API key configured for provider "
-                    f"{resolved_provider!r}. Add llm_keys.{resolved_provider} to the "
-                    f"profile configuration."
-                )
-            api_key = profile.llm_keys[resolved_provider].api_key
-
-        model = profile.defense.model
-        logger.info(
-            "quarantine: profile=%s using dedicated key for provider=%s model=%s",
-            profile.name,
-            resolved_provider,
-            model or "(default)",
-        )
-
+    if _bypass_profile:
+        # Called from _call_with_fallback() — provider and key already resolved
+        profile = get_current_profile()
+        model = getattr(getattr(profile, "defense", None), "model", None) if profile else None
         provider = get_provider(
-            provider_name=resolved_provider,
-            api_key=api_key,
+            provider_name=provider_name,
+            api_key=_api_key_override,
             model=model,
         )
     else:
-        # Standalone mode — use global config
-        provider = get_provider(provider_name)
+        # Check for profile context (gateway mode with per-profile keys)
+        profile = get_current_profile()
+        api_key: SecretStr | None = None
+        model = None
+
+        if profile is not None:
+            # Gateway mode: REQUIRE per-profile API key for key-based providers only
+            resolved_provider = provider_name or profile.defense.provider or get_config().provider
+
+            # Ollama doesn't use API keys, skip the key check
+            if resolved_provider == "ollama":
+                api_key = None
+            else:
+                if resolved_provider not in profile.llm_keys:
+                    raise QuarantineAgentError(
+                        f"Profile {profile.name!r} has no API key configured for provider "
+                        f"{resolved_provider!r}. Add llm_keys.{resolved_provider} to the "
+                        f"profile configuration."
+                    )
+                api_key = profile.llm_keys[resolved_provider].api_key
+
+            model = profile.defense.model
+            logger.info(
+                "quarantine: profile=%s using dedicated key for provider=%s model=%s",
+                profile.name,
+                resolved_provider,
+                model or "(default)",
+            )
+
+            provider = get_provider(
+                provider_name=resolved_provider,
+                api_key=api_key,
+                model=model,
+            )
+        else:
+            # Standalone mode — use global config
+            provider = get_provider(provider_name)
+
     provider_result = await provider.generate(
         system_prompt=prompted,
         user_content=user_text,
@@ -217,13 +310,22 @@ async def quarantine_extract(
         provider_name: LLM provider override (default: global config).
     """
     try:
-        parsed, _canary = await _call_gemini(
-            content=content,
-            system_prompt=EXTRACTION_SYSTEM_PROMPT,
-            response_schema=EXTRACTION_RESPONSE_SCHEMA,
-            user_prompt=prompt,
-            provider_name=provider_name,
-        )
+        if provider_name is not None:
+            # Explicit provider requested (e.g. benchmark) — no fallback
+            parsed, _canary = await _call_gemini(
+                content=content,
+                system_prompt=EXTRACTION_SYSTEM_PROMPT,
+                response_schema=EXTRACTION_RESPONSE_SCHEMA,
+                user_prompt=prompt,
+                provider_name=provider_name,
+            )
+        else:
+            parsed, _canary = await _call_with_fallback(
+                content=content,
+                system_prompt=EXTRACTION_SYSTEM_PROMPT,
+                response_schema=EXTRACTION_RESPONSE_SCHEMA,
+                user_prompt=prompt,
+            )
     except QuarantineAgentError:
         config = get_config()
         if config.fallback == "fail":
@@ -285,12 +387,20 @@ async def quarantine_detect(
         scan_content = f"{layer1_context}\n\n---\n\n{content}"
 
     try:
-        parsed, _canary = await _call_gemini(
-            content=scan_content,
-            system_prompt=DETECTION_SYSTEM_PROMPT,
-            response_schema=DETECTION_RESPONSE_SCHEMA,
-            provider_name=provider_name,
-        )
+        if provider_name is not None:
+            # Explicit provider requested (e.g. benchmark) — no fallback
+            parsed, _canary = await _call_gemini(
+                content=scan_content,
+                system_prompt=DETECTION_SYSTEM_PROMPT,
+                response_schema=DETECTION_RESPONSE_SCHEMA,
+                provider_name=provider_name,
+            )
+        else:
+            parsed, _canary = await _call_with_fallback(
+                content=scan_content,
+                system_prompt=DETECTION_SYSTEM_PROMPT,
+                response_schema=DETECTION_RESPONSE_SCHEMA,
+            )
     except QuarantineAgentError as exc:
         logger.warning("Q-Agent detection failed: %s", exc)
         return {
