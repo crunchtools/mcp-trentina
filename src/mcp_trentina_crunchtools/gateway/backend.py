@@ -2,8 +2,12 @@
 
 Opens a fresh MCP session per call (streamablehttp_client creates anyio
 task groups that cannot cross task boundaries, so pooling is not viable).
-Caches tool lists per URL indefinitely — invalidated on backend failure
-or explicit flush, persisted in SQLite across restarts.
+Caches tool lists per URL indefinitely — invalidated only on explicit flush
+or reconnect, persisted in SQLite across restarts. Crucially, a fetch failure
+never evicts: a cached backend keeps being served from cache through a transient
+outage, so a backend blip can never wipe the cache (which previously triggered a
+fan-out stampede). Concurrent misses for the same URL coalesce into a single
+in-flight fetch.
 """
 
 from __future__ import annotations
@@ -36,6 +40,8 @@ class BackendCall:
 
 
 _tool_list_cache: dict[str, list[dict[str, Any]]] = {}
+
+_inflight: dict[str, asyncio.Task[list[dict[str, Any]]]] = {}
 
 _on_evict_callbacks: list[Any] = []
 
@@ -88,6 +94,7 @@ def load_tool_list_cache() -> int:
 def reset_tool_list_cache() -> None:
     """Clear the in-memory cache without touching SQLite (for testing)."""
     _tool_list_cache.clear()
+    _inflight.clear()
     _on_evict_callbacks.clear()
 
 
@@ -96,21 +103,51 @@ async def list_backend_tools(
 ) -> list[dict[str, Any]]:
     """Fetch the tool list from one backend MCP server.
 
-    Returns from in-memory cache if available. On miss, fetches from
-    the backend and persists to SQLite.
+    A cached backend is always served from cache — the fast path never touches
+    the transport or circuit breaker. Because the cache is never evicted on
+    failure (only on explicit flush/reconnect), a transient backend outage can
+    neither wipe nor bypass the last-known-good list: it keeps being served
+    here. On a genuine miss, concurrent callers coalesce onto one in-flight
+    fetch per URL.
 
     Raises:
         BackendCallError: connection failure, protocol error, timeout, or
-            circuit open.
+            circuit open — only on a cold miss with nothing cached to serve.
+    """
+    cached = _tool_list_cache.get(backend.url)
+    if cached is not None:
+        return cached
+
+    inflight = _inflight.get(backend.url)
+    if inflight is None:
+        inflight = asyncio.ensure_future(_single_flight_fetch(backend_name, backend))
+        _inflight[backend.url] = inflight
+    return await inflight
+
+
+async def _single_flight_fetch(
+    backend_name: str, backend: Backend,
+) -> list[dict[str, Any]]:
+    """Run one fetch and drop its in-flight slot when done."""
+    try:
+        return await _fetch_and_cache(backend_name, backend)
+    finally:
+        _inflight.pop(backend.url, None)
+
+
+async def _fetch_and_cache(
+    backend_name: str, backend: Backend,
+) -> list[dict[str, Any]]:
+    """Fetch one backend's tool list, cache it, and persist to SQLite.
+
+    Only invoked on a cache miss (``list_backend_tools`` serves any cached list
+    directly and never evicts on failure), so there is never a stale entry to
+    fall back on here — a failure simply raises.
     """
     if not breaker.allow(backend.url):
         raise BackendCallError(
             f"backend {backend_name!r} circuit open — skipped"
         )
-
-    cached = _tool_list_cache.get(backend.url)
-    if cached is not None:
-        return cached
 
     headers = backend.headers or None
     try:
@@ -120,7 +157,6 @@ async def list_backend_tools(
         )
     except Exception as exc:
         breaker.record_failure(backend.url)
-        _evict_backend_cache(backend.url)
         logger.warning(
             "gateway: list_tools failed for backend=%s url=%s err=%s",
             backend_name,
@@ -146,6 +182,10 @@ async def call_backend_tool(
 ) -> BackendCall:
     """Invoke a tool on a backend MCP server, returning the raw result.
 
+    A failed call records a circuit failure but deliberately does NOT evict the
+    tool-list cache — a transient call error must not wipe the list and trigger a
+    refetch storm on the next tools/list. The list refreshes only on flush.
+
     Raises:
         BackendCallError: connection failure, protocol error, timeout, or
             circuit open.
@@ -166,7 +206,6 @@ async def call_backend_tool(
         )
     except Exception as exc:
         breaker.record_failure(backend.url)
-        _evict_backend_cache(backend.url)
         logger.warning(
             "gateway: call_tool failed backend=%s tool=%s err=%s",
             backend_name,
