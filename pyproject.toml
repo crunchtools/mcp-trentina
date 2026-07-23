@@ -59,6 +59,7 @@ ignore = [
     "S101",     # assert allowed in tests
     "TRY003",   # long exception messages ok
     "PLR0913",  # many arguments ok for tools
+    "PLR0917",  # many positional arguments ok for tools (newer ruff enforces this)
     "PLR2004",  # magic numbers ok (HTTP status codes, limits)
     "PLW0603",  # global statement ok for singletons
     "PIE790",   # pass in empty classes ok
