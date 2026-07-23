@@ -607,6 +607,86 @@ class TestProfileToolsCache:
         assert "testp" in _profile_tools_cache
         assert "other" in _profile_tools_cache
 
+    async def test_partial_aggregate_not_cached_and_self_heals(self) -> None:
+        """A hard-failed backend suppresses caching so the profile self-heals.
+
+        While a backend raises, the aggregate is returned partial but NOT
+        cached, so the next tools/list re-aggregates. Once the backend recovers,
+        the full list is assembled and cached.
+        """
+        slack_down = True
+
+        async def flaky_list(
+            backend_name: str, _b: Backend,
+        ) -> list[dict[str, Any]]:
+            if backend_name == "mcp-slack" and slack_down:
+                raise BackendCallError("simulated outage")
+            return [{"name": f"{backend_name}_tool", "description": "", "inputSchema": {}}]
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            side_effect=flaky_list,
+        ):
+            resp1 = await route_jsonrpc(
+                _profile(), {"jsonrpc": "2.0", "id": 56, "method": "tools/list"},
+            )
+            assert "testp" not in _profile_tools_cache
+            names1 = [str(t["name"]) for t in resp1["result"]["tools"]]
+            assert names1 == [f"mcp-atlassian{NAMESPACE_SEP}mcp-atlassian_tool"]
+
+            slack_down = False
+            resp2 = await route_jsonrpc(
+                _profile(), {"jsonrpc": "2.0", "id": 57, "method": "tools/list"},
+            )
+
+        assert "testp" in _profile_tools_cache
+        names2 = sorted(str(t["name"]) for t in resp2["result"]["tools"])
+        assert names2 == [
+            f"mcp-atlassian{NAMESPACE_SEP}mcp-atlassian_tool",
+            f"mcp-slack{NAMESPACE_SEP}mcp-slack_tool",
+        ]
+
+    async def test_profile_single_flight_coalesces_concurrent_calls(self) -> None:
+        """Concurrent tools/list for one profile share a single fan-out.
+
+        Without single-flight, N concurrent calls over 2 backends would issue
+        2*N backend fetches. With it, each backend is fetched exactly once.
+        """
+        per_backend_calls: dict[str, int] = {}
+        release = asyncio.Event()
+
+        async def slow_list(
+            backend_name: str, _b: Backend,
+        ) -> list[dict[str, Any]]:
+            per_backend_calls[backend_name] = per_backend_calls.get(backend_name, 0) + 1
+            await release.wait()
+            return [{"name": f"{backend_name}_tool", "description": "", "inputSchema": {}}]
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            side_effect=slow_list,
+        ):
+            calls = [
+                asyncio.ensure_future(
+                    route_jsonrpc(
+                        _profile(),
+                        {"jsonrpc": "2.0", "id": 60 + i, "method": "tools/list"},
+                    )
+                )
+                for i in range(4)
+            ]
+            await asyncio.sleep(0)
+            release.set()
+            responses = await asyncio.gather(*calls)
+
+        assert per_backend_calls == {"mcp-slack": 1, "mcp-atlassian": 1}
+        for resp in responses:
+            names = sorted(str(t["name"]) for t in resp["result"]["tools"])
+            assert names == [
+                f"mcp-atlassian{NAMESPACE_SEP}mcp-atlassian_tool",
+                f"mcp-slack{NAMESPACE_SEP}mcp-slack_tool",
+            ]
+
 
 class TestProfileContext:
     """Covers the ContextVar reset shipped untested in 4d44916."""
