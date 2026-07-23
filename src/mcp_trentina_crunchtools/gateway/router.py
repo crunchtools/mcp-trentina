@@ -43,6 +43,8 @@ NAMESPACE_SEP = "__"
 _profile_tools_cache: dict[str, list[dict[str, Any]]] = {}
 _profile_backend_urls: dict[str, set[str]] = {}
 
+_profile_inflight: dict[str, asyncio.Task[list[dict[str, Any]]]] = {}
+
 
 def _on_backend_evicted(url: str) -> None:
     """Clear any profile cache whose backend set includes this URL."""
@@ -70,6 +72,7 @@ def reset_profile_tools_cache() -> None:
     """Clear the profile-level tool list cache (for testing)."""
     _profile_tools_cache.clear()
     _profile_backend_urls.clear()
+    _profile_inflight.clear()
 
 
 def _audit(
@@ -155,13 +158,40 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
 async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
     """Aggregate tools/list across the profile's backends, filtered and namespaced.
 
-    Checks the per-profile cache first. On miss, queries all backends in
-    parallel and caches the assembled result.
+    Checks the per-profile cache first. On miss, coalesces concurrent callers
+    for the same profile onto a single fan-out (single-flight).
     """
     cached = _profile_tools_cache.get(profile.name)
     if cached is not None:
         return _ok(req_id, {"tools": cached})
 
+    inflight = _profile_inflight.get(profile.name)
+    if inflight is None:
+        inflight = asyncio.ensure_future(_single_flight_build(profile))
+        _profile_inflight[profile.name] = inflight
+    aggregated = await inflight
+    return _ok(req_id, {"tools": aggregated})
+
+
+async def _single_flight_build(profile: Profile) -> list[dict[str, Any]]:
+    """Run one aggregation and drop its in-flight slot when done."""
+    try:
+        return await _build_profile_tools(profile)
+    finally:
+        _profile_inflight.pop(profile.name, None)
+
+
+async def _build_profile_tools(profile: Profile) -> list[dict[str, Any]]:
+    """Fan out to every backend, aggregate, and cache the assembled list.
+
+    The aggregate is cached only when no backend hard-failed (raised). A
+    backend that served a stale list counts as a success; a backend that is
+    both cold and unreachable is skipped and suppresses caching, so the profile
+    self-heals — the next tools/list re-aggregates and picks it up once it
+    recovers. (list_backend_tools single-flights per backend, so re-aggregation
+    while a backend is down stays cheap: healthy backends are cache hits and the
+    down one is a fast circuit-open reject.)
+    """
     await maybe_trigger_compression()
 
     async def _fetch_one(
@@ -189,10 +219,12 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     aggregated: list[dict[str, Any]] = []
+    any_hard_failed = False
     for (backend_name, _backend), outcome in zip(
         profile.backends.items(), results, strict=True,
     ):
         if isinstance(outcome, BaseException):
+            any_hard_failed = True
             logger.warning(
                 "gateway: tools/list profile=%s backend=%s skipped: %s",
                 profile.name,
@@ -202,11 +234,12 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
             continue
         aggregated.extend(outcome)
 
-    _profile_tools_cache[profile.name] = aggregated
-    _profile_backend_urls[profile.name] = {
-        b.url for b in profile.backends.values() if not b.is_internal
-    }
-    return _ok(req_id, {"tools": aggregated})
+    if not any_hard_failed:
+        _profile_tools_cache[profile.name] = aggregated
+        _profile_backend_urls[profile.name] = {
+            b.url for b in profile.backends.values() if not b.is_internal
+        }
+    return aggregated
 
 
 async def _route_tools_call(
