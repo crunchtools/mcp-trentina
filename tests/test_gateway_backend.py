@@ -280,7 +280,12 @@ class TestBackendToolListCache:
 
         assert urls_called == [url_a, url_b]
 
-    async def test_circuit_open_does_not_serve_cache(self) -> None:
+    async def test_circuit_open_serves_stale_cache(self) -> None:
+        """A warmed backend serves its cached list even with the circuit open.
+
+        Behavior change: serving the last-known-good list through an outage is
+        the whole point — a backend blip must not collapse the tool list.
+        """
         async def ok_transport(_url: str, _headers: Any) -> _FakeToolsResult:
             return _FakeToolsResult()
 
@@ -294,6 +299,80 @@ class TestBackendToolListCache:
 
         for _ in range(3):
             breaker.record_failure(URL)
+        assert breaker.get_state(URL) is State.OPEN
 
-        with pytest.raises(BackendCallError, match="circuit open"):
+        async def should_not_be_called(_url: str, _headers: Any) -> Any:
+            raise AssertionError("transport called despite warm cache")
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
+            side_effect=should_not_be_called,
+        ):
+            tools = await list_backend_tools("rotv", _backend())
+
+        assert len(tools) == 1
+        assert URL in _tool_list_cache
+
+    async def test_call_failure_does_not_evict_list_cache(self) -> None:
+        """A failed tool call must not evict the cached tool list."""
+        async def ok_list(_url: str, _headers: Any) -> _FakeToolsResult:
+            return _FakeToolsResult()
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
+            side_effect=ok_list,
+        ):
             await list_backend_tools("rotv", _backend())
+        assert URL in _tool_list_cache
+
+        async def fail_call(*_args: Any, **_kwargs: Any) -> Any:
+            raise ConnectionRefusedError("backend hiccup")
+
+        with (
+            patch(
+                "mcp_trentina_crunchtools.gateway.backend._do_call_tool",
+                side_effect=fail_call,
+            ),
+            pytest.raises(BackendCallError),
+        ):
+            await call_backend_tool("rotv", _backend(), "some_tool", {})
+
+        assert URL in _tool_list_cache
+
+        async def should_not_be_called(_url: str, _headers: Any) -> Any:
+            raise AssertionError("transport re-fetched after call failure")
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
+            side_effect=should_not_be_called,
+        ):
+            tools = await list_backend_tools("rotv", _backend())
+        assert len(tools) == 1
+
+    async def test_single_flight_coalesces_concurrent_misses(self) -> None:
+        """Concurrent misses for one URL share a single transport fetch."""
+        import asyncio
+
+        call_count = 0
+        release = asyncio.Event()
+
+        async def slow_transport(_url: str, _headers: Any) -> _FakeToolsResult:
+            nonlocal call_count
+            call_count += 1
+            await release.wait()
+            return _FakeToolsResult()
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
+            side_effect=slow_transport,
+        ):
+            tasks = [
+                asyncio.ensure_future(list_backend_tools("rotv", _backend()))
+                for _ in range(5)
+            ]
+            await asyncio.sleep(0)
+            release.set()
+            results = await asyncio.gather(*tasks)
+
+        assert call_count == 1
+        assert all(len(r) == 1 for r in results)
