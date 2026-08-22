@@ -135,6 +135,29 @@ class TestFailClosed:
         assert "example.com/big.pdf" in str(exc.value)
 
     @pytest.mark.asyncio
+    async def test_untrusted_bails_before_running_any_inference(self) -> None:
+        """The verdict is known at the token count; scanning first is wasted CPU.
+
+        Letting the ~128 capped passes run before raising gave an attacker a
+        cheap way to burn ~112s of CPU per request.
+        """
+        with (
+            mocked_model(token_count=462_000) as session,
+            pytest.raises(UnscannableContentError),
+        ):
+            await classify_guarded("x", "https://evil.test/big", is_trusted=False)
+
+        assert session.run.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_trusted_still_scans(self) -> None:
+        """Only the untrusted path short-circuits; trusted content is scanned."""
+        with mocked_model(token_count=462_000) as session:
+            await classify_guarded("x", "/srv/trusted/doc", is_trusted=True)
+
+        assert session.run.call_count > 0
+
+    @pytest.mark.asyncio
     async def test_trusted_truncated_passes_with_flag(self) -> None:
         """A trusted source is allowed through, but the partial scan is visible."""
         with mocked_model(token_count=462_000):
