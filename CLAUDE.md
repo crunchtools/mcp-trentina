@@ -24,6 +24,19 @@ uv run mcp-trentina-crunchtools
 - `CLASSIFIER_THREADS` — ONNX intra-op threads; 0 uses the ONNX default of one per core (default: 4).
   Set it to match the container's `--cpus`; threads beyond that quota contend and slow scans down.
 
+## onnxruntime telemetry
+
+`ORT_DISABLE_TELEMETRY=1` is set in the Containerfile and defaulted in
+`quarantine/classifier.py` before the lazy `import onnxruntime`. Left on,
+onnxruntime's init reads `/etc/machine-id` and `/proc/cpuinfo`, reads
+`/etc/os-release` four times, writes `/tmp/mat-debug-1.log`, and creates a
+session file at `/tmp/.ses`. Disabling leaves only the `/sys/class/drm` and
+`/sys/class/accel` probes it needs to choose an execution provider.
+
+The same code path causes an import-time segfault in a shell-less image (see
+the Containerfile's `/etc/machine-id` note). Both mitigations are in place;
+either alone prevents the crash.
+
 ## Endpoints
 
 - `GET /health` — unauthenticated liveness probe returning `{status, classifier, profiles}`.
