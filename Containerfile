@@ -110,5 +110,14 @@ COPY --from=pip-builder /etc/machine-id.seed /etc/machine-id
 ENV QUARANTINE_DB=/data/quarantine.db
 ENV CLASSIFIER_MODEL_PATH=/models/prompt-guard-2-86m
 
+# Left on, onnxruntime's init reads /etc/machine-id and /proc/cpuinfo, reads
+# /etc/os-release four times, writes /tmp/mat-debug-1.log and creates a session
+# file at /tmp/.ses. Not appropriate in an image built to handle untrusted
+# content. Disabling leaves the /sys/class/drm and /sys/class/accel probes it
+# needs to pick an execution provider. The machine-id read that segfaults a
+# shell-less image lives on this same path, so both fixes are kept: either one
+# alone prevents the crash.
+ENV ORT_DISABLE_TELEMETRY=1
+
 EXPOSE 8019
 ENTRYPOINT ["python", "-m", "mcp_trentina_crunchtools"]
