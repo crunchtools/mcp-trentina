@@ -13,7 +13,12 @@ from ..dbus_interface import emit_detection_event, emit_request_event
 from ..errors import BlockedSourceError, FileReadError
 from ..models import ALLOWED_TEXT_EXTENSIONS
 from ..quarantine.agent import quarantine_detect, quarantine_extract
-from ..quarantine.classifier import classify
+from ..quarantine.classifier import (
+    classify_async,
+    classify_guarded,
+    join_warnings,
+    truncation_warning,
+)
 from ..sanitize.pipeline import PipelineResult, looks_like_html, sanitize, sanitize_text
 
 MAX_FILE_SIZE = 2_000_000
@@ -91,7 +96,9 @@ async def safe_read(path: str) -> dict[str, Any]:
 
     is_trusted = config.is_trusted_path(resolved)
 
-    classification = classify(pipeline_result.content)
+    classification = await classify_guarded(
+        pipeline_result.content, resolved, is_trusted=is_trusted
+    )
     if classification and classification.label == "MALICIOUS" and not is_trusted:
         record_detection(
             source_type="file",
@@ -191,12 +198,15 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
     is_trusted = config.is_trusted_path(resolved)
 
     classifier_warning = None
-    classification = classify(pipeline_result.content)
+    classification = await classify_async(pipeline_result.content)
     if classification and classification.label == "MALICIOUS":
         classifier_warning = (
             f"Layer 2 classifier flagged content as MALICIOUS "
             f"(score: {classification.score:.3f}). Proceeding in quarantine mode."
         )
+    classifier_warning = join_warnings(
+        classifier_warning, truncation_warning(classification)
+    )
 
     def _emit(trust_level: str) -> None:
         emit_request_event(
