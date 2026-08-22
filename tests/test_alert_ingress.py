@@ -72,9 +72,9 @@ class TestAlertIngressConfig:
         assert cfg.forward_url == "http://kagetora:8644/webhooks/nagios"
 
     def test_rejects_lowercase_env(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="UPPERCASE"):
             AlertIngressConfig(token_env="my_token", forward_url="http://x:80/hook")
 
     def test_rejects_non_http_url(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="http://"):
             AlertIngressConfig(token_env="MY_TOKEN", forward_url="ftp://bad/hook")
