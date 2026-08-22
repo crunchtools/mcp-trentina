@@ -109,7 +109,9 @@ def _classify_segment(input_ids: list[int], attention_mask: list[int]) -> tuple[
     return label, malicious_score
 
 
-def classify(text: str) -> ClassifierResult | None:
+def classify(
+    text: str, *, fail_on_truncate: bool = False, source: str = "content"
+) -> ClassifierResult | None:
     """Run Layer 2 classifier on text.
 
     Returns ClassifierResult, or None if the model is not available.
@@ -124,6 +126,12 @@ def classify(text: str) -> ClassifierResult | None:
     source as unscannable rather than clean.  Without that bound an 855 KB
     PDF decoded as text produced ~462k tokens and ~1,800 inference passes,
     which pegged every core for the better part of an hour.
+
+    ``fail_on_truncate`` raises :class:`UnscannableContentError` as soon as
+    the token count is known, before any inference runs.  A caller that
+    will reject a truncated scan anyway gains nothing from the ~128 passes
+    it would take to produce one, and letting them run hands an attacker a
+    cheap way to burn two minutes of CPU per request.
     """
     if not is_classifier_available():
         return None
@@ -145,6 +153,8 @@ def classify(text: str) -> ClassifierResult | None:
     max_tokens = get_config().classifier_max_tokens
     truncated = max_tokens > 0 and total_tokens > max_tokens
     if truncated:
+        if fail_on_truncate:
+            raise UnscannableContentError(source, total_tokens, max_tokens)
         all_ids = all_ids[:max_tokens]
 
     if len(all_ids) <= max_length:
@@ -260,15 +270,14 @@ async def classify_guarded(
     attacker a clean verdict for anything hidden past the token cap, so that
     case raises instead.  Trusted sources are allowed through with the
     ``truncated`` flag set for the caller to surface.
+
+    Untrusted input bails at the token count rather than after the scan, so
+    oversized content costs one tokenizer pass instead of ~128 inference
+    passes for a verdict that was never going to be accepted.
     """
-    scan = await classify_async(text)
-
-    if scan is not None and scan.truncated and not is_trusted:
-        raise UnscannableContentError(
-            source, scan.tokens, get_config().classifier_max_tokens
-        )
-
-    return scan
+    return await asyncio.to_thread(
+        classify, text, fail_on_truncate=not is_trusted, source=source
+    )
 
 
 def reset_classifier() -> None:
