@@ -18,6 +18,33 @@ uv run mcp-trentina-crunchtools
 - `QUARANTINE_MAX_CONTENT` — Max chars to Q-Agent (default: 100000)
 - `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-trentina/trentina.db)
 - `QUARANTINE_TRUST_CONFIG` — Trust allowlist JSON path
+- `CLASSIFIER_THRESHOLD` — L2 malicious score cutoff (default: 0.5)
+- `CLASSIFIER_MODEL_PATH` — Prompt Guard 2 ONNX dir (default: /models/prompt-guard-2-86m)
+- `CLASSIFIER_MAX_TOKENS` — Max tokens L2 will scan; 0 disables the cap (default: 32768)
+- `CLASSIFIER_THREADS` — ONNX intra-op threads; 0 uses the ONNX default of one per core (default: 2)
+
+## Endpoints
+
+- `GET /health` — unauthenticated liveness probe returning `{status, classifier, profiles}`.
+  A timeout here means the asyncio event loop is blocked, not merely that a
+  backend is slow.
+
+## Layer 2 scanning limits
+
+`classify()` slides a 512-token window at stride 256, so cost grows linearly
+with input length. Two rules keep that bounded:
+
+- Input is capped at `CLASSIFIER_MAX_TOKENS`. Past that the result carries
+  `truncated=True`. The default sits above what `QUARANTINE_MAX_CONTENT`
+  (100k chars ≈ 28k tokens) can produce, so the two limits never fight.
+- A truncated scan of an **untrusted** source raises `UnscannableContentError`
+  rather than reporting BENIGN — `safe_*` tools fail closed. The `quarantine_*`
+  and `scan_*` tools report the partial scan as a warning instead, matching
+  their existing proceed-with-warnings contract.
+
+Async callers must use `classify_async` / `classify_guarded`. Calling the
+synchronous `classify()` from a coroutine blocks the event loop for the whole
+scan and takes the gateway down with it.
 
 ## Tools
 

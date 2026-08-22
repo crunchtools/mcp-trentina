@@ -9,7 +9,7 @@ from ..client import fetch_url
 from ..config import get_config
 from ..dbus_interface import emit_request_event
 from ..quarantine.agent import quarantine_detect
-from ..quarantine.classifier import classify
+from ..quarantine.classifier import classify_async
 from ..sanitize.pipeline import looks_like_html, sanitize, sanitize_text
 from .read import _validate_file
 
@@ -143,12 +143,13 @@ async def quarantine_scan(
     layer1_detections = pipeline_result.stats.total_detections()
 
     classifier_result = None
-    classification = classify(pipeline_result.content)
+    classification = await classify_async(pipeline_result.content)
     if classification:
         classifier_result = {
             "label": classification.label,
             "score": classification.score,
             "latency_ms": classification.latency_ms,
+            "truncated": classification.truncated,
         }
 
     qagent_assessment = None
@@ -218,12 +219,13 @@ async def deep_quarantine_scan(
     layer1_detections = pipeline_result.stats.total_detections()
 
     classifier_result = None
-    classification = classify(content)
+    classification = await classify_async(content)
     if classification:
         classifier_result = {
             "label": classification.label,
             "score": classification.score,
             "latency_ms": classification.latency_ms,
+            "truncated": classification.truncated,
         }
 
     qagent_assessment = None
