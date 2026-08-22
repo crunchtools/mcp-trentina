@@ -65,6 +65,13 @@ COPY src/ ./src/
 
 RUN pip install --no-cache-dir --prefix=/usr .
 
+# onnxruntime >= 1.29 reads /etc/machine-id during module init. When that file
+# is absent it falls back to popen("blkid")/popen("hostname"), and popen returns
+# NULL in a distroless image with no /bin/sh. The return value is not checked,
+# so the following fclose(NULL) segfaults the interpreter on `import onnxruntime`.
+# Providing the file short-circuits the fallback before popen is ever reached.
+RUN tr -d - < /proc/sys/kernel/random/uuid > /etc/machine-id.seed
+
 # ============================================================
 # Stage 3: Runtime image (distroless — no shell, no dnf)
 # ============================================================
@@ -96,6 +103,9 @@ COPY --from=model-builder /models/prompt-guard-2-86m/ /models/prompt-guard-2-86m
 # Copy installed Python packages from pip-builder (pure Python + native C extensions)
 COPY --from=pip-builder /usr/lib/python3.14/site-packages/ /usr/lib/python3.14/site-packages/
 COPY --from=pip-builder /usr/lib64/python3.14/site-packages/ /usr/lib64/python3.14/site-packages/
+
+# Keeps onnxruntime off its shell-based fallback path — see pip-builder stage
+COPY --from=pip-builder /etc/machine-id.seed /etc/machine-id
 
 ENV QUARANTINE_DB=/data/quarantine.db
 ENV CLASSIFIER_MODEL_PATH=/models/prompt-guard-2-86m
