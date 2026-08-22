@@ -21,7 +21,8 @@ uv run mcp-trentina-crunchtools
 - `CLASSIFIER_THRESHOLD` — L2 malicious score cutoff (default: 0.5)
 - `CLASSIFIER_MODEL_PATH` — Prompt Guard 2 ONNX dir (default: /models/prompt-guard-2-86m)
 - `CLASSIFIER_MAX_TOKENS` — Max tokens L2 will scan; 0 disables the cap (default: 32768)
-- `CLASSIFIER_THREADS` — ONNX intra-op threads; 0 uses the ONNX default of one per core (default: 2)
+- `CLASSIFIER_THREADS` — ONNX intra-op threads; 0 uses the ONNX default of one per core (default: 4).
+  Set it to match the container's `--cpus`; threads beyond that quota contend and slow scans down.
 
 ## Endpoints
 
