@@ -365,7 +365,7 @@ class TestSafeSearch:
                 return_value=mock_raw["sources"],
             ),
             patch(
-                "mcp_trentina_crunchtools.tools.search.classify",
+                "mcp_trentina_crunchtools.tools.search.classify_guarded",
                 return_value=None,
             ),
         ):
@@ -400,7 +400,7 @@ class TestSafeSearch:
                 return_value=[],
             ),
             patch(
-                "mcp_trentina_crunchtools.tools.search.classify",
+                "mcp_trentina_crunchtools.tools.search.classify_guarded",
                 return_value=malicious,
             ),
             pytest.raises(BlockedSourceError),
@@ -446,7 +446,7 @@ class TestQuarantineSearch:
                 return_value=mock_raw["sources"],
             ),
             patch(
-                "mcp_trentina_crunchtools.tools.search.classify",
+                "mcp_trentina_crunchtools.tools.search.classify_async",
                 return_value=None,
             ),
             patch(
@@ -499,7 +499,7 @@ class TestQuarantineSearch:
                 return_value=[],
             ),
             patch(
-                "mcp_trentina_crunchtools.tools.search.classify",
+                "mcp_trentina_crunchtools.tools.search.classify_async",
                 return_value=malicious,
             ),
             patch(
@@ -562,7 +562,7 @@ class TestQuarantineSearch:
                 return_value=[],
             ),
             patch(
-                "mcp_trentina_crunchtools.tools.search.classify",
+                "mcp_trentina_crunchtools.tools.search.classify_async",
                 return_value=None,
             ),
             patch(

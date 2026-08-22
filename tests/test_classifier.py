@@ -376,7 +376,7 @@ class TestPipelineIntegration:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.classify",
+                "mcp_trentina_crunchtools.tools.fetch.classify_guarded",
                 return_value=malicious_result,
             ),
             patch(
@@ -412,7 +412,7 @@ class TestPipelineIntegration:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.classify",
+                "mcp_trentina_crunchtools.tools.fetch.classify_async",
                 return_value=malicious_result,
             ),
             patch(
@@ -454,7 +454,7 @@ class TestPipelineIntegration:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.scan.classify",
+                "mcp_trentina_crunchtools.tools.scan.classify_async",
                 return_value=benign_result,
             ),
             patch(
@@ -481,7 +481,7 @@ class TestPipelineIntegration:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.scan.classify",
+                "mcp_trentina_crunchtools.tools.scan.classify_async",
                 return_value=None,
             ),
             patch(

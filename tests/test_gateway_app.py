@@ -152,3 +152,52 @@ class TestGatewayApp:
         body = resp.json()
         assert body["result"]["isError"] is False
         assert body["result"]["content"][0]["text"] == "channels: [#general]"
+
+
+class TestHealthEndpoint:
+    """Liveness probe.
+
+    During the 2026-08-22 incident the gateway spent ~90 minutes with a
+    blocked event loop and there was no endpoint to detect it from. This
+    route's value is that it is served at all: the handler runs on the loop,
+    so a hang here means the loop is wedged.
+    """
+
+    def test_health_returns_ok(self, client: TestClient) -> None:
+        resp = client.get("/health")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "ok"
+        assert body["profiles"] == 1
+        assert body["classifier"] in {"loaded", "not-loaded", "failed"}
+
+    def test_health_needs_no_auth(self, client: TestClient) -> None:
+        """A probe that requires a per-profile token is useless to a monitor."""
+        assert client.get("/health").status_code == 200
+
+    def test_health_does_not_load_the_model(self, client: TestClient) -> None:
+        with patch(
+            "mcp_trentina_crunchtools.quarantine.classifier.is_classifier_available"
+        ) as loader:
+            assert client.get("/health").status_code == 200
+
+        loader.assert_not_called()
+
+    def test_health_does_not_shadow_a_profile_named_health(self) -> None:
+        """/health is a fixed route; /{profile}/mcp still resolves separately."""
+        resp = client_with_profile("health").post(
+            "/health/mcp", json={"jsonrpc": "2.0", "id": 1}
+        )
+        assert resp.status_code == 401  # reached auth, not the health handler
+
+
+def client_with_profile(name: str) -> TestClient:
+    """Build a TestClient whose single profile has the given name."""
+    profile = Profile(
+        name=name,
+        auth=AuthConfig(bearer_token_env="A"),
+        backends={"mcp-slack": Backend(url="http://mcp-slack:8005/mcp")},
+    )
+    profile.auth.bearer_token = SecretStr("token")
+    return TestClient(gateway_app({name: profile}))

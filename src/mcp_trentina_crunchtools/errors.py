@@ -70,5 +70,33 @@ class ContentSizeError(AirlockError):
         )
 
 
+class UnscannableContentError(AirlockError):
+    """Raised when untrusted content is too large for Layer 2 to scan in full.
+
+    Failing closed here is deliberate.  A partial scan that returns BENIGN is
+    worse than no scan, because it lets an attacker hide an injection past the
+    token cap and still collect a clean bill of health.
+    """
+
+    def __init__(self, source: str, tokens: int, max_tokens: int) -> None:
+        super().__init__(
+            f"Cannot fully scan {source}: {tokens} tokens exceeds the "
+            f"classifier limit of {max_tokens}. Untrusted content must be "
+            "scanned in full. Split the content, or add the source to the "
+            "trust allowlist if you vouch for it."
+        )
+
+
+class UnsupportedContentTypeError(AirlockError):
+    """Raised when a fetched body is not text the pipeline can reason about."""
+
+    def __init__(self, url: str, content_type: str) -> None:
+        super().__init__(
+            f"Refusing to fetch {url}: content-type {content_type!r} is not "
+            "text. Binary bodies decode into garbage that wastes the "
+            "sanitization and classification pipeline."
+        )
+
+
 class ConfigError(AirlockError):
     """Raised for configuration problems."""
