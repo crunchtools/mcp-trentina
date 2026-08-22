@@ -231,3 +231,31 @@ class TestClassifierStatus:
 
         loader.assert_not_called()
         assert status in {"loaded", "not-loaded", "failed"}
+
+
+class TestTelemetryDisabled:
+    """onnxruntime telemetry must be off before the library is imported.
+
+    With it live, importing onnxruntime reads /etc/machine-id and
+    /proc/cpuinfo, writes /tmp/mat-debug-1.log and creates a session file
+    at /tmp/.ses — none of which belongs in a container built to handle
+    untrusted content.
+    """
+
+    def test_env_var_set_at_import(self) -> None:
+        import os
+
+        from mcp_trentina_crunchtools.quarantine.classifier import TELEMETRY_ENV
+
+        assert os.environ[TELEMETRY_ENV] == "1"
+
+    def test_operator_can_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """setdefault, not assignment — an explicit opt-in must survive."""
+        import importlib
+        import os
+
+        import mcp_trentina_crunchtools.quarantine.classifier as mod
+
+        monkeypatch.setenv(mod.TELEMETRY_ENV, "0")
+        importlib.reload(mod)
+        assert os.environ[mod.TELEMETRY_ENV] == "0"

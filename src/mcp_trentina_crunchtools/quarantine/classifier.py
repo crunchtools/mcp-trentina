@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -19,6 +20,28 @@ from ..config import get_config
 from ..errors import UnscannableContentError
 
 logger = logging.getLogger(__name__)
+
+TELEMETRY_ENV = "ORT_DISABLE_TELEMETRY"
+"""Turns off onnxruntime's telemetry, set below before onnxruntime loads.
+
+onnxruntime's C++ init reads this, so it has to land before the lazy
+``import onnxruntime`` in :func:`is_classifier_available` — hence module
+scope. The Containerfile sets it too; this covers running outside the
+container.
+
+With telemetry live, importing onnxruntime reads /etc/machine-id, reads
+/etc/os-release four times, reads /proc/cpuinfo, writes a debug log to
+/tmp/mat-debug-1.log and creates a session file at /tmp/.ses. None of that
+belongs in a process whose job is handling untrusted content. Disabling
+leaves only the /sys/class/drm and /sys/class/accel probes onnxruntime
+genuinely needs to choose an execution provider.
+
+It is also a second line of defence against the import-time segfault the
+Containerfile addresses: the machine-id read that trips a shell-less image
+sits on this same telemetry path, so either mitigation alone prevents it.
+"""
+
+os.environ.setdefault(TELEMETRY_ENV, "1")
 
 _session: Any | None = None
 _tokenizer: Any = None
