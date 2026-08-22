@@ -108,6 +108,15 @@ def _build_profile(name: str, body: Any) -> Profile:
                 for key, val in backend.headers.items()
             }
 
+    if profile.alert_ingress is not None:
+        alert_env = profile.alert_ingress.token_env
+        alert_value = os.environ.get(alert_env, "")
+        if not alert_value:
+            raise ProfileConfigError(
+                f"Profile {name!r}: alert_ingress env var {alert_env} not set or empty"
+            )
+        profile.alert_ingress.token = SecretStr(alert_value)
+
     return profile
 
 
