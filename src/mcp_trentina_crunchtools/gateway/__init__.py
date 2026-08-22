@@ -25,11 +25,13 @@ from .internal import (
     register_internal_server,
 )
 from .loader import GatewayConfig, load_profiles
-from .profile import AuthConfig, Backend, DefenseConfig, ParameterConstraint, Profile
+from .alert_ingress import register_alert_routes
+from .profile import AlertIngressConfig, AuthConfig, Backend, DefenseConfig, ParameterConstraint, Profile
 from .router import route_jsonrpc
 from .sessions import Session, SessionRegistry, session_registry
 
 __all__ = [
+    "AlertIngressConfig",
     "AuthConfig",
     "AuthError",
     "Backend",
@@ -51,6 +53,7 @@ __all__ = [
     "list_backend_tools",
     "list_internal_tools",
     "load_profiles",
+    "register_alert_routes",
     "register_internal_server",
     "register_with_fastmcp",
     "route_jsonrpc",
