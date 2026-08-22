@@ -27,9 +27,19 @@ Kept above what DEFAULT_MAX_CONTENT (100k chars, roughly 28k tokens of
 ordinary prose) can produce, so the two limits never fight: content small
 enough for the Q-Agent is always small enough to scan in full."""
 
-DEFAULT_CLASSIFIER_THREADS = 2
+DEFAULT_CLASSIFIER_THREADS = 4
 """ONNX intra-op threads. Its own default is one per core with a spin-wait,
-which lets a single inference saturate the host."""
+which lets a single inference saturate the host.
+
+Set this to match the container's CPU allocation. Threads beyond that just
+contend for the same quota and make scans slower — measured on lotor
+(6 vCPU) against a 9,100-token article:
+
+    --cpus=2, threads=2   39.2s
+    --cpus=2, threads=4   44.5s   <- contention, worse than half the threads
+    --cpus=6, threads=6   28.0s
+    --cpus=4, threads=4   23.2s   <- deployed
+"""
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "qwen2.5:0.5b"
 SUPPORTED_PROVIDERS = ("gemini", "openai", "anthropic", "ollama")
