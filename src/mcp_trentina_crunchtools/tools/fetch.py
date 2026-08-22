@@ -12,7 +12,12 @@ from ..database import is_blocked, record_detection
 from ..dbus_interface import emit_detection_event, emit_request_event
 from ..errors import BlockedSourceError
 from ..quarantine.agent import quarantine_detect, quarantine_extract
-from ..quarantine.classifier import classify
+from ..quarantine.classifier import (
+    classify_async,
+    classify_guarded,
+    join_warnings,
+    truncation_warning,
+)
 from ..sanitize.pipeline import PipelineResult, looks_like_html, sanitize, sanitize_text
 
 
@@ -44,7 +49,9 @@ async def safe_fetch(url: str) -> dict[str, Any]:
 
     is_trusted = config.is_trusted_domain(url)
 
-    classification = classify(pipeline_result.content)
+    classification = await classify_guarded(
+        pipeline_result.content, url, is_trusted=is_trusted
+    )
     if classification and classification.label == "MALICIOUS" and not is_trusted:
         domain = urlparse(url).hostname
         record_detection(
@@ -146,12 +153,15 @@ async def quarantine_fetch(url: str, prompt: str) -> dict[str, Any]:
     is_trusted = config.is_trusted_domain(url)
 
     classifier_warning = None
-    classification = classify(pipeline_result.content)
+    classification = await classify_async(pipeline_result.content)
     if classification and classification.label == "MALICIOUS":
         classifier_warning = (
             f"Layer 2 classifier flagged content as MALICIOUS "
             f"(score: {classification.score:.3f}). Proceeding in quarantine mode."
         )
+    classifier_warning = join_warnings(
+        classifier_warning, truncation_warning(classification)
+    )
 
     def _emit(trust_level: str) -> None:
         emit_request_event(

@@ -250,9 +250,9 @@ async def quarantine_extract(
         if extracted:
             result = sanitize_text(extracted)
             parsed["extracted_text"] = result.content[:MAX_EXTRACTED_TEXT]
-            from .classifier import classify
+            from .classifier import classify_async
 
-            classification = classify(parsed["extracted_text"])
+            classification = await classify_async(parsed["extracted_text"])
             if classification and classification.label == "MALICIOUS":
                 classifier_output_warning = (
                     f"Layer 2 classifier flagged Q-Agent output as MALICIOUS "

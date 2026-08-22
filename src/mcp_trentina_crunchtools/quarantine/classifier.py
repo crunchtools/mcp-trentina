@@ -9,12 +9,14 @@ and extracted text (post-Layer 3) on the output verification path.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
 from typing import Any
 
 from ..config import get_config
+from ..errors import UnscannableContentError
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +33,17 @@ class ClassifierResult:
     label: str  # "BENIGN" or "MALICIOUS"
     score: float  # confidence score (0.0-1.0)
     latency_ms: float  # inference time
+    truncated: bool = False  # content exceeded the token cap; scan is partial
+    tokens: int = 0  # total tokens in the input, including any beyond the cap
 
 
 def is_classifier_available() -> bool:
-    """Check if the ONNX model is loaded and ready. Lazy-loads on first call."""
+    """Check if the ONNX model is loaded and ready. Lazy-loads on first call.
+
+    Thread count is pinned here: left at its default the CPU provider starts
+    one intra-op thread per core and spin-waits on them, so a single long
+    scan pegs every core and starves the gateway.
+    """
     global _session, _tokenizer, _loaded, _load_attempted
 
     if _loaded:
@@ -57,8 +66,16 @@ def is_classifier_available() -> bool:
     try:
         model_file = f"{model_path}/model.onnx"
         _tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+        sess_options = ort.SessionOptions()
+        threads = config.classifier_threads
+        if threads > 0:
+            sess_options.intra_op_num_threads = threads
+            sess_options.inter_op_num_threads = 1
+
         _session = ort.InferenceSession(
             model_file,
+            sess_options=sess_options,
             providers=["CPUExecutionProvider"],
         )
         _loaded = True
@@ -97,9 +114,16 @@ def classify(text: str) -> ClassifierResult | None:
 
     Returns ClassifierResult, or None if the model is not available.
     Synchronous — ONNX Runtime inference is CPU-bound, not I/O-bound.
+    Prefer :func:`classify_async` from async code so a long scan cannot
+    block the event loop.
 
     For text longer than 512 tokens, splits into overlapping segments
-    (stride=256) and returns the highest malicious score.
+    (stride=256) and returns the highest malicious score.  Scanning stops
+    after ``CLASSIFIER_MAX_TOKENS`` tokens and the result is marked
+    ``truncated``; callers must treat a truncated scan of an untrusted
+    source as unscannable rather than clean.  Without that bound an 855 KB
+    PDF decoded as text produced ~462k tokens and ~1,800 inference passes,
+    which pegged every core for the better part of an hour.
     """
     if not is_classifier_available():
         return None
@@ -116,6 +140,12 @@ def classify(text: str) -> ClassifierResult | None:
         return_attention_mask=False,
     )
     all_ids: list[int] = encoding["input_ids"]
+
+    total_tokens = len(all_ids)
+    max_tokens = get_config().classifier_max_tokens
+    truncated = max_tokens > 0 and total_tokens > max_tokens
+    if truncated:
+        all_ids = all_ids[:max_tokens]
 
     if len(all_ids) <= max_length:
         enc = _tokenizer(
@@ -157,7 +187,88 @@ def classify(text: str) -> ClassifierResult | None:
 
     elapsed_ms = (time.monotonic() - start) * 1000
 
-    return ClassifierResult(label=label, score=score, latency_ms=round(elapsed_ms, 2))
+    if truncated:
+        logger.warning(
+            "Layer 2 scan truncated: %d tokens exceeds cap of %d; "
+            "scanned the first %d only",
+            total_tokens,
+            max_tokens,
+            max_tokens,
+        )
+
+    return ClassifierResult(
+        label=label,
+        score=score,
+        latency_ms=round(elapsed_ms, 2),
+        truncated=truncated,
+        tokens=total_tokens,
+    )
+
+
+async def classify_async(text: str) -> ClassifierResult | None:
+    """Run :func:`classify` on a worker thread.
+
+    Inference holds the GIL only inside ONNX Runtime's C++ kernels, so
+    offloading keeps the asyncio event loop responsive while a scan runs.
+    Every async caller should use this instead of calling classify directly.
+    """
+    return await asyncio.to_thread(classify, text)
+
+
+def classifier_status() -> str:
+    """Report load state without triggering the lazy load.
+
+    Health probes must stay cheap; calling is_classifier_available() here
+    would pull an 86M model off disk on the first request.
+    """
+    if _loaded:
+        return "loaded"
+    return "failed" if _load_attempted else "not-loaded"
+
+
+def truncation_warning(scan: ClassifierResult | None) -> str | None:
+    """Warning text when a scan covered only part of its input, else None.
+
+    Used by the quarantine_* and scan_* tools, which surface risk to the
+    caller rather than refusing outright.  The safe_* tools use
+    :func:`classify_guarded` and fail closed instead.
+    """
+    if scan is None or not scan.truncated:
+        return None
+
+    return (
+        f"Layer 2 scanned only the first {get_config().classifier_max_tokens} "
+        f"of {scan.tokens} tokens. Anything past that point was not "
+        "examined for injection."
+    )
+
+
+def join_warnings(*warnings: str | None) -> str | None:
+    """Combine warning strings into one, dropping the empty ones."""
+    present = [w for w in warnings if w]
+    if not present:
+        return None
+    return " ".join(present)
+
+
+async def classify_guarded(
+    text: str, source: str, *, is_trusted: bool
+) -> ClassifierResult | None:
+    """Classify off-thread and fail closed when an untrusted scan is partial.
+
+    Returning BENIGN on a truncated scan of untrusted content would hand an
+    attacker a clean verdict for anything hidden past the token cap, so that
+    case raises instead.  Trusted sources are allowed through with the
+    ``truncated`` flag set for the caller to surface.
+    """
+    scan = await classify_async(text)
+
+    if scan is not None and scan.truncated and not is_trusted:
+        raise UnscannableContentError(
+            source, scan.tokens, get_config().classifier_max_tokens
+        )
+
+    return scan
 
 
 def reset_classifier() -> None:

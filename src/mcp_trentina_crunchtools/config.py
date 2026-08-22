@@ -20,6 +20,16 @@ DEFAULT_MAX_CONTENT = 100_000
 DEFAULT_DB_PATH = "/data/trentina.db"
 DEFAULT_CLASSIFIER_THRESHOLD = 0.5
 DEFAULT_CLASSIFIER_MODEL_PATH = "/models/prompt-guard-2-86m"
+DEFAULT_CLASSIFIER_MAX_TOKENS = 32_768
+"""Token ceiling for a Layer 2 scan, ~128 sliding windows at stride 256.
+
+Kept above what DEFAULT_MAX_CONTENT (100k chars, roughly 28k tokens of
+ordinary prose) can produce, so the two limits never fight: content small
+enough for the Q-Agent is always small enough to scan in full."""
+
+DEFAULT_CLASSIFIER_THREADS = 2
+"""ONNX intra-op threads. Its own default is one per core with a spin-wait,
+which lets a single inference saturate the host."""
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "qwen2.5:0.5b"
 SUPPORTED_PROVIDERS = ("gemini", "openai", "anthropic", "ollama")
@@ -60,6 +70,12 @@ class Config:
         )
         self.classifier_model_path: str = os.environ.get(
             "CLASSIFIER_MODEL_PATH", DEFAULT_CLASSIFIER_MODEL_PATH
+        )
+        self.classifier_max_tokens: int = int(
+            os.environ.get("CLASSIFIER_MAX_TOKENS", str(DEFAULT_CLASSIFIER_MAX_TOKENS))
+        )
+        self.classifier_threads: int = int(
+            os.environ.get("CLASSIFIER_THREADS", str(DEFAULT_CLASSIFIER_THREADS))
         )
 
         home_db = str(Path.home() / ".local" / "share" / "mcp-trentina" / "trentina.db")

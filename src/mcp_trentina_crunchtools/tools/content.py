@@ -11,7 +11,12 @@ from ..database import is_blocked, record_detection
 from ..dbus_interface import emit_detection_event, emit_request_event
 from ..errors import BlockedSourceError, ContentSizeError
 from ..quarantine.agent import quarantine_detect, quarantine_extract
-from ..quarantine.classifier import classify
+from ..quarantine.classifier import (
+    classify_async,
+    classify_guarded,
+    join_warnings,
+    truncation_warning,
+)
 from ..sanitize.pipeline import PipelineResult, looks_like_html, sanitize, sanitize_text
 from .scan import _build_layer1_context, _build_scan_result
 
@@ -65,7 +70,9 @@ async def safe_content(
 
     pipeline_result = _run_pipeline(content, content_type)
 
-    classification = classify(pipeline_result.content)
+    classification = await classify_guarded(
+        pipeline_result.content, chash, is_trusted=False
+    )
     if classification and classification.label == "MALICIOUS":
         record_detection(
             source_type="content",
@@ -164,12 +171,15 @@ async def quarantine_content(
     pipeline_result = _run_pipeline(content, content_type)
 
     classifier_warning = None
-    classification = classify(pipeline_result.content)
+    classification = await classify_async(pipeline_result.content)
     if classification and classification.label == "MALICIOUS":
         classifier_warning = (
             f"Layer 2 classifier flagged content as MALICIOUS "
             f"(score: {classification.score:.3f}). Proceeding in quarantine mode."
         )
+    classifier_warning = join_warnings(
+        classifier_warning, truncation_warning(classification)
+    )
 
     def _emit(trust_level: str) -> None:
         emit_request_event(
@@ -247,12 +257,13 @@ async def scan_content(
     layer1_detections = pipeline_result.stats.total_detections()
 
     classifier_result = None
-    classification = classify(pipeline_result.content)
+    classification = await classify_async(pipeline_result.content)
     if classification:
         classifier_result = {
             "label": classification.label,
             "score": classification.score,
             "latency_ms": classification.latency_ms,
+            "truncated": classification.truncated,
         }
 
     qagent_assessment = None
@@ -314,12 +325,13 @@ async def deep_scan_content(
     layer1_detections = pipeline_result.stats.total_detections()
 
     classifier_result = None
-    classification = classify(content)
+    classification = await classify_async(content)
     if classification:
         classifier_result = {
             "label": classification.label,
             "score": classification.score,
             "latency_ms": classification.latency_ms,
+            "truncated": classification.truncated,
         }
 
     qagent_assessment = None

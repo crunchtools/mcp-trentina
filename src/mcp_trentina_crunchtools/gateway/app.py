@@ -24,6 +24,7 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from ..quarantine.classifier import classifier_status
 from .auth import verify_bearer
 from .errors import (
     AuthError,
@@ -88,12 +89,31 @@ def gateway_app(
     async def handle_delete(request: Request) -> Response:
         return await _handle_delete(request, registry, sr)
 
+    async def handle_health(_request: Request) -> Response:
+        return _health_payload(registry)
+
     routes = [
+        Route("/health", endpoint=handle_health, methods=["GET"]),
         Route("/{profile}/mcp", endpoint=handle_post, methods=["POST"]),
         Route("/{profile}/mcp", endpoint=handle_get, methods=["GET"]),
         Route("/{profile}/mcp", endpoint=handle_delete, methods=["DELETE"]),
     ]
     return Starlette(routes=routes)
+
+
+def _health_payload(registry: dict[str, Profile]) -> Response:
+    """Build the liveness response.
+
+    The value here is not the body but the fact that it is served at all:
+    the handler runs on the event loop, so a timeout means the loop is
+    blocked.  During the 2026-08-22 incident an unbounded classifier scan
+    wedged the loop for 90 minutes with no way to detect it from outside.
+    """
+    return JSONResponse({
+        "status": "ok",
+        "classifier": classifier_status(),
+        "profiles": len(registry),
+    })
 
 
 def register_with_fastmcp(
@@ -103,6 +123,10 @@ def register_with_fastmcp(
 ) -> None:
     """Wire gateway routes onto a FastMCP server via its custom_route decorator."""
     sr = sessions or session_registry
+
+    @mcp_server.custom_route("/health", methods=["GET"])  # type: ignore[untyped-decorator]
+    async def health_endpoint(_request: Request) -> Response:
+        return _health_payload(registry)
 
     @mcp_server.custom_route("/gateway/{profile}/mcp", methods=["POST", "GET", "DELETE"])  # type: ignore[untyped-decorator]
     async def gateway_endpoint(request: Request) -> Response:

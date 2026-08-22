@@ -21,7 +21,12 @@ from ..quarantine.agent import (
     resolve_grounding_urls,
     search_grounded,
 )
-from ..quarantine.classifier import classify
+from ..quarantine.classifier import (
+    classify_async,
+    classify_guarded,
+    join_warnings,
+    truncation_warning,
+)
 from ..sanitize.pipeline import sanitize_text
 
 
@@ -73,7 +78,9 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
             f"L1 detected {total_l1} injection vectors in L0 output",
         )
 
-    classification = classify(sanitized_text)
+    classification = await classify_guarded(
+        sanitized_text, f"search:{query}", is_trusted=False
+    )
     if classification and classification.label == "MALICIOUS":
         emit_detection_event("L2", f"search:{query}", "high", {
             "classifier_label": classification.label,
@@ -137,13 +144,16 @@ async def quarantine_search(
     )
 
     classifier_warning = None
-    classification = classify(sanitized_text)
+    classification = await classify_async(sanitized_text)
     if classification and classification.label == "MALICIOUS":
         classifier_warning = (
             f"L2 classifier flagged L0 output as MALICIOUS "
             f"(score: {classification.score:.3f}). L0 may have been "
             "compromised by poisoned web content. Proceeding to L3."
         )
+    classifier_warning = join_warnings(
+        classifier_warning, truncation_warning(classification)
+    )
 
     if config.has_api_key:
         sources_text = "\n".join(
