@@ -148,6 +148,10 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
         )
         register_matrix_routes(mcp_server, upstream=matrix_upstream)
 
+    from .gateway.alert_ingress import register_alert_routes
+
+    register_alert_routes(mcp_server, gateway_config.profiles)
+
     from .gateway.backend import load_tool_list_cache
 
     load_compression_cache()
