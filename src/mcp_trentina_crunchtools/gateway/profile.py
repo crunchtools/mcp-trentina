@@ -225,6 +225,45 @@ class Backend(BaseModel):
         return v
 
 
+class AlertIngressConfig(BaseModel):
+    """Per-profile alert webhook ingress.
+
+    Receives external alert POSTs (e.g. from Nagios) at ``/alert/{token}``
+    and forwards the JSON payload to ``forward_url`` (e.g. a Hermes webhook).
+    The token embedded in the URL is the sole authentication mechanism.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    token_env: str = Field(
+        ..., description="Env var name whose value is the alert ingress token",
+    )
+    token: SecretStr | None = Field(
+        default=None, exclude=True, description="Resolved token (load-time only)",
+    )
+    forward_url: str = Field(
+        ..., description="URL to forward alert payloads to",
+    )
+
+    @field_validator("token_env")
+    @classmethod
+    def env_name_is_uppercase_identifier(cls, v: str) -> str:
+        if not ENV_NAME_RE.match(v):
+            raise ValueError(
+                f"token_env {v!r} must be an UPPERCASE env-var identifier"
+            )
+        return v
+
+    @field_validator("forward_url")
+    @classmethod
+    def url_must_be_http(cls, v: str) -> str:
+        if not v.startswith(("http://", "https://")):
+            raise ValueError(
+                f"forward_url must start with http:// or https://: {v!r}"
+            )
+        return v
+
+
 class DefenseConfig(BaseModel):
     """Per-profile defense-layer toggles. Phase 1 stores them; Phase 2 applies them."""
 
@@ -291,6 +330,10 @@ class Profile(BaseModel):
         ),
     )
     defense: DefenseConfig = Field(default_factory=DefenseConfig)
+    alert_ingress: AlertIngressConfig | None = Field(
+        default=None,
+        description="Alert webhook ingress configuration (optional)",
+    )
 
     @field_validator("name")
     @classmethod
