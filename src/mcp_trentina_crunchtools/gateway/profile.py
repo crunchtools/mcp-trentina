@@ -244,6 +244,22 @@ class AlertIngressConfig(BaseModel):
     forward_url: str = Field(
         ..., description="URL to forward alert payloads to",
     )
+    forward_secret_env: str | None = Field(
+        default=None,
+        description="Env var for HMAC secret used to sign forwarded payloads",
+    )
+    forward_secret: SecretStr | None = Field(
+        default=None, exclude=True, description="Resolved HMAC secret (load-time only)",
+    )
+
+    @field_validator("forward_secret_env")
+    @classmethod
+    def forward_secret_env_is_uppercase(cls, v: str | None) -> str | None:
+        if v is not None and not ENV_NAME_RE.match(v):
+            raise ValueError(
+                f"forward_secret_env {v!r} must be an UPPERCASE env-var identifier"
+            )
+        return v
 
     @field_validator("token_env")
     @classmethod
