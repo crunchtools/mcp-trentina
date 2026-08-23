@@ -117,6 +117,15 @@ def _build_profile(name: str, body: Any) -> Profile:
             )
         profile.alert_ingress.token = SecretStr(alert_value)
 
+        if profile.alert_ingress.forward_secret_env:
+            fwd_secret = os.environ.get(profile.alert_ingress.forward_secret_env, "")
+            if not fwd_secret:
+                raise ProfileConfigError(
+                    f"Profile {name!r}: alert_ingress forward_secret_env "
+                    f"{profile.alert_ingress.forward_secret_env} not set or empty"
+                )
+            profile.alert_ingress.forward_secret = SecretStr(fwd_secret)
+
     return profile
 
 

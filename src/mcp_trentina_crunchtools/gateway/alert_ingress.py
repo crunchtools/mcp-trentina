@@ -11,6 +11,7 @@ that need to page an agent (Hermes/Kagetora) through Trentina.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 from typing import TYPE_CHECKING, Any
@@ -105,12 +106,20 @@ async def _handle_alert(
             content="bad request body", status_code=400, media_type="text/plain",
         )
 
+    fwd_headers: dict[str, str] = {"Content-Type": "application/json"}
+    if profile.alert_ingress.forward_secret is not None:
+        secret = profile.alert_ingress.forward_secret.get_secret_value()
+        sig = hmac.new(
+            secret.encode("utf-8"), body, hashlib.sha256,
+        ).hexdigest()
+        fwd_headers["X-Hub-Signature-256"] = f"sha256={sig}"
+
     client = _get_alert_client()
     try:
         resp = await client.post(
             forward_url,
             content=body,
-            headers={"Content-Type": "application/json"},
+            headers=fwd_headers,
         )
     except httpx.TimeoutException:
         logger.warning("alert_ingress: timeout forwarding to %s", forward_url)
