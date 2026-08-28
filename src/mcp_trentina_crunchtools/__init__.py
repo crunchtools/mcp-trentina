@@ -137,6 +137,9 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
 
     Failure to load profiles is fatal — we fail closed rather than serve with
     no gateway when the operator asked for one.
+
+    ``log_level`` is forwarded to ``mcp.run()`` so uvicorn's access/error
+    loggers pick up the resolved ``TRENTINA_LOG_LEVEL``.
     """
     from .gateway import load_profiles, register_internal_server, register_with_fastmcp
     from .gateway.circuit import breaker
