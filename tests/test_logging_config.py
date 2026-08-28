@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools import _configure_logging, _run_with_gateway
+from mcp_trentina_crunchtools import DEFAULT_PORT, _configure_logging, _run_with_gateway, main
 from mcp_trentina_crunchtools.gateway.loader import GatewayConfig
 
 
@@ -125,4 +125,47 @@ def test_run_with_gateway_forwards_log_level_to_uvicorn() -> None:
         host="127.0.0.1",
         port=8019,
         log_level="WARNING",
+    )
+
+
+def test_main_sse_forwards_log_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    """main() calls mcp.run() directly for sse rather than going through
+    _run_with_gateway — that call site needs its own coverage."""
+    monkeypatch.setenv("TRENTINA_LOG_LEVEL", "WARNING")
+    monkeypatch.delenv("TRENTINA_GATEWAY_ENABLED", raising=False)
+    monkeypatch.setattr(
+        "sys.argv", ["mcp-trentina-crunchtools", "--transport", "sse", "--no-dbus"]
+    )
+    mock_mcp = MagicMock()
+
+    with (
+        patch("mcp_trentina_crunchtools.database.get_db"),
+        patch("mcp_trentina_crunchtools.server.mcp", mock_mcp),
+    ):
+        main()
+
+    mock_mcp.run.assert_called_once_with(
+        transport="sse", host="127.0.0.1", port=DEFAULT_PORT, log_level="WARNING"
+    )
+
+
+def test_main_streamable_http_forwards_log_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same as test_main_sse_forwards_log_level, but for the non-gateway
+    streamable-http branch, which also calls mcp.run() directly."""
+    monkeypatch.setenv("TRENTINA_LOG_LEVEL", "DEBUG")
+    monkeypatch.delenv("TRENTINA_GATEWAY_ENABLED", raising=False)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["mcp-trentina-crunchtools", "--transport", "streamable-http", "--no-dbus"],
+    )
+    mock_mcp = MagicMock()
+
+    with (
+        patch("mcp_trentina_crunchtools.database.get_db"),
+        patch("mcp_trentina_crunchtools.server.mcp", mock_mcp),
+    ):
+        main()
+
+    mock_mcp.run.assert_called_once_with(
+        transport="streamable-http", host="127.0.0.1", port=DEFAULT_PORT, log_level="DEBUG"
     )
