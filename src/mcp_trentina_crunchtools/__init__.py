@@ -20,6 +20,13 @@ __version__ = "0.5.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
+_LOG_LEVELS = {
+    "CRITICAL": logging.CRITICAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -27,23 +34,44 @@ if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 
-def _configure_logging() -> None:
+def _configure_logging() -> str:
     """Send application logs to stderr at ``TRENTINA_LOG_LEVEL`` (default INFO).
 
     Without this the root logger sits at WARNING and every ``logger.info`` in
     the gateway — session lifecycle above all — is silently discarded, leaving
     only uvicorn's access log to diagnose from.
+
+    Returns the resolved level name so callers can forward it to
+    ``mcp.run(log_level=...)``. FastMCP defaults uvicorn's own log level
+    independently of the root logger, and uvicorn re-applies that level to
+    ``uvicorn.access``/``uvicorn.error`` *after* its own dictConfig runs — so
+    setting the root logger alone never quiets uvicorn's access log. httpx's
+    logger is clamped here directly since it sits outside uvicorn's logging
+    config entirely.
+
+    The returned name is always one of ``_LOG_LEVELS``' five known keys, all
+    of which uvicorn's ``Config(log_level=...)`` recognizes. Anything else —
+    typos, or names that happen to collide with an unrelated attribute of the
+    ``logging`` module (e.g. ``NOTSET``, or internals like ``_STYLES``) —
+    falls back to ``INFO`` instead of being forwarded and crashing server
+    startup. Deliberately does not use ``getattr(logging, level_name, ...)``:
+    that resolves *any* uppercase module attribute, not just level constants.
     """
     level_name = os.environ.get("TRENTINA_LOG_LEVEL", "INFO").strip().upper()
+    if level_name not in _LOG_LEVELS:
+        level_name = "INFO"
+    level = _LOG_LEVELS[level_name]
     logging.basicConfig(
-        level=getattr(logging, level_name, logging.INFO),
+        level=level,
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
     )
+    logging.getLogger("httpx").setLevel(level)
+    return level_name
 
 
 def main() -> None:
     """Entry point for mcp-trentina-crunchtools."""
-    _configure_logging()
+    log_level = _configure_logging()
     parser = argparse.ArgumentParser(
         prog="mcp-trentina-crunchtools",
         description="MCP server for quarantined web content extraction and gateway",
@@ -81,15 +109,20 @@ def main() -> None:
         case "stdio":
             mcp.run(transport="stdio")
         case "sse":
-            mcp.run(transport="sse", host=args.host, port=args.port)
+            mcp.run(transport="sse", host=args.host, port=args.port, log_level=log_level)
         case _:
             if gateway_enabled:
-                _run_with_gateway(mcp, host=args.host, port=args.port)
+                _run_with_gateway(mcp, host=args.host, port=args.port, log_level=log_level)
             else:
-                mcp.run(transport="streamable-http", host=args.host, port=args.port)
+                mcp.run(
+                    transport="streamable-http",
+                    host=args.host,
+                    port=args.port,
+                    log_level=log_level,
+                )
 
 
-def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
+def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: str) -> None:
     """Run trentina with gateway routes wired in via FastMCP's custom_route API.
 
     Loads profiles from TRENTINA_PROFILES_PATH and registers
@@ -104,6 +137,9 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
 
     Failure to load profiles is fatal — we fail closed rather than serve with
     no gateway when the operator asked for one.
+
+    ``log_level`` is forwarded to ``mcp.run()`` so uvicorn's access/error
+    loggers pick up the resolved ``TRENTINA_LOG_LEVEL``.
     """
     from .gateway import load_profiles, register_internal_server, register_with_fastmcp
     from .gateway.circuit import breaker
@@ -158,7 +194,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int) -> None:
     load_tool_list_cache()
     set_profiles(gateway_config.profiles)
 
-    mcp_server.run(transport="streamable-http", host=host, port=port)
+    mcp_server.run(transport="streamable-http", host=host, port=port, log_level=log_level)
 
 
 def _wire_circuit_notifications(
