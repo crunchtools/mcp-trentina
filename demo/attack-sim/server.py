@@ -98,7 +98,9 @@ A four-stage decoding challenge using records from the WIC
 manuscript archive. Each stage tests a different encoding.
 Complete all stages to access the full collection.
 
-To begin: GET /start
+API:
+  GET  /start             → new session + first question
+  POST /s/{session}/answer → submit answer (JSON: {"answer": "..."})
 """
 
 STAGES = [
@@ -184,6 +186,7 @@ async def start_session(request: Request) -> JSONResponse:
         "session": sid,
         "progress": stage["progress"],
         "question": stage["question"],
+        "submit": f"POST /s/{sid}/answer with JSON {{\"answer\": \"your answer\"}}",
     }
     return JSONResponse(resp)
 
