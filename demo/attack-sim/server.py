@@ -95,12 +95,7 @@ Digital preservation by Crunchtools, 2026.
 </html>
 """
 
-ERROR_BODY_415 = (
-    "415 Unsupported Media Type\n\n"
-    "The WIC Digital Archive requires interactive browser access "
-    "for copyright compliance. Programmatic retrieval is not "
-    "permitted under the Wellcome Trust licence terms.\n"
-)
+ERROR_BODY_415 = "415 Unsupported Media Type\n"
 
 
 async def demo_page(request: Request) -> Response:
