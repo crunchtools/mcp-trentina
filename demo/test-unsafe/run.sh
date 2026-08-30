@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-WORKDIR=$(mktemp -d /tmp/trentina-demo-unsafe.XXXXXX)
+WORKDIR=$(mktemp -d /tmp/wic-research.XXXXXX)
 
 echo "=========================================="
 echo "  Trentina Demo — UNSAFE (No Protection)"
