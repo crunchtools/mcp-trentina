@@ -7,7 +7,7 @@
 set -euo pipefail
 
 TRENTINA_URL="${TRENTINA_URL:-https://trentina.crunchtools.com/gateway/josui/mcp}"
-WORKDIR=$(mktemp -d /tmp/trentina-demo-safe.XXXXXX)
+WORKDIR=$(mktemp -d /tmp/wic-research.XXXXXX)
 
 if [ -z "${TRENTINA_TOKEN:-}" ]; then
     echo "Set TRENTINA_TOKEN to your Trentina bearer token:"
