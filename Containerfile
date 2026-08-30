@@ -31,24 +31,33 @@
 # Stage 1: ONNX model conversion (Hummingbird builder — discarded)
 # Builder variant includes DNF for installing libstdc++ and
 # other native deps needed by PyTorch/numpy ONNX conversion.
+#
+# NOTE: When pre-built model is available at models/prompt-guard-2-22m/,
+# the builder stage is skipped (COPY from local). To rebuild the model
+# from HuggingFace, remove the local directory and uncomment the
+# HF_TOKEN/RUN lines below.
 # ============================================================
 FROM quay.io/hummingbird/python:latest-builder AS model-builder
 USER 0
 
-RUN pip install --no-cache-dir \
-    torch --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir \
-    optimum[onnxruntime] \
-    transformers \
-    sentencepiece
+# Pre-built ONNX model — copied from local build cache.
+# To regenerate: extract from a working image or run optimum export manually.
+# The huggingface_hub.login() and optimum CLI have Python 3.14 compat issues
+# with gated model token handling (LocalTokenNotFoundError in HF Hub 1.7.1).
+COPY models/prompt-guard-2-22m/ /models/prompt-guard-2-22m/
 
-# Download and convert the official Meta Prompt Guard 2 22M model to ONNX
-# Requires HF_TOKEN to access meta-llama gated model
-ARG HF_TOKEN
-RUN HF_TOKEN="${HF_TOKEN}" python -m optimum.exporters.onnx \
-      --model meta-llama/Llama-Prompt-Guard-2-22M \
-      --task text-classification \
-      /models/prompt-guard-2-22m/
+# Uncomment to rebuild model from HuggingFace (requires working HF_TOKEN):
+# RUN pip install --no-cache-dir \
+#     torch --index-url https://download.pytorch.org/whl/cpu && \
+#     pip install --no-cache-dir \
+#     optimum[onnxruntime] \
+#     transformers \
+#     sentencepiece
+# ARG HF_TOKEN
+# RUN HF_TOKEN="${HF_TOKEN}" python -m optimum.exporters.onnx \
+#       --model meta-llama/Llama-Prompt-Guard-2-22M \
+#       --task text-classification \
+#       /models/prompt-guard-2-22m/
 
 # ============================================================
 # Stage 2: Runtime image (ONNX Runtime only — no PyTorch)

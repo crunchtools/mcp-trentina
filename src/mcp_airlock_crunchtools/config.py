@@ -66,7 +66,19 @@ class Config:
         return bool(self.api_key.get_secret_value())
 
     def is_trusted_domain(self, url: str) -> bool:
-        """Check if a URL's domain is in the trust allowlist."""
+        """Check if a URL's domain is trusted.
+
+        Checks SQLite first (managed via D-Bus/Cockpit), then falls back
+        to JSON config for backwards compatibility.
+        """
+        try:
+            from .database import is_domain_trusted
+            if is_domain_trusted(url):
+                return True
+        except Exception:
+            pass
+
+        # Fallback to JSON config
         trusted_domains = self._trust_config.get("trusted_domains", [])
         if not isinstance(trusted_domains, list):
             return False

@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 
 DEFAULT_PORT = 8019
 
@@ -41,11 +40,9 @@ def main() -> None:
 
     if not args.no_dbus:
         try:
-            from .dbus_interface import start_dbus
+            from .dbus_interface import start_dbus_thread
 
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(start_dbus())
-            loop.close()
+            start_dbus_thread()
         except Exception:
             logger.warning("D-Bus startup failed — continuing without D-Bus", exc_info=True)
 
