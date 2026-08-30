@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from .errors import FetchError, UnsupportedContentTypeError
+
+log = logging.getLogger(__name__)
 
 FETCH_TIMEOUT = 30.0
 MAX_RESPONSE_SIZE = 5_000_000  # 5 MB
@@ -49,6 +53,25 @@ def _is_text_content_type(content_type: str) -> bool:
     return media_type.endswith(TEXT_CONTENT_SUFFIXES)
 
 
+def _build_redirect_chain(resp: httpx.Response) -> list[dict[str, object]] | None:
+    """Extract the redirect chain from an httpx response, if any."""
+    if not resp.history:
+        return None
+    chain = []
+    for hop in resp.history:
+        chain.append({
+            "url": str(hop.url),
+            "status": hop.status_code,
+            "content_type": hop.headers.get("content-type", ""),
+        })
+    chain.append({
+        "url": str(resp.url),
+        "status": resp.status_code,
+        "content_type": resp.headers.get("content-type", ""),
+    })
+    return chain
+
+
 async def fetch_url(url: str) -> tuple[str, str]:
     """Fetch a URL and return (content, content_type).
 
@@ -71,7 +94,10 @@ async def fetch_url(url: str) -> tuple[str, str]:
 
             content_type = resp.headers.get("content-type", "text/html")
             if not _is_text_content_type(content_type):
-                raise UnsupportedContentTypeError(url, content_type)
+                redirect_chain = _build_redirect_chain(resp)
+                raise UnsupportedContentTypeError(
+                    url, content_type, redirect_chain=redirect_chain
+                )
 
             declared = resp.headers.get("content-length")
             if declared is not None and declared.isdigit() and int(declared) > MAX_RESPONSE_SIZE:
@@ -88,7 +114,20 @@ async def fetch_url(url: str) -> tuple[str, str]:
             return bytes(buf).decode(resp.encoding or "utf-8", errors="replace"), content_type
 
     except httpx.HTTPStatusError as exc:
-        raise FetchError(url, f"HTTP {exc.response.status_code}") from exc
+        status = exc.response.status_code
+        error_body = None
+        if 400 <= status < 500:
+            try:
+                raw = exc.response.read()
+                error_body = raw[:2048].decode("utf-8", errors="replace")
+            except Exception:
+                log.debug("Could not read error body for %s", url)
+        raise FetchError(
+            url,
+            f"HTTP {status}",
+            status_code=status,
+            error_body=error_body,
+        ) from exc
     except httpx.TimeoutException as exc:
         raise FetchError(url, "Request timed out") from exc
     except httpx.RequestError as exc:

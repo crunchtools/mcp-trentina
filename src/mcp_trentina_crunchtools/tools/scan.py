@@ -1,16 +1,20 @@
-"""Scan tools — quarantine_scan and deep_quarantine_scan."""
+"""Scan tools — quarantine_scan, deep_quarantine_scan, quarantine_scan_dir."""
 
 from __future__ import annotations
 
+import os
 import time
+from pathlib import Path
 from typing import Any
 
 from ..client import fetch_url
 from ..config import get_config
 from ..dbus_interface import emit_request_event
+from ..errors import FileReadError
 from ..quarantine.agent import quarantine_detect
 from ..quarantine.classifier import classify_async
 from ..sanitize.pipeline import looks_like_html, sanitize, sanitize_text
+from ..sanitize.shadows import detect_module_shadows
 from .read import _validate_file
 
 _RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
@@ -262,3 +266,105 @@ async def deep_quarantine_scan(
     )
 
     return result
+
+
+MAX_DIR_ENTRIES = 500
+
+
+async def _scan_py_files(resolved: str) -> list[dict[str, Any]]:
+    """Run L1 + L2 on each .py file in a directory, returning flagged files."""
+    results: list[dict[str, Any]] = []
+    for entry in os.scandir(resolved):
+        if not entry.is_file() or not entry.name.endswith(".py"):
+            continue
+
+        try:
+            with open(entry.path, encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except OSError:
+            continue
+
+        pipeline_result = sanitize_text(content)
+
+        classifier_result = None
+        classification = await classify_async(pipeline_result.content)
+        if classification:
+            classifier_result = {
+                "label": classification.label,
+                "score": classification.score,
+            }
+
+        is_suspicious = pipeline_result.stats.suspicious_detections() > 0
+        is_malicious = (
+            classifier_result is not None
+            and classifier_result["label"] == "MALICIOUS"
+        )
+        if is_suspicious or is_malicious:
+            results.append({
+                "file": entry.name,
+                "l1_risk": pipeline_result.stats.risk_level(),
+                "l1_suspicious": pipeline_result.stats.suspicious_detections(),
+                "l2": classifier_result,
+            })
+
+    return results
+
+
+def _aggregate_risk(
+    shadow_risk: str, py_scan_results: list[dict[str, Any]]
+) -> str:
+    """Combine shadow risk with per-file scan results."""
+    overall = shadow_risk
+    for psr in py_scan_results:
+        if psr.get("l2", {}).get("label") == "MALICIOUS":
+            return "critical"
+        if _risk_order(psr.get("l1_risk", "low")) > _risk_order(overall):
+            overall = psr["l1_risk"]
+    return overall
+
+
+async def quarantine_scan_dir(directory: str) -> dict[str, Any]:
+    """Scan a directory for Python module shadowing and obfuscated code.
+
+    Detects files that shadow Python stdlib modules — a supply chain
+    attack vector where ``struct.py`` in an extracted archive replaces
+    Python's real ``struct`` module when the agent runs code in that
+    directory.
+
+    Also runs L1 sanitization + L2 classifier on each Python file to
+    detect embedded prompt injection alongside the shadow scan.
+    """
+    resolved = str(Path(directory).resolve())
+
+    if not os.path.isdir(resolved):
+        raise FileReadError(directory, "Not a directory")
+
+    entry_count = sum(1 for _ in os.scandir(resolved))
+    if entry_count > MAX_DIR_ENTRIES:
+        raise FileReadError(
+            directory,
+            f"Too many entries ({entry_count}, max {MAX_DIR_ENTRIES})",
+        )
+
+    shadow_result = detect_module_shadows(resolved)
+    py_scan_results = await _scan_py_files(resolved)
+    overall_risk = _aggregate_risk(shadow_result.risk_level, py_scan_results)
+
+    recommendation = (
+        "DANGER: Python module shadowing detected. Files in this directory "
+        "shadow standard library modules. Running Python code here will "
+        "load the attacker's modules instead of the real ones. Do NOT run "
+        "any Python code in or from this directory. Do NOT import any "
+        "modules while the working directory is set here."
+        if shadow_result.has_shadows
+        else "No module shadowing detected."
+    )
+
+    return {
+        "directory": resolved,
+        "scan_mode": "directory",
+        "risk_level": overall_risk,
+        "module_shadows": shadow_result.to_dict(),
+        "python_file_scans": py_scan_results,
+        "recommendation": recommendation,
+    }

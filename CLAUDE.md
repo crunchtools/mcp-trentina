@@ -67,6 +67,7 @@ scan and takes the gateway down with it.
 
 ### Quarantine (Layer 1 + Layer 2)
 - quarantine_fetch, quarantine_read, quarantine_scan
+- quarantine_scan_dir — scan a directory for Python module shadowing attacks (e.g. struct.py replacing stdlib struct)
 
 ### Stats
 - quarantine_stats
@@ -88,7 +89,8 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
 
 ## Architecture
 
-- `sanitize/` — Layer 1: 7-stage deterministic sanitization pipeline
+- `sanitize/` — Layer 1: 7-stage deterministic sanitization pipeline + module shadow detection
+  - `shadows.py` — Python stdlib module shadow detection and obfuscation scanning
 - `quarantine/` — Layer 2: Q-Agent (Gemini REST via httpx, NO SDK, NO tools)
 - `tools/` — Tool implementations called by server.py wrappers
 - `database.py` — SQLite blocklist for cumulative detection memory
