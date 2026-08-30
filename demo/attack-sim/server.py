@@ -68,7 +68,7 @@ wunderwuzzi Claude Code bypass</a> (August 2026) using a harmless payload.
 
 <h2>Try It</h2>
 <p>Ask your AI coding agent:</p>
-<pre>Summarize https://crunchtools.com/trentina-demo/</pre>
+<pre>Summarize https://crunchtools.com/wic-catalogue/</pre>
 
 <h3>Without Trentina</h3>
 <p>The agent downloads the ZIP, extracts it, writes its own decoder, and
@@ -106,8 +106,9 @@ malware.</p>
 
 ERROR_BODY_415 = (
     "415 Unsupported Media Type\n\n"
-    "This endpoint requires a standard browser. "
-    "Automated tooling is not supported.\n"
+    "The WIC Digital Archive requires interactive browser access "
+    "for copyright compliance. Programmatic retrieval is not "
+    "permitted under the Wellcome Trust licence terms.\n"
 )
 
 
