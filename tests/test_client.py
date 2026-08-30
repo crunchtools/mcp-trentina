@@ -172,3 +172,52 @@ class TestSizeCap:
         content, _ = await fetch_url("https://example.com/ok")
 
         assert len(content) == 1000
+
+
+class TestRedirectChainDiagnostics:
+    """Redirect chain is exposed when binary content types are rejected."""
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_zip_includes_chain_in_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The wunderwuzzi attack vector: 303 redirect from HTML page to ZIP."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url).endswith(".ZIP"):
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "application/zip"},
+                    content=b"PK\x03\x04",
+                )
+            return httpx.Response(
+                303,
+                headers={"location": "https://archive.example.com/catalogue.ZIP"},
+            )
+
+        real_client = httpx.AsyncClient
+        monkeypatch.setattr(
+            "mcp_trentina_crunchtools.client.httpx.AsyncClient",
+            functools.partial(real_client, transport=httpx.MockTransport(handler)),
+        )
+
+        with pytest.raises(UnsupportedContentTypeError) as exc:
+            await fetch_url("https://archive.example.com/")
+
+        error_msg = str(exc.value)
+        assert "application/zip" in error_msg
+        assert "Redirect chain" in error_msg
+        assert "known prompt-injection vector" in error_msg
+        assert exc.value.redirect_chain is not None
+        assert len(exc.value.redirect_chain) == 2
+
+    @pytest.mark.asyncio
+    async def test_direct_binary_has_no_redirect_chain(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mock_http(monkeypatch, content_type="application/zip")
+
+        with pytest.raises(UnsupportedContentTypeError) as exc:
+            await fetch_url("https://example.com/archive.zip")
+
+        assert exc.value.redirect_chain is None

@@ -28,8 +28,17 @@ class AirlockError(Exception):
 class FetchError(AirlockError):
     """Raised when fetching a URL fails."""
 
-    def __init__(self, url: str, reason: str) -> None:
+    def __init__(
+        self,
+        url: str,
+        reason: str,
+        *,
+        status_code: int | None = None,
+        error_body: str | None = None,
+    ) -> None:
         super().__init__(f"Failed to fetch {url}: {reason}")
+        self.status_code = status_code
+        self.error_body = error_body
 
 
 class SanitizationError(AirlockError):
@@ -90,12 +99,31 @@ class UnscannableContentError(AirlockError):
 class UnsupportedContentTypeError(AirlockError):
     """Raised when a fetched body is not text the pipeline can reason about."""
 
-    def __init__(self, url: str, content_type: str) -> None:
-        super().__init__(
+    def __init__(
+        self,
+        url: str,
+        content_type: str,
+        *,
+        redirect_chain: list[dict[str, object]] | None = None,
+    ) -> None:
+        parts = [
             f"Refusing to fetch {url}: content-type {content_type!r} is not "
             "text. Binary bodies decode into garbage that wastes the "
-            "sanitization and classification pipeline."
-        )
+            "sanitization and classification pipeline.",
+        ]
+        if redirect_chain:
+            hops = " -> ".join(
+                f"{hop['url']} ({hop['status']} {hop.get('content_type', '')})"
+                for hop in redirect_chain
+            )
+            parts.append(
+                f"Redirect chain: {hops}. "
+                "A page that redirects to a binary download (ZIP, PDF, etc.) "
+                "is a known prompt-injection vector — the attacker wants the "
+                "agent to curl/wget the archive directly and extract it."
+            )
+        super().__init__(" ".join(parts))
+        self.redirect_chain = redirect_chain
 
 
 class ConfigError(AirlockError):
