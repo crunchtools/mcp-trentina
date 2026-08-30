@@ -1,7 +1,7 @@
 [project]
 name = "mcp-airlock-crunchtools"
-version = "0.2.2"
-description = "Secure MCP server for quarantined web content extraction — two-layer defense against prompt injection"
+version = "0.3.0"
+description = "Secure MCP server for quarantined web content extraction — three-layer defense against prompt injection"
 requires-python = ">=3.10"
 license = "AGPL-3.0-or-later"
 authors = [
@@ -88,3 +88,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "uses_real_db: test manages its own temp database (opts out of record_event mock)",
+]

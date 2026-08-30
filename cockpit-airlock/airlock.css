@@ -1,5 +1,264 @@
-/* cockpit-airlock — minimal custom styles */
+/* cockpit-airlock — PatternFly 6 extensions */
 
+/* Force single-column layout — no PF sidebar in this plugin */
+.pf-v6-c-page {
+    grid-template-areas: "main" !important;
+    grid-template-columns: 1fr !important;
+    grid-template-rows: 1fr !important;
+}
+
+/* Summary bar — layer cards + stats row */
+.airlock-summary-bar {
+    border-bottom: 1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2);
+    padding-top: 12px !important;
+    padding-bottom: 12px !important;
+}
+
+/* Stacked layer cards */
+.airlock-layer-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+    max-width: 480px;
+}
+
+.airlock-layer-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    border: 1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2);
+    border-radius: 6px;
+    background: var(--pf-t--global--background--color--secondary--default, #f0f0f0);
+    font-size: 13px;
+}
+
+.airlock-layer-card-label {
+    font-weight: 700;
+    font-size: 12px;
+    min-width: 60px;
+    color: var(--pf-v6-global--Color--200, #6a6e73);
+}
+
+.airlock-layer-card-name {
+    flex: 1;
+    color: inherit;
+}
+
+.airlock-layer-card-status {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.airlock-layer-card-status.active {
+    color: var(--pf-t--global--color--status--success--default, #3e8635);
+}
+
+.airlock-layer-card-status.unavail {
+    color: var(--pf-t--global--color--status--warning--default, #f0ab00);
+}
+
+/* Stats row below layer cards */
+.airlock-stats-row {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--pf-v6-global--Color--200, #6a6e73);
+    padding-top: 8px;
+    border-top: 1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2);
+}
+
+.airlock-stat-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.airlock-stat-value {
+    font-weight: 700;
+    color: var(--pf-v6-global--Color--100, #151515);
+}
+
+/* Uniform badge widths in table columns */
+.airlock-event-row .pf-v6-c-label {
+    min-width: 5.5em;
+    text-align: center;
+    justify-content: center;
+}
+
+/* Event table rows */
+.airlock-event-row {
+    cursor: pointer;
+}
+
+.airlock-event-row:hover {
+    background: var(--pf-v6-global--BackgroundColor--200, #f0f0f0) !important;
+}
+
+/* Tool name styled as link (like username in Accounts) */
+.airlock-tool-link {
+    color: var(--pf-v6-global--link--Color, #06c);
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.airlock-event-row:hover .airlock-tool-link {
+    text-decoration: underline;
+}
+
+.airlock-event-row code {
+    font-size: 0.85em;
+    background: var(--pf-v6-global--BackgroundColor--200, #f0f0f0);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+.airlock-muted {
+    color: var(--pf-v6-global--Color--200, #6a6e73);
+}
+
+.airlock-col-warn {
+    color: var(--pf-t--global--color--status--danger--default, #c9190b);
+    font-weight: 600;
+}
+
+.airlock-col-ok {
+    color: var(--pf-t--global--color--status--success--default, #3e8635);
+}
+
+/* Breadcrumb */
+.pf-v6-c-page__main-breadcrumb {
+    padding: 16px 24px 0 24px;
+}
+
+.pf-v6-c-breadcrumb__link {
+    color: var(--pf-v6-global--link--Color, #06c);
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.pf-v6-c-breadcrumb__link:hover {
+    text-decoration: underline;
+}
+
+.pf-v6-c-breadcrumb__list {
+    list-style: none;
+    display: flex;
+    padding: 0;
+    margin: 0;
+    gap: 4px;
+}
+
+/* Detail page — compact layout */
+.airlock-detail-header {
+    padding-bottom: 8px !important;
+}
+
+.airlock-detail-header h1 {
+    margin-bottom: 8px;
+}
+
+.airlock-detail-compact {
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+}
+
+.airlock-source-full {
+    word-break: break-all;
+    font-size: 0.85em;
+}
+
+/* Event ID — full UUID, selectable */
+.airlock-event-id {
+    font-family: var(--pf-v6-global--FontFamily--mono, "Red Hat Mono", monospace);
+    font-size: 12px;
+    color: var(--pf-v6-global--Color--200, #6a6e73);
+    user-select: all;
+    cursor: text;
+}
+
+/* Detail metadata — structured rows */
+.airlock-detail-meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 24px;
+    font-size: 13px;
+    max-width: 600px;
+}
+
+.airlock-meta-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 2px 0;
+}
+
+.airlock-meta-row:first-child {
+    grid-column: 1 / -1;
+}
+
+.airlock-meta-label {
+    color: var(--pf-v6-global--Color--200, #6a6e73);
+    font-weight: 600;
+    font-size: 12px;
+    min-width: 60px;
+    flex-shrink: 0;
+}
+
+/* Pipeline stage grid — 2x2 equal cards */
+.airlock-pipeline-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.airlock-pipeline-card {
+    border: 1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2);
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 200px;
+}
+
+.airlock-pipeline-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--pf-t--global--background--color--secondary--default, #f0f0f0);
+    border-bottom: 1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2);
+    font-size: 13px;
+}
+
+.airlock-pipeline-card-label {
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.airlock-pipeline-card-status {
+    font-size: 12px;
+}
+
+.airlock-pipeline-card-body {
+    padding: 12px 14px;
+    font-size: 13px;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.airlock-pipeline-detail-row {
+    padding: 3px 0;
+    font-size: 13px;
+}
+
+.airlock-pipeline-detail-row + .airlock-payload {
+    margin-top: 10px;
+}
+
+/* Score bar */
 .airlock-score-bar {
     display: inline-flex;
     align-items: center;
@@ -9,11 +268,11 @@
     border-radius: 3px;
     position: relative;
     overflow: hidden;
+    vertical-align: middle;
 }
 
 .airlock-score-fill {
     height: 100%;
-    background: var(--pf-v6-global--palette--orange-300, #f4c145);
     border-radius: 3px 0 0 3px;
     transition: width 0.3s ease;
 }
@@ -27,14 +286,177 @@
     color: var(--pf-v6-global--Color--100, #151515);
 }
 
-.airlock-event-row {
-    cursor: pointer;
+/* Payload display — used inside pipeline cards */
+.airlock-payload {
+    background: var(--pf-t--global--background--color--secondary--default, #f0f0f0);
+    color: var(--pf-t--global--text--color--regular, #151515);
+    border: 1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2);
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-family: var(--pf-v6-global--FontFamily--mono, "Red Hat Mono", monospace);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 250px;
+    overflow-y: auto;
+    margin: 0;
 }
 
-.airlock-event-row:hover {
-    background: var(--pf-v6-global--BackgroundColor--200, #f0f0f0);
-}
-
+/* Alert area */
 .airlock-alert {
-    margin-bottom: var(--pf-v6-global--spacer--md, 16px);
+    margin: 8px 24px;
+    transition: opacity 0.3s ease;
+}
+
+/* Empty state */
+.airlock-empty {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--pf-v6-global--Color--200, #6a6e73);
+    font-size: 14px;
+}
+
+/* Tab navigation */
+.airlock-tab-section {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+
+.airlock-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--pf-v6-global--BorderColor--100, #d2d2d2);
+}
+
+.airlock-tab {
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--pf-v6-global--Color--200, #6a6e73);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.airlock-tab:hover {
+    color: var(--pf-v6-global--Color--100, #151515);
+}
+
+.airlock-tab.active {
+    color: var(--pf-v6-global--link--Color, #06c);
+    border-bottom-color: var(--pf-v6-global--link--Color, #06c);
+}
+
+/* Trust tab — toolbar and domain count */
+.airlock-trust-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-top: 12px !important;
+    padding-bottom: 12px !important;
+}
+
+.airlock-trust-add {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.airlock-trust-add input {
+    min-width: 220px;
+    padding: 6px 10px;
+    font-size: 13px;
+    border: 1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2);
+    border-radius: 4px;
+    background: var(--pf-t--global--background--color--primary--default, #fff);
+    color: var(--pf-v6-global--Color--100, #151515);
+}
+
+.airlock-trust-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.airlock-trust-count {
+    padding: 8px 24px 4px 24px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--pf-v6-global--Color--200, #6a6e73);
+}
+
+/* Pipeline Analysis — stage flow + metrics */
+.airlock-analysis-flow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-bottom: 12px;
+}
+
+.airlock-analysis-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 8px 14px;
+    border: 1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2);
+    border-radius: 6px;
+    background: var(--pf-t--global--background--color--secondary--default, #f0f0f0);
+    min-width: 100px;
+}
+
+.airlock-analysis-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--pf-v6-global--Color--200, #6a6e73);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.airlock-analysis-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--pf-v6-global--Color--100, #151515);
+}
+
+.airlock-analysis-delta {
+    font-size: 11px;
+    color: var(--pf-v6-global--Color--200, #6a6e73);
+}
+
+.airlock-analysis-arrow {
+    font-size: 18px;
+    color: var(--pf-v6-global--Color--200, #6a6e73);
+    font-weight: 300;
+}
+
+.airlock-analysis-metrics {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    padding-top: 8px;
+    border-top: 1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2);
+}
+
+.airlock-analysis-metric {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Flash animation for new live rows */
+.airlock-flash {
+    animation: airlock-row-flash 1.5s ease-out;
+}
+
+@keyframes airlock-row-flash {
+    0% { background-color: var(--pf-v6-global--palette--blue-50, #e7f1fa); }
+    100% { background-color: transparent; }
 }

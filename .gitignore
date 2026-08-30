@@ -37,3 +37,5 @@ Thumbs.db
 
 # UV
 uv.lock
+models/
+cockpit-airlock/patternfly.css

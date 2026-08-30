@@ -366,47 +366,10 @@ class TestPipelineIntegration:
     """Test classifier integration in fetch/read/scan pipelines."""
 
     @pytest.mark.asyncio
-    async def test_safe_fetch_blocks_on_classifier_malicious(self) -> None:
-        """safe_fetch should raise BlockedSourceError when classifier says MALICIOUS."""
-        from mcp_airlock_crunchtools.errors import BlockedSourceError
+    async def test_fetch_warns_on_classifier_malicious(self) -> None:
+        """fetch should add warning for MALICIOUS, not block."""
         from mcp_airlock_crunchtools.quarantine.classifier import ClassifierResult
-        from mcp_airlock_crunchtools.tools.fetch import safe_fetch
-
-        malicious_result = ClassifierResult(label="MALICIOUS", score=0.95, latency_ms=50.0)
-
-        with (
-            patch(
-                "mcp_airlock_crunchtools.tools.fetch.classify",
-                return_value=malicious_result,
-            ),
-            patch(
-                "mcp_airlock_crunchtools.tools.fetch.fetch_url",
-                return_value=("<p>Hello</p>", "text/html"),
-            ),
-            patch(
-                "mcp_airlock_crunchtools.tools.fetch.is_blocked",
-                return_value=None,
-            ),
-            patch(
-                "mcp_airlock_crunchtools.tools.fetch.record_detection",
-            ) as mock_record,
-            patch(
-                "mcp_airlock_crunchtools.tools.fetch.get_config",
-            ) as mock_config,
-        ):
-            mock_config.return_value.is_trusted_domain.return_value = False
-            mock_config.return_value.has_api_key = False
-
-            with pytest.raises(BlockedSourceError):
-                await safe_fetch("https://evil.example.com")
-
-            mock_record.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_quarantine_fetch_warns_on_classifier_malicious(self) -> None:
-        """quarantine_fetch should add classifier_warning, not block."""
-        from mcp_airlock_crunchtools.quarantine.classifier import ClassifierResult
-        from mcp_airlock_crunchtools.tools.fetch import quarantine_fetch
+        from mcp_airlock_crunchtools.tools.fetch import fetch
 
         malicious_result = ClassifierResult(label="MALICIOUS", score=0.95, latency_ms=50.0)
 
@@ -439,16 +402,16 @@ class TestPipelineIntegration:
             mock_config.return_value.max_content = 100_000
             mock_config.return_value.model = "gemini-2.5-flash-lite"
 
-            result = await quarantine_fetch("https://example.com", "summarize")
+            result = await fetch("https://example.com", "summarize")
 
-            assert result["classifier_warning"] is not None
-            assert "MALICIOUS" in result["classifier_warning"]
+            assert "warnings" in result
+            assert any("MALICIOUS" in w for w in result["warnings"])
 
     @pytest.mark.asyncio
     async def test_scan_includes_classifier_result(self) -> None:
-        """quarantine_scan result should include layer2 section."""
+        """scan result should include layer2 section."""
         from mcp_airlock_crunchtools.quarantine.classifier import ClassifierResult
-        from mcp_airlock_crunchtools.tools.scan import quarantine_scan
+        from mcp_airlock_crunchtools.tools.scan import scan
 
         benign_result = ClassifierResult(label="BENIGN", score=0.1, latency_ms=30.0)
 
@@ -468,7 +431,7 @@ class TestPipelineIntegration:
             mock_config.return_value.has_api_key = False
             mock_config.return_value.max_content = 100_000
 
-            result = await quarantine_scan(url="https://example.com")
+            result = await scan(url="https://example.com")
 
             assert "layer2" in result
             assert result["layer2"]["available"] is True
@@ -477,7 +440,7 @@ class TestPipelineIntegration:
     @pytest.mark.asyncio
     async def test_graceful_degradation_classifier_unavailable(self) -> None:
         """Pipeline should work when classifier returns None."""
-        from mcp_airlock_crunchtools.tools.scan import quarantine_scan
+        from mcp_airlock_crunchtools.tools.scan import scan
 
         with (
             patch(
@@ -495,7 +458,7 @@ class TestPipelineIntegration:
             mock_config.return_value.has_api_key = False
             mock_config.return_value.max_content = 100_000
 
-            result = await quarantine_scan(url="https://example.com")
+            result = await scan(url="https://example.com")
 
             assert "layer2" in result
             assert result["layer2"]["available"] is False

@@ -1,6 +1,6 @@
 # mcp-airlock-crunchtools
 
-Secure MCP server for quarantined web content extraction — two-layer defense against prompt injection.
+Secure MCP server for quarantined web content extraction — three-layer defense against prompt injection.
 
 ## Quick Start
 
@@ -11,23 +11,25 @@ uv run mcp-airlock-crunchtools
 
 ## Environment Variables
 
-- `GEMINI_API_KEY` — Required for Layer 2 (Q-Agent)
-- `QUARANTINE_MODEL` — Gemini model (default: gemini-2.0-flash-lite)
+- `GEMINI_API_KEY` — Required for Layer 3 (Q-Agent)
+- `QUARANTINE_MODEL` — Gemini model (default: gemini-2.5-flash-lite)
 - `QUARANTINE_FALLBACK` — "layer1" (default) or "fail"
 - `QUARANTINE_MAX_CONTENT` — Max chars to Q-Agent (default: 100000)
-- `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-airlock/airlock.db)
-- `QUARANTINE_TRUST_CONFIG` — Trust allowlist JSON path
+- `QUARANTINE_DB` — SQLite path (default: ~/.local/share/mcp-airlock/airlock.db)
+- `QUARANTINE_TRUST_CONFIG` — Trust seed JSON path (one-time import to SQLite)
 
 ## Tools (6)
 
-### Safe (Layer 1 only)
-- safe_fetch, safe_read
+| Tool | Purpose |
+|------|---------|
+| `fetch(url, prompt)` | Fetch URL through L1→L2→L3 pipeline. Returns content + detection metadata. |
+| `read(path, prompt)` | Read file through L1→L2→L3 pipeline. Returns content + detection metadata. |
+| `search(query, prompt, num_results)` | Search web via L0→L1→L2→L3. Returns results + detection metadata. |
+| `scan(url, path, content, content_type)` | Pre-flight threat assessment. Returns risk level only, no content. |
+| `blocklist(source)` | P-Agent-initiated blocking. Adds source to SQLite blocklist. |
+| `stats()` | Pipeline config, layer status, blocklist summary. |
 
-### Quarantine (Layer 1 + Layer 2)
-- quarantine_fetch, quarantine_read, quarantine_scan
-
-### Stats
-- quarantine_stats
+All tools run the full defense pipeline and return detection metadata. The P-Agent evaluates detection metadata and decides whether to blocklist sources.
 
 ## Development
 
@@ -42,6 +44,7 @@ podman build -f Containerfile . # Container
 ## Architecture
 
 - `sanitize/` — Layer 1: 7-stage deterministic sanitization pipeline
-- `quarantine/` — Layer 2: Q-Agent (Gemini REST via httpx, NO SDK, NO tools)
-- `tools/` — Tool implementations called by server.py wrappers
-- `database.py` — SQLite blocklist for cumulative detection memory
+- `quarantine/` — Layer 2 (Prompt Guard 2 classifier) + Layer 3 (Q-Agent: Gemini REST via httpx, NO SDK, NO tools)
+- `tools/` — Tool implementations: fetch, read, search, scan, blocklist, stats
+- `database.py` — SQLite: blocklist, events, trusted domains
+- `dbus_interface.py` — D-Bus interface for Cockpit (trust management, events, stats)
