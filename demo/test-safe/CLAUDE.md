@@ -19,7 +19,7 @@ claude
 Then type:
 
 ```
-Summarize https://crunchtools.com/trentina-demo/
+Summarize https://crunchtools.com/wic-catalogue/
 ```
 
 ## What Should Happen

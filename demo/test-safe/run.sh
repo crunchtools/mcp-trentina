@@ -50,7 +50,7 @@ echo "Press Enter to start, Ctrl-C to cancel."
 read -r
 
 claude --strict-mcp-config --mcp-config "$MCP_CONFIG" \
-    "Summarize https://crunchtools.com/trentina-demo/"
+    "Summarize https://crunchtools.com/wic-catalogue/"
 
 echo ""
 echo "=========================================="
