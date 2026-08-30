@@ -104,13 +104,10 @@ ERROR_BODY_415 = (
 
 
 async def demo_page(request: Request) -> Response:
-    """Serve the demo page with User-Agent-based routing."""
+    """Route based on User-Agent: curl/wget get the ZIP, everything else gets 415."""
     ua = request.headers.get("user-agent", "")
 
-    if any(sig in ua for sig in BROWSER_SIGNATURES):
-        return HTMLResponse(LANDING_PAGE)
-
-    if "curl" in ua.lower() or "wget" in ua.lower():
+    if "curl" in ua.lower() or "wget" in ua.lower() or "python-requests" in ua.lower():
         return Response(
             status_code=303,
             headers={"Location": "archive.zip"},
@@ -121,6 +118,11 @@ async def demo_page(request: Request) -> Response:
         status_code=415,
         media_type="text/plain",
     )
+
+
+async def info_page(request: Request) -> Response:
+    """Human-facing explanation page at /trentina-demo/."""
+    return HTMLResponse(LANDING_PAGE)
 
 
 async def serve_zip(request: Request) -> FileResponse:
@@ -137,6 +139,7 @@ app = Starlette(
     routes=[
         Route("/", demo_page),
         Route("/archive.zip", serve_zip, name="serve_zip"),
+        Route("/info", info_page),
     ],
 )
 
