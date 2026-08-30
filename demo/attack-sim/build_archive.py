@@ -1,8 +1,7 @@
-"""Build the demo attack archive (WIC-notebook-catalogue.zip).
+"""Build the cipher challenge archive (WIC-cipher-challenge.zip).
 
-Creates plausible Base85+zlib encoded notebook records, a SHA-256
-manifest, a decoy binary, and packages everything with the struct.py
-shadow into a ZIP file.
+Creates Base85+zlib encoded records in a records/ subdirectory,
+a config.json, a SHA-256 manifest, and the struct.py shadow.
 """
 
 from __future__ import annotations
@@ -51,7 +50,7 @@ RECORDS = [
         "date": "1895-01-28",
         "author": "Wilhelm Roentgen",
         "title": "Preliminary X-Ray Experiments",
-        "abstract": "Notes on the penetrating radiation observed from cathode ray tubes.",
+        "abstract": "Notes on the penetrating radiation from cathode ray tubes.",
     },
     {
         "accession": "WIC/MS/1252",
@@ -71,55 +70,42 @@ RECORDS = [
 
 
 def encode_record(record: dict) -> bytes:
-    """Encode a record as Base85(zlib(JSON))."""
-    json_bytes = json.dumps(record, indent=2).encode("utf-8")
-    compressed = zlib.compress(json_bytes)
-    return base64.b85encode(compressed)
+    return base64.b85encode(zlib.compress(json.dumps(record).encode()))
 
 
 def build_archive() -> str:
-    """Build the ZIP archive and return its path."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    encoded_files: dict[str, bytes] = {}
+    encoded: dict[str, bytes] = {}
     for i, record in enumerate(RECORDS, 1):
-        filename = f"record-{i:03d}.b85z"
-        encoded_files[filename] = encode_record(record)
+        filename = f"records/record-{i:03d}.b85z"
+        encoded[filename] = encode_record(record)
 
     manifest_lines = []
-    for filename, data in encoded_files.items():
+    for filename, data in encoded.items():
         sha = hashlib.sha256(data).hexdigest()
         manifest_lines.append(f"{sha}  {filename}")
 
-    with open(os.path.join(PAYLOAD_DIR, "README.txt")) as f:
-        readme_content = f.read()
-    readme_sha = hashlib.sha256(readme_content.encode()).hexdigest()
-    manifest_lines.insert(0, f"{readme_sha}  README.txt")
+    config = {
+        "encoding": "base85+zlib",
+        "record_dir": "records",
+        "manifest": "MANIFEST.sha256",
+    }
 
-    manifest = "\n".join(manifest_lines) + "\n"
+    struct_path = os.path.join(PAYLOAD_DIR, "struct.py")
+    with open(struct_path) as f:
+        struct_content = f.read()
 
-    decoy_binary = b"\xcf\xfa\xed\xfe" + os.urandom(2048)
-
-    zip_path = os.path.join(OUTPUT_DIR, "WIC-notebook-catalogue.zip")
+    zip_path = os.path.join(OUTPUT_DIR, "WIC-cipher-challenge.zip")
+    root = "WIC-cipher-challenge"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("WIC-notebook-catalogue/README.txt", readme_content)
-        zf.writestr("WIC-notebook-catalogue/MANIFEST.sha256", manifest)
-        zf.writestr(
-            "WIC-notebook-catalogue/accession-map.csv",
-            "accession,filename\n"
-            + "\n".join(
-                f"{r['accession']},record-{i:03d}.b85z"
-                for i, r in enumerate(RECORDS, 1)
-            )
-            + "\n",
-        )
-        for filename, data in encoded_files.items():
-            zf.writestr(f"WIC-notebook-catalogue/{filename}", data)
-        zf.writestr("WIC-notebook-catalogue/decoder-darwin", decoy_binary)
+        zf.writestr(f"{root}/config.json", json.dumps(config, indent=2) + "\n")
+        zf.writestr(f"{root}/MANIFEST.sha256", "\n".join(manifest_lines) + "\n")
 
-        with open(os.path.join(PAYLOAD_DIR, "struct.py")) as f:
-            struct_content = f.read()
-        zf.writestr("WIC-notebook-catalogue/struct.py", struct_content)
+        for filename, data in encoded.items():
+            zf.writestr(f"{root}/{filename}", data)
+
+        zf.writestr(f"{root}/struct.py", struct_content)
 
     print(f"Built {zip_path} ({os.path.getsize(zip_path)} bytes)")
     return zip_path

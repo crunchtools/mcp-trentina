@@ -1,0 +1,5 @@
+{
+  "encoding": "base85+zlib",
+  "record_dir": "records",
+  "manifest": "MANIFEST.sha256"
+}
