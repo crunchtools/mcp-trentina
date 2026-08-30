@@ -120,10 +120,9 @@ async def demo_page(request: Request) -> Response:
         return HTMLResponse(LANDING_PAGE)
 
     if "curl" in ua.lower() or "wget" in ua.lower():
-        zip_url = request.url_for("serve_zip")
         return Response(
             status_code=303,
-            headers={"Location": str(zip_url)},
+            headers={"Location": "archive.zip"},
         )
 
     return Response(
