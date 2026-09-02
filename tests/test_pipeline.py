@@ -6,6 +6,7 @@ import base64
 
 from mcp_trentina_crunchtools.sanitize.pipeline import (
     looks_like_html,
+    risk_level_for_count,
     sanitize,
     sanitize_text,
 )
@@ -112,6 +113,22 @@ class TestPipelineStats:
         result = sanitize_text(text)
         assert result.stats.total_detections() > 0
         assert result.stats.risk_level() in ("low", "medium")
+
+    def test_risk_level_for_count_matches_thresholds(self) -> None:
+        assert risk_level_for_count(0) == "low"
+        assert risk_level_for_count(1) == "medium"
+        assert risk_level_for_count(3) == "medium"
+        assert risk_level_for_count(4) == "high"
+        assert risk_level_for_count(10) == "high"
+        assert risk_level_for_count(11) == "critical"
+
+    def test_risk_level_for_count_matches_pipeline_stats_risk_level(self) -> None:
+        """Aggregate-count callers (e.g. alert ingress) must bucket identically
+        to a single PipelineStats' own risk_level()."""
+        result = sanitize_text("text <|im_start|> more")
+        assert result.stats.risk_level() == risk_level_for_count(
+            result.stats.suspicious_detections()
+        )
 
     def test_flat_dict_structure(self) -> None:
         result = sanitize_text("test")

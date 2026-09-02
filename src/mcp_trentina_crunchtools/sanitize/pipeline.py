@@ -70,14 +70,24 @@ class PipelineStats:
 
     def risk_level(self) -> str:
         """Classify risk based on suspicious detection counts."""
-        suspicious = self.suspicious_detections()
-        if suspicious == 0:
-            return "low"
-        if suspicious <= 3:
-            return "medium"
-        if suspicious <= 10:
-            return "high"
-        return "critical"
+        return risk_level_for_count(self.suspicious_detections())
+
+
+def risk_level_for_count(suspicious: int) -> str:
+    """Classify risk from a raw suspicious-detection count.
+
+    Shared with callers that aggregate detections across multiple
+    ``PipelineStats`` instances (e.g. alert ingress sanitizing several JSON
+    fields) and can't hand back a single ``PipelineStats`` to call
+    ``risk_level()`` on.
+    """
+    if suspicious == 0:
+        return "low"
+    if suspicious <= 3:
+        return "medium"
+    if suspicious <= 10:
+        return "high"
+    return "critical"
 
 
 @dataclass
