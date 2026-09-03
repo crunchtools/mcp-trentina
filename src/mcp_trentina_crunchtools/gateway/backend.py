@@ -1,6 +1,6 @@
 """Backend MCP connection management with persistent tool list caching.
 
-Opens a fresh MCP session per call (streamablehttp_client creates anyio
+Opens a fresh MCP session per call (streamable_http_client creates anyio
 task groups that cannot cross task boundaries, so pooling is not viable).
 Caches tool lists per URL indefinitely — invalidated only on explicit flush
 or reconnect, persisted in SQLite across restarts. Crucially, a fetch failure
@@ -14,18 +14,44 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import httpx
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from ..database import delete_all_tool_lists, delete_tool_list, save_tool_list
 from .circuit import breaker
 from .errors import BackendCallError
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from .profile import Backend
+
+
+@asynccontextmanager
+async def _connect_streamable_http(
+    url: str, headers: dict[str, str] | None,
+) -> AsyncIterator[Any]:
+    """Adapt this module's ``headers`` dict onto mcp's ``http_client=`` API.
+
+    ``streamable_http_client`` only manages an ``httpx.AsyncClient``'s
+    lifecycle when it creates one itself -- passing a pre-configured client
+    makes the caller responsible for closing it.
+    """
+    if not headers:
+        async with streamable_http_client(url) as streams:
+            yield streams
+        return
+
+    async with (
+        httpx.AsyncClient(headers=headers) as http_client,
+        streamable_http_client(url, http_client=http_client) as streams,
+    ):
+        yield streams
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +257,7 @@ async def call_backend_tool(
 async def _do_list_tools(url: str, headers: dict[str, str] | None) -> Any:
     """Open a fresh session and call list_tools."""
     async with (
-        streamablehttp_client(url, headers=headers) as (read, write, _),
+        _connect_streamable_http(url, headers) as (read, write, _),
         ClientSession(read, write) as session,
     ):
         await session.initialize()
@@ -254,7 +280,7 @@ async def _do_call_tool(
     an ``Any`` alias so the method override type-checks without a suppression.
     """
     async with (
-        streamablehttp_client(url, headers=headers) as (read, write, _),
+        _connect_streamable_http(url, headers) as (read, write, _),
         ClientSession(read, write) as session,
     ):
         await session.initialize()
