@@ -11,6 +11,7 @@ full design and phase plan.
 
 from __future__ import annotations
 
+from .alert_ingress import register_alert_routes
 from .app import gateway_app, register_with_fastmcp
 from .auth import verify_bearer
 from .backend import BackendCall, call_backend_tool, list_backend_tools
@@ -25,8 +26,14 @@ from .internal import (
     register_internal_server,
 )
 from .loader import GatewayConfig, load_profiles
-from .alert_ingress import register_alert_routes
-from .profile import AlertIngressConfig, AuthConfig, Backend, DefenseConfig, ParameterConstraint, Profile
+from .profile import (
+    AlertIngressConfig,
+    AuthConfig,
+    Backend,
+    DefenseConfig,
+    ParameterConstraint,
+    Profile,
+)
 from .router import route_jsonrpc
 from .sessions import Session, SessionRegistry, session_registry
 

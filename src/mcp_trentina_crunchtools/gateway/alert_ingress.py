@@ -19,10 +19,10 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from starlette.responses import Response
 
-from .profile import Profile
-
 if TYPE_CHECKING:
     from starlette.requests import Request
+
+    from .profile import Profile
 
 logger = logging.getLogger(__name__)
 
