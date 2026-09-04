@@ -18,7 +18,7 @@ import yaml
 from pydantic import SecretStr, ValidationError
 
 from .errors import ProfileConfigError
-from .profile import Profile
+from .profile import AlertIngressConfig, Profile
 
 
 @dataclass(frozen=True)
@@ -79,7 +79,8 @@ def _build_profile(name: str, body: Any) -> Profile:
     _resolve_bearer_token(name, profile)
     _resolve_llm_key_secrets(name, profile)
     _expand_backend_headers(name, profile)
-    _resolve_alert_ingress_secrets(name, profile)
+    if profile.alert_ingress is not None:
+        _resolve_alert_ingress_secrets(name, profile.alert_ingress)
 
     return profile
 
@@ -122,26 +123,22 @@ def _expand_backend_headers(name: str, profile: Profile) -> None:
             }
 
 
-def _resolve_alert_ingress_secrets(name: str, profile: Profile) -> None:
-    if profile.alert_ingress is None:
-        return
-
-    alert_env = profile.alert_ingress.token_env
-    alert_value = os.environ.get(alert_env, "")
+def _resolve_alert_ingress_secrets(name: str, alert_ingress: AlertIngressConfig) -> None:
+    alert_value = os.environ.get(alert_ingress.token_env, "")
     if not alert_value:
         raise ProfileConfigError(
-            f"Profile {name!r}: alert_ingress env var {alert_env} not set or empty"
+            f"Profile {name!r}: alert_ingress env var {alert_ingress.token_env} not set or empty"
         )
-    profile.alert_ingress.token = SecretStr(alert_value)
+    alert_ingress.token = SecretStr(alert_value)
 
-    if profile.alert_ingress.forward_secret_env:
-        fwd_secret = os.environ.get(profile.alert_ingress.forward_secret_env, "")
+    if alert_ingress.forward_secret_env:
+        fwd_secret = os.environ.get(alert_ingress.forward_secret_env, "")
         if not fwd_secret:
             raise ProfileConfigError(
                 f"Profile {name!r}: alert_ingress forward_secret_env "
-                f"{profile.alert_ingress.forward_secret_env} not set or empty"
+                f"{alert_ingress.forward_secret_env} not set or empty"
             )
-        profile.alert_ingress.forward_secret = SecretStr(fwd_secret)
+        alert_ingress.forward_secret = SecretStr(fwd_secret)
 
 
 def load_profiles(path: Path | str) -> GatewayConfig:
