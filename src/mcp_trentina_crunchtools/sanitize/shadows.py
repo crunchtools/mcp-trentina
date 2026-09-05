@@ -171,7 +171,9 @@ def _scan_shadow_file(
             with open(path, encoding="utf-8", errors="replace") as fh:
                 indicators = _scan_for_obfuscation(fh.read())
     except OSError:
-        log.debug("Could not read shadow file %s", path)
+        indicators.append(ObfuscationIndicator(
+            "unreadable", "shadow file exists but cannot be read", None
+        ))
 
     return ShadowFinding(
         filename=filename,

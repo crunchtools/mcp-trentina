@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import httpx
+import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
@@ -38,7 +38,7 @@ async def _connect_streamable_http(
 ) -> AsyncIterator[Any]:
     """Adapt this module's ``headers`` dict onto mcp's ``http_client=`` API.
 
-    ``streamable_http_client`` only manages an ``httpx.AsyncClient``'s
+    ``streamable_http_client`` only manages an ``httpx2.AsyncClient``'s
     lifecycle when it creates one itself -- passing a pre-configured client
     makes the caller responsible for closing it.
     """
@@ -48,7 +48,7 @@ async def _connect_streamable_http(
         return
 
     async with (
-        httpx.AsyncClient(headers=headers) as http_client,
+        httpx2.AsyncClient(headers=headers) as http_client,
         streamable_http_client(url, http_client=http_client) as streams,
     ):
         yield streams
@@ -300,17 +300,21 @@ def _serialize_tool(tool: Any) -> dict[str, Any]:
     out: dict[str, Any] = {
         "name": tool.name,
         "description": tool.description or "",
-        "inputSchema": tool.inputSchema,
+        "inputSchema": tool.input_schema,
     }
-    for extra in ("title", "annotations", "outputSchema"):
-        value = getattr(tool, extra, None)
+    for attr, wire_key in (
+        ("title", "title"),
+        ("annotations", "annotations"),
+        ("output_schema", "outputSchema"),
+    ):
+        value = getattr(tool, attr, None)
         if value is None:
             continue
         if hasattr(value, "model_dump"):
             value = value.model_dump(
                 mode="json", by_alias=True, exclude_none=True,
             )
-        out[extra] = value
+        out[wire_key] = value
     return out
 
 
