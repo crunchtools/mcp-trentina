@@ -8,11 +8,14 @@ loaded instead of the real one.  See wunderwuzzi's Claude Code Opus 5 bypass
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 STDLIB_MODULES: frozenset[str] = sys.stdlib_module_names
 
@@ -81,11 +84,12 @@ class ShadowScanResult:
 
     @property
     def risk_level(self) -> str:
-        if not self.shadows_found:
-            return "low"
-        if any(f.is_obfuscated for f in self.shadows_found):
-            return "critical"
-        return "high"
+        has_obfuscated = any(f.is_obfuscated for f in self.shadows_found)
+        return (
+            "critical" if has_obfuscated
+            else "high" if self.shadows_found
+            else "low"
+        )
 
     @property
     def has_shadows(self) -> bool:
@@ -152,30 +156,27 @@ def _scan_for_obfuscation(content: str) -> list[ObfuscationIndicator]:
     return indicators
 
 
-def _scan_entry(entry_name: str, entry_path: str) -> ShadowFinding | None:
-    """Check a single .py file for stdlib shadowing and obfuscation."""
-    module_name = entry_name[:-3]
-    if module_name not in STDLIB_MODULES:
-        return None
-
+def _scan_shadow_file(
+    filename: str, module_name: str, path: str
+) -> ShadowFinding:
+    """Scan a shadow file for obfuscation and return the finding."""
     indicators: list[ObfuscationIndicator] = []
     try:
-        size = os.path.getsize(entry_path)
+        size = os.path.getsize(path)
         if size > MAX_FILE_SIZE:
             indicators.append(ObfuscationIndicator(
                 "size", f"unusually large for a stdlib shadow ({size} bytes)", None
             ))
         else:
-            with open(entry_path, encoding="utf-8", errors="replace") as fh:
-                content = fh.read()
-            indicators = _scan_for_obfuscation(content)
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                indicators = _scan_for_obfuscation(fh.read())
     except OSError:
-        pass
+        log.debug("Could not read shadow file %s", path)
 
     return ShadowFinding(
-        filename=entry_name,
+        filename=filename,
         shadows_module=module_name,
-        path=entry_path,
+        path=path,
         obfuscation_indicators=indicators,
         risk_level="critical" if indicators else "high",
     )
@@ -197,28 +198,20 @@ def detect_module_shadows(directory: str) -> ShadowScanResult:
     for entry in os.scandir(resolved):
         if entry.is_file() and entry.name.endswith(".py"):
             result.files_scanned += 1
-            finding = _scan_entry(entry.name, entry.path)
-            if finding:
-                result.shadows_found.append(finding)
+            module_name = entry.name[:-3]
+            if module_name in STDLIB_MODULES:
+                result.shadows_found.append(
+                    _scan_shadow_file(entry.name, module_name, entry.path)
+                )
 
-        elif entry.is_dir():
+        if entry.is_dir():
             init_path = os.path.join(entry.path, "__init__.py")
             if os.path.isfile(init_path) and entry.name in STDLIB_MODULES:
                 result.files_scanned += 1
-                indicators: list[ObfuscationIndicator] = []
-                try:
-                    with open(init_path, encoding="utf-8", errors="replace") as fh:
-                        content = fh.read()
-                    indicators = _scan_for_obfuscation(content)
-                except OSError:
-                    pass
-
-                result.shadows_found.append(ShadowFinding(
-                    filename=f"{entry.name}/__init__.py",
-                    shadows_module=entry.name,
-                    path=init_path,
-                    obfuscation_indicators=indicators,
-                    risk_level="critical" if indicators else "high",
-                ))
+                result.shadows_found.append(
+                    _scan_shadow_file(
+                        f"{entry.name}/__init__.py", entry.name, init_path
+                    )
+                )
 
     return result
