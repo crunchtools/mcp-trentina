@@ -506,7 +506,7 @@ class TestRouter:
             def __init__(self, name: str) -> None:
                 self.name = name
                 self.description = ""
-                self.inputSchema: dict[str, Any] = {}
+                self.input_schema: dict[str, Any] = {}
 
         async def fake_transport(url: str, _headers: Any) -> _FakeToolsResult:
             transport_calls.append(url)
