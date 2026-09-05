@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import httpx2
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
@@ -38,20 +38,25 @@ async def _connect_streamable_http(
 ) -> AsyncIterator[Any]:
     """Adapt this module's ``headers`` dict onto mcp's ``http_client=`` API.
 
-    ``streamable_http_client`` only manages an ``httpx2.AsyncClient``'s
+    ``streamable_http_client`` only manages an ``httpx.AsyncClient``'s
     lifecycle when it creates one itself -- passing a pre-configured client
     makes the caller responsible for closing it.
+
+    Yields ``(read, write)``. The SDK has shipped the stream bundle as both a
+    2-tuple and a 3-tuple (trailing session-id callback); that trailing element
+    is unused here, so take the first two either way rather than unpacking a
+    fixed width at the call sites.
     """
     if not headers:
         async with streamable_http_client(url) as streams:
-            yield streams
+            yield streams[0], streams[1]
         return
 
     async with (
-        httpx2.AsyncClient(headers=headers) as http_client,
+        httpx.AsyncClient(headers=headers) as http_client,
         streamable_http_client(url, http_client=http_client) as streams,
     ):
-        yield streams
+        yield streams[0], streams[1]
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +262,7 @@ async def call_backend_tool(
 async def _do_list_tools(url: str, headers: dict[str, str] | None) -> Any:
     """Open a fresh session and call list_tools."""
     async with (
-        _connect_streamable_http(url, headers) as (read, write, _),
+        _connect_streamable_http(url, headers) as (read, write),
         ClientSession(read, write) as session,
     ):
         await session.initialize()
@@ -280,7 +285,7 @@ async def _do_call_tool(
     an ``Any`` alias so the method override type-checks without a suppression.
     """
     async with (
-        _connect_streamable_http(url, headers) as (read, write, _),
+        _connect_streamable_http(url, headers) as (read, write),
         ClientSession(read, write) as session,
     ):
         await session.initialize()
@@ -300,21 +305,17 @@ def _serialize_tool(tool: Any) -> dict[str, Any]:
     out: dict[str, Any] = {
         "name": tool.name,
         "description": tool.description or "",
-        "inputSchema": tool.input_schema,
+        "inputSchema": tool.inputSchema,
     }
-    for attr, wire_key in (
-        ("title", "title"),
-        ("annotations", "annotations"),
-        ("output_schema", "outputSchema"),
-    ):
-        value = getattr(tool, attr, None)
+    for extra in ("title", "annotations", "outputSchema"):
+        value = getattr(tool, extra, None)
         if value is None:
             continue
         if hasattr(value, "model_dump"):
             value = value.model_dump(
                 mode="json", by_alias=True, exclude_none=True,
             )
-        out[wire_key] = value
+        out[extra] = value
     return out
 
 

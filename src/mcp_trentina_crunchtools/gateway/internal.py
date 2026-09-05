@@ -62,7 +62,7 @@ async def list_internal_tools() -> list[dict[str, Any]]:
     if _server is None:
         raise BackendCallError("internal tool backend not registered")
     try:
-        tools = await _server.list_tools()
+        tools = list((await _server.get_tools()).values())
     except Exception as exc:
         logger.warning("gateway: internal list_tools failed err=%s", exc)
         raise BackendCallError(
