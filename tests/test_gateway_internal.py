@@ -19,6 +19,7 @@ class _FakeFunctionTool:
 
     def __init__(self, mcp_tool: McpTool) -> None:
         self._mcp_tool = mcp_tool
+        self.name = mcp_tool.name
 
     def to_mcp_tool(self) -> McpTool:
         return self._mcp_tool
@@ -56,10 +57,10 @@ class _FakeServer:
         self._raise_on_call = raise_on_call
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def list_tools(self) -> list[_FakeFunctionTool]:
+    async def get_tools(self) -> dict[str, _FakeFunctionTool]:
         if self._raise_on_list is not None:
             raise self._raise_on_list
-        return self._tools
+        return {t.name: t for t in self._tools}
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> _FakeResult:
         self.calls.append((name, arguments))

@@ -10,15 +10,15 @@ from mcp_trentina_crunchtools.server import mcp
 class TestServerRegistration:
     """Test that all tools are registered correctly."""
 
-    def test_tool_count(self) -> None:
+    async def test_tool_count(self) -> None:
         """Verify exactly 16 tools are registered."""
-        tools = asyncio.run(mcp._list_tools())
+        tools = await mcp.get_tools()
         assert len(tools) == 16, f"Expected 16 tools, got {len(tools)}"
 
-    def test_expected_tools_registered(self) -> None:
+    async def test_expected_tools_registered(self) -> None:
         """Verify all expected tool names are present."""
-        tools = asyncio.run(mcp._list_tools())
-        tool_names = {t.name for t in tools}
+        tools = await mcp.get_tools()
+        tool_names = set(tools.keys())
         expected = {
             "safe_fetch_tool",
             "quarantine_fetch_tool",

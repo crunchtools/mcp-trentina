@@ -34,7 +34,7 @@ class _FakeTool:
     def __init__(self, name: str) -> None:
         self.name = name
         self.description = ""
-        self.input_schema: dict[str, Any] = {}
+        self.inputSchema: dict[str, Any] = {}
 
 
 class _FakeToolsResult:
