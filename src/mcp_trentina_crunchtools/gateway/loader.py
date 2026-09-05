@@ -18,7 +18,7 @@ import yaml
 from pydantic import SecretStr, ValidationError
 
 from .errors import ProfileConfigError
-from .profile import Profile
+from .profile import AlertIngressConfig, Profile
 
 
 @dataclass(frozen=True)
@@ -76,12 +76,24 @@ def _build_profile(name: str, body: Any) -> Profile:
     except ValidationError as exc:
         raise ProfileConfigError(f"Profile {name!r}: {exc}") from exc
 
+    _resolve_bearer_token(name, profile)
+    _resolve_llm_key_secrets(name, profile)
+    _expand_backend_headers(name, profile)
+    if profile.alert_ingress is not None:
+        _resolve_alert_ingress_secrets(name, profile.alert_ingress)
+
+    return profile
+
+
+def _resolve_bearer_token(name: str, profile: Profile) -> None:
     env_name = profile.auth.bearer_token_env
     token_value = os.environ.get(env_name, "")
     if not token_value:
         raise ProfileConfigError(f"Profile {name!r}: env var {env_name} not set or empty")
     profile.auth.bearer_token = SecretStr(token_value)
 
+
+def _resolve_llm_key_secrets(name: str, profile: Profile) -> None:
     for provider_name, override in profile.llm_keys.items():
         if override.api_key.get_secret_value():
             continue
@@ -98,6 +110,8 @@ def _build_profile(name: str, body: Any) -> Profile:
             )
         override.api_key = SecretStr(key_value)
 
+
+def _expand_backend_headers(name: str, profile: Profile) -> None:
     for backend_name, backend in profile.backends.items():
         if backend.headers:
             backend.headers = {
@@ -108,25 +122,23 @@ def _build_profile(name: str, body: Any) -> Profile:
                 for key, val in backend.headers.items()
             }
 
-    if profile.alert_ingress is not None:
-        alert_env = profile.alert_ingress.token_env
-        alert_value = os.environ.get(alert_env, "")
-        if not alert_value:
+
+def _resolve_alert_ingress_secrets(name: str, alert_ingress: AlertIngressConfig) -> None:
+    alert_value = os.environ.get(alert_ingress.token_env, "")
+    if not alert_value:
+        raise ProfileConfigError(
+            f"Profile {name!r}: alert_ingress env var {alert_ingress.token_env} not set or empty"
+        )
+    alert_ingress.token = SecretStr(alert_value)
+
+    if alert_ingress.forward_secret_env:
+        fwd_secret = os.environ.get(alert_ingress.forward_secret_env, "")
+        if not fwd_secret:
             raise ProfileConfigError(
-                f"Profile {name!r}: alert_ingress env var {alert_env} not set or empty"
+                f"Profile {name!r}: alert_ingress forward_secret_env "
+                f"{alert_ingress.forward_secret_env} not set or empty"
             )
-        profile.alert_ingress.token = SecretStr(alert_value)
-
-        if profile.alert_ingress.forward_secret_env:
-            fwd_secret = os.environ.get(profile.alert_ingress.forward_secret_env, "")
-            if not fwd_secret:
-                raise ProfileConfigError(
-                    f"Profile {name!r}: alert_ingress forward_secret_env "
-                    f"{profile.alert_ingress.forward_secret_env} not set or empty"
-                )
-            profile.alert_ingress.forward_secret = SecretStr(fwd_secret)
-
-    return profile
+        alert_ingress.forward_secret = SecretStr(fwd_secret)
 
 
 def load_profiles(path: Path | str) -> GatewayConfig:

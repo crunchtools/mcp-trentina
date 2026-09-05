@@ -107,9 +107,11 @@ class UnsupportedContentTypeError(AirlockError):
         redirect_chain: list[dict[str, object]] | None = None,
     ) -> None:
         parts = [
-            f"Refusing to fetch {url}: content-type {content_type!r} is not "
-            "text. Binary bodies decode into garbage that wastes the "
-            "sanitization and classification pipeline.",
+            (
+                f"Refusing to fetch {url}: content-type {content_type!r} is not "
+                "text. Binary bodies decode into garbage that wastes the "
+                "sanitization and classification pipeline."
+            ),
         ]
         if redirect_chain:
             hops = " -> ".join(
