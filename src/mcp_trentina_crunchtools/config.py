@@ -43,6 +43,7 @@ contend for the same quota and make scans slower — measured on lotor
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "qwen2.5:0.5b"
 SUPPORTED_PROVIDERS = ("gemini", "openai", "anthropic", "ollama")
+DEFAULT_PROVIDER_FALLBACK: list[str] = []
 
 
 class Config:
@@ -74,6 +75,16 @@ class Config:
         self.max_content: int = int(
             os.environ.get("QUARANTINE_MAX_CONTENT", str(DEFAULT_MAX_CONTENT))
         )
+
+        fallback_raw = os.environ.get("TRENTINA_PROVIDER_FALLBACK", "")
+        fallback_list = [p.strip() for p in fallback_raw.split(",") if p.strip()]
+        for p in fallback_list:
+            if p not in SUPPORTED_PROVIDERS:
+                from .errors import ConfigError
+                raise ConfigError(
+                    f"Unknown fallback provider {p!r}. Supported: {SUPPORTED_PROVIDERS}"
+                )
+        self.provider_fallback: list[str] = fallback_list
 
         self.classifier_threshold: float = float(
             os.environ.get("CLASSIFIER_THRESHOLD", str(DEFAULT_CLASSIFIER_THRESHOLD))
