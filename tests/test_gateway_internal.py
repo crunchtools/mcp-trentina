@@ -15,14 +15,24 @@ from mcp_trentina_crunchtools.gateway.errors import BackendCallError
 
 
 class _FakeFunctionTool:
-    """Stands in for a FastMCP FunctionTool: only to_mcp_tool() is exercised."""
+    """Stands in for a FastMCP FunctionTool: to_mcp_tool() and run()."""
 
     def __init__(self, mcp_tool: McpTool) -> None:
         self._mcp_tool = mcp_tool
         self.name = mcp_tool.name
+        self._result: _FakeResult | None = None
+        self._raise: Exception | None = None
+        self.calls: list[dict[str, Any]] = []
 
     def to_mcp_tool(self) -> McpTool:
         return self._mcp_tool
+
+    async def run(self, arguments: dict[str, Any]) -> _FakeResult:
+        self.calls.append(arguments)
+        if self._raise is not None:
+            raise self._raise
+        assert self._result is not None
+        return self._result
 
 
 class _FakeResult:
@@ -40,7 +50,12 @@ class _FakeResult:
 
 
 class _FakeServer:
-    """Minimal FastMCP stand-in: list_tools() + call_tool()."""
+    """Minimal FastMCP stand-in mirroring the real 2.x surface.
+
+    FastMCP 2.x has no ``call_tool``; a caller resolves the tool with
+    ``get_tool`` and invokes ``Tool.run``. This fake must not grow methods
+    the real class lacks -- ``TestFakeMatchesRealFastMcp`` enforces that.
+    """
 
     name = "fake-trentina"
 
@@ -55,19 +70,24 @@ class _FakeServer:
         self._call_result = call_result
         self._raise_on_list = raise_on_list
         self._raise_on_call = raise_on_call
-        self.calls: list[tuple[str, dict[str, Any]]] = []
 
     async def get_tools(self) -> dict[str, _FakeFunctionTool]:
         if self._raise_on_list is not None:
             raise self._raise_on_list
         return {t.name: t for t in self._tools}
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> _FakeResult:
-        self.calls.append((name, arguments))
-        if self._raise_on_call is not None:
-            raise self._raise_on_call
-        assert self._call_result is not None
-        return self._call_result
+    async def get_tool(self, name: str) -> _FakeFunctionTool:
+        for tool in self._tools:
+            if tool.name == name:
+                tool._result = self._call_result
+                tool._raise = self._raise_on_call
+                return tool
+        raise KeyError(f"unknown tool: {name}")
+
+    @property
+    def calls(self) -> list[tuple[str, dict[str, Any]]]:
+        """Every (tool name, arguments) pair run through this server."""
+        return [(t.name, args) for t in self._tools for args in t.calls]
 
 
 def _tool(name: str) -> _FakeFunctionTool:
@@ -189,3 +209,54 @@ async def test_real_trentina_server_lists_its_tools() -> None:
     for t in tools:
         assert isinstance(t["name"], str) and t["name"]
         assert "inputSchema" in t
+
+
+class TestFakeMatchesRealFastMcp:
+    """Guards against the fake drifting from the real FastMCP surface.
+
+    The internal dispatch path broke because ``_FakeServer`` implemented a
+    ``call_tool`` method that FastMCP 2.x does not have, so every test
+    passed while production raised AttributeError on every internal tool.
+    """
+
+    def test_fake_only_implements_methods_the_real_class_has(self) -> None:
+        from fastmcp import FastMCP
+
+        fake_methods = {
+            name
+            for name in dir(_FakeServer)
+            if not name.startswith("_") and callable(getattr(_FakeServer, name))
+        }
+        missing = {m for m in fake_methods if not hasattr(FastMCP, m)}
+        assert not missing, (
+            f"_FakeServer implements methods FastMCP lacks: {sorted(missing)}. "
+            "The fake has drifted from the real API."
+        )
+
+    async def test_real_fastmcp_dispatch_round_trip(self) -> None:
+        """call_internal_tool against a genuine FastMCP instance."""
+        from fastmcp import FastMCP
+
+        server: FastMCP = FastMCP("test-trentina")
+
+        @server.tool()
+        def echo_tool(value: str) -> str:
+            """Echo the supplied value."""
+            return f"echoed:{value}"
+
+        internal.register_internal_server(server)
+
+        tools = await internal.list_internal_tools()
+        assert [t["name"] for t in tools] == ["echo_tool"]
+
+        call = await internal.call_internal_tool("echo_tool", {"value": "hi"})
+        assert call.is_error is False
+        assert any("echoed:hi" in block.get("text", "") for block in call.content)
+
+    async def test_real_fastmcp_unknown_tool_raises_backendcallerror(self) -> None:
+        from fastmcp import FastMCP
+
+        server: FastMCP = FastMCP("test-trentina")
+        internal.register_internal_server(server)
+        with pytest.raises(BackendCallError, match="call failed"):
+            await internal.call_internal_tool("nope_tool", {})
