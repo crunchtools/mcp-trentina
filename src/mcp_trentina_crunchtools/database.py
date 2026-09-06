@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import get_config
+from .outcomes import Outcome, group_of
 
 _db: sqlite3.Connection | None = None
 
@@ -41,7 +42,8 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     tool TEXT NOT NULL,
     success BOOLEAN NOT NULL,
     duration_ms INTEGER NOT NULL,
-    error_message TEXT
+    error_message TEXT,
+    outcome TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_gateway_calls_timestamp ON gateway_calls(timestamp);
@@ -76,7 +78,21 @@ def get_db(db_path: str | None = None) -> sqlite3.Connection:
         _db.execute("PRAGMA journal_mode=WAL")
         _db.execute("PRAGMA foreign_keys=ON")
         _db.executescript(SCHEMA)
+        _migrate(_db)
     return _db
+
+
+def _migrate(db: sqlite3.Connection) -> None:
+    """Apply additive schema migrations to a database created by an older build.
+
+    ``CREATE TABLE IF NOT EXISTS`` leaves a pre-existing table untouched, so a
+    column added to SCHEMA never reaches an existing deployment without this.
+    Additive only — no column is dropped and no row is rewritten.
+    """
+    columns = {row["name"] for row in db.execute("PRAGMA table_info(gateway_calls)")}
+    if "outcome" not in columns:
+        db.execute("ALTER TABLE gateway_calls ADD COLUMN outcome TEXT")
+        db.commit()
 
 
 def is_blocked(source: str) -> dict[str, Any] | None:
@@ -157,64 +173,113 @@ def record_gateway_call(
     profile: str,
     backend: str,
     tool: str,
-    success: bool,
+    outcome: str,
     duration_ms: int,
     error_message: str | None = None,
 ) -> None:
-    """Record a gateway tools/call invocation."""
+    """Record a gateway tools/call invocation.
+
+    ``success`` is derived from *outcome* rather than passed in, so the legacy
+    boolean can never disagree with the taxonomy. It keeps its original
+    meaning — the call returned usable content — which means a fail-closed
+    defense block still reads as ``success = 0``, exactly as it did before.
+    """
     db = get_db()
+    success = outcome == Outcome.OK.value
     db.execute(
         "INSERT INTO gateway_calls "
-        "(timestamp, profile, backend, tool, success, duration_ms, error_message) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (time.time(), profile, backend, tool, success, duration_ms, error_message),
+        "(timestamp, profile, backend, tool, success, duration_ms, error_message, "
+        "outcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            time.time(),
+            profile,
+            backend,
+            tool,
+            success,
+            duration_ms,
+            error_message,
+            outcome,
+        ),
     )
     db.commit()
+
+
+def reset_gateway_calls() -> int:
+    """Delete every audit row. Returns the number removed.
+
+    Deliberately not exposed as an MCP tool: erasing the audit trail is not a
+    capability any consumer profile should hold. Operators run it directly.
+    """
+    db = get_db()
+    before = db.execute("SELECT COUNT(*) AS cnt FROM gateway_calls").fetchone()["cnt"]
+    db.execute("DELETE FROM gateway_calls")
+    db.commit()
+    return int(before)
 
 
 def get_gateway_call_stats(
     profile: str | None = None,
     days: int = 30,
 ) -> dict[str, Any]:
-    """Per-backend/per-tool call counts for data-driven allowlist tightening."""
+    """Per-backend/per-tool call outcomes for allowlist tuning and health checks.
+
+    Reports ``ok`` / ``blocked`` / ``failed`` as separate columns. A single
+    "errors" number cannot be read correctly: it mixes fail-closed defense
+    blocks (working as designed) with genuine breakage, which is how a tool
+    that blocked 34 hostile pages came to look like a tool that was broken.
+    Only ``failed`` is a health signal.
+
+    A NULL outcome means the row predates the taxonomy. It is reported as
+    "unknown" rather than guessed at: back-fitting an outcome from the old
+    boolean would reintroduce the ambiguity this change removes.
+    """
     db = get_db()
     cutoff = time.time() - (days * 86400)
 
+    query = (
+        "SELECT backend, tool, outcome, COUNT(*) AS cnt FROM gateway_calls "
+        "WHERE timestamp > ?{profile_clause} GROUP BY backend, tool, outcome"
+    )
     if profile:
         rows = db.execute(
-            "SELECT backend, tool, COUNT(*) as cnt, "
-            "SUM(CASE WHEN success THEN 1 ELSE 0 END) as ok, "
-            "SUM(CASE WHEN NOT success THEN 1 ELSE 0 END) as err "
-            "FROM gateway_calls WHERE profile = ? AND timestamp > ? "
-            "GROUP BY backend, tool ORDER BY cnt DESC",
-            (profile, cutoff),
+            query.format(profile_clause=" AND profile = ?"), (cutoff, profile)
         ).fetchall()
     else:
-        rows = db.execute(
-            "SELECT backend, tool, COUNT(*) as cnt, "
-            "SUM(CASE WHEN success THEN 1 ELSE 0 END) as ok, "
-            "SUM(CASE WHEN NOT success THEN 1 ELSE 0 END) as err "
-            "FROM gateway_calls WHERE timestamp > ? "
-            "GROUP BY backend, tool ORDER BY cnt DESC",
-            (cutoff,),
-        ).fetchall()
+        rows = db.execute(query.format(profile_clause=""), (cutoff,)).fetchall()
 
-    total_row = db.execute(
-        "SELECT COUNT(*) as cnt FROM gateway_calls WHERE timestamp > ?",
-        (cutoff,),
-    ).fetchone()
+    per_tool: dict[tuple[str, str], dict[str, Any]] = {}
+    totals: dict[str, int] = {"ok": 0, "blocked": 0, "failed": 0, "unknown": 0}
+    for row in rows:
+        key = (row["backend"], row["tool"])
+        entry = per_tool.setdefault(
+            key,
+            {
+                "backend": row["backend"],
+                "tool": row["tool"],
+                "calls": 0,
+                "ok": 0,
+                "blocked": 0,
+                "failed": 0,
+                "unknown": 0,
+                "outcomes": {},
+            },
+        )
+        raw = row["outcome"] or "legacy"
+        group = group_of(raw)
+        count = int(row["cnt"])
+        entry["calls"] += count
+        entry[group] += count
+        entry["outcomes"][raw] = entry["outcomes"].get(raw, 0) + count
+        totals[group] += count
+
+    by_tool = sorted(per_tool.values(), key=lambda e: int(e["calls"]), reverse=True)
 
     return {
-        "total_calls": total_row["cnt"] if total_row else 0,
+        "total_calls": sum(totals.values()),
         "days": days,
         "profile_filter": profile,
-        "by_tool": [
-            {
-                "backend": r["backend"], "tool": r["tool"],
-                "calls": r["cnt"], "ok": r["ok"], "errors": r["err"],
-            }
-            for r in rows
-        ],
+        "totals": totals,
+        "by_tool": by_tool,
     }
 
 
