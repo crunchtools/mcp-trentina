@@ -70,7 +70,6 @@ class _FakeServer:
         self._call_result = call_result
         self._raise_on_list = raise_on_list
         self._raise_on_call = raise_on_call
-        self.calls: list[tuple[str, dict[str, Any]]] = []
 
     async def get_tools(self) -> dict[str, _FakeFunctionTool]:
         if self._raise_on_list is not None:
@@ -82,19 +81,13 @@ class _FakeServer:
             if tool.name == name:
                 tool._result = self._call_result
                 tool._raise = self._raise_on_call
-                self._bind(tool)
                 return tool
         raise KeyError(f"unknown tool: {name}")
 
-    def _bind(self, tool: _FakeFunctionTool) -> None:
-        """Record calls on the server so existing assertions keep working."""
-        original = tool.run
-
-        async def recording(arguments: dict[str, Any]) -> _FakeResult:
-            self.calls.append((tool.name, arguments))
-            return await original(arguments)
-
-        tool.run = recording  # type: ignore[method-assign]
+    @property
+    def calls(self) -> list[tuple[str, dict[str, Any]]]:
+        """Every (tool name, arguments) pair run through this server."""
+        return [(t.name, args) for t in self._tools for args in t.calls]
 
 
 def _tool(name: str) -> _FakeFunctionTool:
