@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from .. import __version__
 from ..database import record_gateway_call
+from ..outcomes import Outcome, classify_exception
 from .backend import call_backend_tool, list_backend_tools, on_backend_cache_evict
 from .compress import compress_tools, maybe_trigger_compression
 from .errors import BackendCallError, BackendNotInProfileError
@@ -79,12 +80,14 @@ def _audit(
     profile: str,
     backend: str,
     tool: str,
-    success: bool,
+    outcome: Outcome,
     duration_ms: int,
     error_message: str | None = None,
 ) -> None:
     with contextlib.suppress(Exception):
-        record_gateway_call(profile, backend, tool, success, duration_ms, error_message)
+        record_gateway_call(
+            profile, backend, tool, outcome.value, duration_ms, error_message
+        )
 
 
 def _ok(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -250,6 +253,20 @@ async def _route_tools_call(
     Re-applies the allowlist on call as defense in depth: even if a consumer
     somehow learned about a tool name, calling it must still match the filter
     that produced their tools/list view.
+
+    Every path here is audited, including the two denials. Leaving those
+    unrecorded made a consumer probing tools outside its allowlist, or
+    repeatedly tripping parameter guards, completely invisible — the exact
+    signal you want for spotting a misbehaving or hijacked consumer, and the
+    most useful input for tuning an allowlist from evidence.
+
+    Outcomes are classified rather than reduced to a boolean.
+    ``classify_exception`` walks ``__cause__`` because ``call_internal_tool``
+    wraps every tool exception in ``BackendCallError``, so a fail-closed
+    defense block would otherwise be indistinguishable from the backend being
+    down. A backend can also report failure *without* raising, via
+    ``isError`` — that previously audited as a success, inflating the ok
+    column with tool-level errors.
     """
     namespaced_name = params.get("name", "")
     arguments = params.get("arguments") or {}
@@ -272,14 +289,13 @@ async def _route_tools_call(
         )
 
     if not filter_tools([{"name": tool_name}], backend):
-        return _err(
-            req_id,
-            -32602,
-            f"Tool {tool_name!r} not permitted on backend {backend_name!r}",
-        )
+        message = f"Tool {tool_name!r} not permitted on backend {backend_name!r}"
+        _audit(profile.name, backend_name, tool_name, Outcome.DENIED_ALLOWLIST, 0, message)
+        return _err(req_id, -32602, message)
 
     guard_err = check_parameter_guards(tool_name, arguments, backend)
     if guard_err:
+        _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, guard_err)
         return _err(req_id, -32602, guard_err)
 
     t0 = time.monotonic()
@@ -295,11 +311,13 @@ async def _route_tools_call(
             )
     except BackendCallError as exc:
         duration_ms = int((time.monotonic() - t0) * 1000)
-        _audit(profile.name, backend_name, tool_name, False, duration_ms, str(exc))
+        outcome = classify_exception(exc)
+        _audit(profile.name, backend_name, tool_name, outcome, duration_ms, str(exc))
         return _err(req_id, -32603, str(exc))
 
     duration_ms = int((time.monotonic() - t0) * 1000)
-    _audit(profile.name, backend_name, tool_name, True, duration_ms)
+    call_outcome = Outcome.TOOL_ERROR if call_result.is_error else Outcome.OK
+    _audit(profile.name, backend_name, tool_name, call_outcome, duration_ms)
 
     result: dict[str, Any] = {
         "content": call_result.content,
