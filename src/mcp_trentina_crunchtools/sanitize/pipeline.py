@@ -109,8 +109,35 @@ def looks_like_html(content: str, file_path: str | None = None) -> bool:
     return bool(_HTML_CONTENT_RE.search(content))
 
 
+def _run_text_stages(
+    original: str, content: str, stats: PipelineStats
+) -> PipelineResult:
+    """Apply stages 5-8 and assemble the result.
+
+    Both entry points end here. HTML reaches these stages after conversion to
+    Markdown; plain text starts at them. Keeping them in one place is what
+    stops the two paths from drifting: a stage added to only one of them would
+    leave text content defended differently from HTML, silently.
+
+    ``original`` is the caller's input, measured for input_size before any
+    stage has run; ``content`` is what the stages should operate on.
+    """
+    content, stats.unicode = sanitize_unicode(content)
+    content, stats.encoded = sanitize_encoded(content)
+    content, stats.exfiltration = sanitize_exfiltration(content)
+    content, stats.delimiters = sanitize_delimiters(content)
+    content, stats.directives = sanitize_directives(content)
+
+    return PipelineResult(
+        content=content,
+        stats=stats,
+        input_size=len(original.encode("utf-8")),
+        output_size=len(content.encode("utf-8")),
+    )
+
+
 def sanitize(html_content: str) -> PipelineResult:
-    """Run the full 7-stage pipeline on HTML content.
+    """Run the full 8-stage pipeline on HTML content.
 
     1. Parse HTML (BeautifulSoup)
     2. Strip hidden elements (display:none, off-screen, same-color)
@@ -121,35 +148,9 @@ def sanitize(html_content: str) -> PipelineResult:
     7. Exfiltration URL detection (suspicious markdown images)
     8. LLM delimiter stripping
     """
-    input_size = len(html_content.encode("utf-8"))
-    pipeline_stats = PipelineStats()
-
-    content, html_stats = sanitize_html(html_content)
-    pipeline_stats.html = html_stats
-
-    content, unicode_stats = sanitize_unicode(content)
-    pipeline_stats.unicode = unicode_stats
-
-    content, encoded_stats = sanitize_encoded(content)
-    pipeline_stats.encoded = encoded_stats
-
-    content, exfil_stats = sanitize_exfiltration(content)
-    pipeline_stats.exfiltration = exfil_stats
-
-    content, delimiter_stats = sanitize_delimiters(content)
-    pipeline_stats.delimiters = delimiter_stats
-
-    content, directive_stats = sanitize_directives(content)
-    pipeline_stats.directives = directive_stats
-
-    output_size = len(content.encode("utf-8"))
-
-    return PipelineResult(
-        content=content,
-        stats=pipeline_stats,
-        input_size=input_size,
-        output_size=output_size,
-    )
+    stats = PipelineStats()
+    content, stats.html = sanitize_html(html_content)
+    return _run_text_stages(html_content, content, stats)
 
 
 def sanitize_text(text: str) -> PipelineResult:
@@ -158,31 +159,4 @@ def sanitize_text(text: str) -> PipelineResult:
     For non-HTML content (markdown files, plain text, source code).
     Runs stages 5-8 only.
     """
-    input_size = len(text.encode("utf-8"))
-    pipeline_stats = PipelineStats()
-
-    content = text
-
-    content, unicode_stats = sanitize_unicode(content)
-    pipeline_stats.unicode = unicode_stats
-
-    content, encoded_stats = sanitize_encoded(content)
-    pipeline_stats.encoded = encoded_stats
-
-    content, exfil_stats = sanitize_exfiltration(content)
-    pipeline_stats.exfiltration = exfil_stats
-
-    content, delimiter_stats = sanitize_delimiters(content)
-    pipeline_stats.delimiters = delimiter_stats
-
-    content, directive_stats = sanitize_directives(content)
-    pipeline_stats.directives = directive_stats
-
-    output_size = len(content.encode("utf-8"))
-
-    return PipelineResult(
-        content=content,
-        stats=pipeline_stats,
-        input_size=input_size,
-        output_size=output_size,
-    )
+    return _run_text_stages(text, text, PipelineStats())

@@ -302,3 +302,77 @@ check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/tools/fetch.py"
 pattern = "_build_advisory"
 justification = "Miscount — called from three sites (fetch.py:140, :151, :172), same class of gourmand miscount as the sessions.py _remove and _profile exceptions above"
+
+# --- Surfaced by restoring the [thresholds] block in gourmand.toml. ---
+# Until now this repo ran with every threshold silently zeroed, which switched
+# off the checks that need a minimum size to fire. These are what they found.
+
+[[exceptions]]
+check = "over_abstraction"
+path = "src/mcp_trentina_crunchtools/errors.py"
+justification = "_scrub_credentials is a named security boundary. It is the one place error text is stripped of keys, tokens and passwords before it can reach a log or a client; inlining the regex at each raise site is exactly how one of them gets missed."
+
+[[exceptions]]
+check = "over_abstraction"
+path = "src/mcp_trentina_crunchtools/gateway/app.py"
+justification = "_plain has twenty call sites. It is not an abstraction to remove, it is the response builder those twenty routes share."
+
+[[exceptions]]
+check = "over_abstraction"
+path = "src/mcp_trentina_crunchtools/gateway/context.py"
+justification = "get_current_profile reads a ContextVar. The wrapper is the point: callers get the profile without touching the contextvar, and the None-outside-gateway-context behaviour is documented in one place."
+
+[[exceptions]]
+check = "over_abstraction"
+path = "src/mcp_trentina_crunchtools/sanitize/pipeline.py"
+justification = "Two findings. PipelineStats.risk_level delegates to risk_level_for_count, which exists so callers that aggregate detections across several PipelineStats (alert ingress) classify risk identically. sanitize_text is a one-liner only because the stages it shared with sanitize() were just extracted into _run_text_stages; it remains a distinct public entry point with its own contract."
+
+[[exceptions]]
+check = "over_abstraction"
+path = "src/mcp_trentina_crunchtools/tools/scan.py"
+justification = "_risk_order is a dict lookup with a safe default. The name is what makes the comparison at the call site readable."
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/database.py"
+justification = "record_detection, save_compression and save_tool_list write to three different tables with different columns; is_blocked and is_domain_blocked read the same table on different columns. What they share is connect, execute, commit. Collapsing them means passing table and column names into the SQL as strings, which trades readable auditable literal queries for dynamic SQL in a security gateway. Not a trade worth making."
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/config.py"
+justification = "is_trusted_domain and is_trusted_path consult different allowlists with different matching rules — hostname suffix versus fnmatch globbing. They share the shape of the not-a-list guard, nothing else."
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/circuit.py"
+justification = "record_success and record_failure share their first two lines and then diverge completely: one closes the circuit and resets the counter, the other increments it and may re-open or trip. Merging opposite state transitions to save two lines would be a poor trade in the component that decides whether a backend is reachable."
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/alert_ingress.py"
+justification = "_get_alert_client, _get_llm_client and _get_matrix_client are the three-line lazy-singleton accessor, once per proxy. The duplication is the idiom."
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/llm_proxy.py"
+justification = "_get_llm_client is the three-line lazy-singleton accessor, matching the same idiom in matrix_proxy and alert_ingress."
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/backend.py"
+justification = "reset_tool_list_cache and reset_profile_tools_cache each clear one module-level cache for tests. Four statements, two different globals."
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/compress.py"
+justification = "set_profiles and register_internal_server are both three-line module-global setters called once at startup. They assign different globals."
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/profile.py"
+justification = "Four Pydantic field validators that each match a different value against a different pattern and raise a message naming the field that was wrong. The per-field message is what makes a bad profiles.yaml diagnosable; they share only the match-then-raise shape."
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "benchmarks/provider_benchmark.py"
+justification = "detection_rate/fp_rate and detection_by_category/fp_by_category compute the true-positive and false-positive halves of the same report. Reporting them as a matched pair is the point of the benchmark."
