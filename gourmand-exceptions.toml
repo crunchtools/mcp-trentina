@@ -268,3 +268,37 @@ check = "conditional_wrapper"
 path = "src/mcp_trentina_crunchtools/__init__.py"
 pattern = "on_circuit_change"
 justification = "Early returns filter out non-notifiable state transitions (e.g. OPEN→HALF_OPEN probe) before expensive broadcast — guard clauses not conditional wrapping"
+
+[[exceptions]]
+check = "primitive_obsession"
+path = "demo/attack-sim/payload/struct.py"
+justification = "The chr() codes ARE the attack. This file is a working stdlib `struct` shadow whose obfuscation (46,115,116,97,116,117,115 spelling '.status', plus 49 for '1') is precisely what sanitize/shadows.py detects and tests/test_shadows.py asserts on. Naming these constants would destroy the artifact and weaken the detection tests"
+
+[[exceptions]]
+check = "random_scripts"
+path = "demo/**"
+justification = "demo/ holds the attack-simulation harness — build_archive.py, server.py and the two run.sh drivers are standalone scripts by design, not library code. They exist to be run by hand when demonstrating the defense"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "demo/attack-sim/server.py"
+pattern = "_encode_b85z"
+justification = "Attack payload encoder for the demo archive. Each encoding is deliberately a distinct named step so the demo can show which obfuscation the pipeline caught"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "demo/attack-sim/server.py"
+pattern = "_encode_xor_b64"
+justification = "Attack payload encoder for the demo archive. Each encoding is deliberately a distinct named step so the demo can show which obfuscation the pipeline caught"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/sanitize/shadows.py"
+pattern = "_scan_for_obfuscation"
+justification = "Called from one production site but ten test sites (tests/test_shadows.py imports it directly and exercises each indicator category independently). It is a cohesive, separately-tested scanning primitive; inlining a 50-line scanner into the file walker would make both harder to read and drop the unit tests"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/tools/fetch.py"
+pattern = "_build_advisory"
+justification = "Miscount — called from three sites (fetch.py:140, :151, :172), same class of gourmand miscount as the sessions.py _remove and _profile exceptions above"

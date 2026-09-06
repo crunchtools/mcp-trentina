@@ -128,6 +128,9 @@ def get_fallback_providers(profile: object = None) -> list[tuple[str, SecretStr 
     Skips providers that have no API key in the current context — a warning
     is logged so operators know the chain is shorter than configured.
 
+    Gateway mode requires a per-profile key and skips a provider without one.
+    Standalone mode falls back to the matching global config key.
+
     Args:
         profile: Gateway profile object (has .llm_keys dict). None in standalone mode.
 
@@ -135,15 +138,14 @@ def get_fallback_providers(profile: object = None) -> list[tuple[str, SecretStr 
         List of (provider_name, api_key_or_none) tuples ready for _call_gemini().
     """
     config = get_config()
-    result: list[tuple[str, SecretStr | None]] = []
+    chain: list[tuple[str, SecretStr | None]] = []
 
     for name in config.provider_fallback:
         if name == "ollama":
-            result.append((name, None))
+            chain.append((name, None))
             continue
 
         if profile is not None:
-            # Gateway mode: require per-profile key, skip if absent
             llm_keys = getattr(profile, "llm_keys", {})
             if name not in llm_keys:
                 logger.warning(
@@ -152,24 +154,25 @@ def get_fallback_providers(profile: object = None) -> list[tuple[str, SecretStr 
                     getattr(profile, "name", "?"),
                 )
                 continue
-            result.append((name, llm_keys[name].api_key))
+            chain.append((name, llm_keys[name].api_key))
         else:
-            # Standalone mode: use global config key
-            key_str: str = ""
-            if name == "gemini":
-                key_str = config.api_key.get_secret_value()
-            elif name == "openai":
-                key_str = config.openai_api_key
-            elif name == "anthropic":
-                key_str = config.anthropic_api_key
+            match name:
+                case "gemini":
+                    key_str = config.api_key.get_secret_value()
+                case "openai":
+                    key_str = config.openai_api_key
+                case "anthropic":
+                    key_str = config.anthropic_api_key
+                case _:
+                    key_str = ""
             if not key_str:
                 logger.warning(
                     "provider fallback: skipping %r — no global API key configured", name
                 )
                 continue
-            result.append((name, SecretStr(key_str)))
+            chain.append((name, SecretStr(key_str)))
 
-    return result
+    return chain
 
 
 def reset_provider() -> None:

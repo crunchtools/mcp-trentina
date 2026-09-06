@@ -30,9 +30,6 @@ def reset_config_and_providers(monkeypatch):
     reset_provider()
 
 
-# ---------------------------------------------------------------------------
-# _is_retryable
-# ---------------------------------------------------------------------------
 
 
 class TestIsRetryable:
@@ -77,9 +74,6 @@ class TestIsRetryable:
         assert not _is_retryable(exc)
 
 
-# ---------------------------------------------------------------------------
-# Config parsing
-# ---------------------------------------------------------------------------
 
 
 class TestConfigFallbackParsing:
@@ -120,9 +114,6 @@ class TestConfigFallbackParsing:
         assert config.provider_fallback == ["ollama"]
 
 
-# ---------------------------------------------------------------------------
-# get_fallback_providers (standalone mode)
-# ---------------------------------------------------------------------------
 
 
 class TestGetFallbackProvidersStandalone:
@@ -164,9 +155,6 @@ class TestGetFallbackProvidersStandalone:
         assert key is None
 
 
-# ---------------------------------------------------------------------------
-# _call_with_fallback integration tests (mocked provider.generate)
-# ---------------------------------------------------------------------------
 
 FAKE_EXTRACTED = {
     "extracted_text": "hello world",
