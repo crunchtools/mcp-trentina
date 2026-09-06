@@ -65,11 +65,11 @@ def _sanitize_json_value(value: Any, texts: list[str], counts: _SanitizeCounts) 
     whole (L2/L3 want context, not isolated field values).
     """
     if isinstance(value, str):
-        result = sanitize_text(value)
-        counts.detections += result.stats.total_detections()
-        counts.suspicious += result.stats.suspicious_detections()
-        texts.append(result.content)
-        return result.content
+        sanitized = sanitize_text(value)
+        counts.detections += sanitized.stats.total_detections()
+        counts.suspicious += sanitized.stats.suspicious_detections()
+        texts.append(sanitized.content)
+        return sanitized.content
     if isinstance(value, dict):
         return {k: _sanitize_json_value(v, texts, counts) for k, v in value.items()}
     if isinstance(value, list):
