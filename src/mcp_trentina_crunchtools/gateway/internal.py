@@ -84,7 +84,8 @@ async def call_internal_tool(tool_name: str, arguments: dict[str, Any]) -> Backe
     if _server is None:
         raise BackendCallError("internal tool backend not registered")
     try:
-        result = await _server.call_tool(tool_name, arguments)
+        tool = await _server.get_tool(tool_name)
+        result = await tool.run(arguments)
     except Exception as exc:
         logger.warning(
             "gateway: internal call_tool failed tool=%s err=%s", tool_name, exc
