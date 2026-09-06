@@ -98,7 +98,6 @@ async def _call_with_fallback(
     """
     profile = get_current_profile()
 
-    # Determine primary provider and key from profile or global config
     if profile is not None:
         primary_name = profile.defense.provider or get_config().provider
         if primary_name == "ollama":
@@ -315,7 +314,6 @@ async def quarantine_extract(
     """
     try:
         if provider_name is not None:
-            # Explicit provider requested (e.g. benchmark) — no fallback
             parsed, _canary = await _call_gemini(
                 content=content,
                 system_prompt=EXTRACTION_SYSTEM_PROMPT,
@@ -392,7 +390,6 @@ async def quarantine_detect(
 
     try:
         if provider_name is not None:
-            # Explicit provider requested (e.g. benchmark) — no fallback
             parsed, _canary = await _call_gemini(
                 content=scan_content,
                 system_prompt=DETECTION_SYSTEM_PROMPT,

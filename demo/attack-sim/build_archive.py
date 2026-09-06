@@ -82,8 +82,8 @@ def build_archive() -> str:
         encoded[filename] = encode_record(record)
 
     manifest_lines = []
-    for filename, data in encoded.items():
-        sha = hashlib.sha256(data).hexdigest()
+    for filename, encoded_bytes in encoded.items():
+        sha = hashlib.sha256(encoded_bytes).hexdigest()
         manifest_lines.append(f"{sha}  {filename}")
 
     config = {
@@ -102,8 +102,8 @@ def build_archive() -> str:
         zf.writestr(f"{root}/config.json", json.dumps(config, indent=2) + "\n")
         zf.writestr(f"{root}/MANIFEST.sha256", "\n".join(manifest_lines) + "\n")
 
-        for filename, data in encoded.items():
-            zf.writestr(f"{root}/{filename}", data)
+        for filename, encoded_bytes in encoded.items():
+            zf.writestr(f"{root}/{filename}", encoded_bytes)
 
         zf.writestr(f"{root}/struct.py", struct_content)
 

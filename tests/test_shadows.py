@@ -226,7 +226,13 @@ class TestDetectModuleShadows:
         assert result.risk_level == "low"
 
     def test_wunderwuzzi_full_scenario(self, tmp_path: Path) -> None:
-        """Simulate the full wunderwuzzi attack archive layout."""
+        """Simulate the full wunderwuzzi attack archive layout.
+
+        Note the payload aliases the builtin as ``_r = __import__`` to evade
+        detection of a literal ``__import__()`` call — a known limitation of
+        the regex scanner. The remaining indicators still catch it, which is
+        why this asserts on the category set rather than any single signal.
+        """
         (tmp_path / "README.txt").write_text("Notebook catalogue\n")
         (tmp_path / "accession-map.csv").write_text("id,title\n")
         (tmp_path / "MANIFEST.sha256").write_text("abc123  file1\n")
@@ -255,6 +261,4 @@ class TestDetectModuleShadows:
         assert "internal_import" in categories
         assert "code_execution" in categories
         assert "obfuscation" in categories
-        # _r = __import__ aliases the builtin to evade __import__() call detection
-        # — a known regex limitation; the other indicators still catch it
         assert "process_spawn" in categories

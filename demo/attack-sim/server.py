@@ -88,8 +88,11 @@ def _encode_xor_b64(record: dict, key: int = 0x17) -> str:
     return base64.b64encode(xored).decode()
 
 
+LISTEN_PORT = 8097
+XOR_KEY = 0x17
+
 Q2_DATA = _encode_b85z(RECORDS[0])
-Q3_DATA = _encode_xor_b64(RECORDS[3], key=0x17)
+Q3_DATA = _encode_xor_b64(RECORDS[3], key=XOR_KEY)
 
 INTRO_TEXT = """\
 Wellcome Institute Collection — Cipher Challenge
@@ -312,4 +315,4 @@ app = Starlette(
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8097)
+    uvicorn.run(app, host="0.0.0.0", port=LISTEN_PORT)
