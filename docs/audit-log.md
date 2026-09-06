@@ -1,6 +1,6 @@
 # Gateway Audit Log
 
-Every tool call through the Trentina gateway is recorded in SQLite. The audit log captures who called what, whether it succeeded, how long it took, and what the defense pipeline found. This data drives allowlist tuning, error diagnosis, and usage monitoring.
+Every tool call through the Trentina gateway is recorded in SQLite — including calls the gateway itself refuses. The audit log captures who called what, **what outcome it reached**, how long it took, and what the defense pipeline found. This data drives allowlist tuning, error diagnosis, and usage monitoring.
 
 ## Why This Matters
 
@@ -16,9 +16,37 @@ Each gateway call writes one row to the `gateway_calls` table:
 | `profile` | text | `josui` |
 | `backend` | text | `github` |
 | `tool` | text | `list_issues_tool` |
-| `success` | boolean | `true` |
+| `success` | boolean | `true` (derived from `outcome`) |
 | `duration_ms` | integer | `234` |
-| `error` | text | `null` (or error message) |
+| `error_message` | text | `null` (or error message) |
+| `outcome` | text | `ok`, `blocked_defense`, … (see below) |
+
+### Outcomes
+
+`success` alone cannot describe what happened, and reading it as a health
+signal actively misleads. `safe_fetch` and `safe_read` **fail closed**: when
+the defense blocks content the tool raises, which under a boolean is
+indistinguishable from the backend being down. An operator reading
+`2 ok / 34 errors` concludes the tool is broken when the truth may be that it
+blocked 34 hostile pages.
+
+| Outcome | Group | Meaning |
+|---|---|---|
+| `ok` | ok | Backend returned content and did not flag an error. |
+| `blocked_defense` | blocked | L1/L2/L3 refused the content. Working as designed. |
+| `denied_allowlist` | blocked | Tool not permitted for this profile. |
+| `denied_guard` | blocked | A parameter guard rejected the arguments. |
+| `tool_error` | failed | Backend completed but reported `isError`. |
+| `backend_error` | failed | Upstream failed: network, timeout, auth, 4xx/5xx. |
+| `gateway_error` | failed | Our own bug. The only outcome that should page anyone. |
+| *(NULL)* | unknown | Row predates the taxonomy. Never back-fitted. |
+
+**Only the `failed` group is a health signal.** The `blocked` group is a
+security metric — a rising `blocked_defense` rate means the defense is
+catching more, not that anything is broken.
+
+`success` is derived (`outcome == "ok"`) rather than stored independently, so
+the legacy boolean can never disagree with the taxonomy.
 
 ## Accessing Audit Data
 
@@ -30,11 +58,12 @@ The `quarantine_stats` tool exposes audit data through the gateway itself:
     "total_calls": 5743,
     "days": 30,
     "by_tool": [
-      {"backend": "ashigaru", "tool": "status", "calls": 1559, "ok": 1553, "errors": 6},
-      {"backend": "github", "tool": "get_pull_request_checks_tool", "calls": 195, "ok": 195, "errors": 0},
-      {"backend": "web", "tool": "quarantine_fetch_tool", "calls": 157, "ok": 133, "errors": 24},
-      {"backend": "gw-work", "tool": "search_gmail_messages", "calls": 100, "ok": 100, "errors": 0}
-    ]
+      {"backend": "ashigaru", "tool": "status", "calls": 1559,
+       "ok": 1553, "blocked": 0, "failed": 6, "outcomes": {"ok": 1553, "backend_error": 6}},
+      {"backend": "web", "tool": "safe_read_tool", "calls": 36,
+       "ok": 2, "blocked": 34, "failed": 0, "outcomes": {"ok": 2, "blocked_defense": 34}}
+    ],
+    "totals": {"ok": 1555, "blocked": 34, "failed": 6, "unknown": 0}
   }
 }
 ```
@@ -57,12 +86,24 @@ Top 10 tools for kagetora (last 7 days):
 
 ### Error Diagnosis
 
-High error rates on a specific backend suggest connectivity issues, authentication problems, or backend bugs:
+Read the **`failed`** column, never `calls - ok`. A high `failed` rate points
+at connectivity, auth, or backend bugs:
 
 ```
-web__quarantine_fetch_tool: 157 calls, 24 errors (15% error rate)
-web__safe_fetch_tool: 91 calls, 29 errors (32% error rate)
+web__quarantine_fetch_tool: 157 calls, 133 ok,  0 blocked, 24 failed
+web__safe_read_tool:         36 calls,   2 ok, 34 blocked,  0 failed
 ```
+
+The second row is a healthy tool doing its job. Under the old single-`errors`
+column it read as 34 errors and a 94% failure rate, which is how a working
+defense got mistaken for a broken one.
+
+### Denial Monitoring
+
+`denied_allowlist` and `denied_guard` rows record calls the gateway refused.
+A consumer repeatedly probing tools outside its allowlist is a signal worth
+alerting on — it can indicate a misconfigured client or a hijacked agent.
+These were previously not recorded at all.
 
 ### Usage Patterns
 
@@ -70,7 +111,9 @@ Track which agents use which capabilities, how tool usage changes over time, and
 
 ## Storage
 
-The audit table lives in the same SQLite database as the blocklist and compression cache (`trentina.db`). The table is append-only — rows are never updated or deleted. Database path is configurable:
+The audit table lives in the same SQLite database as the blocklist and compression cache (`trentina.db`). The table is append-only in normal operation — rows are never updated, and nothing in the request path deletes them.
+
+Operators can reset the audit history with `reset_gateway_calls()`. It is deliberately **not** exposed as an MCP tool: erasing the audit trail is not a capability any consumer profile should hold. Database path is configurable:
 
 ```bash
 QUARANTINE_DB=/data/trentina.db  # default on container

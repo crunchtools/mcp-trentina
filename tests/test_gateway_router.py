@@ -333,7 +333,8 @@ class TestRouter:
         assert stats["total_calls"] == 1
         assert stats["by_tool"][0]["tool"] == "slack_list_channels"
         assert stats["by_tool"][0]["ok"] == 1
-        assert stats["by_tool"][0]["errors"] == 0
+        assert stats["by_tool"][0]["failed"] == 0
+        assert stats["by_tool"][0]["outcomes"] == {"ok": 1}
         db_mod._db = None
 
     async def test_tools_call_records_audit_on_failure(self, tmp_path: Any) -> None:
@@ -371,7 +372,132 @@ class TestRouter:
         assert resp["error"]["code"] == -32603
         stats = get_gateway_call_stats("testp", days=1)
         assert stats["total_calls"] == 1
-        assert stats["by_tool"][0]["errors"] == 1
+        assert stats["by_tool"][0]["failed"] == 1
+        assert stats["by_tool"][0]["outcomes"] == {"backend_error": 1}
+        db_mod._db = None
+
+    async def test_denied_allowlist_is_audited(self, tmp_path: Any) -> None:
+        """An allowlist denial must leave an audit row.
+
+        These returned before _audit was reached, so a consumer probing tools
+        outside its allowlist was invisible — the exact signal you want for
+        spotting a misbehaving or hijacked consumer.
+        """
+        import mcp_trentina_crunchtools.database as db_mod
+
+        db_mod._db = None
+        with patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg:
+            mock_cfg.return_value.db_path = str(tmp_path / "denied_allow.db")
+            mock_cfg.return_value.ensure_db_dir = lambda: None
+            resp = await route_jsonrpc(
+                _profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 40,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"mcp-slack{NAMESPACE_SEP}slack_dangerous",
+                        "arguments": {},
+                    },
+                },
+            )
+
+            assert resp["error"]["code"] == -32602
+            stats = get_gateway_call_stats("testp", days=1)
+            assert stats["total_calls"] == 1
+            entry = stats["by_tool"][0]
+            assert entry["tool"] == "slack_dangerous"
+            assert entry["blocked"] == 1
+            assert entry["failed"] == 0
+            assert entry["outcomes"] == {"denied_allowlist": 1}
+        db_mod._db = None
+
+    async def test_denied_guard_is_audited(self, tmp_path: Any) -> None:
+        """A parameter-guard rejection must leave an audit row."""
+        import mcp_trentina_crunchtools.database as db_mod
+
+        db_mod._db = None
+        p = Profile(
+            name="guarded",
+            auth=AuthConfig(bearer_token_env="TEST"),
+            backends={
+                "gws": Backend(
+                    url="http://gws:8011/mcp",
+                    tools_allow=["*"],
+                    parameter_guards={
+                        "send_gmail_message": {
+                            "to": ParameterConstraint(allow=["self@example.com"]),
+                        }
+                    },
+                ),
+            },
+        )
+        p.auth.bearer_token = SecretStr("x")
+
+        with patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg:
+            mock_cfg.return_value.db_path = str(tmp_path / "denied_guard.db")
+            mock_cfg.return_value.ensure_db_dir = lambda: None
+            await route_jsonrpc(
+                p,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 41,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"gws{NAMESPACE_SEP}send_gmail_message",
+                        "arguments": {"to": "evil@example.com"},
+                    },
+                },
+            )
+
+            stats = get_gateway_call_stats("guarded", days=1)
+            assert stats["by_tool"][0]["outcomes"] == {"denied_guard": 1}
+            assert stats["totals"]["blocked"] == 1
+        db_mod._db = None
+
+    async def test_backend_reported_error_is_not_counted_as_ok(
+        self, tmp_path: Any
+    ) -> None:
+        """isError=True previously audited as a success, inflating the ok column."""
+        import mcp_trentina_crunchtools.database as db_mod
+
+        db_mod._db = None
+
+        async def error_call(
+            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+        ) -> BackendCall:
+            return BackendCall(
+                content=[{"type": "text", "text": "tool blew up"}],
+                is_error=True,
+                structured_content=None,
+            )
+
+        with (
+            patch(
+                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                side_effect=error_call,
+            ),
+            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value.db_path = str(tmp_path / "tool_error.db")
+            mock_cfg.return_value.ensure_db_dir = lambda: None
+            await route_jsonrpc(
+                _profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 42,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"mcp-slack{NAMESPACE_SEP}slack_list_channels",
+                        "arguments": {},
+                    },
+                },
+            )
+
+            entry = get_gateway_call_stats("testp", days=1)["by_tool"][0]
+            assert entry["ok"] == 0
+            assert entry["failed"] == 1
+            assert entry["outcomes"] == {"tool_error": 1}
         db_mod._db = None
 
     async def test_tools_call_rejects_guarded_parameter(self) -> None:
