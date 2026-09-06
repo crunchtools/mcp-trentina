@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from mcp_trentina_crunchtools.server import mcp
 
 
