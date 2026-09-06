@@ -10,7 +10,13 @@ from ..quarantine.classifier import is_classifier_available
 
 
 async def get_trentina_stats() -> dict[str, Any]:
-    """Get trentina session stats, configuration, and blocklist summary."""
+    """Get trentina session stats, configuration, and blocklist summary.
+
+    The audit block ships ``column_meanings`` inline. Without it the columns
+    invite the same misreading the outcome taxonomy was built to prevent:
+    "blocked" is the defense doing its job, and only "failed" indicates
+    something needs fixing.
+    """
     config = get_config()
 
     blocklist = get_blocklist_stats()
@@ -30,6 +36,21 @@ async def get_trentina_stats() -> dict[str, Any]:
             "threshold": config.classifier_threshold,
         },
         "blocklist": blocklist,
-        "gateway_audit": get_gateway_call_stats(days=30),
+        "gateway_audit": {
+            **get_gateway_call_stats(days=30),
+            "column_meanings": {
+                "ok": "Call returned content.",
+                "blocked": (
+                    "Policy stopped the call: defense pipeline block, allowlist "
+                    "denial, or parameter guard. Working as designed — a "
+                    "security metric, not an error rate."
+                ),
+                "failed": (
+                    "Something broke: tool-reported error, upstream failure, or "
+                    "a gateway bug. This is the health signal."
+                ),
+                "unknown": "Row predates the outcome taxonomy.",
+            },
+        },
         "compression": get_compression_stats(),
     }
