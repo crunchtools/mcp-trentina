@@ -291,8 +291,8 @@ async def deep_scan_content(
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
 
-    # Deep mode: L1 reports, but L2/L3 read the ORIGINAL text — L1 strips the
-    # very vectors they judge best. Same shape as scan.py's deep variant.
+    # Deep mode judges the RAW bytes — no normalization, not even the scan
+    # view's obfuscation cleanup. Same shape as scan.py's deep variant.
     verdict = await defend(
         content,
         source=chash,
@@ -301,6 +301,7 @@ async def deep_scan_content(
         record=False,
         precomputed_l1=PipelineResult(
             content=content,
+            scan_view=content,
             stats=l1.stats,
             input_size=l1.input_size,
             output_size=l1.output_size,

@@ -235,10 +235,11 @@ async def deep_quarantine_scan(
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
 
-    # Deep scan's whole point: L1 reports what it found, but L2 and L3 read the
-    # ORIGINAL text, because L1 strips the very vectors they are best at
-    # judging. Expressed by handing the pipeline L1's real stats alongside raw
-    # content — no special mode, just honest inputs.
+    # Deep scan judges the RAW bytes: L2 and L3 both read the original text
+    # with no normalization at all — not even the scan view's obfuscation
+    # cleanup. Since L1 stopped stripping, the standard path already judges
+    # full content; what "deep" still buys is judgment over the un-normalized
+    # original (raw HTML included) plus the higher L3 spend.
     verdict = await defend(
         content,
         source=source,
@@ -247,6 +248,7 @@ async def deep_quarantine_scan(
         record=False,
         precomputed_l1=PipelineResult(
             content=content,
+            scan_view=content,
             stats=l1.stats,
             input_size=l1.input_size,
             output_size=l1.output_size,

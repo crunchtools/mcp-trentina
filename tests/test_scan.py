@@ -102,9 +102,11 @@ class TestDeepScanVsStandardScan:
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "SANITIZED CONTENT"
+            mock_pipeline.scan_view = "SANITIZED CONTENT"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0
+            mock_pipeline.stats.suspicious_detections.return_value = 0
             mock_sanitize.return_value = mock_pipeline
 
             mock_config.return_value.has_api_key = True
@@ -147,9 +149,11 @@ class TestDeepScanVsStandardScan:
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "SANITIZED CONTENT"
+            mock_pipeline.scan_view = "SANITIZED CONTENT"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0
+            mock_pipeline.stats.suspicious_detections.return_value = 0
             mock_sanitize.return_value = mock_pipeline
 
             mock_config.return_value.has_api_key = True
@@ -191,9 +195,11 @@ class TestDeepScanVsStandardScan:
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "sanitized"
+            mock_pipeline.scan_view = "sanitized"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0
+            mock_pipeline.stats.suspicious_detections.return_value = 0
             mock_sanitize.return_value = mock_pipeline
 
             mock_config.return_value.has_api_key = False

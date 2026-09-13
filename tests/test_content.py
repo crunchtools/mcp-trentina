@@ -87,6 +87,7 @@ class TestSafeContent:
 
             mock_sanitize.return_value = PipelineResult(
                 content="Hello",
+                scan_view="Hello",
                 input_size=len(html),
                 output_size=5,
                 stats=PipelineStats(),
@@ -177,6 +178,7 @@ class TestSafeContent:
 
             mock_sanitize.return_value = PipelineResult(
                 content="Hi",
+                scan_view="Hi",
                 input_size=len(html),
                 output_size=2,
                 stats=PipelineStats(),

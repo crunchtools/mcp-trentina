@@ -356,11 +356,13 @@ class TestL1PreservesContentItFlags:
     response (plan step 5): a CVE ticket *discussing* injection arrived with
     an empty description.
 
-    The owner's call (2026-09-13): L1 detects and never strips semantic text.
-    The count feeds the risk verdict and the sidecar; the enforcement mode
-    decides delivery. Obfuscation stages (unicode, encoded, delimiters,
-    hidden HTML) still excise, because removing a zero-width character or an
-    encoded blob never guts a CVE description.
+    The owner's call (2026-09-13, twice, each time stronger): L1 never
+    modifies delivery text at all. It detects; the counts feed the risk
+    verdict, the sidecar, and the L3 gate; obfuscation-normalization lives
+    in the separate ``scan_view`` that L2 judges; and the Q-Agent reads the
+    original. Disposition belongs to the enforcement mode. The one
+    transformation that remains in delivery is HTML-to-Markdown extraction,
+    because readable text is the fetch tools' product, not a security edit.
     """
 
     def test_single_line_survives_with_detection(self) -> None:
@@ -412,12 +414,18 @@ class TestL1PreservesContentItFlags:
             "the flag survives even though the content does"
         )
 
-    def test_obfuscation_stages_still_excise(self) -> None:
-        """Detect-only applies to semantic text, not to obfuscation channels."""
+    def test_obfuscation_is_normalized_in_the_scan_view_only(self) -> None:
+        """The judged view neutralizes obfuscation; delivery stays intact.
+
+        Second owner's call, same day: L1 never modifies delivery text AT
+        ALL — not even zero-width characters. The normalization lives in
+        ``scan_view`` so L2 cannot be blinded, and the counts brief L3.
+        """
         from mcp_trentina_crunchtools.sanitize.pipeline import sanitize_text
 
         text = "Real sentence.\nZero\u200bwidth and a token <|im_start|> here."
         result = sanitize_text(text)
-        assert "\u200b" not in result.content
-        assert "<|im_start|>" not in result.content
-        assert "Real sentence." in result.content
+        assert result.content == text, "delivery text is byte-identical"
+        assert "\u200b" not in result.scan_view
+        assert "<|im_start|>" not in result.scan_view
+        assert result.stats.suspicious_detections() >= 2
