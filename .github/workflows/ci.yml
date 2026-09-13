@@ -24,8 +24,12 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
+      # --locked fails the run if uv.lock is stale or missing rather than
+      # silently re-resolving. Without it a committed lockfile is decoration:
+      # CI would still drift on a transitive release and the green check would
+      # describe a dependency set nobody chose. See issue #79.
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --all-extras --locked
 
       - name: Run linter
         run: uv run ruff check src tests
@@ -55,7 +59,7 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --all-extras --locked
 
       # Runs the corpus attacks through live Gemini and fails only on a genuine
       # detection regression. Skipped without the key (fork PRs); skips itself as

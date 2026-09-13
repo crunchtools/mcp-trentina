@@ -60,10 +60,22 @@ FROM quay.io/hummingbird/python:latest-builder AS pip-builder
 USER 0
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md uv.lock ./
 COPY src/ ./src/
 
-RUN pip install --no-cache-dir --prefix=/usr .
+# Dependencies come from uv.lock, not from a fresh resolve (issue #79). Every
+# dependency in pyproject.toml is floor-pinned with no upper bound, so a plain
+# `pip install .` here built the production image against whatever had been
+# released that morning — the artifact that actually runs was the least pinned
+# thing we owned, and it was resolved separately from the set CI tested.
+#
+# `uv export` emits hashes, so this is also a verified install. The project
+# itself goes in second with --no-deps so pip cannot re-resolve around the lock.
+RUN pip install --no-cache-dir uv \
+ && uv export --frozen --no-dev --no-emit-project \
+      --format requirements-txt -o /tmp/requirements.txt \
+ && pip install --no-cache-dir --prefix=/usr -r /tmp/requirements.txt \
+ && pip install --no-cache-dir --prefix=/usr --no-deps .
 
 # onnxruntime >= 1.29 reads /etc/machine-id during module init. When that file
 # is absent it falls back to popen("blkid")/popen("hostname"), and popen returns
