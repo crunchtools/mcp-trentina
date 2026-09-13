@@ -30,8 +30,8 @@ class TestProfileModel:
         assert p.name == "josui"
         assert p.auth.bearer_token_env == "AIRLOCK_PROFILE_JOSUI_TOKEN"
         assert p.backends == {}
-        assert p.defense.sanitize is True
-        assert p.defense.quarantine is True
+        assert p.defense.enforcement == "annotate"
+        assert p.defense.audit is True
 
     def test_profile_with_backends(self) -> None:
         p = Profile(
@@ -154,16 +154,15 @@ class TestProfileModel:
 
     def test_defense_defaults(self) -> None:
         d = DefenseConfig()
-        assert d.sanitize is True
-        assert d.classify is True
-        assert d.quarantine is True
+        assert d.enforcement == "annotate"
         assert d.audit is True
-        assert 0.0 <= d.classify_threshold <= 1.0
-        assert 0.0 <= d.quarantine_threshold <= 1.0
+        assert d.audit is True
+        assert 0.0 <= d.l2_threshold <= 1.0
+        assert 0.0 <= d.l3_threshold <= 1.0
 
     def test_defense_threshold_bounds(self) -> None:
         with pytest.raises(ValidationError):
-            DefenseConfig(classify_threshold=1.5)
+            DefenseConfig(l2_threshold=1.5)
         with pytest.raises(ValidationError):
             DefenseConfig(quarantine_threshold=-0.1)
 

@@ -296,8 +296,11 @@ class TestAlertIngressNowHonoursTheProfile:
         assert "_trentina_warning" in forward_body.decode()
 
     async def test_ingress_honours_profile_defense(self) -> None:
-        """FIXED. This was the DIVERGENCE: the one place the pipeline actually
-        ran was the one place that ignored the per-profile toggles."""
+        """FIXED, then superseded: the profile's defense config is read (that
+        was the original divergence), but layer off-switches no longer exist —
+        production ran quarantine:false for months without the owner knowing.
+        What the profile controls now is thresholds; the l2_threshold leg is
+        the observable proof the config is honoured."""
         import inspect
 
         from mcp_trentina_crunchtools.gateway.alert_ingress import (
@@ -310,16 +313,23 @@ class TestAlertIngressNowHonoursTheProfile:
         ]
 
         body = json.dumps({"host": "lotor", "output": "anything at all"})
+        scored = ClassifierResult(label="BENIGN", score=0.4, latency_ms=1.0)
         with (
-            patch(f"{_DEFENSE}.classify_async", return_value=BENIGN) as classify,
+            patch(f"{_DEFENSE}.classify_async", return_value=scored),
             patch(f"{_DEFENSE}.get_config") as cfg,
         ):
             cfg.return_value.has_api_key = False
-            await _sanitize_and_classify(
-                body.encode(), self._profile(DefenseConfig(classify=False))
+            # Below the profile threshold: clean.
+            _, _, flagged_loose, _ = await _sanitize_and_classify(
+                body.encode(), self._profile(DefenseConfig(l2_threshold=0.9))
+            )
+            # Same score, stricter profile: flagged.
+            _, _, flagged_strict, _ = await _sanitize_and_classify(
+                body.encode(), self._profile(DefenseConfig(l2_threshold=0.3))
             )
 
-        classify.assert_not_called(), "classify: false must actually disable L2"
+        assert not flagged_loose
+        assert flagged_strict, "the profile's l2_threshold must actually gate"
 
     async def test_truncated_l2_scan_flags(self) -> None:
         """FIXED. A payload past CLASSIFIER_MAX_TOKENS was scanned only in part

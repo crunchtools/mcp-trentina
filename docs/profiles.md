@@ -28,10 +28,9 @@ profiles:
         tools_deny: ["delete*"]
         compress_descriptions: true
     defense:
-      sanitize: true
-      classify: true
-      classify_threshold: 0.5
-      quarantine: true
+      enforcement: annotate
+      l2_threshold: 0.5
+      l3_threshold: 0.7
 
   kagetora:
     auth:
@@ -48,10 +47,9 @@ profiles:
           - draft_gmail_message
         compress_descriptions: true
     defense:
-      sanitize: true
-      classify: true
-      classify_threshold: 0.3
-      quarantine: false
+      enforcement: block      # autonomous agent: flagged content is refused
+      l2_threshold: 0.3       # stricter classifier gate
+      l3_threshold: 0.7
 ```
 
 ## Authentication
@@ -92,17 +90,17 @@ http://trentina:8019/gateway/takeda/mcp
 
 ## Defense Settings
 
-Each profile configures its own defense pipeline:
+Each profile configures its defense **policy** — never the layers' existence. All three layers run for every profile; there are deliberately no per-layer off switches (an earlier schema had them, and `quarantine: false` ran in production for months without the operator knowing). What a profile controls:
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `sanitize` | bool | `true` | Layer 1 — deterministic sanitization |
-| `classify` | bool | `true` | Layer 2 — Prompt Guard 2 classifier |
-| `classify_threshold` | float | `0.5` | L2 confidence threshold (lower = more aggressive) |
-| `quarantine` | bool | `true` | Layer 3 — Q-Agent semantic analysis |
+| `enforcement` | string | `annotate` | What a flagged response becomes: `annotate` (delivered intact + warning — the calibration mode), `block` (refused — autonomous agents), `extract` (Q-Agent rewrite — interactive agents) |
+| `l2_threshold` | float | `0.5` | L2 score at/above which content is flagged, in addition to the model's own MALICIOUS label. Lower = stricter. |
+| `l3_threshold` | float | `0.7` | L2 score at/above which L3 reviews the content. L3 also always fires on model-output provenance and on any suspicious L1 detection. Raise it to spend less on L3. |
+| `audit` | bool | `true` | Write detection rows to SQLite |
 | `provider` | string | `null` | LLM provider override (`gemini`, `openai`, `anthropic`, `ollama`) |
 
-An autonomous agent might set `classify_threshold: 0.3` (flag more aggressively) and `quarantine: false` (skip L3 to save tokens). A human-supervised agent can afford `quarantine: true` since L3 only fires when L2 flags something.
+An autonomous agent runs `enforcement: block` with a strict `l2_threshold`; a human-supervised agent runs `extract` or `annotate`. `TRENTINA_ENFORCEMENT_OVERRIDE=annotate` is the global kill switch for the night a block threshold misfires.
 
 The `provider` field lets each profile use a different LLM for L3 Q-Agent operations and tool description compression. When omitted, the profile uses the global `TRENTINA_MODEL_PROVIDER` environment variable. All provider API keys must be present in the environment regardless of which profiles use them.
 

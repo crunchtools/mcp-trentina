@@ -92,10 +92,7 @@ def reset_verdict_cache() -> None:
 
 def _cache_key(profile: Profile, kind: str, text: str) -> str:
     d = profile.defense
-    cfg = (
-        f"{d.sanitize}:{d.classify}:{d.classify_threshold}:"
-        f"{d.quarantine}:{d.quarantine_threshold}"
-    )
+    cfg = f"{d.l2_threshold}:{d.l3_threshold}"
     return hashlib.sha256(f"{kind}:{cfg}:{text}".encode()).hexdigest()
 
 
