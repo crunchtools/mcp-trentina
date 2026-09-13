@@ -405,7 +405,7 @@ async def advise(
 # --- structured payloads -----------------------------------------------------
 
 
-def _merge_stats(target: PipelineStats, other: PipelineStats) -> None:
+def merge_stats(target: PipelineStats, other: PipelineStats) -> None:
     """Accumulate one stage-stats set into another, field by field.
 
     Walks dataclass fields rather than naming them, so a sanitize stage added
@@ -439,7 +439,7 @@ def sanitize_json_value(
     """
     if isinstance(value, str):
         result = sanitize_text(value)
-        _merge_stats(stats, result.stats)
+        merge_stats(stats, result.stats)
         texts.append(result.content)
         return result.content
     if isinstance(value, dict):

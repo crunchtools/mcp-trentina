@@ -15,6 +15,7 @@ from typing import Any
 
 from ..config import get_config
 from ..dbus_interface import emit_detection_event, emit_request_event
+from ..defense import advise, defend, merge_stats
 from ..errors import BlockedSourceError, QuarantineAgentError
 from ..quarantine.agent import (
     quarantine_extract,
@@ -22,28 +23,34 @@ from ..quarantine.agent import (
     search_grounded,
 )
 from ..quarantine.classifier import (
-    classify_async,
-    classify_guarded,
     join_warnings,
     truncation_warning,
 )
-from ..sanitize.pipeline import sanitize_text
+from ..sanitize.pipeline import PipelineResult, PipelineStats, sanitize_text
 
 
 def _sanitize_l0_output(
     text: str, sources: list[dict[str, str]],
-) -> tuple[str, list[dict[str, str | bool]], int]:
+) -> tuple[str, list[dict[str, str | bool]], int, PipelineStats]:
     """Run L1 on L0's synthesized text and source titles.
 
-    Returns (sanitized_text, sanitized_sources, total_detections).
+    Returns (sanitized_text, sanitized_sources, total_detections, merged_stats).
+
+    The merged stats are what let the shared pipeline judge this the same way
+    it judges everything else: L1 ran across several fields here, so the
+    aggregate has to be reassembled before L2 sees the document.
     """
     text_result = sanitize_text(text)
+    merged = PipelineStats()
+    merge_stats(merged, text_result.stats)
     sanitized_sources = []
     total_detections = text_result.stats.total_detections()
 
     for source in sources:
         title_r = sanitize_text(source.get("title", ""))
         url_r = sanitize_text(source.get("uri", ""))
+        merge_stats(merged, title_r.stats)
+        merge_stats(merged, url_r.stats)
         total_detections += (
             title_r.stats.total_detections()
             + url_r.stats.total_detections()
@@ -54,7 +61,7 @@ def _sanitize_l0_output(
             "redirect_failed": source.get("redirect_failed", False),
         })
 
-    return text_result.content, sanitized_sources, total_detections
+    return text_result.content, sanitized_sources, total_detections, merged
 
 
 async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
@@ -67,10 +74,13 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
         raise BlockedSourceError(f"search:{query}", str(exc)) from exc
 
     resolved_sources = await resolve_grounding_urls(raw.get("sources", []))
-    sanitized_text, sanitized_sources, total_l1 = _sanitize_l0_output(
+    sanitized_text, sanitized_sources, total_l1, l1_stats = _sanitize_l0_output(
         raw["text"], resolved_sources
     )
 
+    # safe_search blocks on an L1 COUNT, not a risk level — a fifth distinct
+    # L1 policy across the tools. Policy stays with the caller by design; only
+    # the mechanics move to the pipeline.
     if total_l1 >= 3:
         emit_detection_event("L1", f"search:{query}", "high", {"total_l1": total_l1})
         raise BlockedSourceError(
@@ -78,9 +88,20 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
             f"L1 detected {total_l1} injection vectors in L0 output",
         )
 
-    classification = await classify_guarded(
-        sanitized_text, f"search:{query}", is_trusted=False
+    verdict = await defend(
+        sanitized_text,
+        source=f"search:{query}",
+        source_type="url",
+        record=False,
+        l3_gate=False,
+        precomputed_l1=PipelineResult(
+            content=sanitized_text,
+            stats=l1_stats,
+            input_size=len(raw["text"]),
+            output_size=len(sanitized_text),
+        ),
     )
+    classification = verdict.classification
     if classification and classification.label == "MALICIOUS":
         emit_detection_event("L2", f"search:{query}", "high", {
             "classifier_label": classification.label,
@@ -139,12 +160,18 @@ async def quarantine_search(
         }
 
     resolved_sources = await resolve_grounding_urls(raw.get("sources", []))
-    sanitized_text, sanitized_sources, _total_l1 = _sanitize_l0_output(
+    sanitized_text, sanitized_sources, _total_l1, _l1_stats = _sanitize_l0_output(
         raw["text"], resolved_sources
     )
 
     classifier_warning = None
-    classification = await classify_async(sanitized_text)
+    verdict = await advise(
+        sanitized_text,
+        source=f"search:{query}",
+        source_type="url",
+        is_html=False,
+    )
+    classification = verdict.classification
     if classification and classification.label == "MALICIOUS":
         classifier_warning = (
             f"L2 classifier flagged L0 output as MALICIOUS "
