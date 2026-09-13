@@ -49,6 +49,7 @@ L1_HOSTILE = (
 
 
 _FETCH = "mcp_trentina_crunchtools.tools.fetch"
+_DEFENSE = "mcp_trentina_crunchtools.defense"
 
 
 def _enter_fetch_patches(
@@ -60,22 +61,35 @@ def _enter_fetch_patches(
     detection: dict[str, Any] | None = None,
     content: str = "<p>Hello</p>",
 ) -> Any:
-    """Patch every seam safe_fetch/quarantine_fetch reaches out through."""
+    """Patch every seam safe_fetch/quarantine_fetch reaches out through.
 
-    def p(name: str, **kw: Any) -> Any:
+    Post-extraction these straddle two modules: the IO and trust decisions
+    still belong to the tool, while the pipeline's own seams (L2, L3, the
+    detection write) now live in defense.py. The split is the point — the
+    assertions below did not move.
+    """
+
+    def pf(name: str, **kw: Any) -> Any:
         return stack.enter_context(patch(f"{_FETCH}.{name}", **kw))
 
-    p("fetch_url", return_value=(content, "text/html"))
-    p("is_blocked", return_value=None)
-    p("classify_guarded", return_value=classification)
-    p("classify_async", return_value=classification)
-    p("quarantine_detect", return_value=detection or {"injection_detected": False})
-    p("quarantine_extract", return_value={"content": {"extracted_text": "x"}})
-    cfg = p("get_config")
+    def pd(name: str, **kw: Any) -> Any:
+        return stack.enter_context(patch(f"{_DEFENSE}.{name}", **kw))
+
+    pf("fetch_url", return_value=(content, "text/html"))
+    pf("is_blocked", return_value=None)
+    pf("classify_async", return_value=classification)
+    pf("quarantine_extract", return_value={"content": {"extracted_text": "x"}})
+    cfg = pf("get_config")
     cfg.return_value.is_trusted_domain.return_value = trusted
     cfg.return_value.has_api_key = has_api_key
     cfg.return_value.fallback = "warn"
     cfg.return_value.max_content = 100_000
+
+    pd("classify_guarded", return_value=classification)
+    pd("quarantine_detect", return_value=detection or {"injection_detected": False})
+    pd("emit_detection_event")
+    dcfg = pd("get_config")
+    dcfg.return_value.has_api_key = has_api_key
     return cfg
 
 
@@ -87,7 +101,7 @@ class TestSafeFetchBlockMatrix:
 
         with ExitStack() as stack:
             _enter_fetch_patches(stack, **kw)
-            rec = stack.enter_context(patch(f"{_FETCH}.record_detection"))
+            rec = stack.enter_context(patch(f"{_DEFENSE}.record_detection"))
             try:
                 result = await safe_fetch("https://example.com")
             except BlockedSourceError:
@@ -197,8 +211,6 @@ class TestQuarantineFetchWarnsInsteadOfBlocking:
             patch("mcp_trentina_crunchtools.tools.fetch.is_blocked",
                   return_value={"detected_at": "2026-01-01T00:00:00Z"}),
             patch("mcp_trentina_crunchtools.tools.fetch.classify_async",
-                  return_value=BENIGN),
-            patch("mcp_trentina_crunchtools.tools.fetch.classify_guarded",
                   return_value=BENIGN),
             patch("mcp_trentina_crunchtools.tools.fetch.get_config") as cfg,
         ):
