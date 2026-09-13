@@ -157,9 +157,11 @@ def _should_run_l3(
     provenance: Provenance,
     is_trusted: bool,
     classification: ClassifierResult | None,
+    l3_gate: bool,
 ) -> bool:
     """Provenance OR score. See Provenance.MODEL_OUTPUT for why."""
-    if not get_config().has_api_key:
+    # Gate shut by the caller, or no provider configured to ask.
+    if not l3_gate or not get_config().has_api_key:
         return False
 
     if defense is not None and not defense.quarantine:
@@ -195,6 +197,7 @@ async def defend(
     is_html: bool | None = None,
     guarded: bool = True,
     record: bool = True,
+    l3_gate: bool = True,
 ) -> DefenseVerdict:
     """Run the three layers over one piece of content and report a verdict.
 
@@ -215,6 +218,10 @@ async def defend(
             the safe_* / quarantine_* distinction at the L2 boundary.
         record: Write the detection row and emit the D-Bus event. Scan-only
             tools report without recording.
+        l3_gate: Run L3 as a *detection gate*. The quarantine_* tools turn this
+            off because they spend L3 on extraction instead — same layer, doing
+            the tool's job rather than guarding the door. Running both would
+            pay Gemini twice per call.
 
     Returns:
         A verdict. This function never raises on a detection — see
@@ -245,6 +252,7 @@ async def defend(
         provenance=provenance,
         is_trusted=is_trusted,
         classification=classification,
+        l3_gate=l3_gate,
     ):
         l3_assessment = await quarantine_detect(pipeline.content)
         l3_flagged = bool(l3_assessment.get("injection_detected"))
@@ -315,3 +323,34 @@ def enforce_block(verdict: DefenseVerdict, source: str) -> None:
     """
     if verdict.flagged:
         raise BlockedSourceError(source, "just detected")
+
+
+async def advise(
+    content: str,
+    *,
+    source: str,
+    source_type: str,
+    is_trusted: bool = False,
+    is_html: bool | None = None,
+    defense: DefenseConfig | None = None,
+) -> DefenseVerdict:
+    """L1 + L2, no gate, no detection row — the `quarantine_*` posture.
+
+    The warn-and-proceed tools want the layers' opinion so they can attach a
+    warning, not a decision that stops the call. They also spend L3 on
+    extraction rather than detection, so the L3 gate stays shut here.
+
+    This exists so that posture is named once instead of three flags being
+    repeated at every warn-mode call site. Same pipeline, different intent.
+    """
+    return await defend(
+        content,
+        source=source,
+        source_type=source_type,
+        is_trusted=is_trusted,
+        is_html=is_html,
+        defense=defense,
+        guarded=False,
+        record=False,
+        l3_gate=False,
+    )

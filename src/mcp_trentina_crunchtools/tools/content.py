@@ -9,7 +9,7 @@ from typing import Any
 from ..config import get_config
 from ..database import is_blocked
 from ..dbus_interface import emit_request_event
-from ..defense import defend, enforce_block
+from ..defense import advise, defend, enforce_block
 from ..errors import BlockedSourceError, ContentSizeError
 from ..quarantine.agent import quarantine_detect, quarantine_extract
 from ..quarantine.classifier import (
@@ -134,10 +134,16 @@ async def quarantine_content(
             "Proceeding in quarantine mode."
         )
 
-    pipeline_result = _run_pipeline(content, content_type)
+    verdict = await advise(
+        content,
+        source=chash,
+        source_type="content",
+        is_html=content_type == "text/html" or looks_like_html(content),
+    )
+    pipeline_result = verdict.pipeline
+    classification = verdict.classification
 
     classifier_warning = None
-    classification = await classify_async(pipeline_result.content)
     if classification and classification.label == "MALICIOUS":
         classifier_warning = (
             f"Layer 2 classifier flagged content as MALICIOUS "

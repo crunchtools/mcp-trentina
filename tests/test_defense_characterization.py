@@ -86,6 +86,7 @@ def _enter_fetch_patches(
     cfg.return_value.max_content = 100_000
 
     pd("classify_guarded", return_value=classification)
+    pd("classify_async", return_value=classification)
     pd("quarantine_detect", return_value=detection or {"injection_detected": False})
     pd("emit_detection_event")
     dcfg = pd("get_config")
@@ -198,8 +199,10 @@ class TestQuarantineFetchWarnsInsteadOfBlocking:
             )
 
         assert result is not None
-        blob = json.dumps(result)
-        assert "warning" in blob.lower(), "quarantine_* must warn rather than raise"
+        # Assert the warning VALUE, not the key: "classifier_warning": null
+        # contains the substring "warning" and would pass a sloppier check.
+        assert result["classifier_warning"], "quarantine_* must warn rather than raise"
+        assert "MALICIOUS" in result["classifier_warning"]
 
     async def test_blocklisted_source_warns_rather_than_raising(self) -> None:
         """safe_fetch raises on a blocklisted URL; quarantine_fetch proceeds."""

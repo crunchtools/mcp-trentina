@@ -10,16 +10,15 @@ from typing import Any
 from ..config import get_config
 from ..database import is_blocked
 from ..dbus_interface import emit_request_event
-from ..defense import defend, enforce_block
+from ..defense import advise, defend, enforce_block
 from ..errors import BlockedSourceError, FileReadError
 from ..models import ALLOWED_TEXT_EXTENSIONS
 from ..quarantine.agent import quarantine_extract
 from ..quarantine.classifier import (
-    classify_async,
     join_warnings,
     truncation_warning,
 )
-from ..sanitize.pipeline import PipelineResult, looks_like_html, sanitize, sanitize_text
+from ..sanitize.pipeline import PipelineResult, looks_like_html
 
 MAX_FILE_SIZE = 2_000_000
 BINARY_CHECK_BYTES = 8192
@@ -150,15 +149,19 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
     with open(resolved, encoding="utf-8", errors="replace") as fh:
         content = fh.read()
 
-    if looks_like_html(content, resolved):
-        pipeline_result = sanitize(content)
-    else:
-        pipeline_result = sanitize_text(content)
-
     is_trusted = config.is_trusted_path(resolved)
 
+    verdict = await advise(
+        content,
+        source=resolved,
+        source_type="file",
+        is_trusted=is_trusted,
+        is_html=looks_like_html(content, resolved),
+    )
+    pipeline_result = verdict.pipeline
+    classification = verdict.classification
+
     classifier_warning = None
-    classification = await classify_async(pipeline_result.content)
     if classification and classification.label == "MALICIOUS":
         classifier_warning = (
             f"Layer 2 classifier flagged content as MALICIOUS "
