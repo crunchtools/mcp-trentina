@@ -283,6 +283,12 @@ async def _scan_and_forward(
             source_type="matrix_sync",
             defense=profile.defense,
             record=True,
+            attribution={
+                "profile": profile.name,
+                "backend": "matrix",
+                "direction": "sync",
+                "blocked": False,
+            },
         )
     except Exception:
         # A parse failure here is attacker-reachable (any room member can

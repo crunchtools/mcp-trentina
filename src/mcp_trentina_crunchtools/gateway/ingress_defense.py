@@ -266,6 +266,13 @@ async def scan_tool_response(
         defense=profile.defense,
         is_html=False,
         guarded=False,
+        attribution={
+            "profile": profile.name,
+            "backend": backend_name,
+            "tool": tool_name,
+            "direction": "response",
+            "blocked": enforcement in ("block", "extract"),
+        },
     )
     warning = _build_warning(verdict, unscannable)
 
@@ -361,6 +368,13 @@ async def scan_tool_list(
                 provenance=provenance,
                 is_html=False,
                 guarded=False,
+                attribution={
+                    "profile": profile.name,
+                    "backend": backend_name,
+                    "tool": str(tool.get("name", "?")),
+                    "direction": "tool_list",
+                    "blocked": effective_enforcement(profile) in ("block", "extract"),
+                },
             )
             warning = _build_warning(verdict, {})
             _cache_put(key, warning)

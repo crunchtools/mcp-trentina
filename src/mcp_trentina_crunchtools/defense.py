@@ -573,6 +573,7 @@ async def defend_json(
     guarded: bool = False,
     record: bool = False,
     l3_context: str | None = None,
+    attribution: dict[str, Any] | None = None,
 ) -> JsonVerdict:
     """Defend a structured payload: sanitize the leaves, judge the whole.
 
@@ -605,5 +606,6 @@ async def defend_json(
         record=record,
         l3_context=l3_context or _default_l3_context(stats),
         precomputed_l1=pipeline,
+        attribution=attribution,
     )
     return JsonVerdict(payload=rebuilt, verdict=verdict, joined_text=joined)
