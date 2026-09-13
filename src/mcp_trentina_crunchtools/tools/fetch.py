@@ -9,13 +9,13 @@ from urllib.parse import urlparse
 
 from ..client import fetch_url
 from ..config import get_config
-from ..database import is_blocked, record_detection
-from ..dbus_interface import emit_detection_event, emit_request_event
+from ..database import is_blocked
+from ..dbus_interface import emit_request_event
+from ..defense import defend, enforce_block
 from ..errors import BlockedSourceError, FetchError, UnsupportedContentTypeError
 from ..quarantine.agent import quarantine_detect, quarantine_extract
 from ..quarantine.classifier import (
     classify_async,
-    classify_guarded,
     join_warnings,
     truncation_warning,
 )
@@ -216,61 +216,19 @@ async def safe_fetch(url: str) -> dict[str, Any]:
         log.warning("redirect-to-binary advisory for %s: %s", url, exc)
         return _handle_content_type_error(url, exc)
 
-    pipeline_result = sanitize(content) if looks_like_html(content) else sanitize_text(content)
-
     is_trusted = config.is_trusted_domain(url)
 
-    classification = await classify_guarded(
-        pipeline_result.content, url, is_trusted=is_trusted
+    verdict = await defend(
+        content,
+        source=url,
+        source_type="url",
+        is_trusted=is_trusted,
+        domain=urlparse(url).hostname,
     )
-    if classification and classification.label == "MALICIOUS" and not is_trusted:
-        domain = urlparse(url).hostname
-        record_detection(
-            source_type="url",
-            source=url,
-            domain=domain,
-            layer1_stats=pipeline_result.stats.to_flat_dict(),
-            risk_level="high",
-            qagent_assessment={
-                "classifier_label": classification.label,
-                "classifier_score": classification.score,
-            },
-        )
-        emit_detection_event("L2", url, "high", {
-            "classifier_label": classification.label,
-            "classifier_score": classification.score,
-        })
-        raise BlockedSourceError(url, "just detected")
+    enforce_block(verdict, url)
 
-    if not is_trusted and config.has_api_key:
-        detection = await quarantine_detect(pipeline_result.content)
-        if detection.get("injection_detected"):
-            domain = urlparse(url).hostname
-            record_detection(
-                source_type="url",
-                source=url,
-                domain=domain,
-                layer1_stats=pipeline_result.stats.to_flat_dict(),
-                risk_level=detection.get("risk_level", "high"),
-                qagent_assessment=detection,
-            )
-            emit_detection_event("L3", url, detection.get("risk_level", "high"), detection)
-            raise BlockedSourceError(url, "just detected")
-
-    if pipeline_result.stats.total_detections() > 0 and not is_trusted:
-        risk = pipeline_result.stats.risk_level()
-        if risk in ("high", "critical"):
-            domain = urlparse(url).hostname
-            record_detection(
-                source_type="url",
-                source=url,
-                domain=domain,
-                layer1_stats=pipeline_result.stats.to_flat_dict(),
-                risk_level=risk,
-            )
-            emit_detection_event("L1", url, risk, pipeline_result.stats.to_flat_dict())
-            raise BlockedSourceError(url, "just detected")
-
+    pipeline_result = verdict.pipeline
+    classification = verdict.classification
     trust_level = "trusted-sanitized" if is_trusted else "sanitized-only"
 
     result = {

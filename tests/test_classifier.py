@@ -376,7 +376,7 @@ class TestPipelineIntegration:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.classify_guarded",
+                "mcp_trentina_crunchtools.defense.classify_guarded",
                 return_value=malicious_result,
             ),
             patch(
@@ -388,7 +388,7 @@ class TestPipelineIntegration:
                 return_value=None,
             ),
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.record_detection",
+                "mcp_trentina_crunchtools.defense.record_detection",
             ) as mock_record,
             patch(
                 "mcp_trentina_crunchtools.tools.fetch.get_config",
