@@ -327,6 +327,28 @@ class DefenseConfig(BaseModel):
         return v
 
 
+class MatrixIngressConfig(BaseModel):
+    """Per-profile access to the Matrix reverse proxy.
+
+    The proxy at ``/matrix/{token}/{path}`` forwards to the homeserver only
+    for a token that resolves to a profile. Before this existed the proxy
+    was an open relay: anything that could reach the port could use
+    Trentina as a Matrix client proxy, unauthenticated and unattributed.
+    Token-in-path mirrors the alert ingress and costs the Matrix client
+    nothing — the homeserver URL configured in the agent simply includes
+    the token as a path prefix.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    token_env: str = Field(
+        ..., description="Env var name whose value is the Matrix proxy token",
+    )
+    token: SecretStr | None = Field(
+        default=None, exclude=True, description="Resolved token (load-time only)",
+    )
+
+
 class Profile(BaseModel):
     """One consumer profile: name, auth, backends, defense config."""
 
@@ -349,6 +371,10 @@ class Profile(BaseModel):
     alert_ingress: AlertIngressConfig | None = Field(
         default=None,
         description="Alert webhook ingress configuration (optional)",
+    )
+    matrix_ingress: MatrixIngressConfig | None = Field(
+        default=None,
+        description="Matrix reverse-proxy access for this profile (optional)",
     )
 
     @field_validator("name")

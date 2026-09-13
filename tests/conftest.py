@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 from mcp_trentina_crunchtools import config as config_mod
+from mcp_trentina_crunchtools import database as database_mod
 from mcp_trentina_crunchtools.gateway.backend import reset_tool_list_cache
 from mcp_trentina_crunchtools.gateway.circuit import breaker
 from mcp_trentina_crunchtools.gateway.ingress_defense import reset_verdict_cache
@@ -20,6 +23,16 @@ def _reset_singletons() -> None:
     reset_tool_list_cache()
     reset_profile_tools_cache()
     reset_verdict_cache()
+    # The sqlite connection is bound to the thread that created it, and
+    # Starlette's TestClient runs apps on a worker thread — a connection one
+    # test created on the main thread poisons the next test's defend()
+    # audit write with sqlite3.ProgrammingError. Fresh connection per test.
+    if database_mod._db is not None:
+        with contextlib.suppress(Exception):
+            # close() is itself thread-bound; dropping the reference is the
+            # part that matters.
+            database_mod._db.close()
+        database_mod._db = None
 
 
 @pytest.fixture(autouse=True)

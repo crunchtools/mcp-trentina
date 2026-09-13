@@ -43,6 +43,7 @@ the layers themselves.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, fields
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -60,6 +61,8 @@ from .sanitize.pipeline import (
     sanitize,
     sanitize_text,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .gateway.profile import DefenseConfig
@@ -352,22 +355,31 @@ async def defend(
     )
 
     if flagged_by is not None and record:
-        audit = defense is None or defense.audit
-        if audit:
-            record_detection(
-                source_type=source_type,
-                source=source,
-                domain=domain,
-                layer1_stats=pipeline.stats.to_flat_dict(),
-                risk_level=risk_level,
-                qagent_assessment=assessment,
+        # Bookkeeping must never destroy a verdict that already exists: a
+        # failed SQLite write or D-Bus emit is an audit gap to alarm on, not
+        # a reason for the caller to lose the flag (or, worse, for a proxy
+        # to fall back to forwarding unscanned).
+        try:
+            audit = defense is None or defense.audit
+            if audit:
+                record_detection(
+                    source_type=source_type,
+                    source=source,
+                    domain=domain,
+                    layer1_stats=pipeline.stats.to_flat_dict(),
+                    risk_level=risk_level,
+                    qagent_assessment=assessment,
+                )
+            emit_detection_event(
+                flagged_by.value,
+                source,
+                risk_level,
+                assessment if assessment is not None else pipeline.stats.to_flat_dict(),
             )
-        emit_detection_event(
-            flagged_by.value,
-            source,
-            risk_level,
-            assessment if assessment is not None else pipeline.stats.to_flat_dict(),
-        )
+        except Exception:
+            logger.exception(
+                "defense: failed to record detection for %s (verdict kept)", source
+            )
 
     return DefenseVerdict(
         content=pipeline.content,
