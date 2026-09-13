@@ -412,7 +412,7 @@ class TestPipelineIntegration:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 return_value=malicious_result,
             ),
             patch(

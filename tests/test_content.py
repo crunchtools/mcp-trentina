@@ -192,7 +192,7 @@ class TestQuarantineContent:
         """Q-Agent extraction returns structured content."""
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.content.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 return_value=None,
             ),
             patch(
@@ -230,7 +230,7 @@ class TestQuarantineContent:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.content.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 return_value=malicious,
             ),
             patch(

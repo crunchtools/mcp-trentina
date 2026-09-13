@@ -11,7 +11,7 @@ from ..client import fetch_url
 from ..config import get_config
 from ..database import is_blocked
 from ..dbus_interface import emit_request_event
-from ..defense import defend, enforce_block
+from ..defense import advise, defend, enforce_block
 from ..errors import BlockedSourceError, FetchError, UnsupportedContentTypeError
 from ..quarantine.agent import quarantine_detect, quarantine_extract
 from ..quarantine.classifier import (
@@ -19,7 +19,7 @@ from ..quarantine.classifier import (
     join_warnings,
     truncation_warning,
 )
-from ..sanitize.pipeline import PipelineResult, looks_like_html, sanitize, sanitize_text
+from ..sanitize.pipeline import PipelineResult, sanitize_text
 
 log = logging.getLogger(__name__)
 
@@ -287,12 +287,13 @@ async def quarantine_fetch(url: str, prompt: str) -> dict[str, Any]:
         log.warning("redirect-to-binary advisory for %s: %s", url, exc)
         return _handle_content_type_error(url, exc)
 
-    pipeline_result = sanitize(content) if looks_like_html(content) else sanitize_text(content)
-
     is_trusted = config.is_trusted_domain(url)
 
+    verdict = await advise(content, source=url, source_type="url", is_trusted=is_trusted)
+    pipeline_result = verdict.pipeline
+    classification = verdict.classification
+
     classifier_warning = None
-    classification = await classify_async(pipeline_result.content)
     if classification and classification.label == "MALICIOUS":
         classifier_warning = (
             f"Layer 2 classifier flagged content as MALICIOUS "
