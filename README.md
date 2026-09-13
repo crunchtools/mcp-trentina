@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.crunchtools/trentina -->
 
-Trentina is a secure MCP gateway that quarantines everything between your AI agents and the outside world — web content, MCP tool responses, LLM API keys, network access, and agent-to-agent communication. Named after the 1377 quarantine system from Ragusa, where incoming ships had to anchor offshore for thirty days before anyone was allowed into the city. Same idea: keep the commerce flowing without letting something dangerous through.
+Trentina is a secure MCP gateway that inspects everything between your AI agents and the outside world — web content, MCP tool responses and tool definitions, Matrix messages, LLM completions, and monitoring alerts — through a [three-layer defense pipeline](docs/defense-pipeline.md) at every ingress, with per-profile enforcement (annotate, extract, or block) and a full audit trail. Content is never silently modified: what your agent reads is what actually arrived, plus Trentina's verdict. (E2EE Matrix rooms are ciphertext at the gateway and outside what any proxy can defend.) Named after the 1377 quarantine system from Ragusa, where incoming ships had to anchor offshore for thirty days before anyone was allowed into the city. Same idea: keep the commerce flowing without letting something dangerous through.
 
 ## Capabilities
 
