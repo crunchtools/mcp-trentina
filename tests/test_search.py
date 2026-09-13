@@ -328,10 +328,10 @@ class TestSanitizeL0Output:
         sources = [
             {"uri": "https://example.com", "title": "Example Page"}
         ]
-        text, sanitized, detections, _stats = _sanitize_l0_output(
+        text_result, sanitized, detections, _stats = _sanitize_l0_output(
             "Clean text here.", sources
         )
-        assert text == "Clean text here."
+        assert text_result.content == "Clean text here."
         assert len(sanitized) == 1
         assert sanitized[0]["uri"] == "https://example.com"
         assert detections == 0

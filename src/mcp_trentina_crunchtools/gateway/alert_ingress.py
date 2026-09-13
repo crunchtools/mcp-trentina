@@ -184,9 +184,13 @@ async def _sanitize_and_classify(
 ) -> tuple[bytes, str, bool, _SanitizeCounts]:
     """Run the three-layer defense over an alert payload.
 
-    Returns the bytes to forward (sanitized, and JSON-re-serialized with a
-    ``_trentina_warning`` field if flagged), the L1 risk level, whether the
-    payload was flagged by any layer, and the raw L1 detection counts.
+    Returns the bytes to forward — the payload's content intact, with a
+    ``_trentina_warning`` field attached when flagged (JSON payloads only;
+    plain text has nowhere to carry an annotation, so its warning lives in
+    the log line and the D-Bus event) — plus the L1 risk level, whether any
+    layer flagged, and the raw L1 detection counts. Content is never
+    modified on the way through: L1 detects, the sidecar warns, and the
+    enforcement mode (not this function) decides disposition.
 
     Two things changed when this moved onto the shared pipeline, both
     deliberate:

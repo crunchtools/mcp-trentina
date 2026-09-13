@@ -96,9 +96,27 @@ def risk_level_for_count(suspicious: int) -> str:
 
 @dataclass
 class PipelineResult:
-    """Result from the sanitization pipeline."""
+    """Result from the sanitization pipeline: two views of one payload.
+
+    ``content`` is the DELIVERY view — the caller's text, unmodified. L1
+    never strips: excising lines or tokens destroyed exactly the content an
+    ops agent exists to read (a CVE ticket discusses attacks in the words
+    attacks use), and it destroyed the evidence before the smarter layers
+    could judge it. Disposition belongs to the profile's enforcement mode
+    and the Q-Agent, not to a regex.
+
+    ``scan_view`` is the JUDGMENT view — the same text with obfuscation
+    normalized away: zero-width characters removed, encoded blobs replaced,
+    delimiter tokens dropped. L2 reads this view so an attacker cannot blind
+    a pattern classifier with the very tricks L1 counts. It is derived
+    deterministically from ``content`` and is never delivered.
+
+    The owner's rule (2026-09-13): what the agent receives is byte-identical
+    to what entered the perimeter, or nothing at all.
+    """
 
     content: str
+    scan_view: str
     stats: PipelineStats
     input_size: int
     output_size: int
@@ -123,17 +141,21 @@ def _run_text_stages(
     stops the two paths from drifting: a stage added to only one of them would
     leave text content defended differently from HTML, silently.
 
-    ``original`` is the caller's input, measured for input_size before any
-    stage has run; ``content`` is what the stages should operate on.
+    ``original`` is the caller's raw input, measured for input_size before
+    any stage has run; ``content`` is the delivery text the stages should
+    inspect (for HTML input, the extracted Markdown). The stages' transforms
+    build the scan view; the delivery text passes through untouched.
     """
-    content, stats.unicode = sanitize_unicode(content)
-    content, stats.encoded = sanitize_encoded(content)
-    content, stats.exfiltration = sanitize_exfiltration(content)
-    content, stats.delimiters = sanitize_delimiters(content)
-    content, stats.directives = sanitize_directives(content)
+    scan_view = content
+    scan_view, stats.unicode = sanitize_unicode(scan_view)
+    scan_view, stats.encoded = sanitize_encoded(scan_view)
+    scan_view, stats.exfiltration = sanitize_exfiltration(scan_view)
+    scan_view, stats.delimiters = sanitize_delimiters(scan_view)
+    scan_view, stats.directives = sanitize_directives(scan_view)
 
     return PipelineResult(
         content=content,
+        scan_view=scan_view,
         stats=stats,
         input_size=len(original.encode("utf-8")),
         output_size=len(content.encode("utf-8")),
@@ -141,17 +163,26 @@ def _run_text_stages(
 
 
 def sanitize(html_content: str) -> PipelineResult:
-    """Run the full 8-stage pipeline on HTML content.
+    """Run the full pipeline on HTML content.
+
+    Stages 1-4 are EXTRACTION, not security stripping: converting a page to
+    the Markdown a human would see is the fetch tools' product, and hidden
+    elements are by definition not part of that product. The extracted
+    Markdown is the delivery view; stages 5-9 then build the scan view from
+    it without modifying it.
 
     1. Parse HTML (BeautifulSoup)
     2. Strip hidden elements (display:none, off-screen, same-color)
     3. Strip dangerous tags (script, style, noscript, meta, link) + comments
     4. Convert HTML to Markdown
-    5. Unicode sanitization (zero-width, bidi, control chars, NFKC)
+    5. Unicode normalization (zero-width, bidi, control chars, NFKC)
     6. Encoded payload detection (base64/hex with instruction patterns)
     7. Exfiltration URL detection (suspicious markdown images)
-    8. LLM delimiter stripping
-    9. Directive detection (count only — text unmodified)
+    8. LLM delimiter detection
+    9. Directive detection
+
+    Stages 5-9 transform only the scan view and count detections; the
+    delivery view is what stage 4 produced.
     """
     stats = PipelineStats()
     content, stats.html = sanitize_html(html_content)

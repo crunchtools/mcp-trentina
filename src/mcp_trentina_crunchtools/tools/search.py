@@ -31,10 +31,10 @@ from ..sanitize.pipeline import PipelineResult, PipelineStats, sanitize_text
 
 def _sanitize_l0_output(
     text: str, sources: list[dict[str, str]],
-) -> tuple[str, list[dict[str, str | bool]], int, PipelineStats]:
+) -> tuple[PipelineResult, list[dict[str, str | bool]], int, PipelineStats]:
     """Run L1 on L0's synthesized text and source titles.
 
-    Returns (sanitized_text, sanitized_sources, total_detections, merged_stats).
+    Returns (text_result, scanned_sources, total_detections, merged_stats).
 
     The merged stats are what let the shared pipeline judge this the same way
     it judges everything else: L1 ran across several fields here, so the
@@ -43,7 +43,7 @@ def _sanitize_l0_output(
     text_result = sanitize_text(text)
     merged = PipelineStats()
     merge_stats(merged, text_result.stats)
-    sanitized_sources = []
+    scanned_sources = []
     total_detections = text_result.stats.total_detections()
 
     for source in sources:
@@ -55,13 +55,13 @@ def _sanitize_l0_output(
             title_r.stats.total_detections()
             + url_r.stats.total_detections()
         )
-        sanitized_sources.append({
+        scanned_sources.append({
             "uri": url_r.content,
             "title": title_r.content,
             "redirect_failed": source.get("redirect_failed", False),
         })
 
-    return text_result.content, sanitized_sources, total_detections, merged
+    return text_result, scanned_sources, total_detections, merged
 
 
 async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
@@ -74,9 +74,10 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
         raise BlockedSourceError(f"search:{query}", str(exc)) from exc
 
     resolved_sources = await resolve_grounding_urls(raw.get("sources", []))
-    sanitized_text, sanitized_sources, total_l1, l1_stats = _sanitize_l0_output(
+    text_result, sanitized_sources, total_l1, l1_stats = _sanitize_l0_output(
         raw["text"], resolved_sources
     )
+    sanitized_text = text_result.content
 
     # safe_search blocks on an L1 COUNT, not a risk level — a fifth distinct
     # L1 policy across the tools. Policy stays with the caller by design; only
@@ -96,6 +97,7 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
         l3_gate=False,
         precomputed_l1=PipelineResult(
             content=sanitized_text,
+            scan_view=text_result.scan_view,
             stats=l1_stats,
             input_size=len(raw["text"]),
             output_size=len(sanitized_text),
@@ -160,9 +162,10 @@ async def quarantine_search(
         }
 
     resolved_sources = await resolve_grounding_urls(raw.get("sources", []))
-    sanitized_text, sanitized_sources, _total_l1, _l1_stats = _sanitize_l0_output(
+    text_result, sanitized_sources, _total_l1, _l1_stats = _sanitize_l0_output(
         raw["text"], resolved_sources
     )
+    sanitized_text = text_result.content
 
     classifier_warning = None
     verdict = await advise(
