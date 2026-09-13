@@ -9,6 +9,7 @@ its own, which is exactly the production shape on a box where ONNX failed.
 from __future__ import annotations
 
 import json
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -433,3 +434,166 @@ class TestEnforcement:
         assert result["isError"] is True
         assert HOSTILE not in json.dumps(result["content"])
         assert result["_trentina_warning"]["blocked"] is True
+
+
+class TestAdversarialReviewFixes:
+    """Regressions for the 2026-09-13 adversarial review findings."""
+
+    def _block_profile(self) -> Profile:
+        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+
+        p = _profile("kagetora")
+        p.defense = DefenseConfig(enforcement="block")
+        return p
+
+    async def test_h1_truncated_l2_scan_blocks(self) -> None:
+        """Padding past the classifier's token cap used to walk a payload
+        through block mode: L2 scanned only the benign head and reported
+        benign. 'We could not finish reading this' now refuses."""
+        from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
+
+        truncated_benign = ClassifierResult(
+            label="BENIGN", score=0.01, latency_ms=1.0, truncated=True,
+        )
+        with patch(
+            "mcp_trentina_crunchtools.defense.classify_async",
+            new_callable=AsyncMock,
+            return_value=truncated_benign,
+        ):
+            decision = await scan_tool_response(
+                profile=self._block_profile(),
+                backend_name="jira",
+                tool_name="jira_get_issue",
+                content_blocks=[{"type": "text", "text": "benign head " * 100}],
+                structured_content=None,
+            )
+        assert decision.blocked
+        assert decision.warning is not None
+        assert decision.warning["l2_truncated"] is True
+
+    async def test_h1_truncated_scan_only_warns_in_annotate(self) -> None:
+        from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
+
+        truncated_benign = ClassifierResult(
+            label="BENIGN", score=0.01, latency_ms=1.0, truncated=True,
+        )
+        with patch(
+            "mcp_trentina_crunchtools.defense.classify_async",
+            new_callable=AsyncMock,
+            return_value=truncated_benign,
+        ):
+            decision = await scan_tool_response(
+                profile=_profile(),
+                backend_name="jira",
+                tool_name="jira_get_issue",
+                content_blocks=[{"type": "text", "text": "benign head " * 100}],
+                structured_content=None,
+            )
+        assert not decision.blocked
+        assert decision.warning is not None and decision.warning["l2_truncated"]
+
+    async def test_h3_l3_unavailable_blocks(self) -> None:
+        """An L3 that answers 'clean' when it means 'down' used to let every
+        MODEL_OUTPUT payload through a provider outage."""
+        with (
+            patch(
+                "mcp_trentina_crunchtools.defense.get_config",
+            ) as cfg,
+            patch(
+                "mcp_trentina_crunchtools.defense.classify_async",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "mcp_trentina_crunchtools.defense.quarantine_detect",
+                new_callable=AsyncMock,
+                return_value={
+                    "injection_detected": False,
+                    "l3_unavailable": True,
+                    "risk_level": "low",
+                },
+            ),
+        ):
+            cfg.return_value.has_api_key = True
+            decision = await scan_tool_response(
+                profile=self._block_profile(),
+                backend_name="jira",
+                tool_name="jira_get_issue",
+                content_blocks=[{"type": "text", "text": "ordinary content"}],
+                structured_content=None,
+            )
+        assert decision.blocked
+        assert decision.warning is not None
+        assert decision.warning["l3_unavailable"] is True
+
+    async def test_m1_poisoned_description_withheld_under_block(self) -> None:
+        tools = [
+            {"name": "good_tool", "description": "Reads a ticket."},
+            {"name": "bad_tool", "description": HOSTILE},
+        ]
+        result = await scan_tool_list(self._block_profile(), "jira", tools, tools)
+        names = [t["name"] for t in result]
+        assert "good_tool" in names
+        assert "bad_tool" not in names, (
+            "a poisoned description's attack is being read during tool "
+            "selection; blocking it means withholding the tool"
+        )
+
+    async def test_m5_hostile_json_keys_are_judged(self) -> None:
+        decision = await scan_tool_response(
+            profile=_profile(),
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=None,
+            structured_content={HOSTILE: True, "status": "Open"},
+        )
+        assert decision.warning is not None
+        assert decision.warning["l1_suspicious"] > 0
+
+    async def test_h2_depth_bomb_does_not_explode_collection(self) -> None:
+        bomb: Any = "payload"
+        for _ in range(5000):
+            bomb = [bomb]
+        decision = await scan_tool_response(
+            profile=_profile(),
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=None,
+            structured_content={"data": bomb, "note": HOSTILE},
+        )
+        assert decision.warning is not None, (
+            "deep nesting must not turn the scan into a fail-open"
+        )
+
+    async def test_visible_warning_block_is_appended(self) -> None:
+        """A sibling key is what strict clients strip; the text block is the
+        guaranteed channel."""
+        from mcp_trentina_crunchtools.gateway.backend import BackendCall
+        from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
+
+        async def fake_call(*_args: object, **_kwargs: object) -> BackendCall:
+            return BackendCall(
+                content=[{"type": "text", "text": HOSTILE}],
+                is_error=False,
+                structured_content=None,
+            )
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+            side_effect=fake_call,
+        ):
+            resp = await route_jsonrpc(
+                _profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 11,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"jira{NAMESPACE_SEP}jira_get_issue",
+                        "arguments": {},
+                    },
+                },
+            )
+        blocks = resp["result"]["content"]
+        assert blocks[0]["text"] == HOSTILE, "original content intact"
+        assert "[TRENTINA WARNING]" in blocks[-1]["text"]

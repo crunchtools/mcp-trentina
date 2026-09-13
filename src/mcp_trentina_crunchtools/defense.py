@@ -178,8 +178,15 @@ def _should_run_l3(
     hit sends the full original to the judge that can tell an attack from a
     CVE ticket discussing one.
     """
-    # Gate shut by the caller, or no provider configured to ask.
-    if not l3_gate or not get_config().has_api_key:
+    # Gate shut by the caller, or no provider configured to ask. has_api_key
+    # is Gemini's; a profile that overrides defense.provider brings its own
+    # key (validated at profile load) or is keyless ollama — for those the
+    # gate opens and an actually-broken provider surfaces as l3_unavailable
+    # in the assessment rather than as a silent never-ran.
+    no_provider = not get_config().has_api_key and (
+        defense is None or defense.provider is None
+    )
+    if not l3_gate or no_provider:
         return False
 
     if defense is not None and not defense.quarantine:
@@ -259,6 +266,7 @@ async def defend(
     l3_context: str | None = None,
     l3_max_chars: int | None = None,
     precomputed_l1: PipelineResult | None = None,
+    attribution: dict[str, Any] | None = None,
 ) -> DefenseVerdict:
     """Run the three layers over one piece of content and report a verdict.
 
@@ -323,10 +331,17 @@ async def defend(
         else:
             classification = await classify_async(pipeline.scan_view)
 
+    # A profile's classify_threshold was parsed and never read — production
+    # set 0.3 believing it tightened the gate, and it did nothing (the label
+    # is computed against the global CLASSIFIER_THRESHOLD). Honour it: either
+    # leg flags.
     l2_flagged = (
         classification is not None
-        and classification.label == "MALICIOUS"
         and not is_trusted
+        and (
+            classification.label == "MALICIOUS"
+            or (defense is not None and classification.score >= defense.classify_threshold)
+        )
     )
 
     l3_assessment: dict[str, Any] | None = None
@@ -362,6 +377,7 @@ async def defend(
         try:
             audit = defense is None or defense.audit
             if audit:
+                attr = attribution or {}
                 record_detection(
                     source_type=source_type,
                     source=source,
@@ -369,6 +385,12 @@ async def defend(
                     layer1_stats=pipeline.stats.to_flat_dict(),
                     risk_level=risk_level,
                     qagent_assessment=assessment,
+                    profile=attr.get("profile"),
+                    backend=attr.get("backend"),
+                    tool=attr.get("tool"),
+                    direction=attr.get("direction"),
+                    provenance=provenance.value,
+                    blocked=bool(attr.get("blocked", True)),
                 )
             emit_detection_event(
                 flagged_by.value,
@@ -470,28 +492,37 @@ def sanitize_json_value(
     a `structuredContent` dict on exactly the same terms, so this belongs in
     the pipeline rather than in one endpoint.
 
-    Since L1 stopped modifying content the "rebuild" is the identity — the
-    delivered payload is byte-identical to the input. What this walk produces
+    Since L1 stopped modifying content there is no rebuild at all — the
+    input object is returned as-is, and the walk is ITERATIVE, because a
+    4KB "[[[[..." depth bomb against a recursive walk was an
+    attacker-triggerable RecursionError, and the except around the scan
+    turned that into a fail-open. What this walk produces
     is the accounting: merged stats across every leaf, the original leaf texts
     (``texts``) joined for L3, and the normalized leaf texts (``scan_views``)
     joined for L2. Leaves are inspected individually but judged as one
     document — a classifier shown one field at a time cannot see an
     instruction split across two of them.
     """
-    if isinstance(value, str):
-        result = sanitize_text(value)
-        merge_stats(stats, result.stats)
-        texts.append(result.content)
-        if scan_views is not None:
-            scan_views.append(result.scan_view)
-        return result.content
-    if isinstance(value, dict):
-        return {
-            k: sanitize_json_value(v, texts, stats, scan_views)
-            for k, v in value.items()
-        }
-    if isinstance(value, list):
-        return [sanitize_json_value(v, texts, stats, scan_views) for v in value]
+    stack: list[Any] = [value]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, str):
+            if not node:
+                continue
+            result = sanitize_text(node)
+            merge_stats(stats, result.stats)
+            texts.append(result.content)
+            if scan_views is not None:
+                scan_views.append(result.scan_view)
+        elif isinstance(node, dict):
+            # Keys too: a model reads {"IGNORE ALL PREVIOUS ...": true} the
+            # same way it reads a value, and keys used to be a scan-free
+            # channel. Reversed so the joined document keeps source order.
+            for k, v in reversed(list(node.items())):
+                stack.append(v)
+                stack.append(k)
+        elif isinstance(node, list):
+            stack.extend(reversed(node))
     return value
 
 

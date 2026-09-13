@@ -404,8 +404,14 @@ async def quarantine_detect(
             )
     except QuarantineAgentError as exc:
         logger.warning("Q-Agent detection failed: %s", exc)
+        # "We could not ask" is not "no injection". The distinct marker lets
+        # enforcement tell an unavailable judge from a clean verdict — a
+        # block-mode profile fails closed on it, and the adversarial review
+        # showed why: padding a payload past the provider's input limit used
+        # to buy a permanent, silent "clean".
         return {
             "injection_detected": False,
+            "l3_unavailable": True,
             "risk_level": "low",
             "summary": f"Q-Agent detection failed: {exc}",
         }

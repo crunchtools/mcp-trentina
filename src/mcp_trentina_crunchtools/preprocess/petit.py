@@ -15,6 +15,16 @@ the perimeter scan. Conversely, an attacker who crafts a payload to collide
 with a boilerplate group achieves only its deletion — dropped lines are
 never delivered, and a line that is never delivered injects nothing.
 
+Known limitation (adversarial review, 2026-09-13): an attacker who can
+WRITE to a shared log ahead of time can pre-seed sample slots — three lines
+matching a predicted alert's fingerprint mean the real fourth line is
+counted but not shown, and the samples the agent reads carry the attacker's
+values. "Collision achieves only deletion" therefore holds against payload
+SMUGGLING, not against suppression of a victim line by an attacker with
+prior write access to the same stream. The group count still shows the line
+existed, and the [petit] summary prefix is in-band (spoofable) — consumers
+must treat petit output as untrusted, which the perimeter already assumes.
+
 Honest scope (from the plan, deliberately): petit reduces log-shaped
 content. It does ~nothing for prose, minified JS, base64 blobs, or extracted
 PDF text, and it declines (applied=False) rather than pretend.
