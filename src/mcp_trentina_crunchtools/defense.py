@@ -235,6 +235,7 @@ async def defend(
     record: bool = True,
     l3_gate: bool = True,
     l3_context: str | None = None,
+    l3_max_chars: int | None = None,
     precomputed_l1: PipelineResult | None = None,
 ) -> DefenseVerdict:
     """Run the three layers over one piece of content and report a verdict.
@@ -264,6 +265,10 @@ async def defend(
             Only the alert ingress and scan tools did this before; telling L3
             what L1 already found measurably sharpens its judgement, so it is
             available to every caller rather than two.
+        l3_max_chars: Bound what L3 is shown. The scan tools cap this today;
+            the others do not. Preserved rather than unified because the
+            reduction layer (plan step 3) replaces truncation outright, and
+            picking a winner between the two behaviours now would be churn.
         l3_gate: Run L3 as a *detection gate*. The quarantine_* tools turn this
             off because they spend L3 on extraction instead — same layer, doing
             the tool's job rather than guarding the door. Running both would
@@ -308,9 +313,12 @@ async def defend(
         classification=classification,
         l3_gate=l3_gate,
     ):
-        l3_assessment = await quarantine_detect(
-            pipeline.content, layer1_context=l3_context
+        l3_input = (
+            pipeline.content[:l3_max_chars]
+            if l3_max_chars is not None
+            else pipeline.content
         )
+        l3_assessment = await quarantine_detect(l3_input, layer1_context=l3_context)
         l3_flagged = bool(l3_assessment.get("injection_detected"))
 
     flagged_by, risk_level, assessment = _decide(

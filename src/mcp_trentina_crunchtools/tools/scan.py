@@ -5,16 +5,23 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..client import fetch_url
 from ..config import get_config
 from ..dbus_interface import emit_request_event
+from ..defense import advise, defend
 from ..errors import FileReadError
-from ..quarantine.agent import quarantine_detect
-from ..quarantine.classifier import classify_async
-from ..sanitize.pipeline import looks_like_html, sanitize, sanitize_text
+from ..sanitize.pipeline import (
+    PipelineResult,
+    looks_like_html,
+    sanitize,
+    sanitize_text,
+)
 from ..sanitize.shadows import detect_module_shadows
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ..quarantine.classifier import ClassifierResult
 from .read import _validate_file
 
 _RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
@@ -30,6 +37,20 @@ _RECOMMENDATIONS = {
 def _risk_order(level: str) -> int:
     """Return numeric risk order for comparison."""
     return _RISK_ORDER.get(level, 0)
+
+
+def _classifier_result(
+    classification: ClassifierResult | None,
+) -> dict[str, Any] | None:
+    """Shape the L2 result for a scan report, or None if L2 did not run."""
+    if classification is None:
+        return None
+    return {
+        "label": classification.label,
+        "score": classification.score,
+        "latency_ms": classification.latency_ms,
+        "truncated": classification.truncated,
+    }
 
 
 def _build_layer1_context(stats: dict[str, int], detections: int) -> str | None:
@@ -138,29 +159,24 @@ async def quarantine_scan(
     config = get_config()
     content, source_type, source = await _fetch_content(url, path)
 
-    pipeline_result = (
-        sanitize(content) if looks_like_html(content, path) else sanitize_text(content)
+    l1 = sanitize(content) if looks_like_html(content, path) else sanitize_text(content)
+    layer1_stats = l1.stats.to_flat_dict()
+    layer1_risk = l1.stats.risk_level()
+    layer1_detections = l1.stats.total_detections()
+
+    verdict = await defend(
+        content,
+        source=source,
+        source_type=source_type,
+        guarded=False,
+        record=False,
+        precomputed_l1=l1,
+        l3_context=_build_layer1_context(layer1_stats, layer1_detections),
+        l3_max_chars=config.max_content,
     )
-
-    layer1_stats = pipeline_result.stats.to_flat_dict()
-    layer1_risk = pipeline_result.stats.risk_level()
-    layer1_detections = pipeline_result.stats.total_detections()
-
-    classifier_result = None
-    classification = await classify_async(pipeline_result.content)
-    if classification:
-        classifier_result = {
-            "label": classification.label,
-            "score": classification.score,
-            "latency_ms": classification.latency_ms,
-            "truncated": classification.truncated,
-        }
-
-    qagent_assessment = None
-    if config.has_api_key:
-        truncated = pipeline_result.content[: config.max_content]
-        layer1_context = _build_layer1_context(layer1_stats, layer1_detections)
-        qagent_assessment = await quarantine_detect(truncated, layer1_context=layer1_context)
+    pipeline_result = verdict.pipeline
+    classifier_result = _classifier_result(verdict.classification)
+    qagent_assessment = verdict.l3_assessment
 
     result = _build_scan_result(
         source_type=source_type,
@@ -182,7 +198,7 @@ async def quarantine_scan(
         l1_detections=layer1_detections,
         l1_suspicious=0,
         l2_label=str(classifier_result["label"]) if classifier_result else None,
-        l2_score=float(classifier_result["score"]) if classifier_result else None,  # type: ignore[arg-type]
+        l2_score=float(classifier_result["score"]) if classifier_result else None,
         input_size=pipeline_result.input_size,
         output_size=pipeline_result.output_size,
         stats=layer1_stats,
@@ -214,29 +230,33 @@ async def deep_quarantine_scan(
     config = get_config()
     content, source_type, source = await _fetch_content(url, path)
 
-    pipeline_result = (
-        sanitize(content) if looks_like_html(content, path) else sanitize_text(content)
+    l1 = sanitize(content) if looks_like_html(content, path) else sanitize_text(content)
+    layer1_stats = l1.stats.to_flat_dict()
+    layer1_risk = l1.stats.risk_level()
+    layer1_detections = l1.stats.total_detections()
+
+    # Deep scan's whole point: L1 reports what it found, but L2 and L3 read the
+    # ORIGINAL text, because L1 strips the very vectors they are best at
+    # judging. Expressed by handing the pipeline L1's real stats alongside raw
+    # content — no special mode, just honest inputs.
+    verdict = await defend(
+        content,
+        source=source,
+        source_type=source_type,
+        guarded=False,
+        record=False,
+        precomputed_l1=PipelineResult(
+            content=content,
+            stats=l1.stats,
+            input_size=l1.input_size,
+            output_size=l1.output_size,
+        ),
+        l3_context=_build_layer1_context(layer1_stats, layer1_detections),
+        l3_max_chars=config.max_content,
     )
-
-    layer1_stats = pipeline_result.stats.to_flat_dict()
-    layer1_risk = pipeline_result.stats.risk_level()
-    layer1_detections = pipeline_result.stats.total_detections()
-
-    classifier_result = None
-    classification = await classify_async(content)
-    if classification:
-        classifier_result = {
-            "label": classification.label,
-            "score": classification.score,
-            "latency_ms": classification.latency_ms,
-            "truncated": classification.truncated,
-        }
-
-    qagent_assessment = None
-    if config.has_api_key:
-        truncated = content[: config.max_content]
-        layer1_context = _build_layer1_context(layer1_stats, layer1_detections)
-        qagent_assessment = await quarantine_detect(truncated, layer1_context=layer1_context)
+    pipeline_result = verdict.pipeline
+    classifier_result = _classifier_result(verdict.classification)
+    qagent_assessment = verdict.l3_assessment
 
     result = _build_scan_result(
         source_type=source_type,
@@ -258,7 +278,7 @@ async def deep_quarantine_scan(
         l1_detections=layer1_detections,
         l1_suspicious=0,
         l2_label=str(classifier_result["label"]) if classifier_result else None,
-        l2_score=float(classifier_result["score"]) if classifier_result else None,  # type: ignore[arg-type]
+        l2_score=float(classifier_result["score"]) if classifier_result else None,
         input_size=pipeline_result.input_size,
         output_size=pipeline_result.output_size,
         stats=layer1_stats,
@@ -284,14 +304,15 @@ async def _scan_py_files(resolved: str) -> list[dict[str, Any]]:
         except OSError:
             continue
 
-        pipeline_result = sanitize_text(content)
-
+        verdict = await advise(
+            content, source=entry.path, source_type="file", is_html=False
+        )
+        pipeline_result = verdict.pipeline
         classifier_result = None
-        classification = await classify_async(pipeline_result.content)
-        if classification:
+        if verdict.classification is not None:
             classifier_result = {
-                "label": classification.label,
-                "score": classification.score,
+                "label": verdict.classification.label,
+                "score": verdict.classification.score,
             }
 
         is_suspicious = pipeline_result.stats.suspicious_detections() > 0

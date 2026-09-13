@@ -454,7 +454,7 @@ class TestPipelineIntegration:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.scan.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 return_value=benign_result,
             ),
             patch(
@@ -481,7 +481,7 @@ class TestPipelineIntegration:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.scan.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 return_value=None,
             ),
             patch(
