@@ -8,6 +8,7 @@ crosses the defense pipeline on the way in.
 from .base import Cost, PreProcessContext, PreProcessor, PreProcessResult
 from .compose import PreProcessOutcome, Strategy, run_preprocessors
 from .petit import PetitProcessor
+from .summarize import SummarizeProcessor
 
 __all__ = [
     "Cost",
@@ -17,5 +18,6 @@ __all__ = [
     "PreProcessResult",
     "PreProcessor",
     "Strategy",
+    "SummarizeProcessor",
     "run_preprocessors",
 ]
