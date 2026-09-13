@@ -194,7 +194,39 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     load_tool_list_cache()
     set_profiles(gateway_config.profiles)
 
+    _warm_classifier()
+
     mcp_server.run(transport="streamable-http", host=host, port=port, log_level=log_level)
+
+
+def _warm_classifier() -> None:
+    """Load L2 at startup instead of on first scan, and say so out loud.
+
+    The classifier lazy-loads on first use. In production on 2026-09-09 that
+    first use arrived eight hours after the container started — so for eight
+    hours the gateway was serving traffic with L2 unavailable, and nothing
+    said so. `classify()` returns None when the model is absent and every
+    caller proceeds, which means an absent layer is indistinguishable from a
+    layer that looked and found nothing.
+
+    Loading here converts a silent gap into a startup log line and a /health
+    field that is true from the first request. It does not make the gateway
+    refuse to start: a box with no model should still proxy, still sanitize,
+    and still be obviously degraded rather than quietly so.
+    """
+    import logging
+
+    from .quarantine.classifier import classifier_status, is_classifier_available
+
+    log = logging.getLogger(__name__)
+    if is_classifier_available():
+        log.info("gateway: L2 classifier loaded at startup (%s)", classifier_status())
+    else:
+        log.warning(
+            "gateway: L2 classifier UNAVAILABLE (%s) — L1 only. /health reports "
+            "this; alert on it rather than assuming the layer is running.",
+            classifier_status(),
+        )
 
 
 def _wire_circuit_notifications(
