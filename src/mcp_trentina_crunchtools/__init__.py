@@ -198,7 +198,48 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
 
     _warm_classifier()
 
-    mcp_server.run(transport="streamable-http", host=host, port=port, log_level=log_level)
+    legacy_mcp = os.environ.get("TRENTINA_LEGACY_MCP", "").strip().lower() in _TRUTHY
+    if legacy_mcp:
+        logger.warning(
+            "gateway: legacy /mcp endpoint ENABLED (TRENTINA_LEGACY_MCP) — it "
+            "bypasses gateway auth, allowlists, and audit; migrate consumers "
+            "to /gateway/<profile>/mcp and unset the variable",
+        )
+        mcp_path = "/mcp"
+    else:
+        # The legacy endpoint served Trentina's full tool surface with no
+        # bearer, no allowlist, and no audit — a bypass of everything the
+        # gateway enforces. FastMCP must still mount its own MCP app
+        # somewhere, so it goes to a per-boot unguessable path that nothing
+        # is told about, and /mcp itself answers 410 with directions.
+        import secrets as _secrets
+
+        mcp_path = f"/mcp-internal-{_secrets.token_hex(16)}"
+
+        from starlette.responses import Response as _Response
+
+        async def legacy_mcp_tombstone(_request: object) -> _Response:
+            return _Response(
+                content=(
+                    "The unauthenticated /mcp endpoint is closed. Use "
+                    "/gateway/<profile>/mcp with your profile's bearer token."
+                ),
+                status_code=410,
+                media_type="text/plain",
+            )
+
+        mcp_server.custom_route("/mcp", methods=["GET", "POST", "DELETE"])(
+            legacy_mcp_tombstone
+        )
+        logger.info("gateway: legacy /mcp closed (410); MCP app mounted internally")
+
+    mcp_server.run(
+        transport="streamable-http",
+        host=host,
+        port=port,
+        log_level=log_level,
+        path=mcp_path,
+    )
 
 
 def _warm_classifier() -> None:
