@@ -88,7 +88,7 @@ class TestDeepScanVsStandardScan:
             patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
             patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
             patch(
-                "mcp_trentina_crunchtools.tools.scan.quarantine_detect",
+                "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):
@@ -129,7 +129,7 @@ class TestDeepScanVsStandardScan:
             patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
             patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
             patch(
-                "mcp_trentina_crunchtools.tools.scan.quarantine_detect",
+                "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):
@@ -170,10 +170,14 @@ class TestDeepScanVsStandardScan:
             patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
             patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
             patch(
-                "mcp_trentina_crunchtools.tools.scan.quarantine_detect",
+                "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
+            # The pipeline reads its own config for the L3 gate; patching only
+            # the tool's would leave L3 enabled here.
+            patch("mcp_trentina_crunchtools.defense.get_config") as defense_config,
         ):
+            defense_config.return_value.has_api_key = False
             mock_fetch.return_value = ("content", "file", "/tmp/test.txt")
             mock_html.return_value = False
 
