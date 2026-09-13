@@ -35,8 +35,14 @@ Thumbs.db
 .env
 *.env.local
 
-# UV
-uv.lock
+# uv.lock is deliberately NOT ignored (issue #79). Every dependency in
+# pyproject.toml is floor-pinned with no upper bound, so without a committed
+# lockfile CI resolved fresh on every run and a transitive release could break
+# the build with no change to this repo — which is exactly how mypy started
+# failing on `mcp.client.streamable_http`. The lock is the only thing that makes
+# a green CI run mean anything.
+
+# MCP registry tokens
 .mcpregistry_github_token
 .mcpregistry_registry_token
 
