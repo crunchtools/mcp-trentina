@@ -88,7 +88,6 @@ def _enter_fetch_patches(
 
     pf("fetch_url", return_value=(content, "text/html"))
     pf("is_blocked", return_value=None)
-    pf("classify_async", return_value=classification)
     pf("quarantine_extract", return_value={"content": {"extracted_text": "x"}})
     cfg = pf("get_config")
     cfg.return_value.is_trusted_domain.return_value = trusted
@@ -224,10 +223,11 @@ class TestQuarantineFetchWarnsInsteadOfBlocking:
                   return_value=("<p>hi</p>", "text/html")),
             patch("mcp_trentina_crunchtools.tools.fetch.is_blocked",
                   return_value={"detected_at": "2026-01-01T00:00:00Z"}),
-            patch("mcp_trentina_crunchtools.tools.fetch.classify_async",
-                  return_value=BENIGN),
             patch("mcp_trentina_crunchtools.tools.fetch.get_config") as cfg,
+            patch(f"{_DEFENSE}.classify_async", return_value=BENIGN),
+            patch(f"{_DEFENSE}.get_config") as dcfg,
         ):
+            dcfg.return_value.has_api_key = False
             cfg.return_value.is_trusted_domain.return_value = True
             cfg.return_value.has_api_key = False
             cfg.return_value.fallback = "warn"
