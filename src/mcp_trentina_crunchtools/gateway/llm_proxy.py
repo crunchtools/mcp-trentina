@@ -261,7 +261,7 @@ async def _proxy_llm(
     )
 
     return await _forward_upstream(
-        request, upstream_url, fwd_headers, provider_name,
+        request, upstream_url, fwd_headers, provider_name, profile,
     )
 
 
@@ -270,6 +270,7 @@ async def _forward_upstream(
     upstream_url: str,
     fwd_headers: dict[str, str],
     provider_name: str,
+    profile: Profile,
 ) -> Response:
     """Send the (already-authorized, key-injected) request to the provider."""
     has_body = request.method in ("POST", "PUT", "PATCH")
@@ -299,21 +300,100 @@ async def _forward_upstream(
             status_code=502, media_type=PLAIN_TEXT,
         )
 
-    return _streaming_response(resp)
+    return _streaming_response(resp, provider_name, profile)
 
 
-def _streaming_response(resp: httpx.Response) -> StreamingResponse:
+# Buffer completions up to this size for the post-hoc scan; a longer stream
+# is passed through with its tail unscanned and a logged warning.
+_MAX_COMPLETION_SCAN_BYTES = 16 * 1024 * 1024
+
+
+def _streaming_response(
+    resp: httpx.Response, provider_name: str, profile: Profile,
+) -> StreamingResponse:
+    """Stream the provider response through, then judge what streamed.
+
+    Per-frame scanning is theater: a 512-token-window classifier over
+    ~5-token deltas never sees an instruction whole, anything spanning two
+    frames is invisible, and a verdict at frame N cannot retract frames
+    1..N-1 already sent. So the stream passes untouched and the ASSEMBLED
+    completion is judged after the last frame — that cannot protect this
+    response, but it records the flag (source_type=llm_completion), feeds
+    step 7's calibration, and is exactly what annotate mode means for a
+    transport that cannot carry an annotation. When enforcement modes land,
+    block profiles switch to buffer-scan-release instead: an autonomous
+    agent has no human waiting on time-to-first-token.
+    """
     resp_headers = filter_response_headers(list(resp.headers.items()))
 
+    collected: list[bytes] = []
+    size_seen = 0
+
     async def stream_body() -> AsyncIterator[bytes]:
+        nonlocal size_seen
         try:
             async for chunk in resp.aiter_bytes():
+                if size_seen <= _MAX_COMPLETION_SCAN_BYTES:
+                    collected.append(chunk)
+                size_seen += len(chunk)
                 yield chunk
         finally:
             await resp.aclose()
+            _schedule_completion_scan(
+                b"".join(collected), size_seen, provider_name, profile,
+            )
 
     ct = resp.headers.get("content-type", "application/json")
     return StreamingResponse(
         stream_body(), status_code=resp.status_code,
         headers=resp_headers, media_type=ct,
     )
+
+
+def _schedule_completion_scan(
+    body: bytes, size_seen: int, provider_name: str, profile: Profile,
+) -> None:
+    """Fire-and-forget the post-hoc completion scan; never block the stream."""
+    import asyncio
+
+    if not body:
+        return
+    if size_seen > _MAX_COMPLETION_SCAN_BYTES:
+        logger.warning(
+            "llm_proxy: completion from %s exceeded %d bytes — tail unscanned",
+            provider_name, _MAX_COMPLETION_SCAN_BYTES,
+        )
+
+    async def _scan() -> None:
+        try:
+            from ..defense import Provenance, defend
+
+            text = body.decode("utf-8", errors="replace")
+            verdict = await defend(
+                text,
+                source=f"llm:{profile.name}:{provider_name}",
+                source_type="llm_completion",
+                defense=profile.defense,
+                provenance=Provenance.MODEL_OUTPUT,
+                is_html=False,
+                guarded=False,
+            )
+            if verdict.flagged:
+                logger.warning(
+                    "llm_proxy: completion flagged profile=%s provider=%s "
+                    "risk=%s flagged_by=%s (already streamed — recorded only)",
+                    profile.name, provider_name, verdict.risk_level,
+                    verdict.flagged_by.value if verdict.flagged_by else None,
+                )
+        except Exception:
+            logger.exception("llm_proxy: post-hoc completion scan failed")
+
+    try:
+        task = asyncio.get_running_loop().create_task(_scan())
+        _scan_tasks.add(task)
+        task.add_done_callback(_scan_tasks.discard)
+    except RuntimeError:
+        logger.debug("llm_proxy: no event loop for post-hoc scan")
+
+
+_scan_tasks: set[Any] = set()
