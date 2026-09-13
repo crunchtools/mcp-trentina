@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from starlette.responses import Response, StreamingResponse
 
-from ..defense import defend_json
+from ..defense import defend, defend_json
 from .proxy_utils import (
     PLAIN_TEXT,
     filter_response_headers,
@@ -65,8 +65,13 @@ MATRIX_HTTP_METHODS = [
     "GET", "POST", "PUT", "DELETE", "OPTIONS",
 ]
 
-# Endpoints whose responses carry room content the agent will read.
-_SCANNED_PATH_MARKERS = ("/sync", "/messages")
+# Endpoints whose responses carry room content the agent will read. Event
+# and context fetches are exactly what reply-handling bots do; /search is a
+# POST that returns message bodies.
+_SCANNED_PATH_MARKERS = (
+    "/sync", "/messages", "/event/", "/context/", "/relations",
+    "/notifications", "/search",
+)
 
 # Only buffer-and-scan bodies up to this size; a larger one forwards
 # unscanned WITH a logged warning rather than OOMing the gateway. /sync
@@ -154,7 +159,7 @@ def register_matrix_routes(
 
 
 def _should_scan(method: str, path: str) -> bool:
-    return method == "GET" and any(m in path for m in _SCANNED_PATH_MARKERS)
+    return method in ("GET", "POST") and any(m in path for m in _SCANNED_PATH_MARKERS)
 
 
 async def _proxy_matrix(
@@ -237,26 +242,38 @@ async def _scan_and_forward(
     a relay is survivable, the proxy eating the agent's Matrix traffic is
     not.
     """
-    chunks: list[bytes] = []
-    size = 0
-    truncated = False
-    async for chunk in resp.aiter_bytes():
-        size += len(chunk)
-        if size > _MAX_SCAN_BYTES:
-            truncated = True
-        chunks.append(chunk)
-    await resp.aclose()
-    body = b"".join(chunks)
-
     headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
 
-    if truncated:
-        logger.warning(
-            "matrix_proxy: %s response exceeds %d bytes — forwarded unscanned",
-            path, _MAX_SCAN_BYTES,
-        )
-        return Response(content=body, status_code=200,
-                        headers=headers, media_type=content_type)
+    chunks: list[bytes] = []
+    size = 0
+    body_iter = resp.aiter_bytes()
+    async for chunk in body_iter:
+        size += len(chunk)
+        chunks.append(chunk)
+        if size > _MAX_SCAN_BYTES:
+            # Too big to judge: stop BUFFERING (the old guard kept
+            # accumulating and only skipped the scan — an OOM lever), stream
+            # what we have plus the remainder, and say so loudly.
+            logger.warning(
+                "matrix_proxy: %s response exceeds %d bytes — forwarded unscanned",
+                path, _MAX_SCAN_BYTES,
+            )
+
+            async def passthrough() -> AsyncIterator[bytes]:
+                try:
+                    for buffered in chunks:
+                        yield buffered
+                    async for rest in body_iter:
+                        yield rest
+                finally:
+                    await resp.aclose()
+
+            return StreamingResponse(
+                passthrough(), status_code=200,
+                headers=headers, media_type=content_type,
+            )
+    await resp.aclose()
+    body = b"".join(chunks)
 
     try:
         payload = json.loads(body)
@@ -268,7 +285,16 @@ async def _scan_and_forward(
             record=True,
         )
     except Exception:
-        logger.exception("matrix_proxy: scan failed for %s — forwarded unscanned", path)
+        # A parse failure here is attacker-reachable (any room member can
+        # ship pathological JSON), so "scan failed" must not mean "clean":
+        # fall back to judging the raw bytes as TEXT — L1/L2 still read a
+        # plaintext payload buried beside the poison — and forward with the
+        # failure on the record.
+        logger.exception(
+            "matrix_proxy: structured scan failed for %s — text-mode fallback",
+            path,
+        )
+        await _text_fallback_scan(body, profile, path)
         return Response(content=body, status_code=200,
                         headers=headers, media_type=content_type)
 
@@ -288,3 +314,30 @@ async def _scan_and_forward(
 
     return Response(content=body, status_code=200,
                     headers=headers, media_type=content_type)
+
+
+async def _text_fallback_scan(body: bytes, profile: Profile, path: str) -> None:
+    """Judge unparseable response bytes as plain text; record any flag.
+
+    The annotation channel is gone (no JSON to attach a key to), so the flag
+    lives in the detections table and the log — degraded, but never the
+    silent clean the recursive-parse fail-open used to produce.
+    """
+    try:
+        verdict = await defend(
+            body.decode("utf-8", errors="replace"),
+            source=f"matrix:{profile.name}:{path}",
+            source_type="matrix_sync",
+            defense=profile.defense,
+            is_html=False,
+            guarded=False,
+        )
+        if verdict.flagged:
+            logger.error(
+                "matrix_proxy: UNPARSEABLE response FLAGGED for profile=%s "
+                "path=%s risk=%s — forwarded (no annotation channel); "
+                "investigate the sender",
+                profile.name, path, verdict.risk_level,
+            )
+    except Exception:
+        logger.exception("matrix_proxy: text-mode fallback scan failed for %s", path)

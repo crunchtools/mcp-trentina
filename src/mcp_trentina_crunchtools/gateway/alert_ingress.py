@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from starlette.responses import Response
 
-from ..defense import advise, defend_json
+from ..defense import defend, defend_json
 from ..sanitize.pipeline import risk_level_for_count
 
 if TYPE_CHECKING:
@@ -229,8 +229,12 @@ async def _sanitize_and_classify(
         final = verdict.verdict
     else:
         text = body.decode("utf-8", errors="replace")
-        first = await advise(
-            text, source=source, source_type="alert", defense=defense, is_html=False,
+        # defend(), not advise(): advise shuts the L3 gate, and the text
+        # branch used to get Q-Agent detection before the refactor — losing
+        # it here was a silent downgrade for every non-JSON alert body.
+        first = await defend(
+            text, source=source, source_type="alert", defense=defense,
+            is_html=False, guarded=False, record=False,
         )
         counts = _SanitizeCounts(
             detections=first.pipeline.stats.total_detections(),

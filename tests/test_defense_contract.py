@@ -83,6 +83,14 @@ def _guarded_imports(path: Path) -> list[tuple[str, str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     found: list[tuple[str, str]] = []
     for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            # `import mcp_trentina_crunchtools.quarantine.classifier as c`
+            # reaches every detector via attribute access; flag the module
+            # itself so the hole ImportFrom-only scanning left is closed.
+            for alias in node.names:
+                if any(alias.name.endswith(m) for m in GUARDED_MODULES):
+                    found.append((alias.name, "<module import>"))
+            continue
         if not isinstance(node, ast.ImportFrom):
             continue
         resolved = _resolve(path, node)
@@ -105,7 +113,11 @@ class TestOnePipeline:
             key = _module_key(path)
             if key in EXEMPT:
                 continue
-            bad = [name for _mod, name in _guarded_imports(path) if name in DETECTORS]
+            bad = [
+                name
+                for _mod, name in _guarded_imports(path)
+                if name in DETECTORS or name == "<module import>"
+            ]
             if bad:
                 offenders[key] = sorted(set(bad))
 

@@ -147,15 +147,22 @@ def record_detection(
     tool: str | None = None,
     direction: str | None = None,
     provenance: str | None = None,
+    blocked: bool = True,
 ) -> int:
-    """Record a detection in the blocklist. Returns the detection ID."""
+    """Record a detection. Returns the detection ID.
+
+    ``blocked`` was hardcoded 1, which was true when every caller refused
+    flagged content. Annotate-mode gateway rows are observations, not
+    blocks, and recording them as blocks would poison both the blocklist
+    semantics and step 7's calibration read.
+    """
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
     cursor = db.execute(
         "INSERT INTO detections (source_type, source, domain, detected_at, "
         "layer1_stats, qagent_assessment, risk_level, blocked, "
         "profile, backend, tool, direction, provenance) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             source_type,
             source,
@@ -164,6 +171,7 @@ def record_detection(
             json.dumps(layer1_stats),
             json.dumps(qagent_assessment) if qagent_assessment else None,
             risk_level,
+            1 if blocked else 0,
             profile,
             backend,
             tool,

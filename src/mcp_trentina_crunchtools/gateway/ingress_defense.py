@@ -41,6 +41,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -79,7 +80,10 @@ class IngressDecision:
 
 
 _CACHE_MAX = 4096
-_verdicts: OrderedDict[str, dict[str, Any] | None] = OrderedDict()
+# A verdict is not forever: a clean cached during an L3 outage, or before a
+# model/config change, must age out rather than shadow the fix.
+_CACHE_TTL_SECONDS = 900.0
+_verdicts: OrderedDict[str, tuple[float, dict[str, Any] | None]] = OrderedDict()
 
 
 def reset_verdict_cache() -> None:
@@ -88,34 +92,52 @@ def reset_verdict_cache() -> None:
 
 def _cache_key(profile: Profile, kind: str, text: str) -> str:
     d = profile.defense
-    cfg = f"{d.sanitize}:{d.classify}:{d.classify_threshold}:{d.quarantine}"
+    cfg = (
+        f"{d.sanitize}:{d.classify}:{d.classify_threshold}:"
+        f"{d.quarantine}:{d.quarantine_threshold}"
+    )
     return hashlib.sha256(f"{kind}:{cfg}:{text}".encode()).hexdigest()
 
 
 def _cache_get(key: str) -> tuple[bool, dict[str, Any] | None]:
-    if key in _verdicts:
-        _verdicts.move_to_end(key)
-        return True, _verdicts[key]
-    return False, None
+    entry = _verdicts.get(key)
+    if entry is None:
+        return False, None
+    expires, value = entry
+    if time.monotonic() > expires:
+        del _verdicts[key]
+        return False, None
+    _verdicts.move_to_end(key)
+    return True, value
 
 
 def _cache_put(key: str, value: dict[str, Any] | None) -> None:
-    _verdicts[key] = value
+    _verdicts[key] = (time.monotonic() + _CACHE_TTL_SECONDS, value)
     _verdicts.move_to_end(key)
     while len(_verdicts) > _CACHE_MAX:
         _verdicts.popitem(last=False)
 
 
 def _collect_strings(value: Any, out: list[str]) -> None:
-    if isinstance(value, str):
-        if value:
-            out.append(value)
-    elif isinstance(value, dict):
-        for v in value.values():
-            _collect_strings(v, out)
-    elif isinstance(value, list):
-        for v in value:
-            _collect_strings(v, out)
+    """Iterative walk over keys AND values.
+
+    Iterative because a few KB of "[[[[..." nesting is an attacker-supplied
+    RecursionError; keys because a model reads {"IGNORE ALL PREVIOUS
+    INSTRUCTIONS": true} exactly like a value, and keys used to be a
+    scan-free channel.
+    """
+    stack: list[Any] = [value]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, str):
+            if node:
+                out.append(node)
+        elif isinstance(node, dict):
+            for k, v in reversed(list(node.items())):
+                stack.append(v)
+                stack.append(k)
+        elif isinstance(node, list):
+            stack.extend(reversed(node))
 
 
 def _collect_response_texts(
@@ -165,9 +187,13 @@ def _collect_block(
 def _build_warning(verdict: Any, unscannable: dict[str, int]) -> dict[str, Any] | None:
     classification = verdict.classification
     l2_truncated = bool(classification is not None and classification.truncated)
+    l3_unavailable = bool(
+        verdict.l3_assessment is not None
+        and verdict.l3_assessment.get("l3_unavailable")
+    )
     gaps = {k: v for k, v in unscannable.items() if v}
 
-    if not verdict.flagged and not l2_truncated and not gaps:
+    if not verdict.flagged and not l2_truncated and not l3_unavailable and not gaps:
         return None
 
     warning: dict[str, Any] = {
@@ -184,6 +210,8 @@ def _build_warning(verdict: Any, unscannable: dict[str, int]) -> dict[str, Any] 
             else None
         ),
     }
+    if l3_unavailable:
+        warning["l3_unavailable"] = True
     if gaps:
         warning["unscannable"] = gaps
     return warning
@@ -241,14 +269,29 @@ async def scan_tool_response(
     )
     warning = _build_warning(verdict, unscannable)
 
+    # Under block/extract, "we could not finish judging this" is treated
+    # exactly like "this is hostile" — the adversarial review's H1/H3:
+    # padding a response past the classifier's token cap made L2 scan only
+    # the benign head, and an L3 outage answered "clean" — either one used
+    # to walk a payload through block mode.
+    l2_truncated = bool(warning and warning.get("l2_truncated"))
+    l3_unavailable = bool(warning and warning.get("l3_unavailable"))
+    unjudgeable = l2_truncated or l3_unavailable
+
     blocked = False
-    if verdict.flagged and enforcement in ("block", "extract"):
+    if (verdict.flagged or unjudgeable) and enforcement in ("block", "extract"):
         blocked = True
         assert warning is not None
         if enforcement == "extract":
             logger.warning(
                 "gateway: enforcement=extract not yet implemented — failing "
                 "closed (block) for profile=%s", profile.name,
+            )
+        if unjudgeable and not verdict.flagged:
+            logger.warning(
+                "gateway: refusing incompletely-judged response for "
+                "profile=%s (l2_truncated=%s l3_unavailable=%s)",
+                profile.name, l2_truncated, l3_unavailable,
             )
         warning = {**warning, "blocked": True}
 
@@ -322,14 +365,28 @@ async def scan_tool_list(
             warning = _build_warning(verdict, {})
             _cache_put(key, warning)
 
-        entry = tool
         if warning is not None:
-            entry = dict(tool)
-            entry["_trentina_warning"] = warning
             logger.warning(
                 "gateway: tool description flagged profile=%s backend=%s tool=%s risk=%s",
                 profile.name, backend_name, tool.get("name"), warning.get("risk_level"),
             )
-        annotated.append(entry)
+            # A poisoned description's whole attack is being READ during tool
+            # selection, and a sibling warning key is exactly the part strict
+            # MCP clients strip before the model sees the schema. So under
+            # block/extract the tool is withheld from the list outright —
+            # blocking the description IS removing it.
+            if warning.get("flagged_by") and effective_enforcement(profile) in (
+                "block", "extract",
+            ):
+                logger.warning(
+                    "gateway: withholding tool %s from profile=%s (enforcement)",
+                    tool.get("name"), profile.name,
+                )
+                continue
+            entry = dict(tool)
+            entry["_trentina_warning"] = warning
+            annotated.append(entry)
+        else:
+            annotated.append(tool)
 
     return annotated
