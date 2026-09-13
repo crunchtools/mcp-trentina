@@ -24,13 +24,22 @@ def _hash(text: str) -> str:
 
 class TestSafeContent:
     """Tests for safe_content tool."""
+    @pytest.fixture(autouse=True)
+    def _no_l3(self):
+        with (
+            patch("mcp_trentina_crunchtools.defense.get_config") as cfg,
+            patch("mcp_trentina_crunchtools.defense.quarantine_detect") as qd,
+        ):
+            cfg.return_value.has_api_key = False
+            qd.return_value = {"injection_detected": False}
+            yield
 
     @pytest.mark.asyncio
     async def test_safe_content_clean(self) -> None:
         """Clean text/plain passes through unchanged."""
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.content.classify_guarded",
+                "mcp_trentina_crunchtools.defense.classify_guarded",
                 return_value=None,
             ),
             patch(
@@ -57,7 +66,7 @@ class TestSafeContent:
         html = "<p>Hello</p>"
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.content.classify_guarded",
+                "mcp_trentina_crunchtools.defense.classify_guarded",
                 return_value=None,
             ),
             patch(
@@ -68,10 +77,10 @@ class TestSafeContent:
                 "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.tools.content.sanitize",
+                "mcp_trentina_crunchtools.defense.sanitize",
             ) as mock_sanitize,
             patch(
-                "mcp_trentina_crunchtools.tools.content.sanitize_text",
+                "mcp_trentina_crunchtools.defense.sanitize_text",
             ) as mock_sanitize_text,
         ):
             from mcp_trentina_crunchtools.sanitize.pipeline import PipelineResult, PipelineStats
@@ -98,7 +107,7 @@ class TestSafeContent:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.content.classify_guarded",
+                "mcp_trentina_crunchtools.defense.classify_guarded",
                 return_value=malicious,
             ),
             patch(
@@ -106,7 +115,7 @@ class TestSafeContent:
                 return_value=None,
             ),
             patch(
-                "mcp_trentina_crunchtools.tools.content.record_detection",
+                "mcp_trentina_crunchtools.defense.record_detection",
             ) as mock_record,
             patch(
                 "mcp_trentina_crunchtools.tools.content.get_config",
@@ -140,7 +149,7 @@ class TestSafeContent:
         html = "<!DOCTYPE html><html><body>Hi</body></html>"
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.content.classify_guarded",
+                "mcp_trentina_crunchtools.defense.classify_guarded",
                 return_value=None,
             ),
             patch(
@@ -151,10 +160,10 @@ class TestSafeContent:
                 "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.tools.content.sanitize",
+                "mcp_trentina_crunchtools.defense.sanitize",
             ) as mock_sanitize,
             patch(
-                "mcp_trentina_crunchtools.tools.content.sanitize_text",
+                "mcp_trentina_crunchtools.defense.sanitize_text",
             ) as mock_sanitize_text,
         ):
             from mcp_trentina_crunchtools.sanitize.pipeline import PipelineResult, PipelineStats

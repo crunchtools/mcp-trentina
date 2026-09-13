@@ -238,13 +238,15 @@ class TestSafeContentAlwaysUntrusted:
         with (
             patch("mcp_trentina_crunchtools.tools.content.is_blocked",
                   return_value=None),
-            patch("mcp_trentina_crunchtools.tools.content.classify_guarded",
-                  return_value=MALICIOUS),
-            patch("mcp_trentina_crunchtools.tools.content.record_detection"),
+            patch(f"{_DEFENSE}.classify_guarded", return_value=MALICIOUS),
+            patch(f"{_DEFENSE}.record_detection"),
+            patch(f"{_DEFENSE}.emit_detection_event"),
+            patch(f"{_DEFENSE}.get_config") as dcfg,
             patch("mcp_trentina_crunchtools.tools.content.get_config") as cfg,
         ):
             cfg.return_value.has_api_key = False
             cfg.return_value.max_content = 100_000
+            dcfg.return_value.has_api_key = False
             with pytest.raises(BlockedSourceError):
                 await safe_content("some text", "text/plain")
 

@@ -7,13 +7,13 @@ import time
 from typing import Any
 
 from ..config import get_config
-from ..database import is_blocked, record_detection
-from ..dbus_interface import emit_detection_event, emit_request_event
+from ..database import is_blocked
+from ..dbus_interface import emit_request_event
+from ..defense import defend, enforce_block
 from ..errors import BlockedSourceError, ContentSizeError
 from ..quarantine.agent import quarantine_detect, quarantine_extract
 from ..quarantine.classifier import (
     classify_async,
-    classify_guarded,
     join_warnings,
     truncation_warning,
 )
@@ -68,55 +68,21 @@ async def safe_content(
     if blocked:
         raise BlockedSourceError(chash, blocked["detected_at"])
 
-    pipeline_result = _run_pipeline(content, content_type)
-
-    classification = await classify_guarded(
-        pipeline_result.content, chash, is_trusted=False
+    verdict = await defend(
+        content,
+        source=chash,
+        source_type="content",
+        # Inline content has no provenance to appeal to, so nothing about it is
+        # ever trusted. fetch asks the domain, read asks the path, this trusts
+        # nothing — which is why trust is the caller's answer, not the
+        # pipeline's.
+        is_trusted=False,
+        is_html=content_type == "text/html" or looks_like_html(content),
     )
-    if classification and classification.label == "MALICIOUS":
-        record_detection(
-            source_type="content",
-            source=chash,
-            domain=None,
-            layer1_stats=pipeline_result.stats.to_flat_dict(),
-            risk_level="high",
-            qagent_assessment={
-                "classifier_label": classification.label,
-                "classifier_score": classification.score,
-            },
-        )
-        emit_detection_event("L2", chash, "high", {
-            "classifier_label": classification.label,
-            "classifier_score": classification.score,
-        })
-        raise BlockedSourceError(chash, "just detected")
+    enforce_block(verdict, chash)
 
-    if config.has_api_key:
-        detection = await quarantine_detect(pipeline_result.content)
-        if detection.get("injection_detected"):
-            record_detection(
-                source_type="content",
-                source=chash,
-                domain=None,
-                layer1_stats=pipeline_result.stats.to_flat_dict(),
-                risk_level=detection.get("risk_level", "high"),
-                qagent_assessment=detection,
-            )
-            emit_detection_event("L3", chash, detection.get("risk_level", "high"), detection)
-            raise BlockedSourceError(chash, "just detected")
-
-    if pipeline_result.stats.total_detections() > 0:
-        risk = pipeline_result.stats.risk_level()
-        if risk in ("high", "critical"):
-            record_detection(
-                source_type="content",
-                source=chash,
-                domain=None,
-                layer1_stats=pipeline_result.stats.to_flat_dict(),
-                risk_level=risk,
-            )
-            emit_detection_event("L1", chash, risk, pipeline_result.stats.to_flat_dict())
-            raise BlockedSourceError(chash, "just detected")
+    pipeline_result = verdict.pipeline
+    classification = verdict.classification
 
     emit_request_event(
         tool="safe_content",
