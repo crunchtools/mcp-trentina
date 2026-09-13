@@ -12,8 +12,16 @@ profile YAML are a hard error at load time.
 from __future__ import annotations
 
 import re
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from ..config import SUPPORTED_PROVIDERS
 
@@ -281,10 +289,22 @@ class AlertIngressConfig(BaseModel):
 
 
 class DefenseConfig(BaseModel):
-    """Per-profile defense-layer toggles. Phase 1 stores them; Phase 2 applies them."""
+    """Per-profile defense-layer toggles, read by the shared pipeline."""
 
     model_config = ConfigDict(extra="forbid")
 
+    enforcement: Literal["annotate", "extract", "block"] = Field(
+        default="annotate",
+        description=(
+            "What a flagged tool response becomes. annotate: delivered "
+            "intact with a _trentina_warning (the calibration mode). "
+            "block: refused outright — autonomous agents (kagetora, "
+            "takeda). extract: replaced by a Q-Agent extraction — "
+            "interactive profiles (josui); requires quarantine=true. "
+            "TRENTINA_ENFORCEMENT_OVERRIDE=annotate is the kill switch: it "
+            "forces annotate everywhere for the night block misfires."
+        ),
+    )
     sanitize: bool = Field(default=True, description="L1 sanitization on responses")
     classify: bool = Field(default=True, description="L2 Prompt Guard 2 classifier")
     classify_threshold: float = Field(
@@ -315,6 +335,17 @@ class DefenseConfig(BaseModel):
             "(falls back to QUARANTINE_MODEL)"
         ),
     )
+
+    @model_validator(mode="after")
+    def extract_requires_quarantine(self) -> DefenseConfig:
+        """`extract` without L3 is unsatisfiable — there is nothing to do the
+        extracting. Refuse the config rather than discovering it per-request."""
+        if self.enforcement == "extract" and not self.quarantine:
+            raise ValueError(
+                "enforcement: extract requires quarantine: true — the "
+                "Q-Agent is what performs the extraction"
+            )
+        return self
 
     @field_validator("provider")
     @classmethod

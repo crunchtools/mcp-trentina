@@ -355,14 +355,36 @@ async def _assemble_call_result(
         result["structuredContent"] = call_result.structured_content
 
     if not backend.is_internal:
-        warning = await scan_tool_response(
+        decision = await scan_tool_response(
             profile=profile,
             backend_name=backend_name,
             tool_name=tool_name,
             content_blocks=call_result.content,
             structured_content=call_result.structured_content,
         )
-        if warning is not None:
-            result["_trentina_warning"] = warning
+        if decision.blocked:
+            # The content never reaches the agent; the warning does. Audited
+            # as a defense block so a misfiring threshold is visible in the
+            # outcome column, not just in an agent's confusion.
+            risk = decision.warning.get("risk_level") if decision.warning else "?"
+            _audit(
+                profile.name, backend_name, tool_name,
+                Outcome.BLOCKED_DEFENSE, 0,
+                f"response blocked by defense (risk={risk})",
+            )
+            return {
+                "content": [{
+                    "type": "text",
+                    "text": (
+                        "[TRENTINA] This tool response was blocked by the "
+                        "defense pipeline. Details are in _trentina_warning; "
+                        "the original content was not delivered."
+                    ),
+                }],
+                "isError": True,
+                "_trentina_warning": decision.warning,
+            }
+        if decision.warning is not None:
+            result["_trentina_warning"] = decision.warning
 
     return result

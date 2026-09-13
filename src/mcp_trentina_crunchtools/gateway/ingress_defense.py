@@ -40,7 +40,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..defense import Provenance, defend
@@ -49,6 +51,32 @@ if TYPE_CHECKING:
     from .profile import Profile
 
 logger = logging.getLogger(__name__)
+
+#: Kill switch (owner requirement, ahead of any enforcement flip): setting
+#: TRENTINA_ENFORCEMENT_OVERRIDE=annotate forces every profile to annotate,
+#: for the night `block` misfires at 3am. Any other value is ignored loudly.
+_OVERRIDE_ENV = "TRENTINA_ENFORCEMENT_OVERRIDE"
+
+
+def effective_enforcement(profile: Profile) -> str:
+    override = os.environ.get(_OVERRIDE_ENV, "").strip().lower()
+    if override:
+        if override == "annotate":
+            return "annotate"
+        logger.error(
+            "%s=%r is not a valid override (only 'annotate' is); ignoring",
+            _OVERRIDE_ENV, override,
+        )
+    return profile.defense.enforcement
+
+
+@dataclass(frozen=True)
+class IngressDecision:
+    """What the router should do with a scanned tool response."""
+
+    warning: dict[str, Any] | None
+    blocked: bool = False
+
 
 _CACHE_MAX = 4096
 _verdicts: OrderedDict[str, dict[str, Any] | None] = OrderedDict()
@@ -168,23 +196,40 @@ async def scan_tool_response(
     tool_name: str,
     content_blocks: list[Any] | None,
     structured_content: Any,
-) -> dict[str, Any] | None:
-    """Judge one tool response. Returns the annotation, or None when clean.
+) -> IngressDecision:
+    """Judge one tool response and decide its fate under the profile's
+    enforcement mode.
 
-    The response is never modified; the caller attaches the returned warning
-    as a ``_trentina_warning`` sibling. Flags are recorded to the detections
-    table (source_type="tool_response") except on a verdict-cache hit.
+    annotate — deliver intact, warning attached (`blocked=False`).
+    block — a flagged response is refused (`blocked=True`); the caller
+        delivers the warning INSTEAD of the content. `extract` currently
+        degrades to block with a logged notice: the extraction response
+        contract ships with the josui flip, and until then failing closed
+        is the only honest reading of "extract" — falling back to annotate
+        would silently deliver what the mode existed to transform.
+
+    Flags are recorded to the detections table (source_type="tool_response")
+    except on a verdict-cache hit.
     """
     texts, unscannable = _collect_response_texts(content_blocks, structured_content)
     joined = "\n".join(texts)
+    enforcement = effective_enforcement(profile)
+
     if not joined.strip():
         gaps = {k: v for k, v in unscannable.items() if v}
-        return {"unscannable": gaps} if gaps else None
+        return IngressDecision(warning={"unscannable": gaps} if gaps else None)
 
-    key = _cache_key(profile, "response", joined + json.dumps(unscannable, sort_keys=True))
+    key = _cache_key(
+        profile,
+        f"response:{enforcement}",
+        joined + json.dumps(unscannable, sort_keys=True),
+    )
     hit, cached = _cache_get(key)
     if hit:
-        return cached
+        return IngressDecision(
+            warning=cached,
+            blocked=bool(cached and cached.get("blocked")),
+        )
 
     verdict = await defend(
         joined,
@@ -195,15 +240,28 @@ async def scan_tool_response(
         guarded=False,
     )
     warning = _build_warning(verdict, unscannable)
+
+    blocked = False
+    if verdict.flagged and enforcement in ("block", "extract"):
+        blocked = True
+        assert warning is not None
+        if enforcement == "extract":
+            logger.warning(
+                "gateway: enforcement=extract not yet implemented — failing "
+                "closed (block) for profile=%s", profile.name,
+            )
+        warning = {**warning, "blocked": True}
+
     _cache_put(key, warning)
     if warning is not None:
         logger.warning(
             "gateway: tool response flagged profile=%s backend=%s tool=%s "
-            "risk=%s flagged_by=%s",
+            "risk=%s flagged_by=%s enforcement=%s blocked=%s",
             profile.name, backend_name, tool_name,
             warning.get("risk_level"), warning.get("flagged_by"),
+            enforcement, blocked,
         )
-    return warning
+    return IngressDecision(warning=warning, blocked=blocked)
 
 
 def _tool_surface_text(tool: dict[str, Any]) -> str:
