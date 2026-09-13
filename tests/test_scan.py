@@ -91,7 +91,11 @@ class TestDeepScanVsStandardScan:
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
+            # The pipeline reads its own config for the L3 gate; patching only
+            # the tool's would leave L3 gated on the shell's GEMINI_API_KEY.
+            patch("mcp_trentina_crunchtools.defense.get_config") as defense_config,
         ):
+            defense_config.return_value.has_api_key = True
             raw = "RAW UNSANITIZED CONTENT"
             mock_fetch.return_value = (raw, "file", "/tmp/test.txt")
             mock_html.return_value = False
@@ -132,7 +136,11 @@ class TestDeepScanVsStandardScan:
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
+            # The pipeline reads its own config for the L3 gate; patching only
+            # the tool's would leave L3 gated on the shell's GEMINI_API_KEY.
+            patch("mcp_trentina_crunchtools.defense.get_config") as defense_config,
         ):
+            defense_config.return_value.has_api_key = True
             raw = "RAW UNSANITIZED CONTENT"
             mock_fetch.return_value = (raw, "file", "/tmp/test.txt")
             mock_html.return_value = False

@@ -274,7 +274,7 @@ class TestScanErrorBody:
                 new_callable=AsyncMock,
             ) as mock_classify,
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.get_config",
+                "mcp_trentina_crunchtools.defense.get_config",
             ) as mock_config,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
