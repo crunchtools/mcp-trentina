@@ -198,7 +198,7 @@ class TestHandleAlertClassifierAndQAgent:
         client = TestClient(_alert_app({"alpha": profile}))
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.alert_ingress.classify_async",
+            "mcp_trentina_crunchtools.defense.classify_async",
             new_callable=AsyncMock,
         ) as mock_classify:
             mock_classify.return_value = ClassifierResult(
@@ -218,9 +218,9 @@ class TestHandleAlertClassifierAndQAgent:
         client = TestClient(_alert_app({"alpha": profile}))
 
         with (
-            patch("mcp_trentina_crunchtools.gateway.alert_ingress.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.defense.get_config") as mock_config,
             patch(
-                "mcp_trentina_crunchtools.gateway.alert_ingress.quarantine_detect",
+                "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):
@@ -247,9 +247,9 @@ class TestHandleAlertClassifierAndQAgent:
         client = TestClient(_alert_app({"alpha": profile}))
 
         with (
-            patch("mcp_trentina_crunchtools.gateway.alert_ingress.get_config") as mock_config,
+            patch("mcp_trentina_crunchtools.defense.get_config") as mock_config,
             patch(
-                "mcp_trentina_crunchtools.gateway.alert_ingress.quarantine_detect",
+                "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):
@@ -288,11 +288,11 @@ class TestHandleAlertNonJsonAndEdgeCases:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.alert_ingress.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 new_callable=AsyncMock,
             ) as mock_classify,
             patch(
-                "mcp_trentina_crunchtools.gateway.alert_ingress.quarantine_detect",
+                "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):
