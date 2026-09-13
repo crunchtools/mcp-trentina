@@ -274,7 +274,7 @@ class TestScanContent:
         """Clean content returns low risk response."""
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.content.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 return_value=None,
             ),
             patch(
@@ -299,7 +299,7 @@ class TestScanContent:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.content.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 return_value=malicious,
             ),
             patch(
@@ -322,7 +322,7 @@ class TestScanContent:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.content.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
             ) as mock_classify,
             patch(
                 "mcp_trentina_crunchtools.tools.content.get_config",
@@ -343,7 +343,7 @@ class TestScanContent:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.content.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
             ) as mock_classify,
             patch(
                 "mcp_trentina_crunchtools.tools.content.get_config",
