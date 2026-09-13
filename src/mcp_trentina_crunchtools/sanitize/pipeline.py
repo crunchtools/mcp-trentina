@@ -44,7 +44,11 @@ class PipelineStats:
         return flat
 
     def total_detections(self) -> int:
-        """Total number of elements stripped across all stages (informational)."""
+        """Total detections across all stages (informational).
+
+        Most stages excise what they detect; the directives stage only
+        counts. Either way a detection is a detection for risk purposes.
+        """
         return sum(self.to_flat_dict().values())
 
     def suspicious_detections(self) -> int:
@@ -147,6 +151,7 @@ def sanitize(html_content: str) -> PipelineResult:
     6. Encoded payload detection (base64/hex with instruction patterns)
     7. Exfiltration URL detection (suspicious markdown images)
     8. LLM delimiter stripping
+    9. Directive detection (count only — text unmodified)
     """
     stats = PipelineStats()
     content, stats.html = sanitize_html(html_content)
