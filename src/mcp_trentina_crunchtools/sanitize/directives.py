@@ -1,13 +1,21 @@
-"""Stage 6: Directive stripping — remove visible LLM instruction patterns.
+"""Stage 6: Directive detection — count visible LLM instruction patterns.
 
-Strips lines containing common prompt injection directives: instruction
+Detects lines containing common prompt injection directives: instruction
 overrides, role reassignment, command execution, and imperative AI
 prefixes. Operates on visible English-language text, complementing the
 invisible-character stripping (unicode stage) and special-token stripping
 (delimiter stage).
 
-False positives are acceptable — if content discusses prompt injection,
-stripping those phrases from extracted text is fine.
+This stage DETECTS and does not modify. It used to remove the whole line
+around a match, which destroyed exactly the content an ops agent exists to
+read: a CVE ticket, a Nagios alert, or a security mail *discusses* attacks
+in the same words attacks use, and a one-line Jira description containing
+"ignore previous instructions" came back as an empty string — silently, with
+L2 and L3 left judging the void. Every other stage excises a precise token
+(a zero-width character, an encoded blob, a delimiter); this one amputated
+prose. Now the count feeds the L1 risk verdict and the sidecar, and the
+enforcement mode — not this stage — decides whether flagged content reaches
+the agent.
 """
 
 from __future__ import annotations
@@ -37,35 +45,25 @@ _PREFIX_PATTERNS = re.compile(
 
 @dataclass
 class DirectiveStats:
-    """Statistics from directive stripping."""
+    """Statistics from directive detection."""
 
-    directives_stripped: int = 0
+    directives_detected: int = 0
 
 
 def sanitize_directives(text: str) -> tuple[str, DirectiveStats]:
-    """Strip lines containing LLM directive patterns.
+    """Count lines containing LLM directive patterns; return text unchanged.
 
-    Returns the cleaned text and stats with the count of stripped lines.
+    One detection per line, however many patterns hit it — the unit of
+    suspicion is the hostile line, and counting each pattern would let a
+    single line inflate the risk score on its own.
     """
     stats = DirectiveStats()
-    lines = text.split("\n")
-    clean_lines: list[str] = []
 
-    for line in lines:
-        stripped = False
-
+    for line in text.split("\n"):
         if _PREFIX_PATTERNS.search(line):
-            stripped = True
+            stats.directives_detected += 1
+            continue
+        if any(pattern.search(line) for pattern in _INLINE_PATTERNS):
+            stats.directives_detected += 1
 
-        if not stripped:
-            for pattern in _INLINE_PATTERNS:
-                if pattern.search(line):
-                    stripped = True
-                    break
-
-        if stripped:
-            stats.directives_stripped += 1
-        else:
-            clean_lines.append(line)
-
-    return "\n".join(clean_lines), stats
+    return text, stats
