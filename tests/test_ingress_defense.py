@@ -382,7 +382,7 @@ class TestEnforcement:
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
         p = _profile("josui")
-        p.defense = DefenseConfig(enforcement="extract", quarantine=True)
+        p.defense = DefenseConfig(enforcement="extract")
         decision = await scan_tool_response(
             profile=p,
             backend_name="jira",
@@ -394,11 +394,16 @@ class TestEnforcement:
             "extract without an extraction contract must refuse, not deliver"
         )
 
-    def test_extract_without_quarantine_is_rejected_at_config(self) -> None:
+    def test_layer_toggles_no_longer_exist(self) -> None:
+        """The owner's call: a profile behind Trentina gets all three
+        layers, full stop. The old sanitize/classify/quarantine booleans
+        (production ran quarantine:false for months, unknowingly) are
+        rejected as unknown fields rather than silently ignored."""
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
-        with pytest.raises(ValueError, match="quarantine"):
-            DefenseConfig(enforcement="extract", quarantine=False)
+        for legacy in ("sanitize", "classify", "quarantine"):
+            with pytest.raises(ValueError, match=legacy):
+                DefenseConfig(**{legacy: False})
 
     async def test_blocked_response_never_reaches_the_agent(self) -> None:
         """End to end through the router: block mode swaps the content for

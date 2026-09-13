@@ -147,7 +147,7 @@ class TestProvenanceGate:
         L2 scores it benign, so a score-only gate would skip L3 entirely and
         the payload would walk in. Provenance forces the Q-Agent to look.
         """
-        defense = DefenseConfig(quarantine=True, quarantine_threshold=0.7)
+        defense = DefenseConfig(l3_threshold=0.7)
         verdict, mocks = await _defend(
             classification=BENIGN_LOW,
             defense=defense,
@@ -168,42 +168,59 @@ class TestProvenanceGate:
 
     async def test_external_below_threshold_skips_l3(self) -> None:
         """The cost control still applies to ordinary external content."""
-        defense = DefenseConfig(quarantine=True, quarantine_threshold=0.7)
+        defense = DefenseConfig(l3_threshold=0.7)
         _, mocks = await _defend(classification=BENIGN_LOW, defense=defense)
         mocks["quarantine_detect"].assert_not_called()
 
     async def test_external_above_threshold_runs_l3(self) -> None:
-        defense = DefenseConfig(quarantine=True, quarantine_threshold=0.7)
+        defense = DefenseConfig(l3_threshold=0.7)
         _, mocks = await _defend(classification=BENIGN_HIGH, defense=defense)
         mocks["quarantine_detect"].assert_called_once()
 
-    async def test_quarantine_disabled_beats_provenance(self) -> None:
-        """An operator turning L3 off is still obeyed. Provenance raises the
-        priority of L3; it does not override an explicit `quarantine: false`."""
-        defense = DefenseConfig(quarantine=False)
+    async def test_l1_suspicion_runs_l3_regardless_of_score(self) -> None:
+        """L1 no longer strips; its detections are a warning, and a warning
+        nobody is forced to act on is nothing — so any suspicious L1 hit
+        sends the original to the judge, even at a rock-bottom L2 score."""
+        defense = DefenseConfig(l3_threshold=0.99)
         _, mocks = await _defend(
-            defense=defense, provenance=Provenance.MODEL_OUTPUT
+            content=L1_HOSTILE, classification=BENIGN_LOW, defense=defense
         )
-        mocks["quarantine_detect"].assert_not_called()
+        mocks["quarantine_detect"].assert_called_once()
+
+    async def test_there_is_no_l3_off_switch(self) -> None:
+        """quarantine: false ran in production for months without the owner
+        knowing. The option no longer exists; unknown fields are rejected."""
+        with pytest.raises(ValueError, match="quarantine"):
+            DefenseConfig(quarantine=False)
 
 
-class TestProfileTogglesAreHonoured:
-    """The first code in the project that reads DefenseConfig at all."""
+class TestProfilePolicyIsHonoured:
+    """The profile controls thresholds and consequences, never layer
+    existence — the owner's answer to quarantine:false running unnoticed."""
 
-    async def test_classify_false_skips_l2(self) -> None:
-        _, mocks = await _defend(
-            defense=DefenseConfig(classify=False), has_api_key=False
+    async def test_l2_always_runs(self) -> None:
+        _, mocks = await _defend(defense=DefenseConfig(), has_api_key=False)
+        mocks["classify_guarded"].assert_called_once()
+
+    async def test_l2_threshold_flags_below_the_global_label(self) -> None:
+        """Production set 0.3 for months believing it tightened the gate; it
+        was dead config. Now a profile-threshold crossing flags even when
+        the model's own label says BENIGN."""
+        verdict, _ = await _defend(
+            classification=BENIGN_HIGH,  # score 0.80, label BENIGN
+            defense=DefenseConfig(l2_threshold=0.3),
+            has_api_key=False,
         )
-        mocks["classify_guarded"].assert_not_called()
+        assert verdict.flagged_by is Layer.L2
 
-    async def test_sanitize_false_leaves_content_untouched(self) -> None:
+    async def test_content_is_never_modified_regardless_of_config(self) -> None:
         verdict, _ = await _defend(
             content=L1_HOSTILE,
-            defense=DefenseConfig(sanitize=False, classify=False),
+            classification=BENIGN_LOW,
+            defense=DefenseConfig(),
             has_api_key=False,
         )
         assert verdict.content == L1_HOSTILE
-        assert verdict.pipeline.stats.total_detections() == 0
 
     async def test_audit_false_skips_the_row_but_still_emits(self) -> None:
         """Audit controls the SQLite write, not the live event bus. Turning

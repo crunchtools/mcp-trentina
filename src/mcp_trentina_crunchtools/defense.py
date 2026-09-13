@@ -136,7 +136,7 @@ def _l2_assessment(classification: ClassifierResult) -> dict[str, Any]:
     }
 
 
-def _run_l1(content: str, *, enabled: bool, is_html: bool | None) -> PipelineResult:
+def _run_l1(content: str, *, is_html: bool | None) -> PipelineResult:
     """Layer 1: the tripwire. Detects, counts, and builds the scan view.
 
     L1 never modifies the delivery text (owner's rule, 2026-09-13). Its
@@ -145,18 +145,9 @@ def _run_l1(content: str, *, enabled: bool, is_html: bool | None) -> PipelineRes
     and its counts feed the risk verdict, the sidecar, and the L3 gate.
     Disposition belongs to the enforcement mode and the Q-Agent.
 
-    When disabled we still return a PipelineResult carrying empty stats, so
-    every downstream shape stays uniform and callers never branch on whether
-    sanitization ran.
+    There is no off switch: L1 is free, deterministic, and non-destructive,
+    so a profile that could disable it would only be hiding its own eyes.
     """
-    if not enabled:
-        return PipelineResult(
-            content=content,
-            scan_view=content,
-            stats=PipelineStats(),
-            input_size=len(content),
-            output_size=len(content),
-        )
     html = looks_like_html(content) if is_html is None else is_html
     return sanitize(content) if html else sanitize_text(content)
 
@@ -189,9 +180,6 @@ def _should_run_l3(
     if not l3_gate or no_provider:
         return False
 
-    if defense is not None and not defense.quarantine:
-        return False
-
     # Model output always earns the Q-Agent's opinion, trusted or not. What a
     # coerced summariser emits is exactly the shape L2 is blind to, so a score
     # gate here would mean L3 never runs on the one input that most needs it.
@@ -210,7 +198,7 @@ def _should_run_l3(
     return (
         defense is None
         or classification is None
-        or classification.score >= defense.quarantine_threshold
+        or classification.score >= defense.l3_threshold
     )
 
 
@@ -308,11 +296,11 @@ async def defend(
         A verdict. This function never raises on a detection — see
         `enforce_block()`.
     """
-    if precomputed_l1 is not None:
-        pipeline = precomputed_l1
-    else:
-        run_l1 = defense is None or defense.sanitize
-        pipeline = _run_l1(content, enabled=run_l1, is_html=is_html)
+    pipeline = (
+        precomputed_l1
+        if precomputed_l1 is not None
+        else _run_l1(content, is_html=is_html)
+    )
 
     # Nothing to judge. A payload whose string leaves are all empty (or a
     # JSON body of pure numbers) has no text for either model to read, and an
@@ -323,7 +311,7 @@ async def defend(
     has_scan_text = bool(pipeline.scan_view.strip())
 
     classification: ClassifierResult | None = None
-    if has_scan_text and (defense is None or defense.classify):
+    if has_scan_text:
         if guarded:
             classification = await classify_guarded(
                 pipeline.scan_view, source, is_trusted=is_trusted
@@ -331,16 +319,16 @@ async def defend(
         else:
             classification = await classify_async(pipeline.scan_view)
 
-    # A profile's classify_threshold was parsed and never read — production
-    # set 0.3 believing it tightened the gate, and it did nothing (the label
-    # is computed against the global CLASSIFIER_THRESHOLD). Honour it: either
-    # leg flags.
+    # Either leg flags: the model's own MALICIOUS label (global threshold),
+    # or the profile's stricter l2_threshold. The per-profile knob was dead
+    # config for months — parsed, stored, never read — which is why the
+    # schema now has thresholds instead of toggles.
     l2_flagged = (
         classification is not None
         and not is_trusted
         and (
             classification.label == "MALICIOUS"
-            or (defense is not None and classification.score >= defense.classify_threshold)
+            or (defense is not None and classification.score >= defense.l2_threshold)
         )
     )
 
