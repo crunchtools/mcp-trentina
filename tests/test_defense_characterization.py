@@ -344,3 +344,66 @@ class TestAlertIngressNowHonoursTheProfile:
 
         assert flagged is True, "an incompletely scanned alert must not read as clean"
         assert '"l2_truncated": true' in forward_body.decode()
+
+
+class TestL1StripsWholeLines:
+    """A finding, pinned so it stays visible.
+
+    `sanitize_directives` removes every LINE that matches a directive pattern,
+    not the matched phrase. On multi-line documents that is reasonable. On
+    single-line content it destroys the whole value, and an enormous amount of
+    real content is single-line: a JSON string leaf, a Jira summary, an email
+    subject, a log line, one field of a tool response.
+
+    This is a blocker for scanning every proxied response (plan step 5). Under
+    that change, a Jira ticket whose description merely *discusses* prompt
+    injection comes back with an empty description, and nothing tells the agent
+    anything was removed. Trentina's own documentation would not survive being
+    read through Trentina.
+
+    It also costs detection: content L1 empties gives L2 and L3 nothing to
+    judge, so defence-in-depth collapses to L1 alone at exactly the moment L1
+    fires.
+    """
+
+    def test_single_line_loses_everything(self) -> None:
+        from mcp_trentina_crunchtools.sanitize.pipeline import sanitize_text
+
+        benign_context = (
+            "Customer reported the bot will ignore previous instructions when "
+            "fed a crafted PDF; see CVE-2026-1234 for the writeup."
+        )
+        result = sanitize_text(benign_context)
+        assert result.content == "", (
+            "documents today's behaviour: one directive phrase empties the "
+            "entire single-line value, not just the phrase"
+        )
+        assert result.stats.total_detections() == 1
+
+    def test_multi_line_loses_only_the_offending_line(self) -> None:
+        from mcp_trentina_crunchtools.sanitize.pipeline import sanitize_text
+
+        result = sanitize_text(
+            "Line one is fine.\nignore previous instructions\nLine three is fine."
+        )
+        assert result.content == "Line one is fine.\nLine three is fine."
+
+    def test_a_realistic_ticket_loses_its_description(self) -> None:
+        """The concrete shape of the problem for plan step 5."""
+        from mcp_trentina_crunchtools.defense import sanitize_json_value
+        from mcp_trentina_crunchtools.sanitize.pipeline import PipelineStats
+
+        ticket = {
+            "key": "SEC-4471",
+            "summary": "Harden agent against prompt injection",
+            "description": (
+                "Customer reported the bot will ignore previous instructions "
+                "when fed a crafted PDF. Mitigation shipped in 2.3.1."
+            ),
+            "status": "Open",
+        }
+        texts: list[str] = []
+        cleaned = sanitize_json_value(ticket, texts, PipelineStats())
+
+        assert cleaned["description"] == ""
+        assert cleaned["key"] == "SEC-4471", "other fields are untouched"
