@@ -28,7 +28,12 @@ CREATE TABLE IF NOT EXISTS detections (
     layer1_stats TEXT NOT NULL,
     qagent_assessment TEXT,
     risk_level TEXT NOT NULL,
-    blocked BOOLEAN DEFAULT 1
+    blocked BOOLEAN DEFAULT 1,
+    profile TEXT,
+    backend TEXT,
+    tool TEXT,
+    direction TEXT,
+    provenance TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_detections_domain ON detections(domain);
@@ -92,6 +97,17 @@ def _migrate(db: sqlite3.Connection) -> None:
     columns = {row["name"] for row in db.execute("PRAGMA table_info(gateway_calls)")}
     if "outcome" not in columns:
         db.execute("ALTER TABLE gateway_calls ADD COLUMN outcome TEXT")
+
+    detection_columns = {
+        row["name"] for row in db.execute("PRAGMA table_info(detections)")
+    }
+    # Phase 2: detections gained gateway attribution (which profile, which
+    # backend and tool, which direction the content was moving, and the
+    # provenance the L3 gate saw). Nullable — 50 web-shaped legacy rows and
+    # the standalone tools carry none of this.
+    for column in ("profile", "backend", "tool", "direction", "provenance"):
+        if column not in detection_columns:
+            db.execute(f"ALTER TABLE detections ADD COLUMN {column} TEXT")
         db.commit()
 
 
@@ -126,14 +142,20 @@ def record_detection(
     layer1_stats: dict[str, Any],
     risk_level: str,
     qagent_assessment: dict[str, Any] | None = None,
+    profile: str | None = None,
+    backend: str | None = None,
+    tool: str | None = None,
+    direction: str | None = None,
+    provenance: str | None = None,
 ) -> int:
     """Record a detection in the blocklist. Returns the detection ID."""
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
     cursor = db.execute(
         "INSERT INTO detections (source_type, source, domain, detected_at, "
-        "layer1_stats, qagent_assessment, risk_level, blocked) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+        "layer1_stats, qagent_assessment, risk_level, blocked, "
+        "profile, backend, tool, direction, provenance) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
         (
             source_type,
             source,
@@ -142,6 +164,11 @@ def record_detection(
             json.dumps(layer1_stats),
             json.dumps(qagent_assessment) if qagent_assessment else None,
             risk_level,
+            profile,
+            backend,
+            tool,
+            direction,
+            provenance,
         ),
     )
     db.commit()

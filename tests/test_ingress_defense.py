@@ -8,6 +8,7 @@ its own, which is exactly the production shape on a box where ONNX failed.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -46,39 +47,42 @@ def _profile(name: str = "testp") -> Profile:
 
 class TestScanToolResponse:
     async def test_clean_response_returns_none(self) -> None:
-        warning = await scan_tool_response(
+        decision = await scan_tool_response(
             profile=_profile(),
             backend_name="jira",
             tool_name="jira_get_issue",
             content_blocks=[{"type": "text", "text": "an ordinary ticket body"}],
             structured_content=None,
         )
-        assert warning is None
+        assert decision.warning is None
+        assert not decision.blocked
 
     async def test_hostile_text_block_is_annotated_not_modified(self) -> None:
         blocks = [{"type": "text", "text": HOSTILE}]
-        warning = await scan_tool_response(
+        decision = await scan_tool_response(
             profile=_profile(),
             backend_name="jira",
             tool_name="jira_get_issue",
             content_blocks=blocks,
             structured_content=None,
         )
+        warning = decision.warning
         assert warning is not None
         assert warning["flagged_by"] == "L1"
         assert warning["risk_level"] in ("high", "critical")
+        assert not decision.blocked, "default enforcement is annotate"
         assert blocks[0]["text"] == HOSTILE, "annotate mode never touches content"
 
     async def test_structured_content_leaves_are_judged(self) -> None:
-        warning = await scan_tool_response(
+        decision = await scan_tool_response(
             profile=_profile(),
             backend_name="jira",
             tool_name="jira_get_issue",
             content_blocks=None,
             structured_content={"issue": {"description": HOSTILE, "key": "SEC-1"}},
         )
-        assert warning is not None
-        assert warning["l1_suspicious"] > 0
+        assert decision.warning is not None
+        assert decision.warning["l1_suspicious"] > 0
 
     async def test_verdict_cache_prevents_rescan(self) -> None:
         profile = _profile()
@@ -97,7 +101,7 @@ class TestScanToolResponse:
         assert mock_defend.call_count == 1
 
     async def test_unscannable_content_is_reported(self) -> None:
-        warning = await scan_tool_response(
+        decision = await scan_tool_response(
             profile=_profile(),
             backend_name="jira",
             tool_name="jira_get_attachment",
@@ -108,21 +112,21 @@ class TestScanToolResponse:
             ],
             structured_content=None,
         )
-        assert warning is not None
-        assert warning["unscannable"] == {"images": 1, "blobs": 1}
+        assert decision.warning is not None
+        assert decision.warning["unscannable"] == {"images": 1, "blobs": 1}
 
     async def test_image_only_response_still_warns(self) -> None:
-        warning = await scan_tool_response(
+        decision = await scan_tool_response(
             profile=_profile(),
             backend_name="jira",
             tool_name="jira_get_attachment",
             content_blocks=[{"type": "image", "data": "...", "mimeType": "image/png"}],
             structured_content=None,
         )
-        assert warning == {"unscannable": {"images": 1}}
+        assert decision.warning == {"unscannable": {"images": 1}}
 
     async def test_resource_text_is_judged(self) -> None:
-        warning = await scan_tool_response(
+        decision = await scan_tool_response(
             profile=_profile(),
             backend_name="feeds",
             tool_name="read_entry",
@@ -131,8 +135,8 @@ class TestScanToolResponse:
             ],
             structured_content=None,
         )
-        assert warning is not None
-        assert warning["flagged_by"] == "L1"
+        assert decision.warning is not None
+        assert decision.warning["flagged_by"] == "L1"
 
 
 class TestScanToolList:
@@ -307,3 +311,125 @@ class TestRouterIntegration:
 
         assert "result" in resp
         mock_defend.assert_not_called()
+
+
+class TestEnforcement:
+    """The step-8 mechanism, landed ahead of the flip. Everything defaults
+    to annotate; block/extract exist so the flip is a config edit, not a
+    deploy."""
+
+    def _block_profile(self) -> Profile:
+        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+
+        p = _profile("kagetora")
+        p.defense = DefenseConfig(enforcement="block")
+        return p
+
+    async def test_block_mode_refuses_flagged_content(self) -> None:
+        decision = await scan_tool_response(
+            profile=self._block_profile(),
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=[{"type": "text", "text": HOSTILE}],
+            structured_content=None,
+        )
+        assert decision.blocked
+        assert decision.warning is not None
+        assert decision.warning["blocked"] is True
+
+    async def test_block_mode_delivers_clean_content(self) -> None:
+        decision = await scan_tool_response(
+            profile=self._block_profile(),
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=[{"type": "text", "text": "an ordinary ticket"}],
+            structured_content=None,
+        )
+        assert not decision.blocked
+        assert decision.warning is None
+
+    async def test_kill_switch_forces_annotate(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """TRENTINA_ENFORCEMENT_OVERRIDE=annotate is the 3am lever: flagged
+        content flows again, warnings intact, no deploy."""
+        monkeypatch.setenv("TRENTINA_ENFORCEMENT_OVERRIDE", "annotate")
+        decision = await scan_tool_response(
+            profile=self._block_profile(),
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=[{"type": "text", "text": HOSTILE}],
+            structured_content=None,
+        )
+        assert not decision.blocked
+        assert decision.warning is not None
+
+    async def test_invalid_override_is_ignored(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("TRENTINA_ENFORCEMENT_OVERRIDE", "off")
+        decision = await scan_tool_response(
+            profile=self._block_profile(),
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=[{"type": "text", "text": HOSTILE}],
+            structured_content=None,
+        )
+        assert decision.blocked, "an unknown override must not weaken block"
+
+    async def test_extract_fails_closed_until_implemented(self) -> None:
+        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+
+        p = _profile("josui")
+        p.defense = DefenseConfig(enforcement="extract", quarantine=True)
+        decision = await scan_tool_response(
+            profile=p,
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=[{"type": "text", "text": HOSTILE}],
+            structured_content=None,
+        )
+        assert decision.blocked, (
+            "extract without an extraction contract must refuse, not deliver"
+        )
+
+    def test_extract_without_quarantine_is_rejected_at_config(self) -> None:
+        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+
+        with pytest.raises(ValueError, match="quarantine"):
+            DefenseConfig(enforcement="extract", quarantine=False)
+
+    async def test_blocked_response_never_reaches_the_agent(self) -> None:
+        """End to end through the router: block mode swaps the content for
+        the refusal notice."""
+        from mcp_trentina_crunchtools.gateway.backend import BackendCall
+        from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
+
+        async def fake_call(*_args: object, **_kwargs: object) -> BackendCall:
+            return BackendCall(
+                content=[{"type": "text", "text": HOSTILE}],
+                is_error=False,
+                structured_content=None,
+            )
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+            side_effect=fake_call,
+        ):
+            resp = await route_jsonrpc(
+                self._block_profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 9,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"jira{NAMESPACE_SEP}jira_get_issue",
+                        "arguments": {},
+                    },
+                },
+            )
+
+        result = resp["result"]
+        assert result["isError"] is True
+        assert HOSTILE not in json.dumps(result["content"])
+        assert result["_trentina_warning"]["blocked"] is True
