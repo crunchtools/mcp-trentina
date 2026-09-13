@@ -117,14 +117,6 @@ profiles:
           - list_gmail_labels
           - modify_gmail_message_labels
           - batch_modify_gmail_message_labels
-        parameter_guards:
-          send_gmail_message:
-            to:
-              allow: ["scott.mccarty@gmail.com"]
-            cc:
-              allow: ["scott.mccarty@gmail.com"]
-            bcc:
-              allow: ["scott.mccarty@gmail.com"]
           # Calendar
           - get_events
           - manage_event
@@ -145,6 +137,14 @@ profiles:
           # Drive (read-only)
           - search_drive_files
           - get_drive_file_content
+        parameter_guards:
+          send_gmail_message:
+            to:
+              allow: ["scott.mccarty@gmail.com"]
+            cc:
+              allow: ["scott.mccarty@gmail.com"]
+            bcc:
+              allow: ["scott.mccarty@gmail.com"]
 
       # ── GWS Work (~130 -> ~15) ─────────────────────────────────
       gws-work:
@@ -159,14 +159,6 @@ profiles:
           - draft_gmail_message
           - send_gmail_message
           - list_gmail_labels
-        parameter_guards:
-          send_gmail_message:
-            to:
-              allow: ["smccarty@redhat.com"]
-            cc:
-              allow: ["smccarty@redhat.com"]
-            bcc:
-              allow: ["smccarty@redhat.com"]
           # Calendar
           - get_events
           - list_calendars
@@ -178,6 +170,14 @@ profiles:
           - search_drive_files
           - get_drive_file_content
           - get_drive_file_download_url
+        parameter_guards:
+          send_gmail_message:
+            to:
+              allow: ["smccarty@redhat.com"]
+            cc:
+              allow: ["smccarty@redhat.com"]
+            bcc:
+              allow: ["smccarty@redhat.com"]
 
       # ── Gemini (~25 -> ~12) ────────────────────────────────────
       gemini:
