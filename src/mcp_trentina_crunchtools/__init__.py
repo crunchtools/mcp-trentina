@@ -182,7 +182,9 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         matrix_upstream = gateway_config.matrix.get(
             "upstream", "https://matrix-client.matrix.org",
         )
-        register_matrix_routes(mcp_server, upstream=matrix_upstream)
+        register_matrix_routes(
+            mcp_server, gateway_config.profiles, upstream=matrix_upstream,
+        )
 
     from .gateway.alert_ingress import register_alert_routes
 

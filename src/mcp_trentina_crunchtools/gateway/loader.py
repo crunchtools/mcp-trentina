@@ -18,7 +18,7 @@ import yaml
 from pydantic import SecretStr, ValidationError
 
 from .errors import ProfileConfigError
-from .profile import AlertIngressConfig, Profile
+from .profile import AlertIngressConfig, MatrixIngressConfig, Profile
 
 
 @dataclass(frozen=True)
@@ -82,6 +82,9 @@ def _build_profile(name: str, body: Any) -> Profile:
     if profile.alert_ingress is not None:
         _resolve_alert_ingress_secrets(name, profile.alert_ingress)
 
+    if profile.matrix_ingress is not None:
+        _resolve_matrix_ingress_secrets(name, profile.matrix_ingress)
+
     return profile
 
 
@@ -121,6 +124,15 @@ def _expand_backend_headers(name: str, profile: Profile) -> None:
                 )
                 for key, val in backend.headers.items()
             }
+
+
+def _resolve_matrix_ingress_secrets(name: str, matrix_ingress: MatrixIngressConfig) -> None:
+    value = os.environ.get(matrix_ingress.token_env, "")
+    if not value:
+        raise ProfileConfigError(
+            f"Profile {name!r}: matrix_ingress env var {matrix_ingress.token_env} not set or empty"
+        )
+    matrix_ingress.token = SecretStr(value)
 
 
 def _resolve_alert_ingress_secrets(name: str, alert_ingress: AlertIngressConfig) -> None:
