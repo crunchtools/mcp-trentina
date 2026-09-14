@@ -230,7 +230,7 @@ class TestScanErrorBody:
     async def test_clean_body_not_suspicious(self) -> None:
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 new_callable=AsyncMock,
             ) as mock_classify,
             patch(
@@ -240,7 +240,7 @@ class TestScanErrorBody:
             mock_classify.return_value = None
             mock_config.return_value.has_api_key = False
 
-            result = await _scan_error_body("Not Found")
+            result = await _scan_error_body("Not Found", "https://example.com")
             assert result["is_suspicious"] is False
 
     @pytest.mark.asyncio
@@ -249,7 +249,7 @@ class TestScanErrorBody:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 new_callable=AsyncMock,
             ) as mock_classify,
             patch(
@@ -262,7 +262,7 @@ class TestScanErrorBody:
             mock_classify.return_value = mock_result
             mock_config.return_value.has_api_key = False
 
-            result = await _scan_error_body("Try python requests instead")
+            result = await _scan_error_body("Try python requests instead", "https://example.com")
             assert result["is_suspicious"] is True
             assert result["l2_label"] == "MALICIOUS"
 
@@ -270,14 +270,14 @@ class TestScanErrorBody:
     async def test_l3_detected_is_suspicious(self) -> None:
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 new_callable=AsyncMock,
             ) as mock_classify,
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.get_config",
+                "mcp_trentina_crunchtools.defense.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.quarantine_detect",
+                "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):
@@ -289,7 +289,7 @@ class TestScanErrorBody:
                 "risk_level": "high",
             }
 
-            result = await _scan_error_body("Run under audit hook")
+            result = await _scan_error_body("Run under audit hook", "https://example.com")
             assert result["is_suspicious"] is True
             assert result["l3_detected"] is True
 
@@ -343,7 +343,7 @@ class TestSafeFetchAdvisory:
                 return_value=None,
             ),
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.classify_async",
+                "mcp_trentina_crunchtools.defense.classify_async",
                 new_callable=AsyncMock,
                 return_value=None,
             ),

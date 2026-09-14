@@ -206,7 +206,7 @@ class TestEventDataShapes:
             l2_score=0.01,
             input_size=500,
             output_size=400,
-            stats={"directives_stripped": 1},
+            stats={"directives_detected": 1},
         )
 
         d = events_captured[0]

@@ -32,10 +32,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from starlette.responses import Response
 
-from ..config import get_config
-from ..quarantine.agent import quarantine_detect
-from ..quarantine.classifier import classify_async
-from ..sanitize.pipeline import risk_level_for_count, sanitize_text
+from ..defense import defend, defend_json
+from ..sanitize.pipeline import risk_level_for_count
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -54,45 +52,6 @@ class _SanitizeCounts:
 
     detections: int = field(default=0)
     suspicious: int = field(default=0)
-
-
-def _sanitize_json_value(value: Any, texts: list[str], counts: _SanitizeCounts) -> Any:
-    """Recursively sanitize string leaves in a JSON value, in place.
-
-    Non-string leaves (numbers, bools, ``None``) pass through untouched —
-    they can't carry a prompt injection. Sanitized strings are also
-    collected into ``texts`` so the caller can classify the payload as a
-    whole (L2/L3 want context, not isolated field values).
-    """
-    if isinstance(value, str):
-        sanitized = sanitize_text(value)
-        counts.detections += sanitized.stats.total_detections()
-        counts.suspicious += sanitized.stats.suspicious_detections()
-        texts.append(sanitized.content)
-        return sanitized.content
-    if isinstance(value, dict):
-        return {k: _sanitize_json_value(v, texts, counts) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_sanitize_json_value(v, texts, counts) for v in value]
-    return value
-
-
-def _layer1_context(detections: int, suspicious: int) -> str | None:
-    """Build a short Q-Agent context blurb from aggregated L1 counts.
-
-    Mirrors ``tools/scan.py``'s ``_build_layer1_context`` at a coarser
-    granularity (aggregate counts, not per-field stats) — alert payloads
-    are sanitized field-by-field, so there's no single ``PipelineStats``
-    to describe in detail.
-    """
-    if detections == 0:
-        return None
-    return (
-        f"Layer 1 deterministic scanning found {detections} injection vector(s) "
-        f"({suspicious} suspicious) across the alert payload's fields. Evaluate "
-        "the following sanitized content for additional semantic injection "
-        "vectors that may have survived deterministic stripping."
-    )
 
 
 def _get_alert_client() -> httpx.AsyncClient:
@@ -171,7 +130,9 @@ async def _handle_alert(
             content="bad request body", status_code=400, media_type="text/plain",
         )
 
-    forward_body, risk_level, flagged, counts = await _sanitize_and_classify(body)
+    forward_body, risk_level, flagged, counts = await _sanitize_and_classify(
+        body, profile
+    )
 
     client_host = request.client.host if request.client is not None else "unknown"
     log_fn = logger.warning if flagged else logger.info
@@ -219,50 +180,75 @@ async def _handle_alert(
 
 
 async def _sanitize_and_classify(
-    body: bytes,
+    body: bytes, profile: Profile,
 ) -> tuple[bytes, str, bool, _SanitizeCounts]:
     """Run the three-layer defense over an alert payload.
 
-    Returns the bytes to forward (sanitized, and JSON-re-serialized with a
-    ``_trentina_warning`` field if flagged), the L1 risk level, whether the
-    payload was flagged by any layer, and the raw L1 detection counts.
-    """
-    texts: list[str] = []
-    counts = _SanitizeCounts()
+    Returns the bytes to forward — the payload's content intact, with a
+    ``_trentina_warning`` field attached when flagged (JSON payloads only;
+    plain text has nowhere to carry an annotation, so its warning lives in
+    the log line and the D-Bus event) — plus the L1 risk level, whether any
+    layer flagged, and the raw L1 detection counts. Content is never
+    modified on the way through: L1 detects, the sidecar warns, and the
+    enforcement mode (not this function) decides disposition.
 
+    Two things changed when this moved onto the shared pipeline, both
+    deliberate:
+
+    1. It now honours ``profile.defense``. This was the only place in the
+       codebase where the pipeline actually ran, and it was the one place that
+       ignored the per-profile toggles DefenseConfig exists to hold.
+
+    2. A truncated L2 scan now flags. Previously the classifier was handed the
+       whole payload, and a payload past CLASSIFIER_MAX_TOKENS was scanned only
+       in part while ``ClassifierResult.truncated`` was discarded — so an
+       oversized alert forwarded looking clean. "We could not finish reading
+       this" is not the same as "this is fine", and it should never again be
+       reported as though it were.
+    """
     try:
         payload = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
         payload = None
 
+    defense = profile.defense
+    source = f"alert:{profile.name}"
+
     if payload is not None:
-        sanitized_payload = _sanitize_json_value(payload, texts, counts)
-        joined_text = "\n".join(texts)
+        # L1 per leaf so the JSON survives; L2/L3 read the joined document, so
+        # an instruction split across two fields is still visible.
+        verdict = await defend_json(
+            payload, source=source, source_type="alert", defense=defense,
+        )
+        counts = _SanitizeCounts(
+            detections=verdict.verdict.pipeline.stats.total_detections(),
+            suspicious=verdict.verdict.pipeline.stats.suspicious_detections(),
+        )
+        sanitized_payload: Any = verdict.payload
+        joined_text = verdict.joined_text
+        final = verdict.verdict
     else:
         text = body.decode("utf-8", errors="replace")
-        sanitized_result = sanitize_text(text)
-        counts.detections = sanitized_result.stats.total_detections()
-        counts.suspicious = sanitized_result.stats.suspicious_detections()
+        # defend(), not advise(): advise shuts the L3 gate, and the text
+        # branch used to get Q-Agent detection before the refactor — losing
+        # it here was a silent downgrade for every non-JSON alert body.
+        first = await defend(
+            text, source=source, source_type="alert", defense=defense,
+            is_html=False, guarded=False, record=False,
+        )
+        counts = _SanitizeCounts(
+            detections=first.pipeline.stats.total_detections(),
+            suspicious=first.pipeline.stats.suspicious_detections(),
+        )
+        final = first
         sanitized_payload = None
-        joined_text = sanitized_result.content
+        joined_text = first.content
 
     risk_level = risk_level_for_count(counts.suspicious)
+    classification = final.classification
+    l2_truncated = bool(classification is not None and classification.truncated)
 
-    classification = await classify_async(joined_text) if joined_text.strip() else None
-
-    config = get_config()
-    qagent_assessment: dict[str, Any] | None = None
-    if config.has_api_key and joined_text.strip():
-        context = _layer1_context(counts.detections, counts.suspicious)
-        qagent_assessment = await quarantine_detect(
-            joined_text[: config.max_content], layer1_context=context,
-        )
-
-    flagged = (
-        risk_level != "low"
-        or (classification is not None and classification.label == "MALICIOUS")
-        or (qagent_assessment is not None and bool(qagent_assessment.get("injection_detected")))
-    )
+    flagged = risk_level != "low" or final.flagged or l2_truncated
 
     if flagged and isinstance(sanitized_payload, dict):
         sanitized_payload["_trentina_warning"] = {
@@ -270,9 +256,10 @@ async def _sanitize_and_classify(
             "l1_detections": counts.detections,
             "l2_label": classification.label if classification is not None else None,
             "l2_score": classification.score if classification is not None else None,
+            "l2_truncated": l2_truncated,
             "l3_injection_detected": (
-                qagent_assessment.get("injection_detected")
-                if qagent_assessment is not None
+                final.l3_assessment.get("injection_detected")
+                if final.l3_assessment is not None
                 else None
             ),
         }

@@ -8,18 +8,17 @@ from pathlib import Path
 from typing import Any
 
 from ..config import get_config
-from ..database import is_blocked, record_detection
-from ..dbus_interface import emit_detection_event, emit_request_event
+from ..database import is_blocked
+from ..dbus_interface import emit_request_event
+from ..defense import advise, defend, enforce_block
 from ..errors import BlockedSourceError, FileReadError
 from ..models import ALLOWED_TEXT_EXTENSIONS
-from ..quarantine.agent import quarantine_detect, quarantine_extract
+from ..quarantine.agent import quarantine_extract
 from ..quarantine.classifier import (
-    classify_async,
-    classify_guarded,
     join_warnings,
     truncation_warning,
 )
-from ..sanitize.pipeline import PipelineResult, looks_like_html, sanitize, sanitize_text
+from ..sanitize.pipeline import PipelineResult, looks_like_html
 
 MAX_FILE_SIZE = 2_000_000
 BINARY_CHECK_BYTES = 8192
@@ -89,61 +88,21 @@ async def safe_read(path: str) -> dict[str, Any]:
     with open(resolved, encoding="utf-8", errors="replace") as fh:
         content = fh.read()
 
-    if looks_like_html(content, resolved):
-        pipeline_result = sanitize(content)
-    else:
-        pipeline_result = sanitize_text(content)
-
     is_trusted = config.is_trusted_path(resolved)
 
-    classification = await classify_guarded(
-        pipeline_result.content, resolved, is_trusted=is_trusted
+    verdict = await defend(
+        content,
+        source=resolved,
+        source_type="file",
+        is_trusted=is_trusted,
+        # read/ decides HTML-ness from the extension as well as the body, which
+        # fetch/ cannot do. Pass the answer rather than let the pipeline guess.
+        is_html=looks_like_html(content, resolved),
     )
-    if classification and classification.label == "MALICIOUS" and not is_trusted:
-        record_detection(
-            source_type="file",
-            source=resolved,
-            domain=None,
-            layer1_stats=pipeline_result.stats.to_flat_dict(),
-            risk_level="high",
-            qagent_assessment={
-                "classifier_label": classification.label,
-                "classifier_score": classification.score,
-            },
-        )
-        emit_detection_event("L2", resolved, "high", {
-            "classifier_label": classification.label,
-            "classifier_score": classification.score,
-        })
-        raise BlockedSourceError(resolved, "just detected")
+    enforce_block(verdict, resolved)
 
-    if not is_trusted and config.has_api_key:
-        detection = await quarantine_detect(pipeline_result.content)
-        if detection.get("injection_detected"):
-            record_detection(
-                source_type="file",
-                source=resolved,
-                domain=None,
-                layer1_stats=pipeline_result.stats.to_flat_dict(),
-                risk_level=detection.get("risk_level", "high"),
-                qagent_assessment=detection,
-            )
-            emit_detection_event("L3", resolved, detection.get("risk_level", "high"), detection)
-            raise BlockedSourceError(resolved, "just detected")
-
-    if pipeline_result.stats.total_detections() > 0 and not is_trusted:
-        risk = pipeline_result.stats.risk_level()
-        if risk in ("high", "critical"):
-            record_detection(
-                source_type="file",
-                source=resolved,
-                domain=None,
-                layer1_stats=pipeline_result.stats.to_flat_dict(),
-                risk_level=risk,
-            )
-            emit_detection_event("L1", resolved, risk, pipeline_result.stats.to_flat_dict())
-            raise BlockedSourceError(resolved, "just detected")
-
+    pipeline_result = verdict.pipeline
+    classification = verdict.classification
     trust_level = "trusted-sanitized" if is_trusted else "sanitized-only"
 
     emit_request_event(
@@ -190,15 +149,19 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
     with open(resolved, encoding="utf-8", errors="replace") as fh:
         content = fh.read()
 
-    if looks_like_html(content, resolved):
-        pipeline_result = sanitize(content)
-    else:
-        pipeline_result = sanitize_text(content)
-
     is_trusted = config.is_trusted_path(resolved)
 
+    verdict = await advise(
+        content,
+        source=resolved,
+        source_type="file",
+        is_trusted=is_trusted,
+        is_html=looks_like_html(content, resolved),
+    )
+    pipeline_result = verdict.pipeline
+    classification = verdict.classification
+
     classifier_warning = None
-    classification = await classify_async(pipeline_result.content)
     if classification and classification.label == "MALICIOUS":
         classifier_warning = (
             f"Layer 2 classifier flagged content as MALICIOUS "

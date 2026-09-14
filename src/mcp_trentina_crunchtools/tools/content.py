@@ -7,18 +7,17 @@ import time
 from typing import Any
 
 from ..config import get_config
-from ..database import is_blocked, record_detection
-from ..dbus_interface import emit_detection_event, emit_request_event
+from ..database import is_blocked
+from ..dbus_interface import emit_request_event
+from ..defense import advise, defend, enforce_block
 from ..errors import BlockedSourceError, ContentSizeError
-from ..quarantine.agent import quarantine_detect, quarantine_extract
+from ..quarantine.agent import quarantine_extract
 from ..quarantine.classifier import (
-    classify_async,
-    classify_guarded,
     join_warnings,
     truncation_warning,
 )
 from ..sanitize.pipeline import PipelineResult, looks_like_html, sanitize, sanitize_text
-from .scan import _build_layer1_context, _build_scan_result
+from .scan import _build_layer1_context, _build_scan_result, _classifier_result
 
 
 def _content_hash(content: str) -> str:
@@ -68,55 +67,21 @@ async def safe_content(
     if blocked:
         raise BlockedSourceError(chash, blocked["detected_at"])
 
-    pipeline_result = _run_pipeline(content, content_type)
-
-    classification = await classify_guarded(
-        pipeline_result.content, chash, is_trusted=False
+    verdict = await defend(
+        content,
+        source=chash,
+        source_type="content",
+        # Inline content has no provenance to appeal to, so nothing about it is
+        # ever trusted. fetch asks the domain, read asks the path, this trusts
+        # nothing — which is why trust is the caller's answer, not the
+        # pipeline's.
+        is_trusted=False,
+        is_html=content_type == "text/html" or looks_like_html(content),
     )
-    if classification and classification.label == "MALICIOUS":
-        record_detection(
-            source_type="content",
-            source=chash,
-            domain=None,
-            layer1_stats=pipeline_result.stats.to_flat_dict(),
-            risk_level="high",
-            qagent_assessment={
-                "classifier_label": classification.label,
-                "classifier_score": classification.score,
-            },
-        )
-        emit_detection_event("L2", chash, "high", {
-            "classifier_label": classification.label,
-            "classifier_score": classification.score,
-        })
-        raise BlockedSourceError(chash, "just detected")
+    enforce_block(verdict, chash)
 
-    if config.has_api_key:
-        detection = await quarantine_detect(pipeline_result.content)
-        if detection.get("injection_detected"):
-            record_detection(
-                source_type="content",
-                source=chash,
-                domain=None,
-                layer1_stats=pipeline_result.stats.to_flat_dict(),
-                risk_level=detection.get("risk_level", "high"),
-                qagent_assessment=detection,
-            )
-            emit_detection_event("L3", chash, detection.get("risk_level", "high"), detection)
-            raise BlockedSourceError(chash, "just detected")
-
-    if pipeline_result.stats.total_detections() > 0:
-        risk = pipeline_result.stats.risk_level()
-        if risk in ("high", "critical"):
-            record_detection(
-                source_type="content",
-                source=chash,
-                domain=None,
-                layer1_stats=pipeline_result.stats.to_flat_dict(),
-                risk_level=risk,
-            )
-            emit_detection_event("L1", chash, risk, pipeline_result.stats.to_flat_dict())
-            raise BlockedSourceError(chash, "just detected")
+    pipeline_result = verdict.pipeline
+    classification = verdict.classification
 
     emit_request_event(
         tool="safe_content",
@@ -168,10 +133,16 @@ async def quarantine_content(
             "Proceeding in quarantine mode."
         )
 
-    pipeline_result = _run_pipeline(content, content_type)
+    verdict = await advise(
+        content,
+        source=chash,
+        source_type="content",
+        is_html=content_type == "text/html" or looks_like_html(content),
+    )
+    pipeline_result = verdict.pipeline
+    classification = verdict.classification
 
     classifier_warning = None
-    classification = await classify_async(pipeline_result.content)
     if classification and classification.label == "MALICIOUS":
         classifier_warning = (
             f"Layer 2 classifier flagged content as MALICIOUS "
@@ -250,27 +221,24 @@ async def scan_content(
 
     chash = _content_hash(content)
 
-    pipeline_result = _run_pipeline(content, content_type)
+    l1 = _run_pipeline(content, content_type)
+    layer1_stats = l1.stats.to_flat_dict()
+    layer1_risk = l1.stats.risk_level()
+    layer1_detections = l1.stats.total_detections()
 
-    layer1_stats = pipeline_result.stats.to_flat_dict()
-    layer1_risk = pipeline_result.stats.risk_level()
-    layer1_detections = pipeline_result.stats.total_detections()
-
-    classifier_result = None
-    classification = await classify_async(pipeline_result.content)
-    if classification:
-        classifier_result = {
-            "label": classification.label,
-            "score": classification.score,
-            "latency_ms": classification.latency_ms,
-            "truncated": classification.truncated,
-        }
-
-    qagent_assessment = None
-    if config.has_api_key:
-        truncated = pipeline_result.content[: config.max_content]
-        layer1_context = _build_layer1_context(layer1_stats, layer1_detections)
-        qagent_assessment = await quarantine_detect(truncated, layer1_context=layer1_context)
+    verdict = await defend(
+        content,
+        source=chash,
+        source_type="content",
+        guarded=False,
+        record=False,
+        precomputed_l1=l1,
+        l3_context=_build_layer1_context(layer1_stats, layer1_detections),
+        l3_max_chars=config.max_content,
+    )
+    pipeline_result = verdict.pipeline
+    classifier_result = _classifier_result(verdict.classification)
+    qagent_assessment = verdict.l3_assessment
 
     result = _build_scan_result(
         source_type="content",
@@ -292,7 +260,7 @@ async def scan_content(
         l1_detections=layer1_detections,
         l1_suspicious=0,
         l2_label=str(classifier_result["label"]) if classifier_result else None,
-        l2_score=float(classifier_result["score"]) if classifier_result else None,  # type: ignore[arg-type]
+        l2_score=float(classifier_result["score"]) if classifier_result else None,
         input_size=pipeline_result.input_size,
         output_size=pipeline_result.output_size,
         stats=layer1_stats,
@@ -318,27 +286,32 @@ async def deep_scan_content(
 
     chash = _content_hash(content)
 
-    pipeline_result = _run_pipeline(content, content_type)
+    l1 = _run_pipeline(content, content_type)
+    layer1_stats = l1.stats.to_flat_dict()
+    layer1_risk = l1.stats.risk_level()
+    layer1_detections = l1.stats.total_detections()
 
-    layer1_stats = pipeline_result.stats.to_flat_dict()
-    layer1_risk = pipeline_result.stats.risk_level()
-    layer1_detections = pipeline_result.stats.total_detections()
-
-    classifier_result = None
-    classification = await classify_async(content)
-    if classification:
-        classifier_result = {
-            "label": classification.label,
-            "score": classification.score,
-            "latency_ms": classification.latency_ms,
-            "truncated": classification.truncated,
-        }
-
-    qagent_assessment = None
-    if config.has_api_key:
-        truncated = content[: config.max_content]
-        layer1_context = _build_layer1_context(layer1_stats, layer1_detections)
-        qagent_assessment = await quarantine_detect(truncated, layer1_context=layer1_context)
+    # Deep mode judges the RAW bytes — no normalization, not even the scan
+    # view's obfuscation cleanup. Same shape as scan.py's deep variant.
+    verdict = await defend(
+        content,
+        source=chash,
+        source_type="content",
+        guarded=False,
+        record=False,
+        precomputed_l1=PipelineResult(
+            content=content,
+            scan_view=content,
+            stats=l1.stats,
+            input_size=l1.input_size,
+            output_size=l1.output_size,
+        ),
+        l3_context=_build_layer1_context(layer1_stats, layer1_detections),
+        l3_max_chars=config.max_content,
+    )
+    pipeline_result = verdict.pipeline
+    classifier_result = _classifier_result(verdict.classification)
+    qagent_assessment = verdict.l3_assessment
 
     result = _build_scan_result(
         source_type="content",
@@ -360,7 +333,7 @@ async def deep_scan_content(
         l1_detections=layer1_detections,
         l1_suspicious=0,
         l2_label=str(classifier_result["label"]) if classifier_result else None,
-        l2_score=float(classifier_result["score"]) if classifier_result else None,  # type: ignore[arg-type]
+        l2_score=float(classifier_result["score"]) if classifier_result else None,
         input_size=pipeline_result.input_size,
         output_size=pipeline_result.output_size,
         stats=layer1_stats,

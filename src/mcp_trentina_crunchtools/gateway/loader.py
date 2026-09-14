@@ -18,7 +18,7 @@ import yaml
 from pydantic import SecretStr, ValidationError
 
 from .errors import ProfileConfigError
-from .profile import AlertIngressConfig, Profile
+from .profile import AlertIngressConfig, MatrixIngressConfig, Profile
 
 
 @dataclass(frozen=True)
@@ -82,6 +82,9 @@ def _build_profile(name: str, body: Any) -> Profile:
     if profile.alert_ingress is not None:
         _resolve_alert_ingress_secrets(name, profile.alert_ingress)
 
+    if profile.matrix_ingress is not None:
+        _resolve_matrix_ingress_secrets(name, profile.matrix_ingress)
+
     return profile
 
 
@@ -123,13 +126,26 @@ def _expand_backend_headers(name: str, profile: Profile) -> None:
             }
 
 
-def _resolve_alert_ingress_secrets(name: str, alert_ingress: AlertIngressConfig) -> None:
-    alert_value = os.environ.get(alert_ingress.token_env, "")
-    if not alert_value:
+def _require_env(name: str, env_var: str, what: str) -> SecretStr:
+    """Read a required secret from the environment, failing closed if absent.
+
+    Shared by every ingress that authenticates by a token-in-env: a missing
+    or empty var is a fatal config error, not a silent None.
+    """
+    value = os.environ.get(env_var, "")
+    if not value:
         raise ProfileConfigError(
-            f"Profile {name!r}: alert_ingress env var {alert_ingress.token_env} not set or empty"
+            f"Profile {name!r}: {what} env var {env_var} not set or empty"
         )
-    alert_ingress.token = SecretStr(alert_value)
+    return SecretStr(value)
+
+
+def _resolve_matrix_ingress_secrets(name: str, matrix_ingress: MatrixIngressConfig) -> None:
+    matrix_ingress.token = _require_env(name, matrix_ingress.token_env, "matrix_ingress")
+
+
+def _resolve_alert_ingress_secrets(name: str, alert_ingress: AlertIngressConfig) -> None:
+    alert_ingress.token = _require_env(name, alert_ingress.token_env, "alert_ingress")
 
     if alert_ingress.forward_secret_env:
         fwd_secret = os.environ.get(alert_ingress.forward_secret_env, "")
