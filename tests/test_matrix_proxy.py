@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import typing
+from collections.abc import AsyncIterator, Callable
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from mcp_trentina_crunchtools.gateway.matrix_proxy import register_matrix_routes
 from mcp_trentina_crunchtools.gateway.proxy_utils import sanitize_proxy_path
+
+if TYPE_CHECKING:
+    from starlette.applications import Starlette
+
+    from mcp_trentina_crunchtools.gateway.profile import Profile
+
+_FIXTURE_ACCESS = "sekrit"  # test fixture value, not a real credential
 
 
 class TestRegisterMatrixRoutes:
@@ -36,7 +45,7 @@ class TestMatrixPathTraversal:
         assert sanitize_proxy_path("_matrix/../../../etc/passwd") is None
 
 
-def _matrix_profile(name: str = "kagetora", token: str = "sekrit") -> object:  # noqa: S107 - test fixture token
+def _matrix_profile(name: str = "kagetora", token: str = _FIXTURE_ACCESS) -> Profile:
     from pydantic import SecretStr
 
     from mcp_trentina_crunchtools.gateway.profile import (
@@ -56,7 +65,7 @@ def _matrix_profile(name: str = "kagetora", token: str = "sekrit") -> object:  #
     return p
 
 
-def _matrix_app(profiles: dict) -> object:  # type: ignore[type-arg]
+def _matrix_app(profiles: dict[str, object]) -> Starlette:
     """A real Starlette app with the matrix route, standing in for FastMCP."""
     from starlette.applications import Starlette
     from starlette.routing import Route
@@ -64,8 +73,8 @@ def _matrix_app(profiles: dict) -> object:  # type: ignore[type-arg]
     routes: list[Route] = []
 
     class _Server:
-        def custom_route(self, path: str, methods: list[str]):  # type: ignore[no-untyped-def]
-            def deco(fn):  # type: ignore[no-untyped-def]
+        def custom_route(self, path: str, methods: list[str]) -> Callable[..., Any]:
+            def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
                 routes.append(Route(path, fn, methods=methods))
                 return fn
             return deco
@@ -94,7 +103,7 @@ class _FakeUpstream:
         resp.headers = {"content-type": self._ct}
         body = self._body
 
-        async def aiter_bytes():  # type: ignore[no-untyped-def]
+        async def aiter_bytes() -> AsyncIterator[bytes]:
             yield body
 
         async def aclose() -> None:

@@ -9,6 +9,7 @@ to the perimeter, and that its output arrives as model output.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -29,13 +30,8 @@ BIG_PAYLOAD = ("An operational log line that resists petit because every "
                "sentence differs in words. " * 200)
 
 
-def _patch_worker(**kwargs):  # type: ignore[no-untyped-def]
+def _patch_worker(**kwargs: Any) -> Any:
     return patch(f"{_S}.quarantine_generate", new_callable=AsyncMock, **kwargs)
-
-
-def _patch_key(present: bool):  # type: ignore[no-untyped-def]
-    cfg = patch(f"{_S}.get_config")
-    return cfg, present
 
 
 class TestSummarizeProcessor:
