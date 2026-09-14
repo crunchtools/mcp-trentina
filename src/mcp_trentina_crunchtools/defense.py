@@ -129,13 +129,6 @@ class DefenseVerdict:
         return self.classification.score if self.classification else None
 
 
-def _l2_assessment(classification: ClassifierResult) -> dict[str, Any]:
-    return {
-        "classifier_label": classification.label,
-        "classifier_score": classification.score,
-    }
-
-
 def _run_l1(content: str, *, is_html: bool | None) -> PipelineResult:
     """Layer 1: the tripwire. Detects, counts, and builds the scan view.
 
@@ -223,7 +216,10 @@ def _decide(
     l1_risk = pipeline.stats.risk_level()
 
     if classification is not None:
-        return Layer.L2, "high", _l2_assessment(classification)
+        return Layer.L2, "high", {
+            "classifier_label": classification.label,
+            "classifier_score": classification.score,
+        }
 
     if l3_assessment is not None:
         return Layer.L3, str(l3_assessment.get("risk_level", "high")), l3_assessment
@@ -497,11 +493,11 @@ def sanitize_json_value(
         if isinstance(node, str):
             if not node:
                 continue
-            result = sanitize_text(node)
-            merge_stats(stats, result.stats)
-            texts.append(result.content)
+            leaf = sanitize_text(node)
+            merge_stats(stats, leaf.stats)
+            texts.append(leaf.content)
             if scan_views is not None:
-                scan_views.append(result.scan_view)
+                scan_views.append(leaf.scan_view)
         elif isinstance(node, dict):
             # Keys too: a model reads {"IGNORE ALL PREVIOUS ...": true} the
             # same way it reads a value, and keys used to be a scan-free

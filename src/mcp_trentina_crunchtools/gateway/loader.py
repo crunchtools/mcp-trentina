@@ -126,22 +126,26 @@ def _expand_backend_headers(name: str, profile: Profile) -> None:
             }
 
 
-def _resolve_matrix_ingress_secrets(name: str, matrix_ingress: MatrixIngressConfig) -> None:
-    value = os.environ.get(matrix_ingress.token_env, "")
+def _require_env(name: str, env_var: str, what: str) -> SecretStr:
+    """Read a required secret from the environment, failing closed if absent.
+
+    Shared by every ingress that authenticates by a token-in-env: a missing
+    or empty var is a fatal config error, not a silent None.
+    """
+    value = os.environ.get(env_var, "")
     if not value:
         raise ProfileConfigError(
-            f"Profile {name!r}: matrix_ingress env var {matrix_ingress.token_env} not set or empty"
+            f"Profile {name!r}: {what} env var {env_var} not set or empty"
         )
-    matrix_ingress.token = SecretStr(value)
+    return SecretStr(value)
+
+
+def _resolve_matrix_ingress_secrets(name: str, matrix_ingress: MatrixIngressConfig) -> None:
+    matrix_ingress.token = _require_env(name, matrix_ingress.token_env, "matrix_ingress")
 
 
 def _resolve_alert_ingress_secrets(name: str, alert_ingress: AlertIngressConfig) -> None:
-    alert_value = os.environ.get(alert_ingress.token_env, "")
-    if not alert_value:
-        raise ProfileConfigError(
-            f"Profile {name!r}: alert_ingress env var {alert_ingress.token_env} not set or empty"
-        )
-    alert_ingress.token = SecretStr(alert_value)
+    alert_ingress.token = _require_env(name, alert_ingress.token_env, "alert_ingress")
 
     if alert_ingress.forward_secret_env:
         fwd_secret = os.environ.get(alert_ingress.forward_secret_env, "")

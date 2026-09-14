@@ -109,16 +109,15 @@ class PetitProcessor:
     name = "petit"
     cost = Cost.FREE
 
-    async def run(
-        self,
-        payload: str,
-        ctx: PreProcessContext,  # noqa: ARG002 - protocol signature; petit needs no context
-    ) -> PreProcessResult:
+    async def run(self, payload: str, _ctx: PreProcessContext) -> PreProcessResult:
+        # petit reduces by line structure alone; it reads no job context.
         bytes_in = len(payload.encode("utf-8"))
         lines = payload.split("\n")
 
         if len(lines) < _MIN_LINES:
-            return self._declined(payload, bytes_in, reason="too_few_lines")
+            return PreProcessResult.declined(
+                self.name, self.cost, payload, reason="too_few_lines",
+            )
 
         groups: dict[str, _Group] = {}
         out_lines: list[str] = []
@@ -135,7 +134,9 @@ class PetitProcessor:
 
         collapsed_groups = [g for g in groups.values() if g.count > _SAMPLES_PER_GROUP]
         if not collapsed_groups:
-            return self._declined(payload, bytes_in, reason="nothing_repetitive")
+            return PreProcessResult.declined(
+                self.name, self.cost, payload, reason="nothing_repetitive",
+            )
 
         summary = [
             "",
@@ -152,7 +153,9 @@ class PetitProcessor:
         bytes_out = len(reduced.encode("utf-8"))
 
         if bytes_in > 0 and bytes_out / bytes_in > _MIN_REDUCTION_RATIO:
-            return self._declined(payload, bytes_in, reason="reduction_below_floor")
+            return PreProcessResult.declined(
+                self.name, self.cost, payload, reason="reduction_below_floor",
+            )
 
         return PreProcessResult(
             name=self.name,
@@ -168,13 +171,3 @@ class PetitProcessor:
             },
         )
 
-    def _declined(self, payload: str, bytes_in: int, *, reason: str) -> PreProcessResult:
-        return PreProcessResult(
-            name=self.name,
-            cost=self.cost,
-            content=payload,
-            applied=False,
-            bytes_in=bytes_in,
-            bytes_out=bytes_in,
-            details={"declined": reason},
-        )

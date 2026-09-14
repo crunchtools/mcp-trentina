@@ -73,9 +73,9 @@ class SummarizeProcessor:
         bytes_in = len(payload.encode("utf-8"))
 
         if bytes_in < _MIN_BYTES:
-            return self._declined(payload, bytes_in, reason="too_small")
+            return PreProcessResult.declined(self.name, self.cost, payload, reason="too_small")
         if not get_config().has_api_key:
-            return self._declined(payload, bytes_in, reason="no_api_key")
+            return PreProcessResult.declined(self.name, self.cost, payload, reason="no_api_key")
 
         try:
             parsed = await quarantine_generate(
@@ -90,11 +90,11 @@ class SummarizeProcessor:
             # Includes canary leaks: a compromised worker's output is simply
             # never used, and the original payload continues to the perimeter.
             logger.warning("summarize: worker call failed (%s); declining", exc)
-            return self._declined(payload, bytes_in, reason="worker_error")
+            return PreProcessResult.declined(self.name, self.cost, payload, reason="worker_error")
 
         summary = str(parsed.get("summary", "")).strip()
         if not summary:
-            return self._declined(payload, bytes_in, reason="empty_summary")
+            return PreProcessResult.declined(self.name, self.cost, payload, reason="empty_summary")
 
         bytes_out = len(summary.encode("utf-8"))
         usage = parsed.get("usage") or {}
@@ -104,15 +104,9 @@ class SummarizeProcessor:
         }
 
         if bytes_out / bytes_in > _MAX_RATIO:
-            details["declined"] = "no_reduction"
-            return PreProcessResult(
-                name=self.name,
-                cost=self.cost,
-                content=payload,
-                applied=False,
-                bytes_in=bytes_in,
-                bytes_out=bytes_in,
-                details=details,
+            return PreProcessResult.declined(
+                self.name, self.cost, payload,
+                reason="no_reduction", details=details,
             )
 
         return PreProcessResult(
@@ -125,13 +119,3 @@ class SummarizeProcessor:
             details=details,
         )
 
-    def _declined(self, payload: str, bytes_in: int, *, reason: str) -> PreProcessResult:
-        return PreProcessResult(
-            name=self.name,
-            cost=self.cost,
-            content=payload,
-            applied=False,
-            bytes_in=bytes_in,
-            bytes_out=bytes_in,
-            details={"declined": reason},
-        )

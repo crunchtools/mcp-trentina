@@ -376,3 +376,21 @@ justification = "Four Pydantic field validators that each match a different valu
 check = "copy_paste_detection"
 path = "benchmarks/provider_benchmark.py"
 justification = "detection_rate/fp_rate and detection_by_category/fp_by_category compute the true-positive and false-positive halves of the same report. Reporting them as a matched pair is the point of the benchmark."
+
+[[exceptions]]
+check = "primitive_obsession"
+path = "src/mcp_trentina_crunchtools/defense.py"
+pattern = "_should_run_l3"
+justification = "is_trusted and l3_gate are two independent, orthogonal predicates on a private gate function (trust of the source vs. whether the caller runs L3 as a detector at all). Bundling them into a config object would add a type to carry two bools consumed one line apart — the over-abstraction the linter elsewhere forbids."
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/gateway/llm_proxy.py"
+pattern = "_schedule_completion_scan"
+justification = "The post-hoc completion scan is a fire-and-forget background task. Its except/log is not redundant defensiveness — a scan crash MUST NOT propagate into the streaming task or the whole completion fails after already reaching the client. Swallow-and-log is the required behaviour, and the finding it records still lands in the detections table."
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "tests/test_defense_contract.py"
+pattern = "_resolve"
+justification = "Relative-import resolution is a non-trivial, correctness-critical algorithm (its docstring documents the exact hole a naive text match would leave). Same rationale as the _decode_base64_safe/_decode_hex_safe exceptions: a named, documented algorithm step, not a readability wrapper."

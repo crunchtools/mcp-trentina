@@ -85,6 +85,33 @@ class PreProcessResult:
             return 1.0
         return self.bytes_out / self.bytes_in
 
+    @classmethod
+    def declined(
+        cls,
+        name: str,
+        cost: Cost,
+        payload: str,
+        *,
+        reason: str,
+        details: dict[str, int | float | str] | None = None,
+    ) -> PreProcessResult:
+        """The no-op variant: the processor looked and passed the payload
+        through unchanged. `reason` records why (too small, not log-shaped,
+        worker error); downstream composition treats it as a skip."""
+        size = len(payload.encode("utf-8"))
+        merged: dict[str, int | float | str] = {"declined": reason}
+        if details:
+            merged.update(details)
+        return cls(
+            name=name,
+            cost=cost,
+            content=payload,
+            applied=False,
+            bytes_in=size,
+            bytes_out=size,
+            details=merged,
+        )
+
 
 @runtime_checkable
 class PreProcessor(Protocol):

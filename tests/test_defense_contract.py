@@ -58,10 +58,6 @@ EXEMPT = {
 }
 
 
-def _module_key(path: Path) -> str:
-    return path.relative_to(SRC).as_posix()
-
-
 def _resolve(path: Path, node: ast.ImportFrom) -> str:
     """Resolve a relative import to a package-absolute dotted name.
 
@@ -101,16 +97,13 @@ def _guarded_imports(path: Path) -> list[tuple[str, str]]:
     return found
 
 
-def _python_files() -> list[Path]:
-    return sorted(p for p in SRC.rglob("*.py") if "__pycache__" not in p.parts)
-
-
 class TestOnePipeline:
     def test_no_module_outside_defense_imports_a_detector(self) -> None:
         offenders: dict[str, list[str]] = {}
 
-        for path in _python_files():
-            key = _module_key(path)
+        src_files = sorted(p for p in SRC.rglob("*.py") if "__pycache__" not in p.parts)
+        for path in src_files:
+            key = path.relative_to(SRC).as_posix()
             if key in EXEMPT:
                 continue
             bad = [
