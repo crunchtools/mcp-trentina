@@ -12,8 +12,15 @@ profile YAML are a hard error at load time.
 from __future__ import annotations
 
 import re
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+)
 
 from ..config import SUPPORTED_PROVIDERS
 
@@ -281,26 +288,62 @@ class AlertIngressConfig(BaseModel):
 
 
 class DefenseConfig(BaseModel):
-    """Per-profile defense-layer toggles. Phase 1 stores them; Phase 2 applies them."""
+    """Per-profile defense policy, read by the shared pipeline.
+
+    There are deliberately NO on/off switches for the layers (owner's call,
+    2026-09-13): the earlier schema had `sanitize`/`classify`/`quarantine`
+    booleans, and production ran `quarantine: false` for months without the
+    owner knowing — partly because none of it was wired, partly because
+    three unrelated words hid what they controlled. A profile behind
+    Trentina gets all three layers, full stop; what a profile controls is
+    THRESHOLDS (how suspicious before a layer flags or escalates) and the
+    ENFORCEMENT consequence. A layer that is genuinely unavailable at
+    runtime (no ONNX model, provider down) is a degraded state that /health
+    reports and block-mode refuses on — never a config option that fails
+    silent.
+
+    Cost control for L3 lives in `l3_threshold`, not in an off switch: L3
+    fires on model-output provenance, on any suspicious L1 detection, or on
+    an L2 score at/above the threshold — so clean traffic costs nothing and
+    an operator who wants L3 rarer raises the threshold in daylight instead
+    of turning the layer off in the dark.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    sanitize: bool = Field(default=True, description="L1 sanitization on responses")
-    classify: bool = Field(default=True, description="L2 Prompt Guard 2 classifier")
-    classify_threshold: float = Field(
-        default=0.5, ge=0.0, le=1.0, description="L2 score above which to flag"
+    enforcement: Literal["annotate", "extract", "block"] = Field(
+        default="annotate",
+        description=(
+            "What a flagged tool response becomes. annotate: delivered "
+            "intact with a _trentina_warning (the calibration mode). "
+            "block: refused outright — autonomous agents (kagetora, "
+            "takeda). extract: replaced by a Q-Agent extraction — "
+            "interactive profiles (josui). "
+            "TRENTINA_ENFORCEMENT_OVERRIDE=annotate is the kill switch: it "
+            "forces annotate everywhere for the night block misfires."
+        ),
     )
-    quarantine: bool = Field(
-        default=True,
-        description="L3 quarantined Gemini re-extraction (token-cost control)",
+    l2_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "L2 (Prompt Guard) score at or above which the content is "
+            "flagged, in addition to the model's own MALICIOUS label"
+        ),
     )
-    quarantine_threshold: float = Field(
+    l3_threshold: float = Field(
         default=0.7,
         ge=0.0,
         le=1.0,
-        description="L2 score above which to trigger L3 (when quarantine=true)",
+        description=(
+            "L2 score at or above which L3 (the Q-Agent) reviews the "
+            "content. L3 also always fires on model-output provenance and "
+            "on any suspicious L1 detection; this threshold only adds the "
+            "score trigger. Raise it to spend less on L3, in daylight."
+        ),
     )
-    audit: bool = Field(default=True, description="Write passthrough rows to SQLite")
+    audit: bool = Field(default=True, description="Write detection rows to SQLite")
     provider: str | None = Field(
         default=None,
         description=(
@@ -327,6 +370,28 @@ class DefenseConfig(BaseModel):
         return v
 
 
+class MatrixIngressConfig(BaseModel):
+    """Per-profile access to the Matrix reverse proxy.
+
+    The proxy at ``/matrix/{token}/{path}`` forwards to the homeserver only
+    for a token that resolves to a profile. Before this existed the proxy
+    was an open relay: anything that could reach the port could use
+    Trentina as a Matrix client proxy, unauthenticated and unattributed.
+    Token-in-path mirrors the alert ingress and costs the Matrix client
+    nothing — the homeserver URL configured in the agent simply includes
+    the token as a path prefix.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    token_env: str = Field(
+        ..., description="Env var name whose value is the Matrix proxy token",
+    )
+    token: SecretStr | None = Field(
+        default=None, exclude=True, description="Resolved token (load-time only)",
+    )
+
+
 class Profile(BaseModel):
     """One consumer profile: name, auth, backends, defense config."""
 
@@ -349,6 +414,10 @@ class Profile(BaseModel):
     alert_ingress: AlertIngressConfig | None = Field(
         default=None,
         description="Alert webhook ingress configuration (optional)",
+    )
+    matrix_ingress: MatrixIngressConfig | None = Field(
+        default=None,
+        description="Matrix reverse-proxy access for this profile (optional)",
     )
 
     @field_validator("name")

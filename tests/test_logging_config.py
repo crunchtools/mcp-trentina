@@ -120,12 +120,15 @@ def test_run_with_gateway_forwards_log_level_to_uvicorn() -> None:
     ):
         _run_with_gateway(mock_server, host="127.0.0.1", port=8019, log_level="WARNING")
 
-    mock_server.run.assert_called_once_with(
-        transport="streamable-http",
-        host="127.0.0.1",
-        port=8019,
-        log_level="WARNING",
-    )
+    assert mock_server.run.call_count == 1
+    kwargs = mock_server.run.call_args.kwargs
+    assert kwargs["transport"] == "streamable-http"
+    assert kwargs["host"] == "127.0.0.1"
+    assert kwargs["port"] == 8019
+    assert kwargs["log_level"] == "WARNING"
+    # Legacy /mcp is closed by default: the MCP app mounts at a per-boot
+    # unguessable path and /mcp itself serves a 410 tombstone.
+    assert kwargs["path"].startswith("/mcp-internal-")
 
 
 def test_main_sse_forwards_log_level(monkeypatch: pytest.MonkeyPatch) -> None:

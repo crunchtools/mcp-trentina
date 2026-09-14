@@ -404,8 +404,14 @@ async def quarantine_detect(
             )
     except QuarantineAgentError as exc:
         logger.warning("Q-Agent detection failed: %s", exc)
+        # "We could not ask" is not "no injection". The distinct marker lets
+        # enforcement tell an unavailable judge from a clean verdict — a
+        # block-mode profile fails closed on it, and the adversarial review
+        # showed why: padding a payload past the provider's input limit used
+        # to buy a permanent, silent "clean".
         return {
             "injection_detected": False,
+            "l3_unavailable": True,
             "risk_level": "low",
             "summary": f"Q-Agent detection failed: {exc}",
         }
@@ -414,6 +420,43 @@ async def quarantine_detect(
         if include_usage and usage is not None:
             parsed["usage"] = usage
         return parsed
+
+
+async def quarantine_generate(
+    content: str,
+    *,
+    system_prompt: str,
+    response_schema: dict[str, Any],
+    user_prompt: str | None = None,
+) -> dict[str, Any]:
+    """Isolated LLM generation under full Q-Agent discipline, for non-defense
+    consumers.
+
+    Pre-processors (the summarizer above all) need model output over hostile
+    text without becoming a second, softer LLM path. This is the one door:
+    the request is built with no tools and no functionDeclarations
+    (structurally — the builder has no parameter for them), a per-request
+    canary detects prompt-leak compromise, the response is schema-constrained
+    JSON, and the provider chain with per-profile keys is the same one the
+    Q-Agent uses.
+
+    It is a PRIMITIVE, not a layer: it renders no verdicts and records no
+    detections. Its output is model output — the caller's outcome carries
+    MODEL_OUTPUT provenance and the perimeter answers with unconditional L3.
+
+    Raises QuarantineAgentError on provider failure, invalid JSON, or canary
+    leak. Token counts are returned under ``usage``.
+    """
+    parsed, _canary = await _call_with_fallback(
+        content=content,
+        system_prompt=system_prompt,
+        response_schema=response_schema,
+        user_prompt=user_prompt,
+    )
+    usage = parsed.pop("_usage", None)
+    if usage is not None:
+        parsed["usage"] = usage
+    return parsed
 
 
 SEARCH_GROUNDING_TOOL: dict[str, Any] = {"google_search": {}}

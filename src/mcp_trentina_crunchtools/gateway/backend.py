@@ -331,8 +331,15 @@ def _serialize_content_block(block: Any) -> dict[str, Any]:
             "mimeType": getattr(block, "mimeType", ""),
         }
     if kind == "resource":
+        resource = getattr(block, "resource", None)
+        if resource is not None and hasattr(resource, "model_dump"):
+            # The SDK hands back a pydantic TextResourceContents, not a
+            # dict. Passing the model through raw meant the perimeter's
+            # isinstance(resource, dict) walk never saw its text (a scan
+            # skip) and json.dumps crashed the response (a 500). Dump it.
+            resource = resource.model_dump(mode="json", exclude_none=True)
         return {
             "type": "resource",
-            "resource": getattr(block, "resource", {}),
+            "resource": resource if resource is not None else {},
         }
     return {"type": kind or "unknown"}

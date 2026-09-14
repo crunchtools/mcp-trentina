@@ -88,19 +88,25 @@ class TestDeepScanVsStandardScan:
             patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
             patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
             patch(
-                "mcp_trentina_crunchtools.tools.scan.quarantine_detect",
+                "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
+            # The pipeline reads its own config for the L3 gate; patching only
+            # the tool's would leave L3 gated on the shell's GEMINI_API_KEY.
+            patch("mcp_trentina_crunchtools.defense.get_config") as defense_config,
         ):
+            defense_config.return_value.has_api_key = True
             raw = "RAW UNSANITIZED CONTENT"
             mock_fetch.return_value = (raw, "file", "/tmp/test.txt")
             mock_html.return_value = False
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "SANITIZED CONTENT"
+            mock_pipeline.scan_view = "SANITIZED CONTENT"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0
+            mock_pipeline.stats.suspicious_detections.return_value = 0
             mock_sanitize.return_value = mock_pipeline
 
             mock_config.return_value.has_api_key = True
@@ -129,19 +135,25 @@ class TestDeepScanVsStandardScan:
             patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
             patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
             patch(
-                "mcp_trentina_crunchtools.tools.scan.quarantine_detect",
+                "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
+            # The pipeline reads its own config for the L3 gate; patching only
+            # the tool's would leave L3 gated on the shell's GEMINI_API_KEY.
+            patch("mcp_trentina_crunchtools.defense.get_config") as defense_config,
         ):
+            defense_config.return_value.has_api_key = True
             raw = "RAW UNSANITIZED CONTENT"
             mock_fetch.return_value = (raw, "file", "/tmp/test.txt")
             mock_html.return_value = False
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "SANITIZED CONTENT"
+            mock_pipeline.scan_view = "SANITIZED CONTENT"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0
+            mock_pipeline.stats.suspicious_detections.return_value = 0
             mock_sanitize.return_value = mock_pipeline
 
             mock_config.return_value.has_api_key = True
@@ -170,18 +182,24 @@ class TestDeepScanVsStandardScan:
             patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
             patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
             patch(
-                "mcp_trentina_crunchtools.tools.scan.quarantine_detect",
+                "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
+            # The pipeline reads its own config for the L3 gate; patching only
+            # the tool's would leave L3 enabled here.
+            patch("mcp_trentina_crunchtools.defense.get_config") as defense_config,
         ):
+            defense_config.return_value.has_api_key = False
             mock_fetch.return_value = ("content", "file", "/tmp/test.txt")
             mock_html.return_value = False
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "sanitized"
+            mock_pipeline.scan_view = "sanitized"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0
+            mock_pipeline.stats.suspicious_detections.return_value = 0
             mock_sanitize.return_value = mock_pipeline
 
             mock_config.return_value.has_api_key = False

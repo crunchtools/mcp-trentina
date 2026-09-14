@@ -182,7 +182,9 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         matrix_upstream = gateway_config.matrix.get(
             "upstream", "https://matrix-client.matrix.org",
         )
-        register_matrix_routes(mcp_server, upstream=matrix_upstream)
+        register_matrix_routes(
+            mcp_server, gateway_config.profiles, upstream=matrix_upstream,
+        )
 
     from .gateway.alert_ingress import register_alert_routes
 
@@ -194,7 +196,80 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     load_tool_list_cache()
     set_profiles(gateway_config.profiles)
 
-    mcp_server.run(transport="streamable-http", host=host, port=port, log_level=log_level)
+    _warm_classifier()
+
+    legacy_mcp = os.environ.get("TRENTINA_LEGACY_MCP", "").strip().lower() in _TRUTHY
+    if legacy_mcp:
+        logger.warning(
+            "gateway: legacy /mcp endpoint ENABLED (TRENTINA_LEGACY_MCP) — it "
+            "bypasses gateway auth, allowlists, and audit; migrate consumers "
+            "to /gateway/<profile>/mcp and unset the variable",
+        )
+        mcp_path = "/mcp"
+    else:
+        # The legacy endpoint served Trentina's full tool surface with no
+        # bearer, no allowlist, and no audit — a bypass of everything the
+        # gateway enforces. FastMCP must still mount its own MCP app
+        # somewhere, so it goes to a per-boot unguessable path that nothing
+        # is told about, and /mcp itself answers 410 with directions.
+        import secrets as _secrets
+
+        mcp_path = f"/mcp-internal-{_secrets.token_hex(16)}"
+
+        from starlette.responses import Response as _Response
+
+        async def legacy_mcp_tombstone(_request: object) -> _Response:
+            return _Response(
+                content=(
+                    "The unauthenticated /mcp endpoint is closed. Use "
+                    "/gateway/<profile>/mcp with your profile's bearer token."
+                ),
+                status_code=410,
+                media_type="text/plain",
+            )
+
+        mcp_server.custom_route("/mcp", methods=["GET", "POST", "DELETE"])(
+            legacy_mcp_tombstone
+        )
+        logger.info("gateway: legacy /mcp closed (410); MCP app mounted internally")
+
+    mcp_server.run(
+        transport="streamable-http",
+        host=host,
+        port=port,
+        log_level=log_level,
+        path=mcp_path,
+    )
+
+
+def _warm_classifier() -> None:
+    """Load L2 at startup instead of on first scan, and say so out loud.
+
+    The classifier lazy-loads on first use. In production on 2026-09-09 that
+    first use arrived eight hours after the container started — so for eight
+    hours the gateway was serving traffic with L2 unavailable, and nothing
+    said so. `classify()` returns None when the model is absent and every
+    caller proceeds, which means an absent layer is indistinguishable from a
+    layer that looked and found nothing.
+
+    Loading here converts a silent gap into a startup log line and a /health
+    field that is true from the first request. It does not make the gateway
+    refuse to start: a box with no model should still proxy, still sanitize,
+    and still be obviously degraded rather than quietly so.
+    """
+    import logging
+
+    from .quarantine.classifier import classifier_status, is_classifier_available
+
+    log = logging.getLogger(__name__)
+    if is_classifier_available():
+        log.info("gateway: L2 classifier loaded at startup (%s)", classifier_status())
+    else:
+        log.warning(
+            "gateway: L2 classifier UNAVAILABLE (%s) — L1 only. /health reports "
+            "this; alert on it rather than assuming the layer is running.",
+            classifier_status(),
+        )
 
 
 def _wire_circuit_notifications(
