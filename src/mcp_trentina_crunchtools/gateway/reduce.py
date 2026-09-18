@@ -188,6 +188,33 @@ async def reduce_response(
             new_blocks[idx] = block
 
     applied = any(getattr(r, "applied", False) for r in results)
+
+    # Every candidate is logged, applied or not, at WARNING: the gateway runs
+    # at TRENTINA_LOG_LEVEL=WARNING so INFO goes nowhere, and this is the same
+    # operational-notice shape as ingress_defense's "tool response flagged
+    # ... blocked=False".
+    #
+    # Declines are the valuable half — a large payload that every processor
+    # declined is the specification for the next one. Volume stays bounded
+    # because a candidate has already cleared min_bytes.
+    declines = ",".join(
+        f"{r.name}:{r.details.get('declined', '?')}"
+        for r in results
+        if not r.applied
+    )
+    logger.warning(
+        "reduce: %s:%s:%s %d -> %d bytes (%d%%) applied=%s metered=%s%s",
+        profile.name,
+        backend_name,
+        tool_name,
+        bytes_in,
+        bytes_out,
+        (100 * bytes_out // bytes_in) if bytes_in else 100,
+        applied,
+        metered,
+        f" declined={declines}" if declines else "",
+    )
+
     if not applied:
         return ReduceOutcome(content_blocks=content_blocks)
 
@@ -214,17 +241,6 @@ async def reduce_response(
             for r in results
         ],
     }
-
-    logger.info(
-        "reduce: %s:%s:%s %d -> %d bytes (%.0f%%) metered=%s",
-        profile.name,
-        backend_name,
-        tool_name,
-        bytes_in,
-        bytes_out,
-        100.0 * bytes_out / bytes_in if bytes_in else 100.0,
-        metered,
-    )
 
     return ReduceOutcome(
         content_blocks=new_blocks,
