@@ -27,6 +27,20 @@ profiles:
     #
     # Direct keys match the lotor deployment pattern (bind-mounted config files in
     # /srv/*/config, backed up by pbs.sh). Env var references work for other setups.
+    # Token reduction on tool responses. Runs OUTSIDE the perimeter and never
+    # replaces it: the gateway reduces, then scans the reduced artifact, then
+    # delivers that artifact (preprocess/base.py invariant 2).
+    #
+    # petit only. It is deterministic, costs nothing, and keeps the input's
+    # provenance. Adding `summarize` spends an LLM call AND forces the output
+    # to MODEL_OUTPUT provenance, which draws unconditional L3 — two model
+    # calls per response. Enable it per tool, after measuring, not fleet-wide.
+    preprocess:
+      enabled: true
+      strategy: auto
+      processors: [petit]
+      target_bytes: 20000
+      min_bytes: 4096
     llm_keys:
       gemini:
         api_key_env: KAGETORA_GEMINI_API_KEY

@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from .. import __version__
 from ..database import record_gateway_call
+from ..defense import Provenance
 from ..outcomes import Outcome, classify_exception
 from .backend import call_backend_tool, list_backend_tools, on_backend_cache_evict
 from .compress import compress_tools, maybe_trigger_compression
@@ -33,6 +34,7 @@ from .filter import filter_tools
 from .guards import check_parameter_guards
 from .ingress_defense import scan_tool_list, scan_tool_response
 from .internal import call_internal_tool, list_internal_tools
+from .reduce import reduce_response
 
 if TYPE_CHECKING:
     from .profile import Backend, Profile
@@ -347,8 +349,31 @@ async def _assemble_call_result(
     their own ingress — the firewall filters where content ENTERS, and
     scanning the same bytes twice is cost, not defense.
     """
+    content_blocks = call_result.content
+    provenance = Provenance.EXTERNAL
+    reduce_sidecar: dict[str, Any] | None = None
+
+    # Reduce BEFORE the perimeter, never after. preprocess/base.py invariant
+    # 2: the caller scans the reduced artifact and delivers that artifact, so
+    # what reduction dropped is never judged and never delivered. Reducing
+    # after the scan would hand the agent bytes the wall never saw.
+    #
+    # Internal tools are excluded for the same reason they skip the scan —
+    # they run the pipeline at their own ingress.
+    if not backend.is_internal:
+        reduced = await reduce_response(
+            profile=profile,
+            backend=backend,
+            backend_name=backend_name,
+            tool_name=tool_name,
+            content_blocks=content_blocks,
+        )
+        content_blocks = reduced.content_blocks
+        provenance = reduced.provenance
+        reduce_sidecar = reduced.sidecar
+
     result: dict[str, Any] = {
-        "content": call_result.content,
+        "content": content_blocks,
         "isError": call_result.is_error,
     }
     if call_result.structured_content is not None:
@@ -359,8 +384,18 @@ async def _assemble_call_result(
             profile=profile,
             backend_name=backend_name,
             tool_name=tool_name,
-            content_blocks=call_result.content,
+            content_blocks=content_blocks,
             structured_content=call_result.structured_content,
+            provenance=provenance,
+            # Invariant 3: the sidecar travels to L3's briefing too. "This is
+            # the 3% that survived reduction" is context a judge should have.
+            l3_context=(
+                f"This artifact was reduced by trentina pre-processors "
+                f"({reduce_sidecar['bytes_in']} -> {reduce_sidecar['bytes_out']} "
+                f"bytes); it is a sample of a larger payload."
+                if reduce_sidecar
+                else None
+            ),
         )
         if decision.blocked:
             # The content never reaches the agent; the warning does. Audited

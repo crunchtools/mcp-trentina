@@ -221,6 +221,8 @@ async def scan_tool_response(
     tool_name: str,
     content_blocks: list[Any] | None,
     structured_content: Any,
+    provenance: Provenance = Provenance.EXTERNAL,
+    l3_context: str | None = None,
 ) -> IngressDecision:
     """Judge one tool response and decide its fate under the profile's
     enforcement mode.
@@ -246,7 +248,7 @@ async def scan_tool_response(
 
     key = _cache_key(
         profile,
-        f"response:{enforcement}",
+        f"response:{enforcement}:{provenance.value}",
         joined + json.dumps(unscannable, sort_keys=True),
     )
     hit, cached = _cache_get(key)
@@ -261,6 +263,8 @@ async def scan_tool_response(
         source=f"{profile.name}:{backend_name}:{tool_name}",
         source_type="tool_response",
         defense=profile.defense,
+        provenance=provenance,
+        l3_context=l3_context,
         is_html=False,
         guarded=False,
         attribution={
