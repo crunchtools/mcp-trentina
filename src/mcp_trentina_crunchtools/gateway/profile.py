@@ -33,6 +33,26 @@ ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 INTERNAL_SCHEME = "internal://"
 
+# Registered pre-processors. Adding one means adding it here, to
+# gateway.reduce._REGISTRY, and nowhere else.
+ProcessorName = Literal["petit", "summarize"]
+# FREE only. summarize is selectable but never a default: it is METERED
+# and its output draws unconditional L3, so it costs two model calls.
+_DEFAULT_PROCESSORS: list[ProcessorName] = ["petit"]
+
+# Reduction budget, in bytes of a single tool response.
+#
+# ~20 KB is roughly 5K tokens: large enough that ordinary responses pass
+# through untouched, small enough that the handful of replies which
+# dominate a transcript get attention. Only the `auto` strategy binds on
+# it, as the ceiling above which METERED processors are allowed.
+DEFAULT_TARGET_BYTES = 20_000
+
+# Floor below which a response is passed through untouched. Reduction has
+# a fixed cost — a parse, a walk, and for METERED a model call — and a
+# payload this small cannot repay it however well it compresses.
+DEFAULT_MIN_BYTES = 4_096
+
 MAX_BACKEND_TIMEOUT_SECONDS = 300.0
 MAX_LIST_TIMEOUT_SECONDS = 60.0
 
@@ -161,8 +181,8 @@ class PreProcessConfig(BaseModel):
             "keeps whichever came out smallest."
         ),
     )
-    processors: list[Literal["petit", "summarize"]] = Field(
-        default_factory=lambda: ["petit"],
+    processors: list[ProcessorName] = Field(
+        default_factory=lambda: list(_DEFAULT_PROCESSORS),
         description=(
             "Which processors may run, in order. 'summarize' is METERED: it "
             "spends an LLM call AND forces its output to MODEL_OUTPUT "
@@ -171,7 +191,7 @@ class PreProcessConfig(BaseModel):
         ),
     )
     target_bytes: int = Field(
-        default=20_000,
+        default=DEFAULT_TARGET_BYTES,
         ge=0,
         description=(
             "Size the reducer is trying to get under. Only 'auto' binds on "
@@ -179,7 +199,7 @@ class PreProcessConfig(BaseModel):
         ),
     )
     min_bytes: int = Field(
-        default=4_096,
+        default=DEFAULT_MIN_BYTES,
         ge=0,
         description=(
             "Floor below which the response is passed through untouched. "
@@ -195,7 +215,7 @@ class ToolPreProcess(BaseModel):
 
     enabled: bool | None = None
     strategy: Literal["none", "chain", "best_of", "auto"] | None = None
-    processors: list[Literal["petit", "summarize"]] | None = None
+    processors: list[ProcessorName] | None = None
     target_bytes: int | None = Field(default=None, ge=0)
     min_bytes: int | None = Field(default=None, ge=0)
 
