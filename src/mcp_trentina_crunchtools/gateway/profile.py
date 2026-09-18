@@ -132,6 +132,74 @@ class ParameterConstraint(BaseModel):
         return v
 
 
+class PreProcessConfig(BaseModel):
+    """Token reduction applied to tool responses before the perimeter scan.
+
+    Reduction is not defense (see ``preprocess/base.py``, invariant 1). What
+    this configures is how hard to try to make a payload smaller; what comes
+    out is exactly as untrusted as what went in, and the caller scans the
+    reduced artifact before delivering it.
+
+    Resolution is two-level and least-surprise: a tool's entry in the
+    backend's ``preprocess_tools`` wins over the profile default, and any
+    field it leaves unset inherits. Profile answers "how aggressive is this
+    agent"; tool answers "is this payload shape worth it".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=False,
+        description="Master switch. Off means the response is untouched.",
+    )
+    strategy: Literal["none", "chain", "best_of", "auto"] = Field(
+        default="auto",
+        description=(
+            "How processors compose. auto runs FREE ones always and "
+            "escalates to METERED only while the payload exceeds "
+            "target_bytes; chain feeds each the previous output; best_of "
+            "keeps whichever came out smallest."
+        ),
+    )
+    processors: list[Literal["petit", "summarize"]] = Field(
+        default_factory=lambda: ["petit"],
+        description=(
+            "Which processors may run, in order. 'summarize' is METERED: it "
+            "spends an LLM call AND forces its output to MODEL_OUTPUT "
+            "provenance, which draws unconditional L3 — two model calls per "
+            "response, not one. Default is the FREE set."
+        ),
+    )
+    target_bytes: int = Field(
+        default=20_000,
+        ge=0,
+        description=(
+            "Size the reducer is trying to get under. Only 'auto' binds on "
+            "it, as the ceiling above which METERED processors are allowed."
+        ),
+    )
+    min_bytes: int = Field(
+        default=4_096,
+        ge=0,
+        description=(
+            "Floor below which the response is passed through untouched. "
+            "Reduction has a fixed cost and small payloads cannot repay it."
+        ),
+    )
+
+
+class ToolPreProcess(BaseModel):
+    """Per-tool override. Every field is optional; unset inherits the profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    strategy: Literal["none", "chain", "best_of", "auto"] | None = None
+    processors: list[Literal["petit", "summarize"]] | None = None
+    target_bytes: int | None = Field(default=None, ge=0)
+    min_bytes: int | None = Field(default=None, ge=0)
+
+
 class Backend(BaseModel):
     """Per-profile backend MCP server config."""
 
@@ -188,6 +256,16 @@ class Backend(BaseModel):
     compress_descriptions: bool = Field(
         default=False,
         description="Compress verbose tool descriptions via LLM at gateway startup",
+    )
+    preprocess_tools: dict[str, ToolPreProcess] = Field(
+        default_factory=dict,
+        description=(
+            "Per-tool response-reduction overrides, keyed by tool name "
+            "(same shape as parameter_guards). Whether reduction helps is a "
+            "property of the tool's OUTPUT SHAPE, not of who called it: "
+            "syslog_tail_tool is log-shaped for every profile. Unset tools "
+            "use the profile default."
+        ),
     )
 
     @field_validator("url")
@@ -411,6 +489,14 @@ class Profile(BaseModel):
         ),
     )
     defense: DefenseConfig = Field(default_factory=DefenseConfig)
+    preprocess: PreProcessConfig = Field(
+        default_factory=PreProcessConfig,
+        description=(
+            "Profile-level response reduction policy. Off by default: a "
+            "gateway that starts quietly rewriting payloads is not a "
+            "default anyone opted into."
+        ),
+    )
     alert_ingress: AlertIngressConfig | None = Field(
         default=None,
         description="Alert webhook ingress configuration (optional)",
