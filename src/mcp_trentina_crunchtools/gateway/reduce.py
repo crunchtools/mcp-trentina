@@ -189,19 +189,14 @@ async def reduce_response(
 
     applied = any(getattr(r, "applied", False) for r in results)
 
-    # Log every CANDIDATE, applied or not, and do it at WARNING.
+    # Every candidate is logged, applied or not, at WARNING: the gateway runs
+    # at TRENTINA_LOG_LEVEL=WARNING so INFO goes nowhere, and this is the same
+    # operational-notice shape as ingress_defense's "tool response flagged
+    # ... blocked=False".
     #
-    # Two deliberate choices. WARNING because the gateway ships with
-    # TRENTINA_LOG_LEVEL=WARNING, so an info-level line is written to nowhere —
-    # and this is an operational notice, the same shape as ingress_defense's
-    # "tool response flagged ... blocked=False", which is also logged at
-    # WARNING while nothing is wrong.
-    #
-    # Both outcomes because the DECLINES are the valuable half: a tool whose
-    # payload is large and which every processor declined is precisely the
-    # specification for the next processor. Logging only successes would leave
-    # that invisible. Volume stays bounded because a candidate has already
-    # cleared min_bytes.
+    # Declines are the valuable half — a large payload that every processor
+    # declined is the specification for the next one. Volume stays bounded
+    # because a candidate has already cleared min_bytes.
     declines = ",".join(
         f"{r.name}:{r.details.get('declined', '?')}"
         for r in results
