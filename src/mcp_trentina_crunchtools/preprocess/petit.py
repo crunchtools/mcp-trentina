@@ -93,8 +93,14 @@ class PetitProcessor:
         lines = payload.split("\n")
 
         if len(lines) < _MIN_LINES:
+            # Named for the condition, not for the size. A 1.6 MB payload of
+            # single-line JSON lands here, and calling that "too few lines"
+            # reads as "too small" — which sent an earlier analysis of the
+            # production sidecar looking for short responses that were not
+            # there. The counts say which it actually was.
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="too_few_lines",
+                self.name, self.cost, payload, reason="not_line_structured",
+                details={"lines_in": len(lines), "bytes_in": bytes_in},
             )
 
         # Only the head of each line is fingerprinted, so a single enormous
@@ -150,8 +156,18 @@ class PetitProcessor:
         bytes_out = len(reduced.encode("utf-8"))
 
         if bytes_in > 0 and bytes_out / bytes_in > _MIN_REDUCTION_RATIO:
+            # The work is already done and measured; report what it achieved.
+            # Without this the log says 100% either way, so "missed the bar by
+            # a hair" and "saved nothing at all" are the same word — and the
+            # first means the floor is costing real savings while the second
+            # means the data simply does not compress.
             return PreProcessResult.declined(
                 self.name, self.cost, payload, reason="reduction_below_floor",
+                details={
+                    "would_be_bytes": bytes_out,
+                    "would_be_ratio": round(bytes_out / bytes_in, 4),
+                    "floor": _MIN_REDUCTION_RATIO,
+                },
             )
 
         return PreProcessResult(

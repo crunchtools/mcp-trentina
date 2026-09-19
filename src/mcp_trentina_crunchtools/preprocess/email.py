@@ -178,7 +178,8 @@ class EmailProcessor:
 
         if len(lines) < _MIN_LINES:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="too_few_lines",
+                self.name, self.cost, payload, reason="not_line_structured",
+                details={"lines_in": len(lines), "bytes_in": bytes_in},
             )
 
         if not _looks_like_mail(lines):
@@ -199,6 +200,11 @@ class EmailProcessor:
         if bytes_in > 0 and bytes_out / bytes_in > _MIN_REDUCTION_RATIO:
             return PreProcessResult.declined(
                 self.name, self.cost, payload, reason="reduction_below_floor",
+                details={
+                    "would_be_bytes": bytes_out,
+                    "would_be_ratio": round(bytes_out / bytes_in, 4),
+                    "floor": _MIN_REDUCTION_RATIO,
+                },
             )
 
         return PreProcessResult(

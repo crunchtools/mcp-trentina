@@ -96,7 +96,8 @@ class TestPetitReduction:
     async def test_short_content_declines(self) -> None:
         result = await PetitProcessor().run("one\ntwo\nthree", PreProcessContext())
         assert not result.applied
-        assert result.details["declined"] == "too_few_lines"
+        assert result.details["declined"] == "not_line_structured"
+        assert result.details["lines_in"] == 3
 
     async def test_all_unique_lines_decline_without_blowup(self) -> None:
         """Adversarial: content shaped to defeat grouping costs linear work
@@ -384,3 +385,41 @@ class TestComposition:
             "short prose", processors=[PetitProcessor()], strategy="chain"
         )
         assert outcome.describe_for_l3() is None
+
+
+class TestDeclinesCarryTheirEvidence:
+    """A decline reports what the processor measured before giving up.
+
+    Without this the sidecar prints 100% either way, so a run that missed
+    the floor by a hair and one that saved nothing read identically — and
+    they argue for opposite changes to the floor.
+    """
+
+    async def test_floor_decline_reports_what_it_would_have_saved(self) -> None:
+        """Content that groups a little, but not enough to clear the bar."""
+        words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
+        payload = "\n".join(
+            f"unique token {word} on line {i}" for i, word in enumerate(words)
+        )
+        result = await PetitProcessor().run(payload, PreProcessContext())
+        if result.details.get("declined") == "reduction_below_floor":
+            assert 0.0 < result.details["would_be_ratio"] <= 1.5
+            assert result.details["would_be_bytes"] > 0
+            assert result.details["floor"] == 0.7
+
+    async def test_not_line_structured_names_the_real_condition(self) -> None:
+        """A large single-line payload is not 'too small'. Reporting it that
+        way sent an earlier reading of the production sidecar hunting for
+        short responses that did not exist."""
+        payload = '{"data":"' + "x" * 200_000 + '"}'
+        result = await PetitProcessor().run(payload, PreProcessContext())
+        assert not result.applied
+        assert result.details["declined"] == "not_line_structured"
+        assert result.details["lines_in"] == 1
+        assert result.details["bytes_in"] > 100_000, "large, not small"
+
+    async def test_applied_results_carry_no_would_be_fields(self) -> None:
+        """would_be_* describes a road not taken; a successful run has none."""
+        result = await PetitProcessor().run(_syslog(500), PreProcessContext())
+        assert result.applied
+        assert "would_be_ratio" not in result.details
