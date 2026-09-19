@@ -96,11 +96,11 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
 - `database.py` — SQLite blocklist for cumulative detection memory
 - `preprocess/` — Token reduction, OUTSIDE the perimeter. Makes payloads
   smaller, never safer; everything it emits still crosses `defend()`.
-  - `petit.py` — line grouping via the `crunchtools` library (petit itself,
-    https://github.com/fatherlinux/petit), pinned to `driver="RawEntry"` with
+  - `petit.py` — line grouping via the `petit-log` package (petit itself,
+    https://github.com/crunchtools/petit), pinned to `driver="RawEntry"` with
     our own `stopwords`. Both arguments are load-bearing: petit's format
     drivers and its packaged `hash.stopwords` normalize WORDS, and this layer
-    normalizes only tokens that cannot carry meaning. Needs >= 2.2.0, which is
+    normalizes only tokens that cannot carry meaning. Needs >= 3.0.0, which is
     the first deterministic release returning verbatim samples.
   - `structured.py` — JSON. Fingerprints ARRAY ELEMENTS where petit
     fingerprints lines, so the comparable unit stops being a line. Emits

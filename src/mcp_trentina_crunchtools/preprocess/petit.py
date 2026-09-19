@@ -5,8 +5,8 @@ mostly the same line wearing different timestamps. Fingerprint each line by
 normalizing its volatile tokens, group identical fingerprints, keep the
 first few real samples of each group, and account for the rest.
 
-Grouping is done by petit itself — the ``crunchtools`` library, from
-https://github.com/fatherlinux/petit — rather than by a second
+Grouping is done by petit itself — the ``petit-log`` package, from
+https://github.com/crunchtools/petit — rather than by a second
 implementation living here. What this module owns is the part that is
 Trentina's business and not a log tool's: the normalization POLICY, the
 thresholds, the decline behaviour, and the shape of the artifact that
@@ -63,7 +63,7 @@ from __future__ import annotations
 
 import asyncio
 
-from crunchtools import PetitError, analyze_text
+from petit import PetitError, analyze_text
 
 from .base import Cost, PreProcessContext, PreProcessResult
 from .volatile import VOLATILE

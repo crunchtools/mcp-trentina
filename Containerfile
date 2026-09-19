@@ -72,8 +72,8 @@ COPY src/ ./src/
 # `uv export` emits hashes, so this is also a verified install. The project
 # itself goes in second with --no-deps so pip cannot re-resolve around the lock.
 #
-# crunchtools is held out of the hashed export and installed separately,
-# because it is resolved from a pin until 2.2.0 reaches PyPI (issue #96) and
+# petit-log is held out of the hashed export and installed separately,
+# because it is resolved from a pin until 3.0.0 reaches PyPI (issue #96) and
 # pip refuses a VCS requirement under hash checking. --no-emit-package keeps
 # every other dependency hash-verified rather than dropping --require-hashes
 # wholesale for the one package that cannot satisfy it.
@@ -81,17 +81,17 @@ COPY src/ ./src/
 # It comes from the source archive rather than git+https for two reasons: the
 # builder image has no git, and an archive HAS a hash, so this install is
 # verified like all the others. The URL is an immutable commit SHA, not the
-# v2.2.0 tag, because a tag can be moved and this is the artifact that runs
+# v3.0.0 tag, because a tag can be moved and this is the artifact that runs
 # in production. If GitHub ever re-rolls the archive the hash check fails the
 # build loudly instead of installing something unexpected.
 #
-# Delete this block and drop --no-emit-package once 2.2.0 is on PyPI.
+# Delete this block and drop --no-emit-package once 3.0.0 is on PyPI.
 RUN pip install --no-cache-dir uv \
- && uv export --frozen --no-dev --no-emit-project --no-emit-package crunchtools \
+ && uv export --frozen --no-dev --no-emit-project --no-emit-package petit-log \
       --format requirements-txt -o /tmp/requirements.txt \
  && pip install --no-cache-dir --prefix=/usr -r /tmp/requirements.txt \
- && printf '%s\n' "crunchtools @ https://github.com/fatherlinux/petit/archive/c16ab675404d9ff451053826b6c388a64bd39d84.tar.gz --hash=sha256:d382b5e49f3e7f0734fb5a4f61f97f15d8dc95a83d2028192e7409854a1c4b45" > /tmp/crunchtools.txt \
- && pip install --no-cache-dir --prefix=/usr --no-deps --require-hashes -r /tmp/crunchtools.txt \
+ && printf '%s\n' "petit-log @ https://github.com/crunchtools/petit/archive/e74f8e2cc6aa2484463511534ca3b1cef747c00b.tar.gz --hash=sha256:105645a4fb495c2ef4ebea6f19b70cca5991f24ba5101e9e9355ad2263ef4372" > /tmp/petit-log.txt \
+ && pip install --no-cache-dir --prefix=/usr --no-deps --require-hashes -r /tmp/petit-log.txt \
  && pip install --no-cache-dir --prefix=/usr --no-deps .
 
 # onnxruntime >= 1.29 reads /etc/machine-id during module init. When that file
