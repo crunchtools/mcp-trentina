@@ -356,6 +356,11 @@ wheels = [
 ]
 
 [[package]]
+name = "crunchtools"
+version = "2.2.0"
+source = { git = "https://github.com/fatherlinux/petit.git?tag=v2.2.0#c16ab675404d9ff451053826b6c388a64bd39d84" }
+
+[[package]]
 name = "cryptography"
 version = "50.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1104,6 +1109,7 @@ version = "0.6.3"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
+    { name = "crunchtools" },
     { name = "dbus-fast" },
     { name = "fastmcp" },
     { name = "httpx" },
@@ -1129,6 +1135,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12" },
+    { name = "crunchtools", git = "https://github.com/fatherlinux/petit.git?tag=v2.2.0" },
     { name = "dbus-fast", specifier = ">=2.0" },
     { name = "fastmcp", specifier = ">=2.0,<3.0" },
     { name = "httpx", specifier = ">=0.28" },

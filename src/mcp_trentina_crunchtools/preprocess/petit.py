@@ -1,10 +1,16 @@
 """Petit — FREE log reduction: remove certainty, leave uncertainty.
 
-After https://github.com/fatherlinux/petit. Repetitive machine output (a
-syslog tail, a CI log, a Nagios burst) is mostly the same line wearing
-different timestamps. Fingerprint each line by normalizing its volatile
-tokens, group identical fingerprints, keep the first few real samples of
-each group, and account for the rest.
+Repetitive machine output (a syslog tail, a CI log, a Nagios burst) is
+mostly the same line wearing different timestamps. Fingerprint each line by
+normalizing its volatile tokens, group identical fingerprints, keep the
+first few real samples of each group, and account for the rest.
+
+Grouping is done by petit itself — the ``crunchtools`` library, from
+https://github.com/fatherlinux/petit — rather than by a second
+implementation living here. What this module owns is the part that is
+Trentina's business and not a log tool's: the normalization POLICY, the
+thresholds, the decline behaviour, and the shape of the artifact that
+crosses the perimeter.
 
 The load-bearing rule: **normalize only tokens that cannot carry meaning to
 a model** — digits, hex runs, IPs, UUIDs, timestamps. Never words. Two lines
@@ -14,6 +20,20 @@ normalized into the boilerplate's group: it stays its own line and reaches
 the perimeter scan. Conversely, an attacker who crafts a payload to collide
 with a boilerplate group achieves only its deletion — dropped lines are
 never delivered, and a line that is never delivered injects nothing.
+
+That rule is why the library is called the way it is:
+
+* ``driver="RawEntry"`` pins the structural driver and declines petit's
+  per-format vocabulary. ``SecureLogHash`` knows sshd's phrases and
+  collapses everything after one of them, so "Invalid user <anything>"
+  becomes a single group — semantic, word-level, and exactly what the rule
+  above forbids. Detection would select it on any sshd-shaped payload.
+* ``stopwords=_VOLATILE`` replaces petit's packaged ``hash.stopwords``,
+  which is tuned for system logs and more aggressive than its name: its
+  ``[a-f]+#`` rule eats the letters next to a scrubbed number, so "bob0"
+  and "boa0" share a fingerprint. Right for finding a flapping daemon,
+  wrong for us. These are our own patterns, unchanged from the hand-rolled
+  implementation this replaced.
 
 Known limitation (adversarial review, 2026-09-13): an attacker who can
 WRITE to a shared log ahead of time can pre-seed sample slots — three lines
@@ -29,51 +49,60 @@ Honest scope (from the plan, deliberately): petit reduces log-shaped
 content. It does ~nothing for prose, minified JS, base64 blobs, or extracted
 PDF text, and it declines (applied=False) rather than pretend.
 
-Hostile-input hardening: every regex here is linear-time (character classes
-and bounded repetition, no nested quantifiers), and fingerprinting reads at
-most ``_FINGERPRINT_MAX_CHARS`` of a line, so a single enormous line costs
-O(cap) not O(line).
+Hostile-input hardening, kept on this side of the boundary regardless of
+what the library promises: every regex here is linear-time (character
+classes and bounded repetition, no nested quantifiers), and only the first
+``_FINGERPRINT_MAX_CHARS`` of a line are handed to the library, so one
+enormous line costs O(cap) not O(line). Samples are then read back from the
+ORIGINAL lines by index, so capping the fingerprint never truncates what is
+delivered. The library is synchronous, so it runs on a worker thread —
+a large payload must not stall the gateway's event loop.
 """
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
+import asyncio
+
+from crunchtools import PetitError, analyze_text
 
 from .base import Cost, PreProcessContext, PreProcessResult
 
 # Order matters: specific shapes before the bare-number catch-all, so an ISO
-# timestamp becomes one <TS> instead of six <N>s.
-_VOLATILE: list[tuple[re.Pattern[str], str]] = [
+# timestamp becomes one <TS> instead of six <N>s. Passed straight to petit
+# as this caller's normalization policy.
+#
+# Each replacement is distinct on purpose. Collapsing everything to one
+# character would merge shapes that are not the same — a line carrying a
+# timestamp and a line carrying a bare number in the same position — and
+# would leave the summary saying only that something was normalized away.
+_VOLATILE: list[tuple[str, str]] = [
     # ISO 8601 / RFC 3339-ish timestamps, with optional fraction and zone.
     (
-        re.compile(
-            r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?"
-        ),
+        r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?",
         "<TS>",
     ),
     # Syslog-style: "Sep 13 04:22:01"
     (
-        re.compile(
+        (
             r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s{1,2}\d{1,2}"
             r"\s\d{2}:\d{2}:\d{2}\b"
         ),
         "<TS>",
     ),
     # Bare clock times.
-    (re.compile(r"\b\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?\b"), "<TS>"),
+    (r"\b\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?\b", "<TS>"),
     (
-        re.compile(
+        (
             r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
             r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
         ),
         "<UUID>",
     ),
-    (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "<IP>"),
+    (r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "<IP>"),
     # Long hex runs: hashes, addresses, ids. 8+ so ordinary words like
     # "deadbeef" pay the price but "cafe" and "added" do not.
-    (re.compile(r"\b(?:0x)?[0-9a-fA-F]{8,}\b"), "<HEX>"),
-    (re.compile(r"\d+"), "<N>"),
+    (r"\b(?:0x)?[0-9a-fA-F]{8,}\b", "<HEX>"),
+    (r"\d+", "<N>"),
 ]
 
 _FINGERPRINT_MAX_CHARS = 400
@@ -87,20 +116,6 @@ _SAMPLES_PER_GROUP = 3
 # Apply only if the reduced artifact is at most this fraction of the input;
 # otherwise the reshuffling costs more clarity than it saves tokens.
 _MIN_REDUCTION_RATIO = 0.7
-
-
-def _fingerprint(line: str) -> str:
-    fp = line[:_FINGERPRINT_MAX_CHARS]
-    for pattern, placeholder in _VOLATILE:
-        fp = pattern.sub(placeholder, fp)
-    return fp
-
-
-@dataclass
-class _Group:
-    fingerprint: str
-    samples: list[str]
-    count: int
 
 
 class PetitProcessor:
@@ -119,35 +134,54 @@ class PetitProcessor:
                 self.name, self.cost, payload, reason="too_few_lines",
             )
 
-        groups: dict[str, _Group] = {}
-        out_lines: list[str] = []
-        for line in lines:
-            fp = _fingerprint(line)
-            group = groups.get(fp)
-            if group is None:
-                group = _Group(fingerprint=fp, samples=[], count=0)
-                groups[fp] = group
-            group.count += 1
-            if group.count <= _SAMPLES_PER_GROUP:
-                group.samples.append(line)
-                out_lines.append(line)
+        # Only the head of each line is fingerprinted, so a single enormous
+        # line cannot buy unbounded work. Samples come back by line number
+        # and are read from `lines`, so the cap never reaches the output.
+        capped = "\n".join(line[:_FINGERPRINT_MAX_CHARS] for line in lines)
 
-        collapsed_groups = [g for g in groups.values() if g.count > _SAMPLES_PER_GROUP]
-        if not collapsed_groups:
+        try:
+            analysis = await asyncio.to_thread(
+                analyze_text,
+                capped,
+                driver="RawEntry",
+                stopwords=_VOLATILE,
+                max_samples=_SAMPLES_PER_GROUP,
+                source_name="trentina",
+            )
+        except PetitError as exc:
+            # The library raises rather than exits, and a reducer that
+            # cannot reduce must still hand back the payload.
+            return PreProcessResult.declined(
+                self.name, self.cost, payload,
+                reason="petit_error", details={"error": type(exc).__name__},
+            )
+
+        collapsed = [g for g in analysis.groups if g.count > _SAMPLES_PER_GROUP]
+        if not collapsed:
             return PreProcessResult.declined(
                 self.name, self.cost, payload, reason="nothing_repetitive",
             )
+
+        # Emit samples in the order they were written, not the order their
+        # groups happened to sort. The artifact should read like the log it
+        # came from.
+        kept = sorted(
+            number
+            for group in analysis.groups
+            for number in group.sample_lines
+            if 0 <= number < len(lines)
+        )
+        out_lines = [lines[number] for number in kept]
 
         summary = [
             "",
             (
                 f"[petit] {len(lines)} lines reduced to {len(out_lines)}; "
-                f"{len(collapsed_groups)} repetitive group(s) collapsed "
+                f"{len(collapsed)} repetitive group(s) collapsed "
                 f"(showing first {_SAMPLES_PER_GROUP} of each):"
             ),
         ]
-        for group in sorted(collapsed_groups, key=lambda g: -g.count):
-            summary.append(f"[petit]   {group.count}x: {group.fingerprint}")
+        summary.extend(f"[petit]   {g.count}x: {g.pattern}" for g in collapsed)
 
         reduced = "\n".join(out_lines + summary)
         bytes_out = len(reduced.encode("utf-8"))
@@ -167,7 +201,10 @@ class PetitProcessor:
             details={
                 "lines_in": len(lines),
                 "lines_out": len(out_lines),
-                "groups_collapsed": len(collapsed_groups),
+                "groups_collapsed": len(collapsed),
+                # Lines petit scrubbed away to nothing (blanks, bare
+                # markers) are counted by neither group nor sample. Say so
+                # rather than let the arithmetic look wrong.
+                "lines_dropped": max(0, analysis.lines_in - analysis.lines_grouped),
             },
         )
-
