@@ -237,3 +237,42 @@ class TestRegistryAndConfigAgree:
         from mcp_trentina_crunchtools.preprocess import Cost
 
         assert all(_REGISTRY[n].cost is Cost.FREE for n in _DEFAULT_PROCESSORS)
+
+
+class TestDeclineLogLine:
+    """The sidecar line is what a human reads at 2am. It has to say what
+    happened, and stay greppable by reason string."""
+
+    def test_floor_decline_shows_the_ratio_it_reached(self) -> None:
+        from mcp_trentina_crunchtools.gateway.reduce import _describe_decline
+        from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
+
+        result = PreProcessResult.declined(
+            "structured", Cost.FREE, "x" * 100, reason="reduction_below_floor",
+            details={"would_be_bytes": 94, "would_be_ratio": 0.94, "floor": 0.7},
+        )
+        line = _describe_decline(result)
+        assert "structured:reduction_below_floor" in line, "still greppable"
+        assert "would_be=94%" in line
+        assert "floor=70%" in line
+
+    def test_shape_decline_shows_lines_and_bytes(self) -> None:
+        from mcp_trentina_crunchtools.gateway.reduce import _describe_decline
+        from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
+
+        result = PreProcessResult.declined(
+            "petit", Cost.FREE, "x", reason="not_line_structured",
+            details={"lines_in": 1, "bytes_in": 1_645_600},
+        )
+        line = _describe_decline(result)
+        assert "petit:not_line_structured" in line
+        assert "lines=1" in line and "bytes=1645600" in line
+
+    def test_bare_decline_stays_terse(self) -> None:
+        from mcp_trentina_crunchtools.gateway.reduce import _describe_decline
+        from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
+
+        result = PreProcessResult.declined(
+            "email", Cost.FREE, "x", reason="not_email",
+        )
+        assert _describe_decline(result) == "email:not_email"
