@@ -35,10 +35,13 @@ INTERNAL_SCHEME = "internal://"
 
 # Registered pre-processors. Adding one means adding it here, to
 # gateway.reduce._REGISTRY, and nowhere else.
-ProcessorName = Literal["petit", "summarize"]
-# FREE only. summarize is selectable but never a default: it is METERED
-# and its output draws unconditional L3, so it costs two model calls.
-_DEFAULT_PROCESSORS: list[ProcessorName] = ["petit"]
+ProcessorName = Literal["petit", "structured", "email", "summarize"]
+# FREE only, and ordered by how cheaply each one can decline: structured
+# and email reject a payload of the wrong shape on their first check, so
+# petit — which has to group every line before it knows — goes last.
+# summarize is selectable but never a default: it is METERED and its output
+# draws unconditional L3, so it costs two model calls.
+_DEFAULT_PROCESSORS: list[ProcessorName] = ["structured", "email", "petit"]
 
 # Reduction budget, in bytes of a single tool response.
 #
