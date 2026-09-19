@@ -94,5 +94,13 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
 - `quarantine/` — Layer 2: Q-Agent (Gemini REST via httpx, NO SDK, NO tools)
 - `tools/` — Tool implementations called by server.py wrappers
 - `database.py` — SQLite blocklist for cumulative detection memory
+- `preprocess/` — Token reduction, OUTSIDE the perimeter. Makes payloads
+  smaller, never safer; everything it emits still crosses `defend()`.
+  - `petit.py` — line grouping via the `crunchtools` library (petit itself,
+    https://github.com/fatherlinux/petit), pinned to `driver="RawEntry"` with
+    our own `stopwords`. Both arguments are load-bearing: petit's format
+    drivers and its packaged `hash.stopwords` normalize WORDS, and this layer
+    normalizes only tokens that cannot carry meaning. Needs >= 2.2.0, which is
+    the first deterministic release returning verbatim samples.
 - `gateway/` — Per-consumer MCP gateway proxy with tool allowlists, parameter guards, and defense pipeline
   - **Parameter guards**: per-tool argument validation with allow/deny value patterns — see `docs/gateway-design.md`

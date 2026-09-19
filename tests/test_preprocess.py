@@ -13,6 +13,8 @@ The properties that matter most here are the security ones:
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from mcp_trentina_crunchtools.defense import Provenance
@@ -127,6 +129,112 @@ class TestPetitReduction:
         result = await PetitProcessor().run(payload, PreProcessContext())
         assert result.applied
         assert target not in result.content
+
+
+class TestPetitLibraryContract:
+    """Properties that come from grouping being petit's job rather than
+    ours. Each one is a defect we found in the published library before
+    adopting it (see petit#19/#20/#21), so each is worth a guard."""
+
+    async def test_same_input_reduces_identically(self) -> None:
+        """Determinism is what makes a FREE reducer safe in the hot path:
+        a non-deterministic one breaks the prompt-cache prefix it was meant
+        to preserve. petit used to sample with random.choice."""
+        payload = _syslog(300)
+        outputs = {
+            (await PetitProcessor().run(payload, PreProcessContext())).content
+            for _ in range(15)
+        }
+        assert len(outputs) == 1
+
+    async def test_mixed_shape_content_does_not_raise(self) -> None:
+        """Tool output interleaves shapes. A driver chosen from a sample
+        and applied to every line used to raise on the first line that did
+        not fit."""
+        mixed = "\n".join(
+            _syslog(40).split("\n")
+            + [f"a prose sentence with no log envelope at all, number {i}"
+               for i in range(40)]
+        )
+        result = await PetitProcessor().run(mixed, PreProcessContext())
+        assert isinstance(result, PreProcessResult)
+        assert result.content
+
+    async def test_sshd_vocabulary_is_not_applied(self) -> None:
+        """petit's SecureLogHash collapses everything after a phrase it
+        knows, so "Invalid user <anything>" becomes one group. That is
+        word-level normalization, which this layer forbids — we pin
+        RawEntry precisely to decline it."""
+        boilerplate = [
+            f"Sep 13 04:{i % 60:02d}:00 lotor sshd[{i}]: Invalid user bob{i} "
+            f"from 10.0.0.{i % 250}"
+            for i in range(200)
+        ]
+        needle = (
+            "Sep 13 04:59:59 lotor sshd[9999]: Invalid user "
+            "ignore-previous-instructions from 10.0.0.9"
+        )
+        boilerplate.insert(100, needle)
+        result = await PetitProcessor().run("\n".join(boilerplate), PreProcessContext())
+        assert result.applied
+        assert needle in result.content, "sshd word rules would have eaten this"
+
+    async def test_letters_next_to_numbers_are_not_collapsed(self) -> None:
+        """petit's packaged hash.stopwords carries `[a-f]+#`, which eats the
+        letter next to a scrubbed number and merges "bob0" with "boa0". We
+        supply our own patterns so distinct words stay distinct."""
+        payload = "\n".join(
+            [f"user bob{i} logged in" for i in range(30)]
+            + [f"user boa{i} logged in" for i in range(30)]
+        )
+        result = await PetitProcessor().run(payload, PreProcessContext())
+        assert result.applied
+        assert result.details["groups_collapsed"] == 2, "bob and boa are not the same"
+
+    async def test_fingerprints_name_what_they_normalized(self) -> None:
+        """A summary that says "#" three times tells the reader less than
+        one that distinguishes a timestamp from an address."""
+        payload = "\n".join(
+            f"2026-09-13T04:22:{i % 60:02d}Z request from 192.168.1.{i % 255} "
+            f"took {i} ms"
+            for i in range(200)
+        )
+        result = await PetitProcessor().run(payload, PreProcessContext())
+        assert result.applied
+        assert "<TS>" in result.content
+        assert "<IP>" in result.content
+
+    async def test_long_lines_are_capped_but_delivered_whole(self) -> None:
+        """Only the head of a line is fingerprinted, so one enormous line
+        cannot buy unbounded work — but samples are read back from the
+        original lines, so nothing delivered is truncated."""
+        tail = "TAIL-MARKER-PAST-THE-CAP"
+        long_line = "x" * 2000 + tail
+        # Enough repetitive filler that the artifact clears the reduction
+        # floor; otherwise the one long line is most of the payload and
+        # petit rightly declines.
+        payload = "\n".join([long_line] + [f"filler line {i}" for i in range(2000)])
+        result = await PetitProcessor().run(payload, PreProcessContext())
+        assert result.applied
+        assert tail in result.content, "the cap must not truncate delivered content"
+
+    async def test_does_not_block_the_event_loop(self) -> None:
+        """petit is synchronous. Run on the loop, a large payload stalls the
+        whole gateway, so it belongs on a worker thread."""
+        ticks = 0
+
+        async def heartbeat() -> None:
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.001)
+                ticks += 1
+
+        beat = asyncio.create_task(heartbeat())
+        try:
+            await PetitProcessor().run(_syslog(20_000), PreProcessContext())
+        finally:
+            beat.cancel()
+        assert ticks > 0, "the loop never got a turn while petit ran"
 
 
 class _FakeSummarizer:
