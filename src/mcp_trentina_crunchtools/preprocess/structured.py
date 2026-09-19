@@ -225,8 +225,17 @@ class StructuredProcessor:
 
         bytes_out = len(text.encode("utf-8"))
         if bytes_in > 0 and bytes_out / bytes_in > _MIN_REDUCTION_RATIO:
+            # See petit.py: the ratio is measured, so report it rather than
+            # collapse every near-miss and every no-hoper into one word.
             return PreProcessResult.declined(
                 self.name, self.cost, payload, reason="reduction_below_floor",
+                details={
+                    "would_be_bytes": bytes_out,
+                    "would_be_ratio": round(bytes_out / bytes_in, 4),
+                    "floor": _MIN_REDUCTION_RATIO,
+                    "groups_collapsed": reducer.groups_collapsed,
+                    "elements_dropped": reducer.elements_dropped,
+                },
             )
 
         return PreProcessResult(
