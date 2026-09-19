@@ -74,15 +74,7 @@ jobs:
 
   gourmand:
     name: Code Quality (Gourmand)
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/crunchtools/gourmand:latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run Gourmand
-        run: gourmand --full .
+    uses: crunchtools/gatehouse/.github/workflows/gourmand.yml@v0.5.0
 
   build-container:
     runs-on: ubuntu-latest
