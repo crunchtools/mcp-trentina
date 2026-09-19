@@ -32,9 +32,11 @@ from typing import Any
 
 from ..defense import Provenance
 from ..preprocess import (
+    EmailProcessor,
     PetitProcessor,
     PreProcessContext,
     PreProcessor,
+    StructuredProcessor,
     SummarizeProcessor,
     run_preprocessors,
 )
@@ -44,7 +46,9 @@ logger = logging.getLogger(__name__)
 
 # Stateless by contract (``PreProcessor`` protocol), so one instance each.
 _REGISTRY: dict[str, PreProcessor] = {
+    "email": EmailProcessor(),
     "petit": PetitProcessor(),
+    "structured": StructuredProcessor(),
     "summarize": SummarizeProcessor(),
 }
 
