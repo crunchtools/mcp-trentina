@@ -148,7 +148,7 @@ class TestDoesNotDeleteTheWrongThing:
     async def test_short_payload_declines(self) -> None:
         result = await _run("From: a@b.com\nTo: c@d.com\n> quoted")
         assert not result.applied
-        assert result.details["declined"] == "too_few_lines"
+        assert result.details["declined"] == "not_line_structured"
 
 
 class TestProperties:

@@ -119,6 +119,29 @@ def _text_blocks(content_blocks: list[Any] | None) -> list[tuple[int, str]]:
     return out
 
 
+def _describe_decline(outcome: Any) -> str:
+    """One processor's decline, with the evidence it already measured.
+
+    "reduction_below_floor" on its own is the same word for a run that
+    missed the bar by a hair and one that saved nothing, and those argue
+    for opposite changes to the floor — so print what was measured.
+
+    Shape stays `name:reason(...)` so existing greps for a reason string
+    keep matching.
+    """
+    detail = outcome.details
+    parts: list[str] = []
+    if "would_be_ratio" in detail:
+        parts.append(f"would_be={detail['would_be_ratio']:.0%}")
+        parts.append(f"floor={float(detail.get('floor', 0)):.0%}")
+    if "lines_in" in detail:
+        parts.append(f"lines={detail['lines_in']}")
+        if "bytes_in" in detail:
+            parts.append(f"bytes={detail['bytes_in']}")
+    suffix = f"({','.join(parts)})" if parts else ""
+    return f"{outcome.name}:{detail.get('declined', '?')}{suffix}"
+
+
 async def reduce_response(
     *,
     profile: Profile,
@@ -201,11 +224,7 @@ async def reduce_response(
     # Declines are the valuable half — a large payload that every processor
     # declined is the specification for the next one. Volume stays bounded
     # because a candidate has already cleared min_bytes.
-    declines = ",".join(
-        f"{r.name}:{r.details.get('declined', '?')}"
-        for r in results
-        if not r.applied
-    )
+    declines = ",".join(_describe_decline(r) for r in results if not r.applied)
     logger.warning(
         "reduce: %s:%s:%s %d -> %d bytes (%d%%) applied=%s metered=%s%s",
         profile.name,
