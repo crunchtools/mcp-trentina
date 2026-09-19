@@ -200,3 +200,40 @@ class TestRouterOrdering:
         scanned = seen["blocks"][0]["text"]
         assert len(scanned) < len(LOGGY), "scanner saw the unreduced payload"
         assert result["content"][0]["text"] == scanned, "delivered != scanned"
+
+
+class TestRegistryAndConfigAgree:
+    """The registry and the config Literal are two halves of one list.
+
+    Adding a processor to `gateway.reduce._REGISTRY` without adding it to
+    `ProcessorName` produces a reducer that exists, is wired in, passes its
+    own tests — and that no profile can ever name, because Pydantic rejects
+    the string. It is dead on arrival and nothing fails to say so.
+    """
+
+    def test_every_registered_processor_is_configurable(self) -> None:
+        from typing import get_args
+
+        from mcp_trentina_crunchtools.gateway.profile import ProcessorName
+        from mcp_trentina_crunchtools.gateway.reduce import _REGISTRY
+
+        assert set(_REGISTRY) == set(get_args(ProcessorName))
+
+    def test_every_default_processor_is_registered(self) -> None:
+        from mcp_trentina_crunchtools.gateway.profile import (
+            _DEFAULT_PROCESSORS,
+            PreProcessConfig,
+        )
+        from mcp_trentina_crunchtools.gateway.reduce import _REGISTRY
+
+        assert set(_DEFAULT_PROCESSORS) <= set(_REGISTRY)
+        assert set(PreProcessConfig().processors) <= set(_REGISTRY)
+
+    def test_defaults_are_all_free(self) -> None:
+        """A METERED processor in the defaults would spend LLM money for
+        every profile that merely switched reduction on."""
+        from mcp_trentina_crunchtools.gateway.profile import _DEFAULT_PROCESSORS
+        from mcp_trentina_crunchtools.gateway.reduce import _REGISTRY
+        from mcp_trentina_crunchtools.preprocess import Cost
+
+        assert all(_REGISTRY[n].cost is Cost.FREE for n in _DEFAULT_PROCESSORS)

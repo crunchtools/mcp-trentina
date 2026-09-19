@@ -7,17 +7,21 @@ crosses the defense pipeline on the way in.
 
 from .base import Cost, PreProcessContext, PreProcessor, PreProcessResult
 from .compose import PreProcessOutcome, Strategy, run_preprocessors
+from .email import EmailProcessor
 from .petit import PetitProcessor
+from .structured import StructuredProcessor
 from .summarize import SummarizeProcessor
 
 __all__ = [
     "Cost",
+    "EmailProcessor",
     "PetitProcessor",
     "PreProcessContext",
     "PreProcessOutcome",
     "PreProcessResult",
     "PreProcessor",
     "Strategy",
+    "StructuredProcessor",
     "SummarizeProcessor",
     "run_preprocessors",
 ]

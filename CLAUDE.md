@@ -102,5 +102,12 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
     drivers and its packaged `hash.stopwords` normalize WORDS, and this layer
     normalizes only tokens that cannot carry meaning. Needs >= 2.2.0, which is
     the first deterministic release returning verbatim samples.
+  - `structured.py` — JSON. Fingerprints ARRAY ELEMENTS where petit
+    fingerprints lines, so the comparable unit stops being a line. Emits
+    valid JSON.
+  - `email.py` — mail. Collapses quoted reply chains and strips signatures;
+    leaves repeated footers to petit, which is what `chain` is for.
+  - `volatile.py` — the one normalization policy all of them share. Import
+    it; a second copy is a second, weaker security rule.
 - `gateway/` — Per-consumer MCP gateway proxy with tool allowlists, parameter guards, and defense pipeline
   - **Parameter guards**: per-tool argument validation with allow/deny value patterns — see `docs/gateway-design.md`
