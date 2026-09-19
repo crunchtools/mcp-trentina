@@ -5,7 +5,7 @@ against profile ``alert_ingress`` configurations (constant-time),
 and forwards the JSON payload to the profile's ``forward_url``.
 
 The token embedded in the URL is the sole authentication — no
-headers required.  Designed for monitoring systems (Nagios, Zabbix)
+headers required.  Designed for monitoring systems such as Nagios
 that need to page an agent (Hermes/Kagetora) through Trentina.
 
 Before forwarding, the payload runs through the same three-layer
