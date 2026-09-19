@@ -356,11 +356,6 @@ wheels = [
 ]
 
 [[package]]
-name = "crunchtools"
-version = "2.2.0"
-source = { git = "https://github.com/fatherlinux/petit.git?tag=v2.2.0#c16ab675404d9ff451053826b6c388a64bd39d84" }
-
-[[package]]
 name = "cryptography"
 version = "50.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1109,7 +1104,6 @@ version = "0.6.3"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
-    { name = "crunchtools" },
     { name = "dbus-fast" },
     { name = "fastmcp" },
     { name = "httpx" },
@@ -1119,6 +1113,7 @@ dependencies = [
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "onnxruntime", version = "1.24.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "onnxruntime", version = "1.29.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "petit-log" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "transformers" },
@@ -1135,7 +1130,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.12" },
-    { name = "crunchtools", git = "https://github.com/fatherlinux/petit.git?tag=v2.2.0" },
     { name = "dbus-fast", specifier = ">=2.0" },
     { name = "fastmcp", specifier = ">=2.0,<3.0" },
     { name = "httpx", specifier = ">=0.28" },
@@ -1143,6 +1137,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "onnxruntime", specifier = ">=1.17" },
+    { name = "petit-log", git = "https://github.com/crunchtools/petit.git?tag=v3.0.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
@@ -1624,6 +1619,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/fa/2a/52a8da6fe965dea61
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9a/70/875f4a23bfc4731703a5835487d0d2fb999031bd415e7d17c0ae615c18b7/pathvalidate-3.3.1-py3-none-any.whl", hash = "sha256:5263baab691f8e1af96092fa5137ee17df5bdfbd6cff1fcac4d6ef4bc2e1735f", size = 24305, upload-time = "2025-06-15T09:07:19.117Z" },
 ]
+
+[[package]]
+name = "petit-log"
+version = "3.0.0"
+source = { git = "https://github.com/crunchtools/petit.git?tag=v3.0.0#e74f8e2cc6aa2484463511534ca3b1cef747c00b" }
 
 [[package]]
 name = "platformdirs"

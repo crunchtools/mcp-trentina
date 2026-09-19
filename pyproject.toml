@@ -21,9 +21,10 @@ classifiers = [
 dependencies = [
     "fastmcp>=2.0,<3.0",
     # petit, as a library. Layer 1's line grouping (preprocess/petit.py).
-    # 2.2.0 is the first release that is deterministic, returns verbatim
+    # 3.0.0 renamed the distribution to petit-log and the import to petit;
+    # it is the first release that is deterministic, returns verbatim
     # samples, and lets the caller supply its own normalization policy.
-    "crunchtools>=2.2.0",
+    "petit-log>=3.0.0",
     "httpx>=0.28",
     "pydantic>=2.0",
     "beautifulsoup4>=4.12",
@@ -103,17 +104,17 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 
-# crunchtools 2.2.0 is tagged and built but not yet uploaded to PyPI, where
-# only 2.1.0 is available, so dev and CI resolution is pinned to the tag.
-# The `crunchtools>=2.2.0` requirement above is the real dependency and is
-# what consumers install. Removing this block is tracked in issue #96 and is
-# blocked on a human with PyPI credentials running the upload.
+# petit-log 3.0.0 is tagged and built but not yet uploaded to PyPI, so dev
+# and CI resolution is pinned to the tag. The `petit-log>=3.0.0` requirement
+# above is the real dependency and is what consumers install. Removing this
+# block is tracked in issue #96 and is blocked on a human with PyPI
+# credentials running the upload.
 [tool.uv.sources]
-crunchtools = { git = "https://github.com/fatherlinux/petit.git", tag = "v2.2.0" }
+petit-log = { git = "https://github.com/crunchtools/petit.git", tag = "v3.0.0" }
 
-# crunchtools (petit) ships no type information — it is a long-lived tool
-# whose library surface was added recently and whose internals carry no
-# annotations. Only preprocess/petit.py imports it.
+# petit-log ships no type information — it is a long-lived tool whose library
+# surface was added recently and whose internals carry no annotations. Only
+# preprocess/petit.py imports it.
 [[tool.mypy.overrides]]
-module = ["crunchtools"]
+module = ["petit"]
 ignore_missing_imports = true
