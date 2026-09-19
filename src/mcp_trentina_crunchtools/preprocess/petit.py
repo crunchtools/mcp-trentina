@@ -28,7 +28,7 @@ That rule is why the library is called the way it is:
   collapses everything after one of them, so "Invalid user <anything>"
   becomes a single group — semantic, word-level, and exactly what the rule
   above forbids. Detection would select it on any sshd-shaped payload.
-* ``stopwords=_VOLATILE`` replaces petit's packaged ``hash.stopwords``,
+* ``stopwords=VOLATILE`` replaces petit's packaged ``hash.stopwords``,
   which is tuned for system logs and more aggressive than its name: its
   ``[a-f]+#`` rule eats the letters next to a scrubbed number, so "bob0"
   and "boa0" share a fingerprint. Right for finding a flapping daemon,
@@ -66,44 +66,7 @@ import asyncio
 from crunchtools import PetitError, analyze_text
 
 from .base import Cost, PreProcessContext, PreProcessResult
-
-# Order matters: specific shapes before the bare-number catch-all, so an ISO
-# timestamp becomes one <TS> instead of six <N>s. Passed straight to petit
-# as this caller's normalization policy.
-#
-# Each replacement is distinct on purpose. Collapsing everything to one
-# character would merge shapes that are not the same — a line carrying a
-# timestamp and a line carrying a bare number in the same position — and
-# would leave the summary saying only that something was normalized away.
-_VOLATILE: list[tuple[str, str]] = [
-    # ISO 8601 / RFC 3339-ish timestamps, with optional fraction and zone.
-    (
-        r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?",
-        "<TS>",
-    ),
-    # Syslog-style: "Sep 13 04:22:01"
-    (
-        (
-            r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s{1,2}\d{1,2}"
-            r"\s\d{2}:\d{2}:\d{2}\b"
-        ),
-        "<TS>",
-    ),
-    # Bare clock times.
-    (r"\b\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?\b", "<TS>"),
-    (
-        (
-            r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
-            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
-        ),
-        "<UUID>",
-    ),
-    (r"\b(?:\d{1,3}\.){3}\d{1,3}\b", "<IP>"),
-    # Long hex runs: hashes, addresses, ids. 8+ so ordinary words like
-    # "deadbeef" pay the price but "cafe" and "added" do not.
-    (r"\b(?:0x)?[0-9a-fA-F]{8,}\b", "<HEX>"),
-    (r"\d+", "<N>"),
-]
+from .volatile import VOLATILE
 
 _FINGERPRINT_MAX_CHARS = 400
 
@@ -144,7 +107,7 @@ class PetitProcessor:
                 analyze_text,
                 capped,
                 driver="RawEntry",
-                stopwords=_VOLATILE,
+                stopwords=VOLATILE,
                 max_samples=_SAMPLES_PER_GROUP,
                 source_name="trentina",
             )
