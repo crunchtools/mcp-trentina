@@ -18,14 +18,14 @@ def _scrub_credentials(message: str) -> str:
     )
 
 
-class AirlockError(Exception):
+class TrentinaError(Exception):
     """Base error for all trentina operations."""
 
     def __init__(self, message: str) -> None:
         super().__init__(_scrub_credentials(message))
 
 
-class FetchError(AirlockError):
+class FetchError(TrentinaError):
     """Raised when fetching a URL fails."""
 
     def __init__(
@@ -41,11 +41,11 @@ class FetchError(AirlockError):
         self.error_body = error_body
 
 
-class SanitizationError(AirlockError):
+class SanitizationError(TrentinaError):
     """Raised when the sanitization pipeline encounters an unrecoverable error."""
 
 
-class QuarantineAgentError(AirlockError):
+class QuarantineAgentError(TrentinaError):
     """Raised when the Q-Agent (Gemini) call fails."""
 
     def __init__(self, reason: str, status_code: int | None = None) -> None:
@@ -53,7 +53,7 @@ class QuarantineAgentError(AirlockError):
         self.status_code = status_code
 
 
-class BlockedSourceError(AirlockError):
+class BlockedSourceError(TrentinaError):
     """Raised when a source is in the SQLite blocklist."""
 
     def __init__(self, source: str, detected_at: str) -> None:
@@ -63,14 +63,14 @@ class BlockedSourceError(AirlockError):
         )
 
 
-class FileReadError(AirlockError):
+class FileReadError(TrentinaError):
     """Raised when reading a local file fails."""
 
     def __init__(self, path: str, reason: str) -> None:
         super().__init__(f"Cannot read {path}: {reason}")
 
 
-class ContentSizeError(AirlockError):
+class ContentSizeError(TrentinaError):
     """Raised when inline content exceeds the maximum allowed size."""
 
     def __init__(self, size: int, max_size: int) -> None:
@@ -80,7 +80,7 @@ class ContentSizeError(AirlockError):
         )
 
 
-class UnscannableContentError(AirlockError):
+class UnscannableContentError(TrentinaError):
     """Raised when untrusted content is too large for Layer 2 to scan in full.
 
     Failing closed here is deliberate.  A partial scan that returns BENIGN is
@@ -97,7 +97,7 @@ class UnscannableContentError(AirlockError):
         )
 
 
-class UnsupportedContentTypeError(AirlockError):
+class UnsupportedContentTypeError(TrentinaError):
     """Raised when a fetched body is not text the pipeline can reason about."""
 
     def __init__(
@@ -129,5 +129,5 @@ class UnsupportedContentTypeError(AirlockError):
         self.redirect_chain = redirect_chain
 
 
-class ConfigError(AirlockError):
+class ConfigError(TrentinaError):
     """Raised for configuration problems."""

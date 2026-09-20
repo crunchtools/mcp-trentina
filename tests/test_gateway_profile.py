@@ -25,10 +25,10 @@ class TestProfileModel:
     def test_minimal_profile_valid(self) -> None:
         p = Profile(
             name="josui",
-            auth=AuthConfig(bearer_token_env="AIRLOCK_PROFILE_JOSUI_TOKEN"),
+            auth=AuthConfig(bearer_token_env="TRENTINA_PROFILE_JOSUI_TOKEN"),
         )
         assert p.name == "josui"
-        assert p.auth.bearer_token_env == "AIRLOCK_PROFILE_JOSUI_TOKEN"
+        assert p.auth.bearer_token_env == "TRENTINA_PROFILE_JOSUI_TOKEN"
         assert p.backends == {}
         assert p.defense.enforcement == "annotate"
         assert p.defense.audit is True
@@ -36,7 +36,7 @@ class TestProfileModel:
     def test_profile_with_backends(self) -> None:
         p = Profile(
             name="kagetora",
-            auth=AuthConfig(bearer_token_env="AIRLOCK_PROFILE_KAGETORA_TOKEN"),
+            auth=AuthConfig(bearer_token_env="TRENTINA_PROFILE_KAGETORA_TOKEN"),
             backends={
                 "mcp-slack": Backend(url="http://mcp-slack:8005/mcp"),
                 "mcp-atlassian": Backend(
@@ -233,7 +233,7 @@ class TestLlmKeys:
     def test_profile_with_llm_keys(self) -> None:
         p = Profile(
             name="kagetora",
-            auth=AuthConfig(bearer_token_env="AIRLOCK_PROFILE_KAGETORA_TOKEN"),
+            auth=AuthConfig(bearer_token_env="TRENTINA_PROFILE_KAGETORA_TOKEN"),
             llm_keys={"gemini": LlmKeyOverride(api_key_env="KAGETORA_GEMINI_API_KEY")},
         )
         assert p.llm_keys["gemini"].api_key_env == "KAGETORA_GEMINI_API_KEY"
@@ -302,7 +302,7 @@ class TestLoader:
 profiles:
   josui:
     auth:
-      bearer_token_env: AIRLOCK_PROFILE_JOSUI_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_JOSUI_TOKEN
     backends:
       mcp-slack:
         url: http://mcp-slack:8005/mcp
@@ -310,7 +310,7 @@ profiles:
         tools_deny: ["slack_destructive_*"]
 """
         )
-        monkeypatch.setenv("AIRLOCK_PROFILE_JOSUI_TOKEN", "tok-josui")
+        monkeypatch.setenv("TRENTINA_PROFILE_JOSUI_TOKEN", "tok-josui")
         gateway_cfg = load_profiles(cfg)
         assert set(gateway_cfg.profiles) == {"josui"}
         token = gateway_cfg.profiles["josui"].auth.bearer_token
@@ -348,7 +348,7 @@ profiles:
 profiles:
   kagetora:
     auth:
-      bearer_token_env: AIRLOCK_PROFILE_KAGETORA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
     backends:
       memory:
         url: http://mcp-memory:8765/mcp
@@ -356,7 +356,7 @@ profiles:
           Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
 """
         )
-        monkeypatch.setenv("AIRLOCK_PROFILE_KAGETORA_TOKEN", "tok")
+        monkeypatch.setenv("TRENTINA_PROFILE_KAGETORA_TOKEN", "tok")
         monkeypatch.setenv("MCP_MEMORY_API_KEY", "memsecret")
         gateway_cfg = load_profiles(cfg)
         assert (
@@ -373,7 +373,7 @@ profiles:
 profiles:
   kagetora:
     auth:
-      bearer_token_env: AIRLOCK_PROFILE_KAGETORA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
     backends:
       memory:
         url: http://mcp-memory:8765/mcp
@@ -381,7 +381,7 @@ profiles:
           Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
 """
         )
-        monkeypatch.setenv("AIRLOCK_PROFILE_KAGETORA_TOKEN", "tok")
+        monkeypatch.setenv("TRENTINA_PROFILE_KAGETORA_TOKEN", "tok")
         monkeypatch.delenv("MCP_MEMORY_API_KEY", raising=False)
         with pytest.raises(ProfileConfigError, match="MCP_MEMORY_API_KEY"):
             load_profiles(cfg)

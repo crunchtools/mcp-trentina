@@ -9,15 +9,15 @@
 
 ## Overview
 
-Airlock's existing tools require the content source to be either a URL (fetch tools)
+Trentina's existing tools require the content source to be either a URL (fetch tools)
 or a file path inside the container (read tools). This creates a hard dependency on
 filesystem access or web availability — neither of which exists when another MCP agent
-needs to pass content through airlock's defense pipeline.
+needs to pass content through trentina's defense pipeline.
 
-Takeda (OpenClaw Signal bot on lotor) is the immediate consumer. It receives Signal
-messages containing URLs, pasted text, and decoded attachments. It connects to airlock
-over streamable-http on the same host but cannot mount volumes into the airlock
-container or serve content via HTTP for airlock to fetch.
+Takeda (OpenClaw Signal bot) is the immediate consumer. It receives Signal
+messages containing URLs, pasted text, and decoded attachments. It connects to trentina
+over streamable-http on the same host but cannot mount volumes into the trentina
+container or serve content via HTTP for trentina to fetch.
 
 Content tools solve this by accepting raw text as an MCP tool parameter. The content
 enters the same three-layer pipeline (L1 deterministic, L2 classifier, L3 Q-Agent) as
@@ -100,7 +100,7 @@ has no stable identifier, so the blocklist uses a SHA-256 hash of the content.
 content_hash = f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}"
 ```
 
-This is deterministic — identical content always produces the same hash. If airlock
+This is deterministic — identical content always produces the same hash. If trentina
 detects injection in a piece of content and blocklists it, submitting the same content
 again will be blocked immediately without re-running the pipeline.
 
@@ -264,7 +264,7 @@ The only new code is the tool orchestration layer in `content.py`.
 ## Dependencies
 
 - Depends on: None. All required infrastructure (pipeline, classifier, Q-Agent, database) exists.
-- Blocks: Takeda/OpenClaw airlock integration on lotor.
+- Blocks: Takeda/OpenClaw trentina integration.
 
 ---
 

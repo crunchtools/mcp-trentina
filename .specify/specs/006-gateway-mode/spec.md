@@ -9,15 +9,15 @@
 ## Overview
 
 Makes the per-consumer MCP gateway endpoint family (`POST /gateway/<profile>/mcp`)
-the **single surface** for talking to airlock (Option C). Every tool a consumer
-can reach — airlock's own web/fetch tools *and* every backend MCP server on the
+the **single surface** for talking to trentina (Option C). Every tool a consumer
+can reach — trentina's own web/fetch tools *and* every backend MCP server on the
 `crunchtools` network — is surfaced through one per-consumer endpoint behind one
 bearer token. The profile is the policy: one endpoint, one token, one YAML stanza
 per agent.
 
-Airlock's native tools (`safe_fetch_tool`, `quarantine_fetch_tool`,
+Trentina's native tools (`safe_fetch_tool`, `quarantine_fetch_tool`,
 `safe_search_tool`, …) are exposed as an **internal backend**: a profile backend
-whose URL uses the `internal://<label>` scheme dispatches in-process to airlock's
+whose URL uses the `internal://<label>` scheme dispatches in-process to trentina's
 own FastMCP tool registry instead of opening a streamable-http session. By
 convention this backend is named `web`, so the tools surface as
 `web__safe_fetch_tool`, `web__quarantine_fetch_tool`, etc. The result is that
@@ -33,7 +33,7 @@ definitions to the model.
 The legacy `/mcp` web-tools surface is **deprecated** under Option C. It is still
 registered by FastMCP's `mcp.run(transport="streamable-http")` (and on the
 production base image, fastmcp 3.1.1, it returns 404 — see below), but no
-consumer should target it: airlock's tools are reachable through the gateway's
+consumer should target it: trentina's tools are reachable through the gateway's
 `internal://` backend instead. Because `/mcp` and the gateway no longer need to
 coexist as live surfaces, the fastmcp 3.1.1 routing collision that constrained
 the earlier design is now irrelevant.
@@ -50,8 +50,8 @@ responses), audit log integration, and Cockpit UI come in later phases. See
 
 | Endpoint | Method | Status | Description |
 |---|---|---|---|
-| `/gateway/<profile>/mcp` | POST | **Canonical** | MCP endpoint, one per consumer profile. Routes to the profile's configured backends (http MCP servers + the `internal://` airlock-tools backend) with tool-name allowlist filtering. `GET`/`DELETE` return 405 (no session resumption). |
-| `/mcp` | POST | **Deprecated** | The original web-tools surface. Still registered by FastMCP but not for consumer use; airlock's tools are reached via the gateway's `internal://` backend. On the production base image (fastmcp 3.1.1) it returns 404 — deliberate, not a regression. |
+| `/gateway/<profile>/mcp` | POST | **Canonical** | MCP endpoint, one per consumer profile. Routes to the profile's configured backends (http MCP servers + the `internal://` trentina-tools backend) with tool-name allowlist filtering. `GET`/`DELETE` return 405 (no session resumption). |
+| `/mcp` | POST | **Deprecated** | The original web-tools surface. Still registered by FastMCP but not for consumer use; trentina's tools are reached via the gateway's `internal://` backend. On the production base image (fastmcp 3.1.1) it returns 404 — deliberate, not a regression. |
 
 The gateway endpoint is not a "tool" in the MCP sense — it's an HTTP endpoint
 family that itself speaks MCP to consumers. `tools/list` returns the filtered,
@@ -74,8 +74,8 @@ to the appropriate backend.
 - Profile name in URL path validated against `^[a-z][a-z0-9-]*$` to prevent path traversal in route matching.
 
 ### Layer 3 — API Hardening
-- Backend URL scheme is scheme-discriminated: `http(s)://` for remote streamable-http MCP servers, `internal://<label>` for airlock's in-process tool registry. SSE and stdio are rejected at profile-load time. The `internal://` label must match `^[a-z][a-z0-9-]*$` so the namespace stays well-formed.
-- The internal backend executes airlock's own already-trusted tool coroutines in-process — no new network surface, no new credential. It is subject to the same per-profile allow/deny filter and call-time re-check as any http backend.
+- Backend URL scheme is scheme-discriminated: `http(s)://` for remote streamable-http MCP servers, `internal://<label>` for trentina's in-process tool registry. SSE and stdio are rejected at profile-load time. The `internal://` label must match `^[a-z][a-z0-9-]*$` so the namespace stays well-formed.
+- The internal backend executes trentina's own already-trusted tool coroutines in-process — no new network surface, no new credential. It is subject to the same per-profile allow/deny filter and call-time re-check as any http backend.
 - TLS for backend MCP connections when URL scheme is `https://` (loopback `http://` is fine on the `crunchtools` podman network).
 - Timeouts on all backend MCP calls (configurable per profile, default 30s).
 - Backend response size limit (configurable, default 10 MB; rejects oversized).
@@ -107,7 +107,7 @@ to the appropriate backend.
 | `gateway/backend.py` | Backend MCP connection management via `mcp.client.streamable_http` |
 | `gateway/filter.py` | `tools/list` response allowlist filter (glob-pattern matching) |
 | `gateway/router.py` | JSON-RPC dispatch (`initialize`, `tools/list`, `tools/call`, `ping`) per profile; dispatches each backend by URL scheme (http vs internal) |
-| `gateway/internal.py` | Internal backend: walks airlock's own FastMCP tool registry, exposing `list_internal_tools()` / `call_internal_tool()` with the same return types as the http backend |
+| `gateway/internal.py` | Internal backend: walks trentina's own FastMCP tool registry, exposing `list_internal_tools()` / `call_internal_tool()` with the same return types as the http backend |
 | `gateway/app.py` | Starlette app exposing `/gateway/{profile}/mcp` routes |
 | `gateway/errors.py` | Gateway-specific error responses (constant-time auth fail, scrubbed messages) |
 | `tests/test_gateway_profile.py` | Profile model + loader tests (incl. `internal://` scheme validation) |
@@ -120,9 +120,9 @@ to the appropriate backend.
 
 | File | Changes |
 |------|---------|
-| `__init__.py` | `_run_with_gateway()`: when `AIRLOCK_GATEWAY_ENABLED=true`, register the gateway `custom_route` AND bind airlock's FastMCP server as the internal-tool backend (`register_internal_server`) before `mcp.run(...)` |
+| `__init__.py` | `_run_with_gateway()`: when `TRENTINA_GATEWAY_ENABLED=true`, register the gateway `custom_route` AND bind trentina's FastMCP server as the internal-tool backend (`register_internal_server`) before `mcp.run(...)` |
 | `gateway/profile.py` | `Backend.url` validator accepts `internal://<label>` alongside `http(s)://`; adds `Backend.is_internal` |
-| `config.py` | Add `AIRLOCK_GATEWAY_ENABLED`, `AIRLOCK_PROFILES_PATH` env vars |
+| `config.py` | Add `TRENTINA_GATEWAY_ENABLED`, `TRENTINA_PROFILES_PATH` env vars |
 | `pyproject.toml` | `pyyaml>=6.0` dependency; version bump |
 
 ---
@@ -153,7 +153,7 @@ Phase 1 adds zero `@mcp.tool()`-registered tools to the existing FastMCP surface
 
 ## Open Questions
 
-1. **Should Phase 1 require `AIRLOCK_GATEWAY_ENABLED=true` to mount the routes?** Recommend yes — feature-flagged rollout, default off, no behavior change for existing deployments until flipped.
+1. **Should Phase 1 require `TRENTINA_GATEWAY_ENABLED=true` to mount the routes?** Recommend yes — feature-flagged rollout, default off, no behavior change for existing deployments until flipped.
 2. **Profile reload behavior**: hot-reload on YAML file change (Phase 4 — Cockpit editor needs this), or restart-only for Phase 1? Recommend restart-only for Phase 1; revisit in Phase 4.
 3. **MCP `resources/*` and `prompts/*` methods**: deferred to v1.1 per design doc. The gateway returns method-not-found for these for now.
 
@@ -161,7 +161,7 @@ Phase 1 adds zero `@mcp.tool()`-registered tools to the existing FastMCP surface
 > earlier design worried that registering the gateway `custom_route` made the
 > FastMCP `/mcp` endpoint 404 on the production base image. Under Option C `/mcp`
 > is deprecated and unused, so its 404 is harmless — the collision no longer
-> constrains anything and the `AIRLOCK_GATEWAY_ENABLED` flag can be flipped on
+> constrains anything and the `TRENTINA_GATEWAY_ENABLED` flag can be flipped on
 > without bumping fastmcp.
 
 ---
@@ -171,4 +171,4 @@ Phase 1 adds zero `@mcp.tool()`-registered tools to the existing FastMCP surface
 | Version | Date | Changes |
 |---------|------|---------|
 | 0.1.0 | 2026-06-13 | Initial draft — Phase 1 scope only |
-| 0.2.0 | 2026-06-13 | Option C: gateway is the single surface; `/mcp` deprecated; airlock's own tools exposed via the `internal://` backend; routing-collision known-issue retired. |
+| 0.2.0 | 2026-06-13 | Option C: gateway is the single surface; `/mcp` deprecated; trentina's own tools exposed via the `internal://` backend; routing-collision known-issue retired. |

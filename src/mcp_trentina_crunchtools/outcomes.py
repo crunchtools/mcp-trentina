@@ -23,7 +23,7 @@ from __future__ import annotations
 from enum import Enum
 
 from .errors import (
-    AirlockError,
+    TrentinaError,
     BlockedSourceError,
     ConfigError,
     ContentSizeError,
@@ -114,7 +114,7 @@ def classify_exception(exc: BaseException) -> Outcome:
     The ``__cause__`` walk is depth- and cycle-guarded: an exception chain that
     loops back on itself must never hang the audit path.
 
-    A bare ``AirlockError`` with no more specific subclass is still ours, so it
+    A bare ``TrentinaError`` with no more specific subclass is still ours, so it
     falls through to ``GATEWAY_ERROR``. Anything else classifies as
     ``BACKEND_ERROR``: the overwhelming majority of unknowns originate
     upstream, and over-reporting our own bugs would make the one outcome that
@@ -134,7 +134,7 @@ def classify_exception(exc: BaseException) -> Outcome:
         for exc_type, outcome in _CLASSIFICATION:
             if isinstance(err, exc_type):
                 return outcome
-    if any(isinstance(err, AirlockError) for err in chain):
+    if any(isinstance(err, TrentinaError) for err in chain):
         return Outcome.GATEWAY_ERROR
     return Outcome.BACKEND_ERROR
 

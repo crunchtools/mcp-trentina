@@ -7,7 +7,7 @@
 profiles:
   kagetora:
     auth:
-      bearer_token_env: AIRLOCK_PROFILE_KAGETORA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
 
     # Defense POLICY. All three layers always run — there are no per-layer
     # off switches. An autonomous agent gets `block` once thresholds are
@@ -46,7 +46,7 @@ profiles:
         api_key_env: KAGETORA_GEMINI_API_KEY
 
     backends:
-      # ── Internal (airlock's own tools) ──────────────────────────
+      # ── Internal (trentina's own tools) ──────────────────────────
       web:
         url: "internal://web"
         tools_allow: ["*"]

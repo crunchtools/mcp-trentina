@@ -46,7 +46,7 @@ DEFAULT_PROVIDER_FALLBACK: list[str] = []
 
 
 class Config:
-    """Airlock configuration from environment variables.
+    """Trentina configuration from environment variables.
 
     Requires GEMINI_API_KEY for Layer 2 (Q-Agent) operations.
     Layer 1 (deterministic sanitization) works without it.

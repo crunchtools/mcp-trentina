@@ -9,9 +9,9 @@
 
 ## Overview
 
-Airlock protects agents from prompt injection when fetching web content, but has no
+Trentina protects agents from prompt injection when fetching web content, but has no
 way to search the web safely. Takeda (OpenClaw Signal bot) needs web search capability
-routed through airlock's defense layers so all web access flows through a single
+routed through trentina's defense layers so all web access flows through a single
 security boundary.
 
 Two new tools — `safe_search` and `quarantine_search` — use Gemini's built-in search
@@ -89,7 +89,7 @@ A separate JSON structure — NOT in the text — containing the actual sources:
 **Redirect URLs:** The URIs in `groundingChunks` are often **temporary redirect URLs**
 through `vertexaisearch.cloud.google.com` that expire after a few days. rotv's
 `newsService.js` has a `resolveRedirectUrl()` function to chase these redirects to
-their final destinations. Airlock needs the same.
+their final destinations. Trentina needs the same.
 
 ### Implications for the Pipeline
 
@@ -110,7 +110,7 @@ Why this is better than an external search API:
 - **Zero new credentials** — reuses existing `GEMINI_API_KEY`
 - **Zero new dependencies** — no new HTTP client, no new error types
 - **Included in Gemini API pricing** — no separate per-query cost
-- **Raw httpx** — consistent with airlock's existing Gemini integration
+- **Raw httpx** — consistent with trentina's existing Gemini integration
 - **Google CSE is being discontinued** (closed to new customers, sunset Jan 2027)
 
 ### Pipeline: L0 → L1 → L2 → L3
@@ -250,7 +250,7 @@ sources internally.
 
 A new function in `agent.py` that makes a Gemini API call with `google_search`
 grounding enabled. Returns plain text + grounding metadata. This is the ONLY place
-in airlock where a Q-Agent has any tool at all.
+in trentina where a Q-Agent has any tool at all.
 
 **Quarantine enforcement:** L0 gets `google_search` grounding ONLY — no
 `functionDeclarations`, no other tools. `_enforce_search_quarantine()` validates this.
@@ -359,7 +359,7 @@ def _enforce_search_quarantine(request_body: dict[str, Any]) -> None:
     """Enforce L0 search constraints.
 
     ONLY google_search grounding is permitted. No functionDeclarations,
-    no other tools. This is the ONLY place in airlock where any agent
+    no other tools. This is the ONLY place in trentina where any agent
     has tool access.
     """
     if "functionDeclarations" in request_body:

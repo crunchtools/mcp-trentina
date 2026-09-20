@@ -1,4 +1,4 @@
-# Gateway Mode — airlock as the trusted boundary for MCP traffic
+# Gateway Mode — trentina as the trusted boundary for MCP traffic
 
 **Status:** Design draft (v0.2, Option C — single-endpoint architecture)
 **Branch:** `feat/gateway-design`
@@ -8,12 +8,12 @@
 
 ## Summary
 
-Airlock today exposes 6 web-content tools (`fetch`, `read`, `search`, `scan`,
+Trentina today exposes 6 web-content tools (`fetch`, `read`, `search`, `scan`,
 `blocklist`, `stats`) that run untrusted content through a 3-layer prompt-injection
 defense (L1 sanitize → L2 Prompt Guard 2 classifier → L3 quarantined Gemini
 re-extraction) before returning anything to the LLM.
 
-This design extends airlock with a second surface — a **per-consumer MCP gateway**
+This design extends trentina with a second surface — a **per-consumer MCP gateway**
 that proxies traffic to the 14 backend MCP servers, applying the
 same defense pipeline to every tool response on the way back, with per-profile
 control of which tools each consumer sees and which defense layers run.
@@ -25,15 +25,15 @@ covering both web fetches *and* MCP-server tool outputs.
 
 ## Mission restatement
 
-Airlock's mission has always been the **trusted boundary between untrusted content
+Trentina's mission has always been the **trusted boundary between untrusted content
 and the LLM**. Web-fetch happens to be the only surface currently implemented because
 the LLM platforms Scott uses (Claude, Gemini) ship web search/fetch as native tools
-and don't route them through MCP — so airlock had to provide replacement tools.
+and don't route them through MCP — so trentina had to provide replacement tools.
 
 Every MCP server that returns content is the same threat: a wiki page, an RT ticket
 comment, a Slack message thread, a Jira issue description, a Confluence page, an
 email body — every one is a channel an attacker can plant prompt-injection payloads
-in. None of them currently flow through airlock. The gateway extension closes that
+in. None of them currently flow through trentina. The gateway extension closes that
 gap without changing the mission.
 
 ---
@@ -42,9 +42,9 @@ gap without changing the mission.
 
 Three problems converge:
 
-1. **MCP responses bypass airlock.** A malicious Confluence page, a Jira ticket
+1. **MCP responses bypass trentina.** A malicious Confluence page, a Jira ticket
    description written by a hostile user, a phishing email rendered through the
-   Gmail MCP — every one of those reaches the LLM unfiltered today. Airlock is
+   Gmail MCP — every one of those reaches the LLM unfiltered today. Trentina is
    the right boundary for this content but has no current path to it.
 
 2. **Per-consumer policy lives in two places.** Josui's deny list lives in
@@ -66,9 +66,9 @@ Three problems converge:
 ## Approach
 
 > **Option C (2026-06-13):** the gateway is the **single** surface. The original
-> `/mcp` web-tools endpoint is deprecated — airlock's own tools are folded into
+> `/mcp` web-tools endpoint is deprecated — trentina's own tools are folded into
 > the gateway as an in-process `internal://` backend (conventionally named `web`),
-> so one per-consumer endpoint behind one bearer token covers airlock's tools
+> so one per-consumer endpoint behind one bearer token covers trentina's tools
 > *and* the whole MCP fleet. There is no parallel surface to maintain.
 
 The gateway endpoint family:
@@ -86,7 +86,7 @@ Each request to the gateway endpoint:
 3. **Dispatches** the MCP call by backend URL scheme: `http(s)://` proxies to a
    remote MCP server via the `crunchtools` podman network (container DNS lookup
    — already how Kagetora reaches the fleet today); `internal://<label>`
-   dispatches in-process to airlock's own FastMCP tool registry. Both paths
+   dispatches in-process to trentina's own FastMCP tool registry. Both paths
    return identical wire shapes to the consumer.
 4. **On `tools/list` response:** drops tool definitions not in the profile's
    allowlist *before* forwarding to the consumer. This is where context savings
@@ -95,10 +95,10 @@ Each request to the gateway endpoint:
    defense layers (L1 always; L2 always; L3 optional per-profile) and returns
    sanitized content + detection metadata to the consumer.
 6. **Audits** every passthrough (profile, backend, tool, detection scores, byte
-   counts) to airlock's existing SQLite audit table.
+   counts) to trentina's existing SQLite audit table.
 7. **Surfaces** in the Cockpit plugin under a new "Gateway" tab.
 
-Under Option C the standalone `/mcp` web-tools endpoint is deprecated; airlock's
+Under Option C the standalone `/mcp` web-tools endpoint is deprecated; trentina's
 own tools are reached through the gateway's `internal://` backend, so every tool
 response — web fetches included — flows through the single gateway chokepoint.
 
@@ -106,16 +106,16 @@ response — web fetches included — flows through the single gateway chokepoin
 
 ## Profile schema
 
-YAML in `/etc/airlock/profiles.yaml` (or `$AIRLOCK_PROFILES_PATH`), hot-reloaded
+YAML in `/etc/trentina/profiles.yaml` (or `$TRENTINA_PROFILES_PATH`), hot-reloaded
 on file change (handled by Cockpit when profiles are edited from the UI).
 
 ```yaml
 profiles:
   josui:
     auth:
-      bearer_token_env: AIRLOCK_GATEWAY_JOSUI_TOKEN
+      bearer_token_env: TRENTINA_GATEWAY_JOSUI_TOKEN
     backends:
-      web:                              # airlock's own tools, in-process
+      web:                              # trentina's own tools, in-process
         url: internal://web
         tools_allow: ["*"]
         tools_deny: []
@@ -157,7 +157,7 @@ profiles:
 
   kagetora:
     auth:
-      bearer_token_env: AIRLOCK_PROFILE_KAGETORA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
     backends:
       memory:
         url: http://mcp-memory:8765/mcp
@@ -195,7 +195,7 @@ profiles:
 ### Consumer-visible tool names
 
 Backend tools are exposed under their original names, namespaced by backend name
-to avoid collisions — including airlock's own tools under the `internal://`
+to avoid collisions — including trentina's own tools under the `internal://`
 backend's name (conventionally `web`):
 
 ```
@@ -223,7 +223,7 @@ re-extraction. Two controls:
    metadata sidecar instead of being re-extracted.
 
 2. **Cockpit runtime override**: a global "L3 enabled" switch in the Cockpit
-   backend, persisted to airlock's SQLite settings table, takes precedence over
+   backend, persisted to trentina's SQLite settings table, takes precedence over
    per-profile config. Lets Scott kill L3 fleet-wide during a Gemini outage or
    when chasing a quota issue without redeploying.
 
@@ -335,7 +335,7 @@ spent, no side effects.
 
 ## Audit & Cockpit additions
 
-Every gateway passthrough writes one row to airlock's SQLite audit table:
+Every gateway passthrough writes one row to trentina's SQLite audit table:
 
 | Column | Type | Example |
 |---|---|---|
@@ -353,11 +353,11 @@ Every gateway passthrough writes one row to airlock's SQLite audit table:
 New Cockpit panel **Gateway**:
 - **Top-N tools per profile (last 24h)** — informs allowlist tuning
 - **Detection events timeline** — every L2 flag and L3 trigger, with drill-down to the response that tripped it
-- **Profile editor** — read-write YAML editor with validation, writes back to `/etc/airlock/profiles.yaml`
+- **Profile editor** — read-write YAML editor with validation, writes back to `/etc/trentina/profiles.yaml`
 - **L3 master switch** — global on/off toggle (token-cost control)
 - **Real-time passthrough tail** — live view of in-flight gateway calls
 
-The Cockpit plugin uses airlock's existing D-Bus interface for read access;
+The Cockpit plugin uses trentina's existing D-Bus interface for read access;
 write paths (profile editor, L3 switch) go through new D-Bus methods that
 update SQLite and the YAML file with locking.
 
@@ -365,19 +365,19 @@ update SQLite and the YAML file with locking.
 
 ## Migration & compatibility
 
-Option C is a **hard cut on the airlock side** (the gateway is the only surface),
+Option C is a **hard cut on the trentina side** (the gateway is the only surface),
 with consumers migrating at their own pace. Each consumer collapses its many MCP
-entries — including the old direct airlock `/mcp` entry — into a single
+entries — including the old direct trentina `/mcp` entry — into a single
 gateway entry behind one bearer token. **Kagetora cuts over first** (smaller
 blast radius, autonomous agent), then Josui.
 
 **An autonomous-agent consumer (small blast radius) — first:**
-1. Add its profile to airlock config: the `web` (`internal://web`)
+1. Add its profile to trentina config: the `web` (`internal://web`)
    backend + a narrowed http backend set.
 2. Replace its `mcp_servers:` entries with one
-   `airlock-gateway` entry pointing at the gateway's
+   `trentina-gateway` entry pointing at the gateway's
    `/gateway/<profile>/mcp` route (Bearer
-   `${AIRLOCK_GATEWAY_<PROFILE>_TOKEN}`).
+   `${TRENTINA_GATEWAY_<PROFILE>_TOKEN}`).
 3. Restart it; verify a call exercises both an http backend
    (`mcp-gemini__gemini_query_tool`) and the internal backend
    (`web__safe_fetch_tool`); confirm the prompt-token count drops from ~146K
@@ -385,8 +385,8 @@ blast radius, autonomous agent), then Josui.
 
 **An interactive-session consumer — second:**
 1. Add its profile with the `web` backend + the full http backend matrix.
-2. Replace the ~10 migrated MCP client entries + the old airlock entry
-   with one `airlock-gateway` entry pointing at the gateway's
+2. Replace the ~10 migrated MCP client entries + the old trentina entry
+   with one `trentina-gateway` entry pointing at the gateway's
    `/gateway/<profile>/mcp` route. Genuinely-local servers (pcloud,
    trove, claude-in-chrome, …) stay as-is.
 3. Shrink the SSH tunnel config from 10 `LocalForward` lines to
@@ -403,7 +403,7 @@ prompt tokens.
 
 ## Deployment
 
-Same `/srv/<service>/` layout the airlock service already
+Same `/srv/<service>/` layout the trentina service already
 uses in production. Adds:
 
 - `/srv/<service>/config/profiles.yaml` — profile definitions
@@ -415,7 +415,7 @@ uses in production. Adds:
   in `/usr/share/cockpit/airlock/`
 
 No new container, no new port, no new systemd unit. The existing
-service unit stays as-is; the airlock binary gains a
+service unit stays as-is; the trentina binary gains a
 new endpoint family on its existing localhost listener.
 
 Cockpit visualization comes free with the existing Cockpit instance —
@@ -455,7 +455,7 @@ so in steady state L3 contributes near-zero latency.
 
 `tools/list` response (allowlist filter only, no content scan): <5ms overhead.
 
-Streaming preserved end-to-end for SSE responses — airlock forwards chunks as
+Streaming preserved end-to-end for SSE responses — trentina forwards chunks as
 they arrive, applying L1 incrementally; L2/L3 buffer until the stream completes
 (or until a watermark, configurable).
 
@@ -470,7 +470,7 @@ they arrive, applying L1 incrementally; L2/L3 buffer until the stream completes
 - **Token rotation**: tokens are env-file-loaded; rotation = update env file +
   systemd reload (no rebuild).
 - **Server-to-server trust**: backends are trusted on the `crunchtools` network
-  (loopback-bind only, no public reach). Airlock is the only thing talking to
+  (loopback-bind only, no public reach). Trentina is the only thing talking to
   them through this path.
 - **Audit immutability**: SQLite audit table is append-only (existing pattern);
   Cockpit shows but never edits.
@@ -483,7 +483,7 @@ they arrive, applying L1 incrementally; L2/L3 buffer until the stream completes
 ## Non-goals / out of scope (v1)
 
 - OIDC / OAuth (v2)
-- Rate limiting (v2 — could fold into airlock's existing P-Agent blocklist)
+- Rate limiting (v2 — could fold into trentina's existing P-Agent blocklist)
 - Caching backend responses (v2 — backends own their own caching)
 - MCP resources / prompts passthrough — v1 covers `tools/list` and `tools/call`
   only; `resources/list`, `resources/read`, `prompts/list`, `prompts/get` come
@@ -502,7 +502,7 @@ they arrive, applying L1 incrementally; L2/L3 buffer until the stream completes
    no value. Heuristic: skip L3 when response content-type indicates pure JSON
    with no string fields > N chars. Worth doing in v1?
 3. **Long-lived sessions**: streamable-http supports session resumption. Should
-   airlock proxy session IDs transparently, or terminate at the gateway?
+   trentina proxy session IDs transparently, or terminate at the gateway?
 4. **P-Agent backend blocklist semantics**: if mcp-atlassian keeps tripping L2
    for a Josui profile, does the P-Agent blocklist apply per-profile or
    globally?
@@ -516,19 +516,19 @@ they arrive, applying L1 incrementally; L2/L3 buffer until the stream completes
 | Phase | Scope | Estimated effort |
 |---|---|---|
 | 1 | Profile loader + auth + endpoint routing + tool allowlist filter (no defense pipeline yet) | ~half session |
-| 1-final (Option C) | `internal://` airlock-tools backend; `/mcp` deprecated; gateway becomes the single surface | ~half session |
+| 1-final (Option C) | `internal://` trentina-tools backend; `/mcp` deprecated; gateway becomes the single surface | ~half session |
 | 2 | L1 + L2 on tool-call responses; L3 with profile + Cockpit master switch | ~half session |
 | 3 | Audit log integration + Cockpit Gateway tab (read-only) | ~half session |
 | 4 | Cockpit profile editor + token rotation UI | ~half session |
 | 5 | Migration: Josui + Kagetora cut over to gateway endpoints | ~one session |
 
-Each phase is independently mergeable behind a feature flag (`AIRLOCK_GATEWAY_ENABLED=true`).
+Each phase is independently mergeable behind a feature flag (`TRENTINA_GATEWAY_ENABLED=true`).
 
 ---
 
 ## References
 
-- Existing airlock 3-layer defense: `src/mcp_trentina_crunchtools/sanitize/`,
+- Existing trentina 3-layer defense: `src/mcp_trentina_crunchtools/sanitize/`,
   `quarantine/` (this repo)
 - crunchtools MCP fleet topology: see private ops notes
 - Autonomous-agent constitution profile §V (kill switches): drives the L3

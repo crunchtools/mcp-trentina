@@ -127,7 +127,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     """Run trentina with gateway routes wired in via FastMCP's custom_route API.
 
     Loads profiles from TRENTINA_PROFILES_PATH and registers
-    POST /gateway/{profile}/mcp endpoints on the FastMCP app. Airlock's own
+    POST /gateway/{profile}/mcp endpoints on the FastMCP app. Trentina's own
     tools are bound as the in-process internal backend so profiles can surface
     them (via an ``internal://<label>`` backend) through the same gateway
     endpoint as the remote MCP backends.

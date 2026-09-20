@@ -10,7 +10,7 @@ Phase 1 added a `gateway/` subpackage exposing `/gateway/<profile>/mcp` endpoint
 that proxy to backend MCP servers with bearer-token auth and tool-allowlist
 filtering on `tools/list` responses.
 
-**Option C** folds airlock's own tools into that same gateway as an in-process
+**Option C** folds trentina's own tools into that same gateway as an in-process
 `internal://` backend and deprecates the standalone `/mcp` web-tools surface, so
 the gateway becomes the single per-consumer endpoint for everything. No defense
 pipeline application yet — that's Phase 2.
@@ -45,7 +45,7 @@ FastMCP app  —  custom_route("/gateway/{profile}/mcp")  (gateway/app.py)
     ▼
    scheme dispatch
     ├── http(s):// ──► backend.py  ──► remote MCP server (mcp-slack:8005, …)
-    └── internal:// ─► internal.py ──► airlock's own FastMCP tool registry (in-process)
+    └── internal:// ─► internal.py ──► trentina's own FastMCP tool registry (in-process)
     │
     │  response (both paths return the same dict / BackendCall shape)
     ▼
@@ -56,7 +56,7 @@ Consumer
 ```
 
 The deprecated `/mcp` web-tools endpoint is still registered by FastMCP's
-`mcp.run()` but is not a consumer surface under Option C — airlock's tools are
+`mcp.run()` but is not a consumer surface under Option C — trentina's tools are
 reached through the `internal://` backend above.
 
 ### Why custom_route, not a parent Starlette app
@@ -133,7 +133,7 @@ auth check awkward, and complicates the future defense-pipeline injection point
 ### Step 9: Mount in server.py
 
 - [x] Wrap existing `mcp.streamable_http_app()` in a parent Starlette app.
-- [x] Add gateway routes when `AIRLOCK_GATEWAY_ENABLED=true`.
+- [x] Add gateway routes when `TRENTINA_GATEWAY_ENABLED=true`.
 - [x] When env var unset/false: parent app is identical to old behavior (gateway routes absent).
 
 ### Step 10: Tests
@@ -161,16 +161,16 @@ auth check awkward, and complicates the future defense-pipeline injection point
 - [ ] `gourmand --full .`
 - [ ] `podman build -f Containerfile .`
 
-### Step 13: Deploy to lotor (Option C cutover)
+### Step 13: Deploy (Option C cutover)
 
 - [ ] Push branch → GHA build (or build the overlay image) → image carrying Option C
-- [ ] Provision `/srv/mcp-trentina.crunchtools.com/config/profiles.yaml` with real `josui` + `kagetora` profiles, each carrying the `web` (`internal://web`) backend + their http backend matrix
-- [ ] Generate `AIRLOCK_GATEWAY_JOSUI_TOKEN` + `AIRLOCK_GATEWAY_KAGETORA_TOKEN` on lotor (`secrets.token_hex(32)`), add to `mcp-trentina.env`
-- [ ] Add `AIRLOCK_GATEWAY_ENABLED=true` + `AIRLOCK_PROFILES_PATH=/etc/airlock/profiles.yaml`; mount profiles.yaml into the container
+- [ ] Provision `/srv/<service>/config/profiles.yaml` with real `josui` + `kagetora` profiles, each carrying the `web` (`internal://web`) backend + their http backend matrix
+- [ ] Generate `TRENTINA_GATEWAY_JOSUI_TOKEN` + `TRENTINA_GATEWAY_KAGETORA_TOKEN` (`secrets.token_hex(32)`), add to `mcp-trentina.env`
+- [ ] Add `TRENTINA_GATEWAY_ENABLED=true` + `TRENTINA_PROFILES_PATH=/etc/trentina/profiles.yaml`; mount profiles.yaml into the container
 - [ ] systemctl restart; verify `/gateway/<profile>/mcp` lists tools across an http backend AND `web__safe_fetch_tool`; confirm `/mcp` 404 is deliberate
 - [ ] **Cut Kagetora over first** (smaller blast radius, autonomous agent): one `mcp_servers:` entry in Hermes `config.yaml`; verify prompt-token count drops from ~146K toward <50K
-- [ ] **Then Josui**: one `airlock-gateway` entry in `~/.claude.json`; shrink the SSH tunnel from 10 LocalForwards to one (8019)
-- [ ] Clean up: delete the `gateway-test` profile, `/root/.airlock-gateway-test-token`, the `phase1` overlay image, and `Containerfile.gateway-overlay`
+- [ ] **Then Josui**: one `trentina-gateway` entry in `~/.claude.json`; shrink the SSH tunnel from 10 LocalForwards to one (8019)
+- [ ] Clean up: delete the `gateway-test` profile, `/root/.trentina-gateway-test-token`, the `phase1` overlay image, and `Containerfile.gateway-overlay`
 
 ---
 
@@ -200,7 +200,7 @@ auth check awkward, and complicates the future defense-pipeline injection point
 | File | Changes |
 |------|---------|
 | `src/mcp_trentina_crunchtools/server.py` | Wrap FastMCP app in parent Starlette; mount gateway routes when enabled |
-| `src/mcp_trentina_crunchtools/config.py` | Add `AIRLOCK_GATEWAY_ENABLED`, `AIRLOCK_PROFILES_PATH` |
+| `src/mcp_trentina_crunchtools/config.py` | Add `TRENTINA_GATEWAY_ENABLED`, `TRENTINA_PROFILES_PATH` |
 | `pyproject.toml` | Add `pyyaml>=6.0`; bump `version` to `0.4.0` |
 
 ---
@@ -211,10 +211,10 @@ auth check awkward, and complicates the future defense-pipeline injection point
 |------|--------|------------|
 | Backend MCP connection leaks under load | Med | Phase 1 opens a fresh session per call (no pool); `async with` guarantees teardown. Pooling is a Phase 2 optimization. |
 | ~~FastMCP `/mcp` vs gateway custom-route collision (3.1.1)~~ | ~~High~~ | **Retired by Option C.** `/mcp` is deprecated and unused; its 404 on 3.1.1 is harmless. No fastmcp bump needed. |
-| Internal backend executing untrusted args in-process | Med | The internal backend only invokes airlock's own already-trusted tool coroutines, subject to the same per-profile allow/deny filter and call-time re-check as http backends. No new code path executes consumer content. |
+| Internal backend executing untrusted args in-process | Med | The internal backend only invokes trentina's own already-trusted tool coroutines, subject to the same per-profile allow/deny filter and call-time re-check as http backends. No new code path executes consumer content. |
 | Allowlist patterns allowing path traversal in tool names | Med | Glob validator rejects `..`, `/`, leading hyphen, regex metachars. Tested adversarially. |
 | Bearer tokens leaked in logs | High | Profile model uses `SecretStr`; errors.py scrubbed; mypy enforces no `__repr__` leak. Test asserts log absence. |
-| Profile YAML file not present on container start | Low | When `AIRLOCK_GATEWAY_ENABLED=true` but file missing → fail closed at startup with clear error log. When disabled → no profile load attempted. |
+| Profile YAML file not present on container start | Low | When `TRENTINA_GATEWAY_ENABLED=true` but file missing → fail closed at startup with clear error log. When disabled → no profile load attempted. |
 
 ---
 

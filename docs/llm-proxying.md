@@ -79,13 +79,13 @@ Each **profile** then declares the key it wants the proxy to inject, under `llm_
 profiles:
   kagetora:
     auth:
-      bearer_token_env: AIRLOCK_PROFILE_KAGETORA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
     llm_keys:
       gemini:
         api_key_env: KAGETORA_GEMINI_API_KEY
   takeda:
     auth:
-      bearer_token_env: AIRLOCK_PROFILE_TAKEDA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_TAKEDA_TOKEN
     llm_keys:
       gemini:
         api_key_env: TAKEDA_GEMINI_API_KEY
