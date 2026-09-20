@@ -1,11 +1,21 @@
-# MCP Airlock CrunchTools Container
+# MCP Trentina CrunchTools Container
 # Three-layer defense: deterministic sanitization + Prompt Guard 2 classifier + quarantined LLM
 # Built entirely on Hummingbird Python images (Red Hat hardened, minimal)
 #
-# Build (requires HF_TOKEN for Llama model download):
-#   source ~/.config/mcp-env/mcp-trentina-build.env
-#   podman build --build-arg HF_TOKEN=$HF_TOKEN \
-#     -t quay.io/crunchtools/mcp-trentina .
+# Build: the GHA pipeline, and only the GHA pipeline.
+# .github/workflows/container.yml builds and pushes quay.io/crunchtools/mcp-trentina.
+# Do NOT build this image by hand — building outside the pipeline causes drift.
+#
+# The model-builder stage below needs HF_TOKEN to reach the GATED Meta Prompt Guard
+# repo. That credential belongs in GitHub secrets and nowhere else; it must never be
+# copied to a workstation, because no local build path legitimately needs it.
+#
+# GitHub keeps Actions secrets and Dependabot secrets in SEPARATE stores, and a run
+# triggered by Dependabot reads only the Dependabot store. HF_TOKEN must therefore
+# exist in BOTH, or every dependency-update PR fails right here with a 401 on a gated
+# repo while main stays green. Symptom to look for in the log: `--build-arg HF_TOKEN=`
+# with nothing after the `=`. On crunchtools the Dependabot secret must be set at REPO
+# level; an org-level Dependabot secret did not reach the build.
 #
 # Run (Streamable HTTP on port 8019):
 #   podman run --rm \
@@ -112,7 +122,7 @@ LABEL name="mcp-trentina-crunchtools" \
       description="Three-layer defense against prompt injection: deterministic sanitization + Prompt Guard 2 classifier + quarantined LLM" \
       maintainer="crunchtools.com" \
       url="https://github.com/crunchtools/mcp-trentina" \
-      io.k8s.display-name="MCP Airlock CrunchTools" \
+      io.k8s.display-name="MCP Trentina CrunchTools" \
       io.openshift.tags="mcp,security,prompt-injection,sanitization,quarantine" \
       org.opencontainers.image.source="https://github.com/crunchtools/mcp-trentina" \
       org.opencontainers.image.description="Secure MCP server for quarantined web content extraction" \

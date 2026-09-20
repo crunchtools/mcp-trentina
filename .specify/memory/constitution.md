@@ -178,7 +178,9 @@ Every code change must pass through these gates in order:
 2. **Type Check** — `uv run mypy src`
 3. **Tests** — `uv run pytest -v`
 4. **Gourmand** — `gourmand --full .`
-5. **Container Build** — `podman build -f Containerfile .`
+5. **Container Build** — push the branch; GHA builds it
+   (`.github/workflows/container.yml`). Never build the image locally: the
+   model-export stage needs a gated HuggingFace credential that only CI holds.
 
 ---
 
