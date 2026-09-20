@@ -136,8 +136,8 @@ reload_profiles_tool()
 It validates the whole file first and installs nothing unless all of it parses
 and every referenced env var resolves, so a bad edit leaves the gateway exactly
 as it was and returns the error. A good one swaps the profiles in place and
-returns a per-profile diff of what moved, then notifies connected sessions so
-clients refresh their tool list.
+reports what moved, then notifies connected sessions so clients refresh their
+tool list.
 
 A reload is cheap where a restart is not. A restart re-judges every tool
 description through the full defense pipeline before the first `tools/list` can
@@ -146,6 +146,29 @@ on connect. A reload keeps the verdict cache, the compression cache and every
 backend's tool list, so a profile-only edit re-judges nothing. Changing a
 profile's `defense` thresholds is the exception: the verdicts were reached under
 the old thresholds, so that profile's descriptions are judged again.
+
+### The report is scoped to the caller
+
+The reload applies the whole file — every profile in it, not just the caller's.
+The *diff* is returned for the calling profile alone:
+
+```
+"profiles": {"changed": ["josui", "takeda"], ...}   # every profile that moved
+"changes": {"josui": {...}},                        # the caller's diff
+"changes_scope": "josui",
+"changes_withheld": ["takeda"]                      # named, not described
+```
+
+Without that scoping, granting this tool to one agent would hand it the other
+agents' backend names, allowlist deltas and guarded parameter names — the shape
+of their permissions — out of a routine config reload. No secret was ever in the
+diff (URLs, headers, tokens and `llm_keys` are reported by field name only), but
+the shape is worth as much to an attacker who has one agent and wants another.
+
+The scoping is why this tool can be granted like `cache_flush` rather than held
+for an operator seat. An operator who wants the whole picture reads the file
+they just edited. A call with no profile bound — which no in-tree path produces,
+since every internal dispatch goes through the router — withholds every diff.
 
 ### In a container, mount the DIRECTORY, not the file
 

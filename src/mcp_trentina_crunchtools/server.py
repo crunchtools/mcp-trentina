@@ -350,7 +350,9 @@ async def reload_profiles_tool() -> dict[str, Any]:
     matrix ingress where no route was registered at startup — the result names
     any of those it saw.
 
-    Returns a per-profile diff of what changed, and notifies connected
-    sessions so clients refresh their tool list.
+    Names every profile the reload moved, and returns the diff of what moved
+    for the CALLING profile only — another profile's backends, allowlists and
+    guarded parameters are its own business. Notifies connected sessions so
+    clients refresh their tool list.
     """
     return await reload_profiles()

@@ -12,6 +12,11 @@ make the tool worth having rather than merely present:
 * a reload re-judges nothing, so it costs seconds instead of the forty
   minutes a restart spends re-running ingress defense over every tool
   description.
+
+Reloads are run through ``_reload_as`` rather than calling the tool bare,
+because the gateway binds the calling profile around every internal dispatch
+and the result is scoped to it. A bare call is the no-caller case, which has
+its own tests.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ import pytest
 
 from mcp_trentina_crunchtools.gateway import compress
 from mcp_trentina_crunchtools.gateway.compress import set_profiles
+from mcp_trentina_crunchtools.gateway.context import profile_context
 from mcp_trentina_crunchtools.gateway.filter import filter_tools
 from mcp_trentina_crunchtools.gateway.loader import (
     get_active_config,
@@ -78,6 +84,22 @@ DENIED_YAML = BASE_YAML.replace(
     '        tools_deny: ["jira_delete_issue"]\n',
 )
 
+# Both profiles move at once: alpha gains a deny, beta swaps wiki for rt.
+SWAPPED_BACKEND_YAML = DENIED_YAML.replace(
+    "      wiki:\n        url: http://wiki:1/mcp\n        tools_allow: [\"*\"]\n",
+    "      rt:\n        url: http://rt:1/mcp\n        tools_allow: [\"rt_get*\"]\n",
+)
+
+# beta alone gains a guard on a tool alpha has never heard of.
+BETA_GUARDED_YAML = BASE_YAML.replace(
+    "      wiki:\n        url: http://wiki:1/mcp\n        tools_allow: [\"*\"]\n",
+    "      wiki:\n        url: http://wiki:1/mcp\n        tools_allow: [\"*\"]\n"
+    "        parameter_guards:\n"
+    "          wiki_delete_page_tool:\n"
+    "            title:\n"
+    "              deny: [\"Runbook*\"]\n",
+)
+
 
 @pytest.fixture
 def profiles_path(
@@ -105,6 +127,17 @@ def _registry() -> dict[str, Any]:
 
 def _tools_result(names: list[str]) -> list[dict[str, Any]]:
     return [{"name": n, "description": f"{n} does a thing", "inputSchema": {}} for n in names]
+
+
+async def _reload_as(profile_name: str) -> dict[str, Any]:
+    """Reload the way the gateway does: with the caller's profile bound.
+
+    The bound object is the pre-reload `Profile`, exactly as in production —
+    the router looked it up before dispatching and the swap does not reach
+    into that local.
+    """
+    with profile_context(_registry()[profile_name]):
+        return await reload_profiles()
 
 
 async def _list_tools(profile_name: str) -> list[str]:
@@ -203,23 +236,20 @@ class TestAppliedReload:
         assert _registry() is before
         assert compress_view is before
 
-    async def test_diff_reports_allow_deny_and_backend_moves(
+    async def test_diff_reports_allow_and_deny_moves(
         self, profiles_path: Path
     ) -> None:
-        profiles_path.write_text(
-            DENIED_YAML.replace(
-                "      wiki:\n        url: http://wiki:1/mcp\n"
-                "        tools_allow: [\"*\"]\n",
-                "      rt:\n        url: http://rt:1/mcp\n"
-                "        tools_allow: [\"rt_get*\"]\n",
-            ),
-            encoding="utf-8",
-        )
-        result = await reload_profiles()
+        profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
+        result = await _reload_as("alpha")
 
         assert result["profiles"]["changed"] == ["alpha", "beta"]
         alpha = result["changes"]["alpha"]["backends_changed"]["jira"]
         assert alpha["tools_deny"] == {"added": ["jira_delete_issue"], "removed": []}
+
+    async def test_diff_reports_backend_moves(self, profiles_path: Path) -> None:
+        profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
+        result = await _reload_as("beta")
+
         assert result["changes"]["beta"]["backends_added"] == ["rt"]
         assert result["changes"]["beta"]["backends_removed"] == ["wiki"]
 
@@ -238,7 +268,7 @@ class TestAppliedReload:
             ),
             encoding="utf-8",
         )
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         guards = result["changes"]["alpha"]["backends_changed"]["jira"]["parameter_guards"]
         assert guards == {"jira_delete_issue": {"parameters_added": ["key"]}}
@@ -266,7 +296,7 @@ class TestAppliedReload:
         self, profiles_path: Path
     ) -> None:
         profiles_path.write_text(DENIED_YAML, encoding="utf-8")
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["profiles"]["unchanged"] == ["beta"]
         assert list(result["changes"]) == ["alpha"]
@@ -295,6 +325,88 @@ class TestAppliedReload:
 
         assert result["sessions_notified"] == {"alpha": 1}
         assert queue.get_nowait()["method"] == "notifications/tools/listChanged"
+
+
+class TestCallerScoping:
+    """The diff belongs to the caller; the other profiles are names only.
+
+    The gateway serves several agents from one file, and any profile allowed
+    to call this tool would otherwise read the others' backend names,
+    allowlist deltas and guarded parameter names out of a routine reload.
+    """
+
+    async def test_another_profiles_diff_is_named_but_withheld(
+        self, profiles_path: Path
+    ) -> None:
+        profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
+
+        result = await _reload_as("alpha")
+
+        assert result["profiles"]["changed"] == ["alpha", "beta"]
+        assert result["changes_scope"] == "alpha"
+        assert list(result["changes"]) == ["alpha"]
+        assert result["changes_withheld"] == ["beta"]
+
+    async def test_a_backend_name_only_beta_holds_does_not_reach_alpha(
+        self, profiles_path: Path
+    ) -> None:
+        """alpha learns beta moved, not that beta traded wiki for rt."""
+        profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
+
+        result = await _reload_as("alpha")
+
+        assert "rt" not in str(result)
+        assert "wiki" not in str(result)
+
+    async def test_a_guard_on_another_profile_leaks_neither_tool_nor_parameter(
+        self, profiles_path: Path
+    ) -> None:
+        """The guarded tool name is the interesting half of that disclosure."""
+        profiles_path.write_text(BETA_GUARDED_YAML, encoding="utf-8")
+
+        result = await _reload_as("alpha")
+
+        assert result["profiles"]["changed"] == ["beta"]
+        assert result["changes"] == {}
+        assert "wiki_delete_page_tool" not in str(result)
+        assert "title" not in str(result)
+
+    async def test_the_reload_still_applies_to_every_profile(
+        self, profiles_path: Path
+    ) -> None:
+        """Scoping the REPORT does not scope the reload — it is the whole file."""
+        profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
+
+        await _reload_as("alpha")
+
+        assert sorted(_registry()["beta"].backends) == ["rt"]
+        assert not filter_tools(
+            [{"name": "jira_delete_issue"}], _registry()["alpha"].backends["jira"]
+        )
+
+    async def test_an_unknown_caller_gets_no_diff(
+        self, profiles_path: Path
+    ) -> None:
+        """No bound profile is a path the router does not have — fail closed."""
+        profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
+
+        result = await reload_profiles()
+
+        assert result["reloaded"] is True
+        assert result["changes_scope"] is None
+        assert result["changes"] == {}
+        assert result["changes_withheld"] == ["alpha", "beta"]
+
+    async def test_a_refused_reload_reports_profile_names_only(
+        self, profiles_path: Path
+    ) -> None:
+        """The error path predates this and already withholds everything."""
+        profiles_path.write_text("profiles: [not, a, mapping]", encoding="utf-8")
+
+        result = await _reload_as("alpha")
+
+        assert result["reloaded"] is False
+        assert result["profiles"] == ["alpha", "beta"]
 
 
 class TestUnappliedSections:
