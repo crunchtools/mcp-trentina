@@ -243,18 +243,17 @@ class TestDeclineLogLine:
     """The sidecar line is what a human reads at 2am. It has to say what
     happened, and stay greppable by reason string."""
 
-    def test_floor_decline_shows_the_ratio_it_reached(self) -> None:
+    def test_not_smaller_decline_shows_the_ratio_it_reached(self) -> None:
         from mcp_trentina_crunchtools.gateway.reduce import _describe_decline
         from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
 
         result = PreProcessResult.declined(
-            "structured", Cost.FREE, "x" * 100, reason="reduction_below_floor",
-            details={"would_be_bytes": 94, "would_be_ratio": 0.94, "floor": 0.7},
+            "structured", Cost.FREE, "x" * 100, reason="not_smaller",
+            details={"would_be_bytes": 104, "would_be_ratio": 1.04},
         )
         line = _describe_decline(result)
-        assert "structured:reduction_below_floor" in line, "still greppable"
-        assert "would_be=94%" in line
-        assert "floor=70%" in line
+        assert "structured:not_smaller" in line, "still greppable"
+        assert "would_be=104%" in line
 
     def test_shape_decline_shows_lines_and_bytes(self) -> None:
         from mcp_trentina_crunchtools.gateway.reduce import _describe_decline

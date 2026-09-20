@@ -395,17 +395,35 @@ class TestDeclinesCarryTheirEvidence:
     they argue for opposite changes to the floor.
     """
 
-    async def test_floor_decline_reports_what_it_would_have_saved(self) -> None:
-        """Content that groups a little, but not enough to clear the bar."""
-        words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
+    async def test_small_savings_are_now_taken(self) -> None:
+        """There is no minimum saving. A payload with modest repetition used
+        to be discarded whole by the 0.7 floor; it is now delivered."""
+        lines = [f"the {w} report covers region {w}x here" for w in
+                 (chr(97 + i // 26) + chr(97 + i % 26) for i in range(300))]
+        lines += ["status nominal all systems green"] * 100
+        payload = "\n".join(lines)
+        result = await PetitProcessor().run(payload, PreProcessContext())
+        assert result.applied, "a real saving must not be thrown away"
+        assert result.bytes_out < result.bytes_in
+
+    async def test_declines_only_when_no_smaller(self) -> None:
+        """What remains is arithmetic: if the rewrite is not smaller,
+        delivering it would cost bytes for nothing."""
+        def word(i: int) -> str:
+            out = ""
+            while True:
+                out += chr(97 + i % 26)
+                i //= 26
+                if not i:
+                    return out
+
         payload = "\n".join(
-            f"unique token {word} on line {i}" for i, word in enumerate(words)
+            f"the {word(i)} report covers {word(i + 5000)} across {word(i + 9000)}"
+            for i in range(400)
         )
         result = await PetitProcessor().run(payload, PreProcessContext())
-        if result.details.get("declined") == "reduction_below_floor":
-            assert 0.0 < result.details["would_be_ratio"] <= 1.5
-            assert result.details["would_be_bytes"] > 0
-            assert result.details["floor"] == 0.7
+        assert not result.applied
+        assert result.details["declined"] in ("nothing_repetitive", "not_smaller")
 
     async def test_not_line_structured_names_the_real_condition(self) -> None:
         """A large single-line payload is not 'too small'. Reporting it that
