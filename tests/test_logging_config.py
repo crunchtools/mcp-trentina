@@ -172,3 +172,74 @@ def test_main_streamable_http_forwards_log_level(monkeypatch: pytest.MonkeyPatch
     mock_mcp.run.assert_called_once_with(
         transport="streamable-http", host="127.0.0.1", port=DEFAULT_PORT, log_level="DEBUG"
     )
+
+
+class TestStartupCacheVisibility:
+    """The startup cache summary must survive production's log level.
+
+    Production runs at TRENTINA_LOG_LEVEL=WARNING. A summary logged at INFO
+    is discarded there, which is exactly what happened: after the #118
+    deploy the only way to answer "did the verdict cache load?" was to SSH
+    to the box and query SQLite. A cold cache predicts a slow first
+    tools/list, and that prediction is worth nothing after the timeout.
+    """
+
+    def _boot(self, caplog: pytest.LogCaptureFixture, *, verdicts: int) -> str:
+        mock_server = MagicMock()
+        with (
+            patch(
+                "mcp_trentina_crunchtools.gateway.load_profiles",
+                return_value=GatewayConfig(profiles={}),
+            ),
+            patch("mcp_trentina_crunchtools.gateway.register_internal_server"),
+            patch("mcp_trentina_crunchtools.gateway.register_with_fastmcp"),
+            patch("mcp_trentina_crunchtools._wire_circuit_notifications"),
+            patch(
+                "mcp_trentina_crunchtools.gateway.llm_proxy.load_llm_providers",
+                return_value={},
+            ),
+            patch("mcp_trentina_crunchtools.gateway.llm_proxy.register_llm_routes"),
+            patch("mcp_trentina_crunchtools.gateway.alert_ingress.register_alert_routes"),
+            patch(
+                "mcp_trentina_crunchtools.gateway.compress.load_compression_cache",
+                return_value=7,
+            ),
+            patch("mcp_trentina_crunchtools.gateway.compress.set_profiles"),
+            patch(
+                "mcp_trentina_crunchtools.gateway.backend.load_tool_list_cache",
+                return_value=26,
+            ),
+            patch(
+                "mcp_trentina_crunchtools.gateway.ingress_defense.load_verdict_cache",
+                return_value=verdicts,
+            ),
+            caplog.at_level(logging.WARNING, logger="mcp_trentina_crunchtools"),
+        ):
+            _run_with_gateway(
+                mock_server, host="127.0.0.1", port=8019, log_level="WARNING"
+            )
+        return "\n".join(
+            r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING
+        )
+
+    def test_summary_is_visible_at_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        logged = self._boot(caplog, verdicts=331)
+        assert "331 perimeter verdict(s)" in logged
+        assert "26 tool list(s)" in logged
+        assert "7 compression(s)" in logged
+
+    def test_a_cold_cache_says_the_next_request_will_be_slow(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The whole point. An empty store is not an error, but it is the
+        one fact that explains the timeout about to happen."""
+        logged = self._boot(caplog, verdicts=0)
+        assert "COLD" in logged
+
+    def test_a_warm_cache_does_not_cry_wolf(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        logged = self._boot(caplog, verdicts=331)
+        assert "COLD" not in logged
