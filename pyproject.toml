@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "fastmcp>=2.0,<3.0",
+    "fastmcp>=2.0,<5.0",
     # petit, as a library. Layer 1's line grouping (preprocess/petit.py).
     # 3.0.0 renamed the distribution to petit-log and the import to petit;
     # it is the first release that is deterministic, returns verbatim
