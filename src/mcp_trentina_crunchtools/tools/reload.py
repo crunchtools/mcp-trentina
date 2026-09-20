@@ -129,6 +129,22 @@ def _profile_delta(before: Profile, after: Profile) -> dict[str, Any]:
     return {key: value for key, value in candidate.items() if value}
 
 
+def _compression_surface(profiles: dict[str, Profile]) -> set[tuple[str, bool]]:
+    """The (url, compress_descriptions) pairs description compression walks.
+
+    Re-arming compression is worth a fan-out only when this set moved.
+    ``precompress_all`` deduplicates by URL and ``_find_uncached`` skips every
+    description already cached, so a tools_deny edit would cost one tools/list
+    per compressing backend and buy nothing.
+    """
+    return {
+        (backend.url, backend.compress_descriptions)
+        for profile in profiles.values()
+        for backend in profile.backends.values()
+        if not backend.is_internal
+    }
+
+
 def _unapplied(active: ActiveConfig, new_config: GatewayConfig) -> list[str]:
     """Name every edit in the new file that a reload cannot put into force.
 
@@ -224,9 +240,7 @@ async def reload_profiles() -> dict[str, Any]:
     invalidated = [
         name for name in (*added, *removed, *changed) if invalidate_profile_cache(name)
     ]
-    if added or any(
-        key.startswith("backends_") for delta in changed.values() for key in delta
-    ):
+    if _compression_surface(before) != _compression_surface(after):
         retrigger_compression()
 
     dropped_sessions = sum(

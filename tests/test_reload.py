@@ -31,11 +31,13 @@ from mcp_trentina_crunchtools.gateway.loader import (
     get_active_config,
     load_profiles,
     register_active_config,
+    replace_active_config,
     reset_active_config,
 )
 from mcp_trentina_crunchtools.gateway.router import (
     _profile_tools_cache,
     invalidate_profile_cache,
+    invalidate_profile_cache_for_backend,
     route_jsonrpc,
 )
 from mcp_trentina_crunchtools.gateway.sessions import session_registry
@@ -314,12 +316,71 @@ llm_providers:
         assert result["reloaded"] is True
         assert any("llm_providers" in note for note in result["not_applied"])
 
+    async def test_matrix_section_change_is_reported_as_restart_only(
+        self, profiles_path: Path
+    ) -> None:
+        profiles_path.write_text(
+            BASE_YAML + "matrix:\n  enabled: true\n", encoding="utf-8",
+        )
+        result = await reload_profiles()
+
+        assert result["reloaded"] is True
+        assert any("matrix section" in note for note in result["not_applied"])
+
+    async def test_new_alert_ingress_without_a_route_is_reported(
+        self, profiles_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The route is registered at startup only if some profile had one."""
+        monkeypatch.setenv("TEST_ALERT_TOKEN", "alert-secret")
+        profiles_path.write_text(
+            BASE_YAML.replace(
+                "  beta:\n",
+                "  beta:\n"
+                "    alert_ingress:\n"
+                "      token_env: TEST_ALERT_TOKEN\n"
+                "      forward_url: https://hermes.example/hook\n",
+            ),
+            encoding="utf-8",
+        )
+        result = await reload_profiles()
+
+        assert result["reloaded"] is True
+        assert any("alert_ingress" in note for note in result["not_applied"])
+
+    async def test_new_matrix_ingress_without_a_route_is_reported(
+        self, profiles_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A matrix_ingress is inert while matrix.enabled is off."""
+        monkeypatch.setenv("TEST_MATRIX_TOKEN", "matrix-secret")
+        profiles_path.write_text(
+            BASE_YAML.replace(
+                "  beta:\n",
+                "  beta:\n"
+                "    matrix_ingress:\n"
+                "      token_env: TEST_MATRIX_TOKEN\n",
+            ),
+            encoding="utf-8",
+        )
+        result = await reload_profiles()
+
+        assert result["reloaded"] is True
+        assert any("matrix_ingress" in note for note in result["not_applied"])
+
     async def test_a_plain_profile_edit_reports_nothing_unapplied(
         self, profiles_path: Path
     ) -> None:
         profiles_path.write_text(DENIED_YAML, encoding="utf-8")
         result = await reload_profiles()
         assert result["not_applied"] == []
+
+    async def test_replacing_a_config_before_startup_is_a_programming_error(
+        self, profiles_path: Path
+    ) -> None:
+        """A reload cannot precede startup; the holder refuses to invent one."""
+        config = load_profiles(profiles_path)
+        reset_active_config()
+        with pytest.raises(RuntimeError, match="before register_active_config"):
+            replace_active_config(config)
 
 
 class TestCacheBehaviour:
@@ -380,6 +441,63 @@ class TestCacheBehaviour:
             assert await _list_tools("alpha") == ["jira__jira_get_issue"]
 
         assert len(judged) == after_warmup
+
+    async def test_backend_change_rearms_compression_and_a_deny_edit_does_not(
+        self, profiles_path: Path
+    ) -> None:
+        """A newly added backend has uncompressed descriptions; a deny does not."""
+        compress._compress_triggered = True
+        profiles_path.write_text(DENIED_YAML, encoding="utf-8")
+        await reload_profiles()
+        assert compress._compress_triggered is True
+
+        profiles_path.write_text(
+            DENIED_YAML.replace(
+                "      wiki:\n", "      rt:\n        url: http://rt:1/mcp\n      wiki:\n",
+            ),
+            encoding="utf-8",
+        )
+        await reload_profiles()
+        assert compress._compress_triggered is False
+
+    async def test_an_inflight_build_is_not_cached_across_a_backend_eviction(
+        self, profiles_path: Path
+    ) -> None:
+        """Same window, reached the other way: a backend evicted mid-build.
+
+        The eviction cascade runs while the aggregation is still fanning out,
+        so without the generation bump the result it writes would reinstate
+        the very list the eviction was meant to discard.
+        """
+        gate = asyncio.Event()
+
+        async def slow_list(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+            await gate.wait()
+            return _tools_result(["jira_get_issue"])
+
+        with patch(
+            "mcp_trentina_crunchtools.defense.classify_async",
+            AsyncMock(return_value=_BENIGN),
+        ):
+            # The eviction cascade only knows a profile's backend URLs once an
+            # aggregate has been cached, so warm one first — with a fast list.
+            with patch(
+                f"{_ROUTER}.list_backend_tools",
+                AsyncMock(return_value=_tools_result(["jira_get_issue"])),
+            ):
+                await _list_tools("alpha")
+
+            # What cache_flush leaves behind: the aggregate gone, the
+            # backend-URL map still mapping alpha to jira.
+            _profile_tools_cache.pop("alpha")
+            with patch(f"{_ROUTER}.list_backend_tools", slow_list):
+                build = asyncio.create_task(_list_tools("alpha"))
+                await asyncio.sleep(0)
+                invalidate_profile_cache_for_backend("http://jira:1/mcp")
+                gate.set()
+                await build
+
+        assert "alpha" not in _profile_tools_cache
 
     async def test_an_inflight_build_is_not_cached_across_an_invalidation(
         self, profiles_path: Path
