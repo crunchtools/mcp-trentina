@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 import os
+import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.5.0"
+__version__ = "0.6.3"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -231,9 +232,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         # gateway enforces. FastMCP must still mount its own MCP app
         # somewhere, so it goes to a per-boot unguessable path that nothing
         # is told about, and /mcp itself answers 410 with directions.
-        import secrets as _secrets
-
-        mcp_path = f"/mcp-internal-{_secrets.token_hex(16)}"
+        mcp_path = f"/mcp-internal-{secrets.token_hex(16)}"
 
         from starlette.responses import Response as _Response
 
@@ -276,8 +275,6 @@ def _warm_classifier() -> None:
     refuse to start: a box with no model should still proxy, still sanitize,
     and still be obviously degraded rather than quietly so.
     """
-    import logging
-
     from .quarantine.classifier import classifier_status, is_classifier_available
 
     log = logging.getLogger(__name__)
@@ -302,8 +299,6 @@ def _wire_circuit_notifications(
     affected backend URL and broadcasts ``tools/listChanged`` to all
     active sessions for those profiles.
     """
-    import asyncio
-
     from .gateway.circuit import State
     from .gateway.router import reset_profile_tools_cache
 

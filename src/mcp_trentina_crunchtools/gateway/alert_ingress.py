@@ -120,12 +120,23 @@ async def _handle_alert(
             content="unauthorized", status_code=401, media_type="text/plain",
         )
 
-    assert profile.alert_ingress is not None
+    if profile.alert_ingress is None:
+        # _resolve_profile_by_alert_token() only ever returns a profile whose
+        # alert_ingress is set -- this branch means that invariant broke.
+        logger.error("alert_ingress: resolved profile has no alert_ingress config")
+        return Response(
+            content="internal error", status_code=500, media_type="text/plain",
+        )
     forward_url = profile.alert_ingress.forward_url
 
     try:
         body = await request.body()
     except Exception:
+        # Client disconnect mid-read, malformed chunked encoding, and a body
+        # exceeding the server limit all land here. 400 is the right answer to
+        # all three, but the reason is the only signal distinguishing a flaky
+        # client from an attack, so it is logged rather than discarded.
+        logger.warning("alert_ingress: could not read request body", exc_info=True)
         return Response(
             content="bad request body", status_code=400, media_type="text/plain",
         )

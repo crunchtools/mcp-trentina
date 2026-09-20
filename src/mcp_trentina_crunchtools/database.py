@@ -101,10 +101,10 @@ def _migrate(db: sqlite3.Connection) -> None:
     detection_columns = {
         row["name"] for row in db.execute("PRAGMA table_info(detections)")
     }
-    # Phase 2: detections gained gateway attribution (which profile, which
-    # backend and tool, which direction the content was moving, and the
-    # provenance the L3 gate saw). Nullable — 50 web-shaped legacy rows and
-    # the standalone tools carry none of this.
+    # Gateway attribution columns (which profile, which backend and tool,
+    # which direction the content was moving, and the provenance the L3
+    # gate saw). Nullable — 50 web-shaped legacy rows and the standalone
+    # tools carry none of this.
     for column in ("profile", "backend", "tool", "direction", "provenance"):
         if column not in detection_columns:
             db.execute(f"ALTER TABLE detections ADD COLUMN {column} TEXT")

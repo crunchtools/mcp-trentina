@@ -386,7 +386,15 @@ async def scan_tool_response(
     blocked = False
     if (verdict.flagged or unjudgeable) and enforcement in ("block", "extract"):
         blocked = True
-        assert warning is not None
+        if warning is None:
+            # _build_warning() only returns None when nothing was flagged and
+            # nothing was unjudgeable -- entering this branch means one of
+            # those was true, so warning cannot be None here. If it is, the
+            # invariant broke and failing loudly beats silently skipping the
+            # block under python -O.
+            raise RuntimeError(
+                "ingress_defense: warning is None while blocking -- invariant violated"
+            )
         if enforcement == "extract":
             logger.warning(
                 "gateway: enforcement=extract not yet implemented — failing "

@@ -8,6 +8,8 @@ from ..config import get_config
 from ..database import get_blocklist_stats, get_compression_stats, get_gateway_call_stats
 from ..quarantine.classifier import is_classifier_available
 
+GATEWAY_AUDIT_LOOKBACK_DAYS = 30
+
 
 async def get_trentina_stats() -> dict[str, Any]:
     """Get trentina session stats, configuration, and blocklist summary.
@@ -37,7 +39,7 @@ async def get_trentina_stats() -> dict[str, Any]:
         },
         "blocklist": blocklist,
         "gateway_audit": {
-            **get_gateway_call_stats(days=30),
+            **get_gateway_call_stats(days=GATEWAY_AUDIT_LOOKBACK_DAYS),
             "column_meanings": {
                 "ok": "Call returned content.",
                 "blocked": (

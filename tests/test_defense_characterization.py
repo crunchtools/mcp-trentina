@@ -25,6 +25,7 @@ seams move into `gateway/defense.py` and the targets here move with them — the
 
 from __future__ import annotations
 
+import inspect
 import json
 from contextlib import ExitStack
 from types import SimpleNamespace
@@ -301,8 +302,6 @@ class TestAlertIngressNowHonoursTheProfile:
         production ran quarantine:false for months without the owner knowing.
         What the profile controls now is thresholds; the l2_threshold leg is
         the observable proof the config is honoured."""
-        import inspect
-
         from mcp_trentina_crunchtools.gateway.alert_ingress import (
             _sanitize_and_classify,
         )

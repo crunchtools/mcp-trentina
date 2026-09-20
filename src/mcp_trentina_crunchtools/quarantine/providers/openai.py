@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import httpx
@@ -23,8 +24,6 @@ def _add_additional_properties(schema: dict[str, Any]) -> dict[str, Any]:
     Recursively adds additionalProperties: false to all object types and
     strips constraints OpenAI doesn't support (maxLength, minimum, etc.).
     """
-    import copy
-
     schema = copy.deepcopy(schema)
     for key in _UNSUPPORTED_KEYS:
         schema.pop(key, None)

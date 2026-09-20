@@ -10,6 +10,8 @@ Each test here pins one of the four defects the taxonomy replaced:
 
 from __future__ import annotations
 
+import sqlite3
+import time
 from typing import Any
 
 import pytest
@@ -157,7 +159,7 @@ class TestAuditRecording:
         conn.execute(
             "INSERT INTO gateway_calls (timestamp, profile, backend, tool, success, "
             "duration_ms, error_message, outcome) VALUES (?,?,?,?,?,?,?,NULL)",
-            (__import__("time").time(), "p", "web", "safe_read", 0, 5, "old"),
+            (time.time(), "p", "web", "safe_read", 0, 5, "old"),
         )
         conn.commit()
 
@@ -171,8 +173,6 @@ class TestAuditRecording:
         CREATE TABLE IF NOT EXISTS leaves an old table untouched, so without
         _migrate the new column never reaches production.
         """
-        import sqlite3
-
         import mcp_trentina_crunchtools.database as db_mod
 
         path = str(tmp_path / "old.db")

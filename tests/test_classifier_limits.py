@@ -8,6 +8,9 @@ that pegged every core for roughly 90 minutes and wedged the event loop.
 
 from __future__ import annotations
 
+import importlib
+import os
+import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
@@ -203,8 +206,6 @@ class TestAsyncOffload:
 
     @pytest.mark.asyncio
     async def test_runs_on_a_worker_thread(self) -> None:
-        import threading
-
         loop_thread = threading.get_ident()
         seen: list[int] = []
 
@@ -243,17 +244,12 @@ class TestTelemetryDisabled:
     """
 
     def test_env_var_set_at_import(self) -> None:
-        import os
-
         from mcp_trentina_crunchtools.quarantine.classifier import TELEMETRY_ENV
 
         assert os.environ[TELEMETRY_ENV] == "1"
 
     def test_operator_can_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """setdefault, not assignment — an explicit opt-in must survive."""
-        import importlib
-        import os
-
         import mcp_trentina_crunchtools.quarantine.classifier as mod
 
         monkeypatch.setenv(mod.TELEMETRY_ENV, "0")
