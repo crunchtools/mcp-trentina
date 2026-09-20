@@ -20,6 +20,19 @@ POST /gateway/<profile_name>/mcp
 
 All MCP operations (`tools/list`, `tools/call`) go through this single URL. The profile name determines which backends, tools, and defense settings apply.
 
+#### The legacy `/mcp` endpoint
+
+Earlier versions served Trentina's full tool surface at a bare `/mcp` with no
+bearer token, no allowlist and no audit -- a bypass of everything the gateway
+enforces. It is disabled by default: `/mcp` answers `410` with directions, and
+FastMCP's own MCP app is mounted at a per-boot unguessable path instead.
+
+Setting `TRENTINA_LEGACY_MCP` to a truthy value restores the old unguarded
+`/mcp` for consumers that have not migrated. It logs a warning at startup.
+Treat it as a temporary migration aid: anything reaching Trentina through it
+is not inspected, not allowlisted and not audited. Migrate consumers to
+`/gateway/<profile>/mcp` and unset the variable.
+
 ### Backend Routing
 
 When an agent calls a tool, Trentina parses the namespaced tool name to determine which backend handles it:
