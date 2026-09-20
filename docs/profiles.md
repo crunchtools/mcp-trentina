@@ -147,6 +147,30 @@ backend's tool list, so a profile-only edit re-judges nothing. Changing a
 profile's `defense` thresholds is the exception: the verdicts were reached under
 the old thresholds, so that profile's descriptions are judged again.
 
+### In a container, mount the DIRECTORY, not the file
+
+If the gateway runs in a container, bind-mount the directory holding
+`profiles.yaml`:
+
+```
+-v /srv/trentina/gateway-config:/config:ro,Z      # correct
+-v /srv/trentina/config/profiles.yaml:/config/profiles.yaml:ro,Z   # WRONG
+```
+
+A single-file bind mount pins the container to that file's **inode** at
+container start. `sed -i`, `vim`, and anything else that writes a temp file and
+renames it into place leave the original inode untouched and give the host path
+a new one — so the host has your edit and the container still reads the old
+bytes, for the life of the container. The reload then correctly reports
+`reloaded: true` with no changes, which reads exactly like "my edit was a
+no-op". Verified on the CrunchTools deployment 2026-09-20: host inode 93033554,
+container still serving 93033552.
+
+Mounting the directory makes the container resolve the path on each open, so an
+edit by any editor is seen. If you must keep a file mount, every edit has to
+preserve the inode (`cp new profiles.yaml`, not `mv`), which is one careless
+`vim` away from silence.
+
 Some sections cannot reload, because their routes bind at startup: the
 `llm_providers` and `matrix` sections, and adding an `alert_ingress` or
 `matrix_ingress` where no such route was registered at boot. The reload result
