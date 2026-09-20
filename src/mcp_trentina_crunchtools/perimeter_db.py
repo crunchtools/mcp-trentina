@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .config import get_config
@@ -123,7 +123,7 @@ def save_verdict(
             cache_key,
             None if warning is None else json.dumps(warning),
             perimeter_version,
-            datetime.now(timezone.utc).isoformat(),
+            datetime.now(UTC).isoformat(),
         ),
     )
     db.commit()

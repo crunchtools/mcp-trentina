@@ -1,8 +1,8 @@
 [project]
 name = "mcp-trentina-crunchtools"
-version = "0.6.3"
+version = "0.7.0"
 description = "Secure MCP gateway and quarantine for AI agent traffic — three-layer defense against prompt injection"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
 authors = [
     { name = "crunchtools.com" }
@@ -14,12 +14,20 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "fastmcp>=2.0,<3.0",
+    "fastmcp>=4.0,<5.0",
+    # The MCP SDK is a DIRECT dependency, not one inherited through fastmcp.
+    # fastmcp governs how trentina is a server; the SDK governs how it is a
+    # client to ~20 backends (gateway/backend.py dials the raw SDK). Leaving
+    # the SDK implicit let the server framework silently pick the client's
+    # protocol stack, which made the gateway the version ceiling for its own
+    # fleet. Bound them separately so each side can move on its own.
+    "mcp>=2.2,<3.0",
     # petit, as a library. Layer 1's line grouping (preprocess/petit.py).
     # 3.0.0 renamed the distribution to petit-log and the import to petit;
     # it is the first release that is deterministic, returns verbatim
@@ -56,7 +64,7 @@ packages = ["src/mcp_trentina_crunchtools"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "S", "B", "C4", "C901", "DTZ", "T10", "ISC", "PIE", "PT", "RET", "SIM", "TID", "TCH", "ARG", "PLC", "PLE", "PLR", "PLW", "TRY", "RUF"]
@@ -75,6 +83,13 @@ ignore = [
     "PLR0913",  # 12 hits: MCP tool signatures mirror the wire API
     "PLR2004",  # 10 hits: HTTP status codes and byte limits
     "PLR0917",  # 6 hits: ditto, positional
+    "UP042",    # 4 hits: `class X(str, Enum)` -> StrEnum. Surfaced by raising
+                #   target-version to py311, not by any code change. Every use
+                #   site goes through .value or .name (checked), so the swap
+                #   looks safe -- but these enums land in persisted audit rows
+                #   (Outcome) and cache keys (Provenance), and StrEnum changes
+                #   what str() returns. That is a deliberate migration with its
+                #   own blast radius, not fallout from a Python floor bump.
 ]
 
 [tool.ruff.lint.pylint]
@@ -85,7 +100,12 @@ max-statements = 50
 max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "S105", "S106", "S108", "PLC0415", "PLR2004", "ARG002", "ARG005", "RUF003", "PT018", "TC003"]
+# S603: the integration tests launch a real MCP backend and a fastmcp-free
+# interpreter as subprocesses. Both argv lists are literals naming this repo's
+# own modules and sys.executable -- there is no untrusted input to check, and
+# the alternative (never starting a real server) is what let a production
+# breakage through a green CI run in the first place.
+"tests/*" = ["S101", "S105", "S106", "S108", "S603", "PLC0415", "PLR2004", "ARG002", "ARG005", "RUF003", "PT018", "TC003"]
 "src/mcp_trentina_crunchtools/dbus_interface.py" = ["UP037", "C901", "TRY300"]
 "src/mcp_trentina_crunchtools/gateway/app.py" = ["C901", "PLR0911", "PLR0912"]
 # Request handler: each early return is a distinct HTTP failure response
@@ -99,6 +119,14 @@ max-complexity = 10
 "benchmarks/provider_benchmark.py" = ["E402", "PLR0915"]
 
 [tool.mypy]
+# NOT the 3.11 floor, deliberately. numpy's bundled stubs use PEP 695 `type X =`
+# syntax, which mypy refuses to parse under python_version = "3.11":
+#   numpy/__init__.pyi: error: Type statement is only supported in Python 3.12
+#   and greater  [syntax]
+# That is a blocking error, so type checking stops entirely. 3.11 compatibility
+# is instead enforced where it actually bites -- ruff's target-version = py311,
+# and the CI matrix running the full suite on 3.11, which would fail at import
+# on any 3.12-only syntax.
 python_version = "3.12"
 strict = true
 warn_return_any = true

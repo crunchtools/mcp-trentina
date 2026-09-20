@@ -50,11 +50,16 @@ class _FakeResult:
 
 
 class _FakeServer:
-    """Minimal FastMCP stand-in mirroring the real 2.x surface.
+    """Minimal FastMCP stand-in mirroring the real 4.x surface.
 
-    FastMCP 2.x has no ``call_tool``; a caller resolves the tool with
-    ``get_tool`` and invokes ``Tool.run``. This fake must not grow methods
-    the real class lacks -- ``TestFakeMatchesRealFastMcp`` enforces that.
+    FastMCP has no ``call_tool``; a caller resolves the tool with ``get_tool``
+    and invokes ``Tool.run``. This fake must not grow methods the real class
+    lacks, nor keep ones it has dropped -- ``TestFakeMatchesRealFastMcp``
+    enforces both directions.
+
+    Tool enumeration is ``list_tools()`` returning a list: fastmcp 4 removed
+    the 2.x ``get_tools()`` dict. ``_FakeLegacyServer`` below covers the old
+    shape, which ``internal._walk_server_tools`` still accepts.
     """
 
     name = "fake-trentina"
@@ -71,10 +76,10 @@ class _FakeServer:
         self._raise_on_list = raise_on_list
         self._raise_on_call = raise_on_call
 
-    async def get_tools(self) -> dict[str, _FakeFunctionTool]:
+    async def list_tools(self) -> list[_FakeFunctionTool]:
         if self._raise_on_list is not None:
             raise self._raise_on_list
-        return {t.name: t for t in self._tools}
+        return list(self._tools)
 
     async def get_tool(self, name: str) -> _FakeFunctionTool:
         for tool in self._tools:
@@ -88,6 +93,23 @@ class _FakeServer:
     def calls(self) -> list[tuple[str, dict[str, Any]]]:
         """Every (tool name, arguments) pair run through this server."""
         return [(t.name, args) for t in self._tools for args in t.calls]
+
+
+class _FakeLegacyServer:
+    """A fastmcp 2.x-shaped server: ``get_tools()`` returning a name->tool dict.
+
+    Not a drift risk -- it deliberately models a framework generation trentina
+    no longer installs, to prove ``_walk_server_tools`` still accepts a backend
+    running the older shape.
+    """
+
+    name = "fake-legacy-trentina"
+
+    def __init__(self, tools: list[_FakeFunctionTool]) -> None:
+        self._tools = tools
+
+    async def get_tools(self) -> dict[str, _FakeFunctionTool]:
+        return {t.name: t for t in self._tools}
 
 
 def _tool(name: str) -> _FakeFunctionTool:
@@ -217,6 +239,11 @@ class TestFakeMatchesRealFastMcp:
     The internal dispatch path broke because ``_FakeServer`` implemented a
     ``call_tool`` method that FastMCP 2.x does not have, so every test
     passed while production raised AttributeError on every internal tool.
+
+    That guard was one-directional and so missed the mirror-image failure:
+    fastmcp 4 *removed* ``get_tools()``, and a fake still implementing it kept
+    passing while production raised AttributeError on every internal tool for
+    the second time. Both directions are checked now.
     """
 
     def test_fake_only_implements_methods_the_real_class_has(self) -> None:
@@ -232,6 +259,46 @@ class TestFakeMatchesRealFastMcp:
             f"_FakeServer implements methods FastMCP lacks: {sorted(missing)}. "
             "The fake has drifted from the real API."
         )
+
+    async def test_legacy_get_tools_dict_still_accepted(self) -> None:
+        """A fastmcp 2.x-shaped server still enumerates.
+
+        The gateway must not be pinned to one framework generation by its own
+        internal backend, so the dict-returning ``get_tools()`` shape stays
+        supported even though trentina now installs fastmcp 4.
+        """
+        internal.register_internal_server(_FakeLegacyServer([_tool("legacy_tool")]))
+
+        tools = await internal.list_internal_tools()
+
+        assert [t["name"] for t in tools] == ["legacy_tool"]
+
+    async def test_server_with_neither_enumeration_method_fails_loudly(self) -> None:
+        class _Bare:
+            name = "bare"
+
+        internal.register_internal_server(_Bare())
+
+        with pytest.raises(BackendCallError, match="internal list_tools failed"):
+            await internal.list_internal_tools()
+
+    def test_methods_the_gateway_calls_still_exist_on_real_fastmcp(self) -> None:
+        """The other direction: the real class dropping something we call.
+
+        ``_walk_server_tools`` tries ``list_tools`` then ``get_tools``; at
+        least one must be real, or the internal backend is dead in production
+        while every fake-backed test still passes.
+        """
+        from fastmcp import FastMCP
+
+        assert any(
+            hasattr(FastMCP, m) for m in ("list_tools", "get_tools")
+        ), "FastMCP exposes neither list_tools nor get_tools"
+
+        for method in ("get_tool", "custom_route"):
+            assert hasattr(FastMCP, method), (
+                f"FastMCP no longer exposes {method!r}, which the gateway calls."
+            )
 
     async def test_real_fastmcp_dispatch_round_trip(self) -> None:
         """call_internal_tool against a genuine FastMCP instance."""

@@ -1,6 +1,6 @@
 # mcp-trentina-crunchtools Constitution
 
-> **Version:** 1.0.2
+> **Version:** 1.1.0
 > **Ratified:** 2026-03-10
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.1.0
@@ -109,9 +109,9 @@ Follow [Semantic Versioning 2.0.0](https://semver.org/) strictly.
 
 | Layer | Technology | Version |
 |-------|------------|---------|
-| Language | Python | 3.10+ |
+| Language | Python | 3.11+ |
 | MCP Framework | FastMCP | Latest |
-| HTTP Client | httpx | Latest |
+| HTTP Client | httpx (app) + httpx2 (MCP transport) | Latest |
 | Validation | Pydantic | v2 |
 | HTML Parsing | beautifulsoup4 | Latest |
 | HTML-to-Markdown | markdownify | Latest |
@@ -143,11 +143,43 @@ All tests use mocked httpx — no live API calls. Test categories:
 
 `test_tool_count` MUST be updated whenever tools are added or removed.
 
+### Python version coverage (MANDATORY)
+
+Two rules, and they are not negotiable independently — the second only works
+because the first bounds it.
+
+1. **Everything that can run on the whole matrix MUST run on the whole
+   matrix.** CI tests every Python version between the floor declared in
+   `requires-python` and the newest supported release, inclusive. No gaps. A
+   version admitted by `requires-python` but absent from the CI matrix is an
+   untested claim, which is how a floor of 3.10 survived while being
+   uninstallable (issue #100).
+
+2. **Anything that can only run on one version MUST run on the NEWEST
+   supported version** — the one the container ships. Some work genuinely
+   cannot be parallelized across the matrix: it needs a credential only one job
+   holds, it costs live API quota per run, or it executes inside the built
+   image. That work does not get to pick a comfortable middle version. It runs
+   where production runs, because a single-version test that is not testing
+   production's interpreter is testing a configuration nobody deploys.
+
+The newest supported version is therefore load-bearing in two directions: it is
+the matrix ceiling AND the home for every single-version job. When a new Python
+release is adopted, both move together — adding it to `classifiers` without
+moving the single-version jobs violates this section.
+
+Type checking is exempt from rule 2 and deliberately so. `python_version` in
+`[tool.mypy]` selects which language semantics to check *against*, not which
+interpreter runs; pointing it at the newest release would stop it catching code
+that breaks on the floor, which is the opposite of the intent. It should track
+the floor, and where a dependency's stubs make that impossible the config MUST
+record the specific blocker.
+
 ---
 
 ## IV. Gourmand (AI Slop Detection)
 
-All code MUST pass `gourmand --full .` with **zero violations** before merge. Gourmand is a CI gate in GitHub Actions.
+All code MUST pass `gourmand check .` with **zero violations** before merge. Gourmand is a CI gate in GitHub Actions.
 
 ### Configuration
 
@@ -177,7 +209,7 @@ Every code change must pass through these gates in order:
 1. **Lint** — `uv run ruff check src tests`
 2. **Type Check** — `uv run mypy src`
 3. **Tests** — `uv run pytest -v`
-4. **Gourmand** — `gourmand --full .`
+4. **Gourmand** — `gourmand check .`
 5. **Container Build** — push the branch; GHA builds it
    (`.github/workflows/container.yml`). Never build the image locally: the
    model-export stage needs a gated HuggingFace credential that only CI holds.
@@ -258,3 +290,5 @@ Container CI workflows MUST use two separate jobs:
 | 1.0.0 | 2026-03-09 | Initial constitution |
 | 1.0.1 | 2026-03-10 | Add Sections IV (Gourmand), VII (Development Workflow), VIII (Governance) |
 | 1.0.2 | 2026-03-16 | Add Section VI (Container Conventions); renumber VI-VIII → VII-IX |
+| 1.0.3 | 2026-09-20 | Python floor 3.10+ → 3.11+ (3.10 was uninstallable, issue #100); record httpx2 as the MCP transport client alongside httpx |
+| 1.1.0 | 2026-09-20 | Add Section III "Python version coverage": full matrix from floor to newest, single-version jobs pinned to newest (production's version) |

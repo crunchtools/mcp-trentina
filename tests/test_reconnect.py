@@ -13,6 +13,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from mcp.types import ListToolsResult, Tool
 
 from mcp_trentina_crunchtools.gateway import compress
 from mcp_trentina_crunchtools.gateway.backend import _tool_list_cache
@@ -33,16 +34,13 @@ def _unset_profiles() -> None:
     compress._profiles = None
 
 
-class _FakeTool:
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self.description = ""
-        self.inputSchema: dict[str, Any] = {}
-
-
-class _FakeToolsResult:
-    def __init__(self, names: list[str]) -> None:
-        self.tools = [_FakeTool(n) for n in names]
+# Real SDK models rather than hand-rolled stand-ins -- a fake with its own
+# attribute names cannot notice an SDK field rename, which is how camelCase
+# reads survived the move to snake_case with the suite still green.
+def _tools_result(names: list[str]) -> ListToolsResult:
+    return ListToolsResult(
+        tools=[Tool(name=n, description="", input_schema={}) for n in names]
+    )
 
 
 def _profile(name: str, backends: dict[str, Backend]) -> Profile:
@@ -86,8 +84,8 @@ class TestReconnectBackend:
             breaker.record_failure(POSTIZ_URL)
         assert breaker.get_state(POSTIZ_URL) is State.OPEN
 
-        async def ok(_url: str, _headers: Any) -> _FakeToolsResult:
-            return _FakeToolsResult(["integrationList", "listPostsTool"])
+        async def ok(_url: str, _headers: Any) -> ListToolsResult:
+            return _tools_result(["integrationList", "listPostsTool"])
 
         with patch(
             "mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok
@@ -151,8 +149,8 @@ class TestReconnectBackend:
             }
         )
 
-        async def ok(_url: str, _headers: Any) -> _FakeToolsResult:
-            return _FakeToolsResult(["integrationList"])
+        async def ok(_url: str, _headers: Any) -> ListToolsResult:
+            return _tools_result(["integrationList"])
 
         with patch(
             "mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok
@@ -173,8 +171,8 @@ class TestReconnectBackend:
         _profile_tools_cache["josui"] = [{"name": "other__tool"}]
         _profile_backend_urls["josui"] = {POSTIZ_URL}
 
-        async def ok(_url: str, _headers: Any) -> _FakeToolsResult:
-            return _FakeToolsResult(["integrationList"])
+        async def ok(_url: str, _headers: Any) -> ListToolsResult:
+            return _tools_result(["integrationList"])
 
         with patch(
             "mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok

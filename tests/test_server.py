@@ -10,13 +10,13 @@ class TestServerRegistration:
 
     async def test_tool_count(self) -> None:
         """Verify exactly 16 tools are registered."""
-        tools = await mcp.get_tools()
+        tools = await mcp.list_tools()
         assert len(tools) == 16, f"Expected 16 tools, got {len(tools)}"
 
     async def test_expected_tools_registered(self) -> None:
         """Verify all expected tool names are present."""
-        tools = await mcp.get_tools()
-        tool_names = set(tools.keys())
+        tools = await mcp.list_tools()
+        tool_names = {t.name for t in tools}
         expected = {
             "safe_fetch_tool",
             "quarantine_fetch_tool",

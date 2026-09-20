@@ -23,6 +23,11 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from mcp_types.version import (
+    HANDSHAKE_PROTOCOL_VERSIONS,
+    LATEST_HANDSHAKE_VERSION,
+)
+
 from .. import __version__
 from ..database import record_gateway_call
 from ..defense import Provenance
@@ -41,7 +46,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PROTOCOL_VERSION = "2025-03-26"
+# The revision answered when a client asks for one we do not recognize. Kept
+# at the SDK's own handshake ceiling rather than a literal, so trentina tracks
+# the protocol registry instead of drifting behind it.
+PROTOCOL_VERSION = LATEST_HANDSHAKE_VERSION
 NAMESPACE_SEP = "__"
 
 # JSON-RPC 2.0 reserved error codes (https://www.jsonrpc.org/specification#error_object)
@@ -112,6 +120,28 @@ def _err(req_id: Any, code: int, message: str) -> dict[str, Any]:
     }
 
 
+def _negotiate_protocol_version(requested: Any) -> str:
+    """Answer an ``initialize`` with the revision the client asked for.
+
+    Trentina previously replied with one hardcoded revision no matter what was
+    asked, which pinned every consumer to the gateway's era and made the
+    gateway the ceiling for its own fleet. Every backend measured in issue #107
+    already behaves the way this does: honour the client's request when it is a
+    revision we know, otherwise counter-offer our ceiling and let the client
+    decide whether it can live with that.
+
+    The known set comes from the SDK's protocol registry rather than a local
+    literal, so trentina picks up new revisions when it picks up a new SDK.
+
+    Note the gateway's surface is tools-only and hand-rolled (it does not use
+    fastmcp for gateway traffic), so agreeing to a revision costs nothing
+    beyond the tool methods, which are stable across every revision listed.
+    """
+    if isinstance(requested, str) and requested in HANDSHAKE_PROTOCOL_VERSIONS:
+        return requested
+    return PROTOCOL_VERSION
+
+
 async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, Any]:
     """Dispatch one JSON-RPC request against a profile.
 
@@ -138,7 +168,9 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
         return _ok(
             req_id,
             {
-                "protocolVersion": PROTOCOL_VERSION,
+                "protocolVersion": _negotiate_protocol_version(
+                    params.get("protocolVersion")
+                ),
                 "capabilities": {"tools": {"listChanged": True}},
                 "serverInfo": {
                     "name": f"mcp-trentina-gateway:{profile.name}",

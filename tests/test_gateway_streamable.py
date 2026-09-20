@@ -8,6 +8,10 @@ import time
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from mcp_types.version import (
+    HANDSHAKE_PROTOCOL_VERSIONS,
+    LATEST_HANDSHAKE_VERSION,
+)
 from pydantic import SecretStr
 from starlette.testclient import TestClient
 
@@ -20,7 +24,10 @@ from mcp_trentina_crunchtools.gateway.app import (
 )
 from mcp_trentina_crunchtools.gateway.circuit import CircuitBreaker, State
 from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
-from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP
+from mcp_trentina_crunchtools.gateway.router import (
+    NAMESPACE_SEP,
+    _negotiate_protocol_version,
+)
 from mcp_trentina_crunchtools.gateway.sessions import SessionRegistry
 
 TEST_TOKEN = "alice-token"
@@ -190,7 +197,7 @@ class TestStreamableHTTPPost:
         result = resp.json()["result"]
         assert result["capabilities"]["tools"]["listChanged"] is True
 
-    def test_initialize_uses_2025_protocol(self) -> None:
+    def test_initialize_without_a_requested_version_answers_our_ceiling(self) -> None:
         _, client = _make_registry_and_client()
         resp = client.post(
             "/alice/mcp",
@@ -198,7 +205,74 @@ class TestStreamableHTTPPost:
             headers=AUTH,
         )
         result = resp.json()["result"]
-        assert result["protocolVersion"] == "2025-03-26"
+        assert result["protocolVersion"] == LATEST_HANDSHAKE_VERSION
+
+
+class TestProtocolVersionNegotiation:
+    """The frontend half of issue #107: accept clients of any protocol era.
+
+    Trentina used to answer every ``initialize`` with one hardcoded revision
+    regardless of what was asked, which made the gateway the protocol ceiling
+    for every consumer behind it. It now behaves the way the backend fleet
+    measured in #107 already did: honour a known request, counter-offer
+    otherwise.
+
+    Parametrized over the SDK's own registry rather than a literal list, so a
+    new revision arriving with a future SDK is covered without editing this
+    test.
+    """
+
+    @pytest.mark.parametrize("requested", HANDSHAKE_PROTOCOL_VERSIONS)
+    def test_known_revision_is_echoed_back(self, requested: str) -> None:
+        _, client = _make_registry_and_client()
+        resp = client.post(
+            "/alice/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": requested},
+            },
+            headers=AUTH,
+        )
+        assert resp.json()["result"]["protocolVersion"] == requested
+
+    @pytest.mark.parametrize(
+        "requested",
+        [
+            "2026-07-28",  # the modern per-request-envelope era: real, not a
+                           # handshake revision, so not reachable this way
+            "1999-01-01",
+            "",
+            None,
+            {"not": "a string"},
+        ],
+    )
+    def test_unknown_revision_gets_our_ceiling(self, requested: object) -> None:
+        _, client = _make_registry_and_client()
+        resp = client.post(
+            "/alice/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": requested},
+            },
+            headers=AUTH,
+        )
+        assert resp.json()["result"]["protocolVersion"] == LATEST_HANDSHAKE_VERSION
+
+    def test_answer_is_always_something_a_real_client_accepts(self) -> None:
+        """An SDK client rejects any reply outside HANDSHAKE_PROTOCOL_VERSIONS.
+
+        ``ClientSession.initialize`` raises RuntimeError on an unrecognized
+        server version, so every branch of the negotiation must land inside the
+        registry or the gateway becomes undialable.
+        """
+        for requested in (*HANDSHAKE_PROTOCOL_VERSIONS, "2026-07-28", "nonsense"):
+            assert (
+                _negotiate_protocol_version(requested) in HANDSHAKE_PROTOCOL_VERSIONS
+            )
 
 
 class TestStreamableHTTPDelete:

@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import httpx
+import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
@@ -38,9 +38,17 @@ async def _connect_streamable_http(
 ) -> AsyncIterator[Any]:
     """Adapt this module's ``headers`` dict onto mcp's ``http_client=`` API.
 
-    ``streamable_http_client`` only manages an ``httpx.AsyncClient``'s
+    ``streamable_http_client`` only manages an ``httpx2.AsyncClient``'s
     lifecycle when it creates one itself -- passing a pre-configured client
     makes the caller responsible for closing it.
+
+    The client is ``httpx2``, not ``httpx``: that is the fork the MCP SDK
+    builds on and annotates for. The two are separate distributions with
+    separate import names and coexist happily, so trentina's own ``httpx``
+    use elsewhere (quarantine's Gemini REST calls) is untouched. Passing an
+    ``httpx`` client here does work at runtime -- httpx2 is a fork with the
+    same API -- but it is a type error, and relying on two HTTP stacks
+    staying API-identical is not a bet worth carrying.
 
     Yields ``(read, write)``. The SDK has shipped the stream bundle as both a
     2-tuple and a 3-tuple (trailing session-id callback); that trailing element
@@ -53,12 +61,38 @@ async def _connect_streamable_http(
         return
 
     async with (
-        httpx.AsyncClient(headers=headers) as http_client,
+        httpx2.AsyncClient(headers=headers) as http_client,
         streamable_http_client(url, http_client=http_client) as streams,
     ):
         yield streams[0], streams[1]
 
 logger = logging.getLogger(__name__)
+
+_MISSING = object()
+
+
+def _field(obj: Any, snake: str, camel: str, default: Any = None) -> Any:
+    """Read an MCP model field without depending on fastmcp's alias shim.
+
+    SDK 2.x renamed every model field to snake_case (``input_schema``,
+    ``is_error``, ``structured_content``); camelCase survives only as a
+    pydantic *serialization* alias, so it is absent from objects deserialized
+    off the wire.
+
+    fastmcp re-attaches the camelCase spellings as deprecated properties when
+    it is imported, which means reading ``tool.inputSchema`` appears to keep
+    working -- but only as a side effect of importing fastmcp, and only until
+    the shim is dropped (it already emits FastMCPDeprecationWarning). That is
+    a trap, not compatibility: this module must be correct on a raw SDK object
+    with fastmcp absent, which ``tests/test_backend_no_fastmcp.py`` enforces.
+
+    Reads the real field name first and keeps camelCase only as a fallback for
+    SDK 1.x objects, so the gateway stays correct against either SDK vintage.
+    """
+    value = getattr(obj, snake, _MISSING)
+    if value is _MISSING:
+        value = getattr(obj, camel, _MISSING)
+    return default if value is _MISSING else value
 
 
 @dataclass(frozen=True)
@@ -248,13 +282,25 @@ async def call_backend_tool(
         ) from exc
 
     breaker.record_success(backend.url)
+    # SDK 2.x widened call_tool's return to CallToolResult | InputRequiredResult
+    # | Result. Only the first carries content/is_error; the others arrive when
+    # a tool wants elicitation or hands back a bare result. The gateway does not
+    # negotiate those capabilities, so anything without content is a protocol
+    # surprise rather than a tool answer -- surface it instead of reporting an
+    # empty success.
+    raw_content = _field(result, "content", "content", _MISSING)
+    if raw_content is _MISSING:
+        raise BackendCallError(
+            f"backend {backend_name!r} returned {type(result).__name__} "
+            f"for tool {tool_name!r}, which carries no content"
+        )
     content: list[dict[str, Any]] = [
-        _serialize_content_block(b) for b in result.content
+        _serialize_content_block(b) for b in raw_content
     ]
-    structured = getattr(result, "structuredContent", None)
+    structured = _field(result, "structured_content", "structuredContent")
     return BackendCall(
         content=content,
-        is_error=bool(result.isError),
+        is_error=bool(_field(result, "is_error", "isError", False)),
         structured_content=structured if isinstance(structured, dict) else None,
     )
 
@@ -283,6 +329,12 @@ async def _do_call_tool(
     disabled for buggy backends: the cached schemas are cleared and the
     validator is replaced with a no-op. The SDK internals are reached through
     an ``Any`` alias so the method override type-checks without a suppression.
+
+    SDK 2.x renamed the validator ``_validate_tool_result`` -> public
+    ``validate_tool_result``. Assigning the old name would silently create a
+    dead attribute, leaving validation switched ON for exactly the backends
+    this flag exists to accommodate -- a misconfiguration that reports as a
+    backend failure. So the override asserts it actually patched something.
     """
     async with (
         _connect_streamable_http(url, headers) as (read, write),
@@ -290,10 +342,32 @@ async def _do_call_tool(
     ):
         await session.initialize()
         if not validate_output:
-            internals: Any = session
-            internals._tool_output_schemas.clear()
-            internals._validate_tool_result = _noop_validate
+            _disable_output_validation(session)
         return await session.call_tool(tool_name, arguments=arguments)
+
+
+def _disable_output_validation(session: Any) -> None:
+    """Neuter client-side output-schema validation on an open session.
+
+    Raises:
+        BackendCallError: the SDK exposes neither known validator name, so the
+            override would be a no-op. Fail loudly rather than quietly honour
+            the opposite of what the profile asked for.
+    """
+    schemas = getattr(session, "_tool_output_schemas", None)
+    if schemas is not None:
+        schemas.clear()
+
+    for attr in ("validate_tool_result", "_validate_tool_result"):
+        if hasattr(session, attr):
+            setattr(session, attr, _noop_validate)
+            return
+
+    raise BackendCallError(
+        "cannot disable output-schema validation: this MCP SDK exposes no "
+        "known validator hook (tried validate_tool_result, "
+        "_validate_tool_result)"
+    )
 
 
 async def _noop_validate(name: str, result: Any) -> None:
@@ -301,21 +375,31 @@ async def _noop_validate(name: str, result: Any) -> None:
 
 
 def _serialize_tool(tool: Any) -> dict[str, Any]:
-    """Convert an MCP Tool dataclass to a JSON-serializable dict."""
+    """Convert an MCP Tool dataclass to a JSON-serializable dict.
+
+    Reads snake_case field names (see ``_field``) but **emits camelCase keys**:
+    those are the MCP wire format, unchanged across every protocol revision,
+    and the whole defense pipeline downstream keys off them. The rename was
+    Python-side only.
+    """
     out: dict[str, Any] = {
         "name": tool.name,
         "description": tool.description or "",
-        "inputSchema": tool.inputSchema,
+        "inputSchema": _field(tool, "input_schema", "inputSchema"),
     }
-    for extra in ("title", "annotations", "outputSchema"):
-        value = getattr(tool, extra, None)
+    for wire_key, snake, camel in (
+        ("title", "title", "title"),
+        ("annotations", "annotations", "annotations"),
+        ("outputSchema", "output_schema", "outputSchema"),
+    ):
+        value = _field(tool, snake, camel)
         if value is None:
             continue
         if hasattr(value, "model_dump"):
             value = value.model_dump(
                 mode="json", by_alias=True, exclude_none=True,
             )
-        out[extra] = value
+        out[wire_key] = value
     return out
 
 
@@ -328,7 +412,7 @@ def _serialize_content_block(block: Any) -> dict[str, Any]:
         return {
             "type": "image",
             "data": getattr(block, "data", ""),
-            "mimeType": getattr(block, "mimeType", ""),
+            "mimeType": _field(block, "mime_type", "mimeType", ""),
         }
     if kind == "resource":
         resource = getattr(block, "resource", None)
