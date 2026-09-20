@@ -14,7 +14,7 @@ jobs:
         python-version: ["3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -48,7 +48,7 @@ jobs:
     env:
       HAS_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -81,7 +81,7 @@ jobs:
     env:
       HAS_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build container image
         run: |
@@ -127,9 +127,9 @@ jobs:
     name: Constitution Validation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: crunchtools/constitution
           path: .constitution
