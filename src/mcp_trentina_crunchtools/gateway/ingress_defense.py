@@ -33,6 +33,12 @@ A content-hash verdict cache keeps the cost sane: ~210 descriptions are
 rebuilt on every circuit-breaker flap, and agents re-read the same tickets
 all day. Verdicts are cached per (defense-config, content) pair; a cache
 hit re-records nothing.
+
+Tool-description verdicts also OUTLIVE the process, in ``perimeter_db`` —
+a store of its own, not a table beside the blocklist. Judging them from
+cold took over five minutes, which every MCP client reports as a timeout
+rather than as a warm-up. Responses stay in memory: unbounded, mostly seen
+once, and not what a restart pays for.
 """
 
 from __future__ import annotations
@@ -41,7 +47,6 @@ import hashlib
 import json
 import logging
 import os
-import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -80,14 +85,52 @@ class IngressDecision:
 
 
 _CACHE_MAX = 4096
-# A verdict is not forever: a clean cached during an L3 outage, or before a
-# model/config change, must age out rather than shadow the fix.
-_CACHE_TTL_SECONDS = 900.0
-_verdicts: OrderedDict[str, tuple[float, dict[str, Any] | None]] = OrderedDict()
+
+# A COMPLETE verdict is a pure function of (detector set, defence config,
+# content), and all three are pinned — the first by the row's version
+# stamp, the other two by the cache key. So it does not go stale and does
+# not expire. It used to, on a 900-second TTL, which meant fifteen quiet
+# minutes re-armed a full rescan of every tool description.
+_verdicts: OrderedDict[str, dict[str, Any] | None] = OrderedDict()
+
+# Set when the store refuses a write. A read-only or full disk fails the
+# same way for every subsequent verdict, and retrying 200 more times per
+# boot turns one logged problem into a flood.
+_persist_broken = False
+
+
+def load_verdict_cache() -> int:
+    """Populate the verdict cache from the perimeter store at startup.
+
+    Without this, every restart re-judges ~210 tool descriptions through
+    L1, L2 and L3 before the first ``tools/list`` can answer — measured at
+    over five minutes, which every MCP client reports as a timeout rather
+    than as a warm-up.
+
+    On the trust question: the store is owned by this process's own uid, so
+    an attacker able to write it can equally rewrite this dict in memory,
+    the code, or the image. Re-deriving every verdict on each boot defends
+    only against someone who has already won. The version stamp covers the
+    case that actually happens — a row written by an older perimeter.
+    """
+    from ..perimeter_db import PERIMETER_VERSION, get_all_verdicts
+
+    global _persist_broken
+    _persist_broken = False
+
+    loaded = get_all_verdicts(PERIMETER_VERSION)
+    _verdicts.update(loaded)
+    while len(_verdicts) > _CACHE_MAX:
+        _verdicts.popitem(last=False)
+    logger.info("perimeter: loaded %d cached verdict(s)", len(_verdicts))
+    return len(_verdicts)
 
 
 def reset_verdict_cache() -> None:
+    """Clear the in-memory cache without touching the store (for testing)."""
+    global _persist_broken
     _verdicts.clear()
+    _persist_broken = False
 
 
 def _cache_key(profile: Profile, kind: str, text: str) -> str:
@@ -97,22 +140,56 @@ def _cache_key(profile: Profile, kind: str, text: str) -> str:
 
 
 def _cache_get(key: str) -> tuple[bool, dict[str, Any] | None]:
-    entry = _verdicts.get(key)
-    if entry is None:
-        return False, None
-    expires, value = entry
-    if time.monotonic() > expires:
-        del _verdicts[key]
-        return False, None
-    _verdicts.move_to_end(key)
-    return True, value
+    hit = key in _verdicts
+    if hit:
+        _verdicts.move_to_end(key)
+    return hit, _verdicts.get(key)
 
 
-def _cache_put(key: str, value: dict[str, Any] | None) -> None:
-    _verdicts[key] = (time.monotonic() + _CACHE_TTL_SECONDS, value)
+def _cache_put(key: str, value: dict[str, Any] | None, *, persist: bool = False) -> None:
+    """Remember one verdict, and for tool descriptions write it down.
+
+    ``persist`` is set only by ``scan_tool_list``. Tool descriptions are
+    what a restart pays for — a bounded set of a few hundred, judged again
+    on every boot and every circuit-breaker flap. Tool RESPONSES are
+    unbounded and mostly seen once, so persisting them would put a disk
+    write in the hot path of every proxied call to buy a hit rate near
+    zero. They stay in memory, where the LRU already bounds them.
+    """
+    global _persist_broken
+
+    # A verdict reached while L3 was unavailable, or while L2 truncated its
+    # input, is NOT the verdict the perimeter would reach today. Keeping it
+    # would let an outage's "clean" outlive the outage. This is the one
+    # thing the old TTL was really buying, and refusing the verdict outright
+    # buys it without the recurring rescan.
+    if value is not None and (
+        value.get("l3_unavailable")
+        or value.get("l2_truncated")
+        or value.get("l2_unavailable")
+    ):
+        return
+
+    _verdicts[key] = value
     _verdicts.move_to_end(key)
     while len(_verdicts) > _CACHE_MAX:
         _verdicts.popitem(last=False)
+
+    if not persist or _persist_broken:
+        return
+    try:
+        from ..perimeter_db import PERIMETER_VERSION, save_verdict
+
+        save_verdict(key, value, PERIMETER_VERSION)
+    except Exception:
+        # A store that cannot be written is a slow next boot, not a wrong
+        # answer, and must never cost the request in front of us. Stop
+        # trying: whatever broke the write breaks the next two hundred.
+        _persist_broken = True
+        logger.warning(
+            "perimeter: cannot write the verdict store; verdicts will not "
+            "survive this restart", exc_info=True,
+        )
 
 
 def _collect_strings(value: Any, out: list[str]) -> None:
@@ -184,13 +261,25 @@ def _collect_block(
 def _build_warning(verdict: Any, unscannable: dict[str, int]) -> dict[str, Any] | None:
     classification = verdict.classification
     l2_truncated = bool(classification is not None and classification.truncated)
+    # There was text for L2 to read and no result came back: the ONNX model
+    # is missing or failed to load, so the classifier silently did not run.
+    # ``classify_async`` returns None for that, which used to read as a
+    # clean scan — survivable while a verdict expired in fifteen minutes,
+    # not survivable now that one is written down.
+    l2_unavailable = bool(verdict.pipeline.scan_view.strip()) and classification is None
     l3_unavailable = bool(
         verdict.l3_assessment is not None
         and verdict.l3_assessment.get("l3_unavailable")
     )
     gaps = {k: v for k, v in unscannable.items() if v}
 
-    if not verdict.flagged and not l2_truncated and not l3_unavailable and not gaps:
+    if (
+        not verdict.flagged
+        and not l2_truncated
+        and not l2_unavailable
+        and not l3_unavailable
+        and not gaps
+    ):
         return None
 
     warning: dict[str, Any] = {
@@ -207,6 +296,8 @@ def _build_warning(verdict: Any, unscannable: dict[str, int]) -> dict[str, Any] 
             else None
         ),
     }
+    if l2_unavailable:
+        warning["l2_unavailable"] = True
     if l3_unavailable:
         warning["l3_unavailable"] = True
     if gaps:
@@ -284,6 +375,12 @@ async def scan_tool_response(
     # to walk a payload through block mode.
     l2_truncated = bool(warning and warning.get("l2_truncated"))
     l3_unavailable = bool(warning and warning.get("l3_unavailable"))
+    # Deliberately NOT l2_unavailable. A missing ONNX model is a deploy
+    # fault, not an attacker-triggerable one, and folding it in here would
+    # let one bad image refuse every response on every block-mode profile.
+    # It still forbids CACHING the verdict and still annotates, so the gap
+    # is visible and does not outlive the fix. Promoting it to a block is a
+    # separate decision with its own blast radius.
     unjudgeable = l2_truncated or l3_unavailable
 
     blocked = False
@@ -378,13 +475,20 @@ async def scan_tool_list(
                 },
             )
             warning = _build_warning(verdict, {})
-            _cache_put(key, warning)
+            _cache_put(key, warning, persist=True)
 
         if warning is not None:
-            logger.warning(
-                "gateway: tool description flagged profile=%s backend=%s tool=%s risk=%s",
-                profile.name, backend_name, tool.get("name"), warning.get("risk_level"),
-            )
+            if not hit:
+                # Only on a fresh judgement. Logging cache hits as well made
+                # the journal read as though nothing were cached at all,
+                # which is how an earlier "the gateway is rescanning
+                # everything" report started.
+                logger.warning(
+                    "gateway: tool description flagged profile=%s backend=%s "
+                    "tool=%s risk=%s",
+                    profile.name, backend_name, tool.get("name"),
+                    warning.get("risk_level"),
+                )
             # A poisoned description's whole attack is being READ during tool
             # selection, and a sibling warning key is exactly the part strict
             # MCP clients strip before the model sees the schema. So under
