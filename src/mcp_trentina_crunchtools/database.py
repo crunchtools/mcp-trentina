@@ -183,24 +183,49 @@ def record_detection(
     return cursor.lastrowid or 0
 
 
-def get_blocklist_stats() -> dict[str, Any]:
-    """Get summary statistics for the blocklist."""
-    db = get_db()
-    total = db.execute("SELECT COUNT(*) as cnt FROM detections WHERE blocked = 1").fetchone()
-    recent = db.execute(
-        "SELECT source_type, source, domain, detected_at, risk_level "
-        "FROM detections WHERE blocked = 1 "
-        "ORDER BY detected_at DESC LIMIT 10"
-    ).fetchall()
+def get_blocklist_stats(profile: str | None = None) -> dict[str, Any]:
+    """Get summary statistics for the blocklist, optionally for one profile.
 
-    by_risk = db.execute(
-        "SELECT risk_level, COUNT(*) as cnt FROM detections WHERE blocked = 1 GROUP BY risk_level"
-    ).fetchall()
+    The *profile* filter matters more here than the column suggests. A
+    detection's ``source`` is written as ``profile:backend:tool``, so an
+    unfiltered ``recent_detections`` hands the reader other agents' names, the
+    backends they call and the URLs they fetched. Rows that predate the
+    attribution columns have a NULL profile and belong to no one; a filtered
+    query correctly leaves them out rather than crediting them to whoever asked.
+
+    Returns:
+        ``total_blocked``, ``by_risk_level``, ``recent_detections``, and
+        ``profile_filter`` — the profile the numbers are for, or None for the
+        whole gateway, so a reader never has to guess which it got.
+    """
+    db = get_db()
+    # Same idiom as get_gateway_call_stats above: fixed query templates with
+    # one optional clause, the value always bound as a parameter.
+    clause = " AND profile = ?" if profile else ""
+    args: tuple[Any, ...] = (profile,) if profile else ()
+
+    total_query = (
+        "SELECT COUNT(*) as cnt FROM detections WHERE blocked = 1{profile_clause}"
+    )
+    recent_query = (
+        "SELECT source_type, source, domain, detected_at, risk_level "
+        "FROM detections WHERE blocked = 1{profile_clause} "
+        "ORDER BY detected_at DESC LIMIT 10"
+    )
+    risk_query = (
+        "SELECT risk_level, COUNT(*) as cnt FROM detections "
+        "WHERE blocked = 1{profile_clause} GROUP BY risk_level"
+    )
+
+    total = db.execute(total_query.format(profile_clause=clause), args).fetchone()
+    recent = db.execute(recent_query.format(profile_clause=clause), args).fetchall()
+    by_risk = db.execute(risk_query.format(profile_clause=clause), args).fetchall()
 
     return {
         "total_blocked": total["cnt"] if total else 0,
         "by_risk_level": {row["risk_level"]: row["cnt"] for row in by_risk},
         "recent_detections": [dict(row) for row in recent],
+        "profile_filter": profile,
     }
 
 

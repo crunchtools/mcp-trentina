@@ -91,7 +91,9 @@ profiles:
 ```
 
 Changes to `profiles.yaml` take effect on the next `reload_profiles` call or
-gateway restart — there is no file watcher. See
+gateway restart — there is no file watcher. What one call applies depends on
+the caller's `role`: an agent profile applies its own section, an operator the
+whole file. See [Roles](profiles.md#roles) and
 [Applying a Change](profiles.md#applying-a-change).
 
 ### Real-World Scale

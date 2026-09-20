@@ -6,6 +6,9 @@
 
 profiles:
   kagetora:
+    # role: agent is the default and the right one for an autonomous agent —
+    # the gateway's admin tools then reach this profile's own slice and no
+    # further. See docs/profiles.md#roles.
     auth:
       bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
 

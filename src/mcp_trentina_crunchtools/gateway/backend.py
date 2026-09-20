@@ -125,8 +125,15 @@ def _evict_backend_cache(url: str) -> None:
         logger.info("cache: evicted backend %s", url)
 
 
-def evict_backend_cache_by_name(url: str) -> int:
-    """Evict cache for a specific backend. Returns 1 if evicted, 0 if not found."""
+def evict_backend_cache_url(url: str) -> int:
+    """Evict one backend's cached tool list, by exact URL. Returns 1 or 0.
+
+    Named for what it takes. It was ``..._by_name``, which invited its caller
+    to hand it a backend NAME and match loosely — and one did, substring-wise,
+    so flushing ``gw`` reached ``gw-work`` and ``gw-personal`` both. The cache
+    is keyed by URL; resolving a name to a URL belongs to whoever knows which
+    profile is asking.
+    """
     if url in _tool_list_cache:
         _evict_backend_cache(url)
         return 1

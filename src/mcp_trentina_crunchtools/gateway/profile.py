@@ -33,6 +33,12 @@ ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 INTERNAL_SCHEME = "internal://"
 
+# What a profile may reach through the gateway's own admin tools. Two values,
+# because the only distinction that matters is "my slice" versus "the whole
+# gateway" — an agent profile sees and acts on itself, the operator seat holds
+# the box. See gateway/scope.py, which is the only place this is interpreted.
+ProfileRole = Literal["agent", "operator"]
+
 # Registered pre-processors. Adding one means adding it here, to
 # gateway.reduce._REGISTRY, and nowhere else.
 ProcessorName = Literal["petit", "structured", "email", "summarize"]
@@ -509,6 +515,15 @@ class Profile(BaseModel):
         description=(
             "Per-provider API key overrides for the LLM proxy, keyed by "
             "provider name (must match a configured llm_providers entry)."
+        ),
+    )
+    role: ProfileRole = Field(
+        default="agent",
+        description=(
+            "What this profile may see and act on through the gateway's own "
+            "admin tools. 'agent' (the default) is self-scope: its own audit "
+            "rows, its own backends, its own section of profiles.yaml. "
+            "'operator' is the seat that holds the whole gateway."
         ),
     )
     defense: DefenseConfig = Field(default_factory=DefenseConfig)

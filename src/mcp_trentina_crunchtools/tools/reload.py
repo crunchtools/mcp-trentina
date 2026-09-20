@@ -28,13 +28,23 @@ resolved in full BEFORE anything is mutated, so a bad edit leaves the running
 gateway exactly as it was and returns the error. See `loader.ActiveConfig`
 for why mutating the registry dict in place is the entire swap.
 
-What the caller is told is scoped to the caller. The reload acts on the whole
-file, so the result names every profile that moved — but the DIFF is returned
-only for the calling profile. Any profile holding this tool would otherwise
-read the other agents' backend names, allowlist deltas and guarded parameter
-names out of a routine config reload, which is the shape of their permissions
-and nobody else's business. An operator who wants the whole picture reads the
-file they just edited.
+What a reload touches is decided by the caller's role (``gateway/scope.py``).
+
+An OPERATOR reload is the one described above: the whole file, every profile,
+the gateway-wide settings, and the full diff.
+
+An AGENT reload validates the whole file — a bad edit anywhere still refuses,
+because half a file is not a config — and then applies exactly one entry: the
+caller's own. Other profiles keep serving what they were serving, and their
+diffs are not reported, because another agent's backend names, allowlist deltas
+and guarded parameter names are the shape of its permissions and nobody else's
+business. The note the caller gets back is fixed text, so it says nothing about
+whether anyone else moved.
+
+One thing an agent reload will not do is apply a change to its OWN ``role``.
+The file is the authority on who is the operator, and file write access is the
+real trust boundary — but a profile promoting itself in a single call is a
+worse shape than one that costs an operator reload or a restart.
 """
 
 from __future__ import annotations
@@ -44,7 +54,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from ..gateway.compress import retrigger_compression
-from ..gateway.context import get_current_profile
+from ..gateway.errors import ScopeError
 from ..gateway.llm_proxy import validate_profile_llm_keys
 from ..gateway.loader import (
     get_active_config,
@@ -52,6 +62,7 @@ from ..gateway.loader import (
     replace_active_config,
 )
 from ..gateway.router import invalidate_profile_cache
+from ..gateway.scope import CallerScope, require_caller
 from ..gateway.sessions import session_registry
 
 if TYPE_CHECKING:
@@ -191,39 +202,103 @@ def _unapplied(active: ActiveConfig, new_config: GatewayConfig) -> list[str]:
     return notes
 
 
-def _scope_changes(
-    changed: dict[str, dict[str, Any]],
-) -> tuple[str | None, dict[str, dict[str, Any]], list[str]]:
-    """Split the full diff into (caller, the caller's diff, withheld names).
+AGENT_SCOPE_NOTE = (
+    "agent scope — only this profile's section was applied; other profiles "
+    "and gateway-wide settings need an operator-scope reload"
+)
 
-    The caller is the profile the gateway bound around this dispatch. Outside
-    that dispatch there is no caller to scope to, and the honest answer is to
-    withhold every diff rather than guess that whoever got here is entitled to
-    all of them — the only in-tree path that reaches this tool goes through
-    the router, so an unknown caller is a new path, not an operator.
+
+def _profile_compression_surface(profile: Profile) -> set[tuple[str, bool]]:
+    """One profile's slice of the compression surface."""
+    return {
+        (backend.url, backend.compress_descriptions)
+        for backend in profile.backends.values()
+        if not backend.is_internal
+    }
+
+
+async def _apply_own_profile(
+    scope: CallerScope,
+    registry: dict[str, Profile],
+    new_config: GatewayConfig,
+) -> dict[str, Any]:
+    """Agent path: put the caller's own section into force, and nothing else.
+
+    Nothing here touches ``replace_active_config``, the session TTL or the
+    session cap: those are gateway-wide, and an agent applying them would be
+    changing the terms every other profile runs under.
     """
-    profile = get_current_profile()
-    caller = profile.name if profile is not None else None
-    mine = {name: delta for name, delta in changed.items() if name == caller}
-    return caller, mine, sorted(set(changed) - set(mine))
+    name = scope.label
+    before = registry.get(name)
+    after = new_config.profiles.get(name)
+
+    if before is None or after is None:
+        return {
+            "reloaded": False,
+            "scope": name,
+            "error": (
+                "this profile is not in the file on disk — an operator reload "
+                "or a restart applies a profile that was added or removed"
+            ),
+        }
+    if before.role != after.role:
+        return {
+            "reloaded": False,
+            "scope": name,
+            "error": (
+                "this profile's role changed on disk — a role change is "
+                "applied by an operator reload or a restart, never by the "
+                "profile it promotes"
+            ),
+        }
+
+    delta = _profile_delta(before, after)
+    registry[name] = after
+    invalidated = invalidate_profile_cache(name)
+    if _profile_compression_surface(before) != _profile_compression_surface(after):
+        retrigger_compression()
+    notified = await session_registry.broadcast_tools_changed(name)
+
+    logger.warning(
+        "gateway: profile %s reloaded its own section — %d field group(s) moved",
+        name, len(delta),
+    )
+    return {
+        "reloaded": True,
+        "scope": name,
+        "applied": [name],
+        "changes": {name: delta} if delta else {},
+        "caches_invalidated": [name] if invalidated else [],
+        "sessions_notified": notified,
+        "note": AGENT_SCOPE_NOTE,
+    }
 
 
 async def reload_profiles() -> dict[str, Any]:
     """Re-read profiles.yaml and put it into force without a restart.
 
     Returns:
-        A result dict. ``reloaded`` is False with an ``error`` when the file
-        did not validate, in which case the running config is untouched and
-        only profile NAMES are reported. On success ``profiles`` names every
-        profile the reload added, removed, changed or left alone, and the
-        diff is scoped to the caller: ``changes`` holds it for the calling
-        profile alone, ``changes_scope`` names that profile (None when no
-        caller is bound), and ``changes_withheld`` names the other profiles
-        that moved without describing how.
+        A result dict. On success ``scope`` says what was reloaded: the
+        caller's profile name for an agent, which applied and reports only its
+        own section, or "gateway" for an operator, which applied the whole
+        file and reports every profile that moved.
+
+        ``reloaded`` is False with an ``error`` when the caller is unknown, or
+        when the file did not validate — in which case the running config is
+        untouched. That refusal is itself scoped: an operator also gets the
+        ``path`` it failed to load and the ``profiles`` currently serving,
+        while an agent gets the parse error alone, because the file it cannot
+        read and the roster it does not hold are not its business.
     """
     active = get_active_config()
     if active is None:
         return {"reloaded": False, "error": "gateway not initialized"}
+
+    try:
+        scope = require_caller("reload_profiles")
+    except ScopeError as exc:
+        logger.warning("reload_profiles refused: %s", exc)
+        return {"reloaded": False, "error": str(exc)}
 
     path = active.path
     before = dict(active.config.profiles)
@@ -244,13 +319,18 @@ async def reload_profiles() -> dict[str, Any]:
         logger.warning(
             "gateway: profile reload REFUSED from %s: %s", path, exc, exc_info=True,
         )
-        return {
+        refusal: dict[str, Any] = {
             "reloaded": False,
             "error": str(exc),
-            "path": str(path),
             "note": "running configuration left unchanged",
-            "profiles": sorted(before),
         }
+        if scope.is_operator:
+            refusal["path"] = str(path)
+            refusal["profiles"] = sorted(before)
+        return refusal
+
+    if not scope.is_operator:
+        return await _apply_own_profile(scope, active.config.profiles, new_config)
 
     after = new_config.profiles
     added = sorted(set(after) - set(before))
@@ -291,14 +371,13 @@ async def reload_profiles() -> dict[str, Any]:
         for name in [*added, *changed]
     }
 
-    caller, my_changes, withheld = _scope_changes(changed)
-
     logger.warning(
         "gateway: profiles reloaded from %s by %s — %d added, %d removed, %d changed",
-        path, caller or "an unknown caller", len(added), len(removed), len(changed),
+        path, scope.label, len(added), len(removed), len(changed),
     )
     return {
         "reloaded": True,
+        "scope": "gateway",
         "path": str(path),
         "profiles": {
             "added": added,
@@ -306,9 +385,7 @@ async def reload_profiles() -> dict[str, Any]:
             "changed": sorted(changed),
             "unchanged": sorted((set(before) & set(after)) - set(changed)),
         },
-        "changes": my_changes,
-        "changes_scope": caller,
-        "changes_withheld": withheld,
+        "changes": changed,
         "caches_invalidated": invalidated,
         "sessions_notified": {k: v for k, v in notified.items() if v},
         "sessions_dropped": dropped_sessions,

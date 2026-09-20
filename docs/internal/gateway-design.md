@@ -116,6 +116,7 @@ looks applied, and changes nothing.
 ```yaml
 profiles:
   josui:
+    role: operator                      # default: agent — see docs/profiles.md#roles
     auth:
       bearer_token_env: TRENTINA_GATEWAY_JOSUI_TOKEN
     backends:

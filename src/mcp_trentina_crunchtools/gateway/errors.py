@@ -41,6 +41,17 @@ class BackendNotInProfileError(GatewayError):
     """
 
 
+class ScopeError(GatewayError):
+    """Raised when a caller asks an admin tool for something outside its role.
+
+    Covers three refusals, all of which are answered the same way — say no,
+    name nothing: no calling profile is bound to the call, the action needs the
+    operator role, or the named backend is not in the caller's own profile. The
+    message never names another profile or its backends, so a refusal is not an
+    existence oracle for the rest of the gateway.
+    """
+
+
 class BackendCallError(GatewayError):
     """Raised when a backend MCP call fails (network, timeout, malformed response).
 

@@ -15,8 +15,12 @@ make the tool worth having rather than merely present:
 
 Reloads are run through ``_reload_as`` rather than calling the tool bare,
 because the gateway binds the calling profile around every internal dispatch
-and the result is scoped to it. A bare call is the no-caller case, which has
-its own tests.
+and both what the reload APPLIES and what it REPORTS follow from that caller's
+role. A bare call is the no-caller case, which has its own test.
+
+``alpha`` is the operator in these fixtures and ``beta`` an ordinary agent, so
+a whole-file reload is ``_reload_as("alpha")`` and a self-scoped one is
+``_reload_as("beta")``.
 """
 
 from __future__ import annotations
@@ -48,7 +52,7 @@ from mcp_trentina_crunchtools.gateway.router import (
 )
 from mcp_trentina_crunchtools.gateway.sessions import session_registry
 from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-from mcp_trentina_crunchtools.tools.reload import reload_profiles
+from mcp_trentina_crunchtools.tools.reload import AGENT_SCOPE_NOTE, reload_profiles
 
 pytestmark = pytest.mark.asyncio
 
@@ -60,6 +64,7 @@ _BENIGN = ClassifierResult(label="BENIGN", score=0.01, latency_ms=1.0)
 BASE_YAML = """\
 profiles:
   alpha:
+    role: operator
     auth:
       bearer_token_env: TEST_ALPHA_TOKEN
     backends:
@@ -129,14 +134,21 @@ def _tools_result(names: list[str]) -> list[dict[str, Any]]:
     return [{"name": n, "description": f"{n} does a thing", "inputSchema": {}} for n in names]
 
 
-async def _reload_as(profile_name: str) -> dict[str, Any]:
+async def _reload_as(profile_name: str, operator: bool | None = None) -> dict[str, Any]:
     """Reload the way the gateway does: with the caller's profile bound.
 
     The bound object is the pre-reload `Profile`, exactly as in production —
     the router looked it up before dispatching and the swap does not reach
-    into that local.
+    into that local. Pass ``operator=False`` to bind a copy of that profile
+    demoted to agent, for the cases that need alpha's backends without
+    alpha's role.
     """
-    with profile_context(_registry()[profile_name]):
+    caller = _registry()[profile_name]
+    if operator is not None:
+        caller = caller.model_copy(
+            update={"role": "operator" if operator else "agent"}
+        )
+    with profile_context(caller):
         return await reload_profiles()
 
 
@@ -162,7 +174,7 @@ class TestRefusedReload:
     ) -> None:
         """A file that does not parse changes nothing and says why."""
         profiles_path.write_text("profiles: [this is not a mapping]", encoding="utf-8")
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["reloaded"] is False
         assert "profiles" in result["error"]
@@ -184,7 +196,7 @@ class TestRefusedReload:
 """,
             encoding="utf-8",
         )
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["reloaded"] is False
         assert "TEST_GAMMA_TOKEN_NOT_SET" in result["error"]
@@ -201,7 +213,7 @@ class TestRefusedReload:
             ),
             encoding="utf-8",
         )
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["reloaded"] is False
         assert "anthropic" in result["error"]
@@ -217,7 +229,7 @@ class TestAppliedReload:
         assert filter_tools([{"name": "jira_delete_issue"}], backend)
 
         profiles_path.write_text(DENIED_YAML, encoding="utf-8")
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["reloaded"] is True
         reloaded_backend = _registry()["alpha"].backends["jira"]
@@ -231,7 +243,7 @@ class TestAppliedReload:
         compress_view = compress.get_profiles()
 
         profiles_path.write_text(DENIED_YAML, encoding="utf-8")
-        await reload_profiles()
+        await _reload_as("alpha")
 
         assert _registry() is before
         assert compress_view is before
@@ -286,7 +298,7 @@ class TestAppliedReload:
         url: http://wiki:1/mcp
 """
         profiles_path.write_text(swapped_yaml, encoding="utf-8")
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["profiles"]["added"] == ["gamma"]
         assert result["profiles"]["removed"] == ["beta"]
@@ -308,7 +320,7 @@ class TestAppliedReload:
         session_registry.create_session("beta")
         profiles_path.write_text(ALPHA_ONLY_YAML, encoding="utf-8")
 
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["sessions_dropped"] == 1
         assert not session_registry.get_sessions_for_profile("beta")
@@ -321,60 +333,28 @@ class TestAppliedReload:
         queue = session_registry.subscribe(session_id)
         profiles_path.write_text(DENIED_YAML, encoding="utf-8")
 
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["sessions_notified"] == {"alpha": 1}
         assert queue.get_nowait()["method"] == "notifications/tools/listChanged"
 
 
-class TestCallerScoping:
-    """The diff belongs to the caller; the other profiles are names only.
+class TestOperatorScope:
+    """The operator seat reloads the file and is told everything that moved."""
 
-    The gateway serves several agents from one file, and any profile allowed
-    to call this tool would otherwise read the others' backend names,
-    allowlist deltas and guarded parameter names out of a routine reload.
-    """
-
-    async def test_another_profiles_diff_is_named_but_withheld(
+    async def test_every_profile_that_moved_is_reported(
         self, profiles_path: Path
     ) -> None:
         profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
 
         result = await _reload_as("alpha")
 
+        assert result["scope"] == "gateway"
         assert result["profiles"]["changed"] == ["alpha", "beta"]
-        assert result["changes_scope"] == "alpha"
-        assert list(result["changes"]) == ["alpha"]
-        assert result["changes_withheld"] == ["beta"]
+        assert sorted(result["changes"]) == ["alpha", "beta"]
+        assert result["changes"]["beta"]["backends_added"] == ["rt"]
 
-    async def test_a_backend_name_only_beta_holds_does_not_reach_alpha(
-        self, profiles_path: Path
-    ) -> None:
-        """alpha learns beta moved, not that beta traded wiki for rt."""
-        profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
-
-        result = await _reload_as("alpha")
-
-        assert "rt" not in str(result)
-        assert "wiki" not in str(result)
-
-    async def test_a_guard_on_another_profile_leaks_neither_tool_nor_parameter(
-        self, profiles_path: Path
-    ) -> None:
-        """The guarded tool name is the interesting half of that disclosure."""
-        profiles_path.write_text(BETA_GUARDED_YAML, encoding="utf-8")
-
-        result = await _reload_as("alpha")
-
-        assert result["profiles"]["changed"] == ["beta"]
-        assert result["changes"] == {}
-        assert "wiki_delete_page_tool" not in str(result)
-        assert "title" not in str(result)
-
-    async def test_the_reload_still_applies_to_every_profile(
-        self, profiles_path: Path
-    ) -> None:
-        """Scoping the REPORT does not scope the reload — it is the whole file."""
+    async def test_the_whole_file_is_applied(self, profiles_path: Path) -> None:
         profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
 
         await _reload_as("alpha")
@@ -384,29 +364,133 @@ class TestCallerScoping:
             [{"name": "jira_delete_issue"}], _registry()["alpha"].backends["jira"]
         )
 
-    async def test_an_unknown_caller_gets_no_diff(
+
+class TestAgentScope:
+    """An agent profile reloads itself: its own section, its own diff.
+
+    The gateway serves several agents from one file. What the others hold —
+    their backend names, allowlist deltas, guarded parameter names — is the
+    shape of their permissions, and a routine config reload is not an occasion
+    to hand it over. Nor is it an occasion to put their edits into force.
+    """
+
+    async def test_only_the_callers_section_is_applied(
         self, profiles_path: Path
     ) -> None:
-        """No bound profile is a path the router does not have — fail closed."""
+        profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
+
+        result = await _reload_as("beta")
+
+        assert result["applied"] == ["beta"]
+        assert sorted(_registry()["beta"].backends) == ["rt"]
+        # alpha's deny edit sat in the same file and stays on disk.
+        assert filter_tools(
+            [{"name": "jira_delete_issue"}], _registry()["alpha"].backends["jira"]
+        )
+
+    async def test_the_note_is_fixed_text_naming_nobody(
+        self, profiles_path: Path
+    ) -> None:
+        """Saying 'others were skipped' must not say WHO, or how many."""
+        profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
+
+        result = await _reload_as("beta")
+
+        assert result["note"] == AGENT_SCOPE_NOTE
+        assert "alpha" not in str(result)
+        assert "jira" not in str(result)
+
+    async def test_the_callers_own_diff_comes_back(
+        self, profiles_path: Path
+    ) -> None:
+        profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
+
+        result = await _reload_as("beta")
+
+        assert result["scope"] == "beta"
+        assert result["changes"]["beta"]["backends_added"] == ["rt"]
+        assert result["changes"]["beta"]["backends_removed"] == ["wiki"]
+
+    async def test_a_guard_on_another_profile_leaks_nothing(
+        self, profiles_path: Path
+    ) -> None:
+        """beta gains a guard; alpha's own reload learns neither tool nor parameter."""
+        profiles_path.write_text(BETA_GUARDED_YAML, encoding="utf-8")
+
+        result = await _reload_as("alpha", operator=False)
+
+        assert result["changes"] == {}
+        assert "wiki_delete_page_tool" not in str(result)
+        assert "beta" not in str(result)
+
+    async def test_gateway_wide_settings_are_left_alone(
+        self, profiles_path: Path
+    ) -> None:
+        """Session limits are the terms every profile runs under, not beta's."""
+        profiles_path.write_text(
+            SWAPPED_BACKEND_YAML + "gateway:\n  session_ttl_seconds: 11\n",
+            encoding="utf-8",
+        )
+        before_ttl = session_registry.session_ttl
+
+        await _reload_as("beta")
+
+        assert session_registry.session_ttl == before_ttl
+
+    async def test_a_profile_cannot_apply_its_own_promotion(
+        self, profiles_path: Path
+    ) -> None:
+        """Promotion costs an operator reload or a restart, never one call."""
+        profiles_path.write_text(
+            BASE_YAML.replace(
+                "  beta:\n    auth:", "  beta:\n    role: operator\n    auth:"
+            ),
+            encoding="utf-8",
+        )
+
+        result = await _reload_as("beta")
+
+        assert result["reloaded"] is False
+        assert "role" in result["error"]
+        assert _registry()["beta"].role == "agent"
+
+    async def test_a_profile_missing_from_the_file_is_refused(
+        self, profiles_path: Path
+    ) -> None:
+        """Adding or removing a profile is a gateway-wide edit."""
+        profiles_path.write_text(ALPHA_ONLY_YAML, encoding="utf-8")
+
+        result = await _reload_as("beta")
+
+        assert result["reloaded"] is False
+        assert "beta" in _registry()
+
+    async def test_a_refused_file_names_no_profiles(
+        self, profiles_path: Path
+    ) -> None:
+        """The error path hands an agent the parse error and nothing else."""
+        profiles_path.write_text("profiles: [not, a, mapping]", encoding="utf-8")
+
+        result = await _reload_as("beta")
+
+        assert result["reloaded"] is False
+        assert "profiles" not in result
+        assert "path" not in result
+
+
+class TestUnknownCaller:
+    async def test_no_bound_profile_is_refused_outright(
+        self, profiles_path: Path
+    ) -> None:
+        """A live gateway with no caller is a path nobody designed."""
         profiles_path.write_text(SWAPPED_BACKEND_YAML, encoding="utf-8")
 
         result = await reload_profiles()
 
-        assert result["reloaded"] is True
-        assert result["changes_scope"] is None
-        assert result["changes"] == {}
-        assert result["changes_withheld"] == ["alpha", "beta"]
-
-    async def test_a_refused_reload_reports_profile_names_only(
-        self, profiles_path: Path
-    ) -> None:
-        """The error path predates this and already withholds everything."""
-        profiles_path.write_text("profiles: [not, a, mapping]", encoding="utf-8")
-
-        result = await _reload_as("alpha")
-
         assert result["reloaded"] is False
-        assert result["profiles"] == ["alpha", "beta"]
+        assert "no calling profile" in result["error"]
+        # And nothing moved.
+        assert sorted(_registry()["beta"].backends) == ["wiki"]
 
 
 class TestUnappliedSections:
@@ -423,7 +507,7 @@ llm_providers:
 """,
             encoding="utf-8",
         )
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["reloaded"] is True
         assert any("llm_providers" in note for note in result["not_applied"])
@@ -434,7 +518,7 @@ llm_providers:
         profiles_path.write_text(
             BASE_YAML + "matrix:\n  enabled: true\n", encoding="utf-8",
         )
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["reloaded"] is True
         assert any("matrix section" in note for note in result["not_applied"])
@@ -454,7 +538,7 @@ llm_providers:
             ),
             encoding="utf-8",
         )
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["reloaded"] is True
         assert any("alert_ingress" in note for note in result["not_applied"])
@@ -473,7 +557,7 @@ llm_providers:
             ),
             encoding="utf-8",
         )
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
 
         assert result["reloaded"] is True
         assert any("matrix_ingress" in note for note in result["not_applied"])
@@ -482,7 +566,7 @@ llm_providers:
         self, profiles_path: Path
     ) -> None:
         profiles_path.write_text(DENIED_YAML, encoding="utf-8")
-        result = await reload_profiles()
+        result = await _reload_as("alpha")
         assert result["not_applied"] == []
 
     async def test_replacing_a_config_before_startup_is_a_programming_error(
@@ -512,7 +596,7 @@ class TestCacheBehaviour:
             assert set(_profile_tools_cache) == {"alpha", "beta"}
 
             profiles_path.write_text(DENIED_YAML, encoding="utf-8")
-            result = await reload_profiles()
+            result = await _reload_as("alpha")
 
         assert result["caches_invalidated"] == ["alpha"]
         assert set(_profile_tools_cache) == {"beta"}
@@ -548,7 +632,7 @@ class TestCacheBehaviour:
             assert after_warmup == 2
 
             profiles_path.write_text(DENIED_YAML, encoding="utf-8")
-            await reload_profiles()
+            await _reload_as("alpha")
 
             assert await _list_tools("alpha") == ["jira__jira_get_issue"]
 
@@ -560,7 +644,7 @@ class TestCacheBehaviour:
         """A newly added backend has uncompressed descriptions; a deny does not."""
         compress._compress_triggered = True
         profiles_path.write_text(DENIED_YAML, encoding="utf-8")
-        await reload_profiles()
+        await _reload_as("alpha")
         assert compress._compress_triggered is True
 
         profiles_path.write_text(
@@ -569,7 +653,7 @@ class TestCacheBehaviour:
             ),
             encoding="utf-8",
         )
-        await reload_profiles()
+        await _reload_as("alpha")
         assert compress._compress_triggered is False
 
     async def test_an_inflight_build_is_not_cached_across_a_backend_eviction(

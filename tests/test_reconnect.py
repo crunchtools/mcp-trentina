@@ -4,6 +4,11 @@ Patches the transport layer (_do_list_tools) so the real reconnect_backend
 runs its breaker reset, cache eviction, fresh fetch, and profile-cache
 invalidation end to end. Profiles are registered via set_profiles and reset
 to None after each test (the autouse conftest fixture does not manage them).
+
+The class below registers no ActiveConfig, so it runs in the standalone scope
+— one tenant, full reach, which is the operator path. ``TestAgentScope`` is
+the multi-tenant half: a live gateway, a bound agent profile, and a backend it
+does not hold.
 """
 
 from __future__ import annotations
@@ -19,6 +24,11 @@ from mcp_trentina_crunchtools.gateway import compress
 from mcp_trentina_crunchtools.gateway.backend import _tool_list_cache
 from mcp_trentina_crunchtools.gateway.circuit import State, breaker
 from mcp_trentina_crunchtools.gateway.compress import set_profiles
+from mcp_trentina_crunchtools.gateway.context import profile_context
+from mcp_trentina_crunchtools.gateway.loader import (
+    GatewayConfig,
+    register_active_config,
+)
 from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
 from mcp_trentina_crunchtools.gateway.router import (
     _profile_backend_urls,
@@ -188,3 +198,76 @@ class TestReconnectBackend:
 
         assert result["reconnected"] is False
         assert result["error"] == "gateway not initialized"
+
+
+@pytest.mark.asyncio
+class TestAgentScope:
+    """A live gateway, and a caller that is not the operator."""
+
+    @staticmethod
+    def _live(profiles: dict[str, Profile], tmp_path: Any) -> None:
+        set_profiles(profiles)
+        register_active_config(
+            tmp_path / "profiles.yaml", GatewayConfig(profiles=profiles), {}
+        )
+
+    async def test_a_backend_in_another_profile_is_refused(
+        self, tmp_path: Any
+    ) -> None:
+        """Reconnecting what you cannot call is not yours to do."""
+        josui = _profile("josui", {"postiz": Backend(url=POSTIZ_URL)})
+        takeda = _profile("takeda", {"wiki": Backend(url="http://wiki:1/mcp")})
+        self._live({"josui": josui, "takeda": takeda}, tmp_path)
+
+        with profile_context(takeda):
+            result = await reconnect_backend("postiz")
+
+        assert result["reconnected"] is False
+        assert "not in this profile" in result["error"]
+        assert breaker.get_state(POSTIZ_URL) is State.CLOSED
+
+    async def test_a_miss_lists_only_the_callers_own_backends(
+        self, tmp_path: Any
+    ) -> None:
+        """The directory of every profile's backends used to come back here."""
+        josui = _profile("josui", {"postiz": Backend(url=POSTIZ_URL)})
+        takeda = _profile("takeda", {"wiki": Backend(url="http://wiki:1/mcp")})
+        self._live({"josui": josui, "takeda": takeda}, tmp_path)
+
+        with profile_context(takeda):
+            result = await reconnect_backend("nope")
+
+        assert result["available"] == ["wiki"]
+        assert "postiz" not in str(result)
+
+    async def test_the_tool_count_is_what_the_caller_would_see(
+        self, tmp_path: Any
+    ) -> None:
+        """A shared backend's raw surface is somebody else's view of it."""
+        takeda = _profile(
+            "takeda",
+            {"postiz": Backend(url=POSTIZ_URL, tools_allow=["integrationList"])},
+        )
+        self._live({"takeda": takeda}, tmp_path)
+
+        async def ok(_url: str, _headers: Any) -> ListToolsResult:
+            return _tools_result(["integrationList", "deletePostTool"])
+
+        with profile_context(takeda), patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok
+        ):
+            result = await reconnect_backend("postiz")
+
+        assert result["targets"][0]["tool_count"] == 1
+        assert "profiles" not in result["targets"][0]
+
+    async def test_no_bound_caller_on_a_live_gateway_is_refused(
+        self, tmp_path: Any
+    ) -> None:
+        josui = _profile("josui", {"postiz": Backend(url=POSTIZ_URL)})
+        self._live({"josui": josui}, tmp_path)
+
+        result = await reconnect_backend("postiz")
+
+        assert result["reconnected"] is False
+        assert "no calling profile bound" in result["error"]
