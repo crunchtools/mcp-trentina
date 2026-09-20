@@ -215,3 +215,82 @@ def load_profiles(path: Path | str) -> GatewayConfig:
             gateway_section.get("max_sessions_per_profile", 10)
         ),
     )
+
+
+@dataclass(frozen=True)
+class ActiveConfig:
+    """What the running gateway loaded, and what it wired at startup.
+
+    ``config.profiles`` is the SAME dict object every route handler, the
+    compression module and the circuit-breaker wiring were handed at startup,
+    and each of them reads it per request. Mutating that dict in place is
+    therefore the whole swap — nothing has to be re-registered. Replacing it
+    with a new dict would leave every holder pointing at the old one, which is
+    exactly the silent no-op this machinery exists to prevent.
+
+    The three remaining fields record what CANNOT be changed by a reload,
+    because they were bound into closures when the routes were registered:
+    the LLM provider set, and whether the alert and matrix routes exist at
+    all. A reload compares against them so it can say what it did not apply,
+    instead of reporting success over a change that went nowhere.
+    """
+
+    path: Path
+    config: GatewayConfig
+    llm_providers: dict[str, Any]
+    alert_route_registered: bool
+    matrix_route_registered: bool
+
+
+_active: ActiveConfig | None = None
+
+
+def register_active_config(
+    path: Path,
+    config: GatewayConfig,
+    llm_providers: dict[str, Any] | None = None,
+) -> None:
+    """Record the running configuration so it can be reloaded in place.
+
+    Called once at startup, after the routes are registered, and again by
+    each successful reload.
+    """
+    global _active
+    _active = ActiveConfig(
+        path=path,
+        config=config,
+        llm_providers=llm_providers if llm_providers is not None else {},
+        alert_route_registered=any(
+            p.alert_ingress is not None for p in config.profiles.values()
+        ),
+        matrix_route_registered=bool(config.matrix.get("enabled")),
+    )
+
+
+def get_active_config() -> ActiveConfig | None:
+    """Return the running configuration, or None if the gateway is not up."""
+    return _active
+
+
+def replace_active_config(config: GatewayConfig) -> None:
+    """Swap the scalar config after a reload, keeping the startup wiring facts.
+
+    Raises:
+        RuntimeError: no active config; a reload cannot precede startup.
+    """
+    global _active
+    if _active is None:
+        raise RuntimeError("replace_active_config called before register_active_config")
+    _active = ActiveConfig(
+        path=_active.path,
+        config=config,
+        llm_providers=_active.llm_providers,
+        alert_route_registered=_active.alert_route_registered,
+        matrix_route_registered=_active.matrix_route_registered,
+    )
+
+
+def reset_active_config() -> None:
+    """Forget the running configuration (for testing)."""
+    global _active
+    _active = None

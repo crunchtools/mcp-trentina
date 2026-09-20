@@ -62,11 +62,21 @@ _profile_backend_urls: dict[str, set[str]] = {}
 
 _profile_inflight: dict[str, asyncio.Task[list[dict[str, Any]]]] = {}
 
+# Bumped by every invalidation. An aggregation already in flight captured the
+# Profile object as it was when it started, so after a config reload its
+# result is stale before it is written. The callers waiting on that build
+# still get it — it was current when they asked — but it must not land in the
+# cache, where the NEXT caller would read it as fresh. Popping the cache key
+# alone does not cover this: the in-flight task writes after the pop.
+_cache_generation = 0
+
 
 def _on_backend_evicted(url: str) -> None:
     """Clear any profile cache whose backend set includes this URL."""
+    global _cache_generation
     for name, urls in list(_profile_backend_urls.items()):
         if url in urls:
+            _cache_generation += 1
             _profile_tools_cache.pop(name, None)
             _profile_backend_urls.pop(name, None)
 
@@ -85,10 +95,28 @@ def invalidate_profile_cache_for_backend(url: str) -> None:
     _on_backend_evicted(url)
 
 
+def invalidate_profile_cache(profile_name: str) -> bool:
+    """Drop one profile's aggregate so the next tools/list rebuilds it.
+
+    Used by the profile reload: the aggregate was assembled from the Profile
+    object that the reload just replaced, so it describes an allowlist that is
+    no longer in force. Returns whether a cached aggregate was actually
+    dropped — a profile nobody has listed yet has nothing to invalidate.
+    """
+    global _cache_generation
+    _cache_generation += 1
+    _profile_backend_urls.pop(profile_name, None)
+    return _profile_tools_cache.pop(profile_name, None) is not None
+
+
 def reset_profile_tools_cache() -> None:
-    """Clear the profile-level tool list cache (for testing)."""
-    _profile_tools_cache.clear()
-    _profile_backend_urls.clear()
+    """Clear every profile aggregate (for testing).
+
+    Covers the in-flight names too, so a build still running is disowned by
+    the generation bump rather than caching into the next test.
+    """
+    for name in {*_profile_tools_cache, *_profile_backend_urls, *_profile_inflight}:
+        invalidate_profile_cache(name)
     _profile_inflight.clear()
 
 
@@ -210,21 +238,30 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
 
     inflight = _profile_inflight.get(profile.name)
     if inflight is None:
-        inflight = asyncio.ensure_future(_single_flight_build(profile))
+        # The generation is read HERE, not inside the build: a reload
+        # landing between scheduling the task and its first line would
+        # otherwise be invisible to it, and the stale aggregate would cache.
+        inflight = asyncio.ensure_future(
+            _single_flight_build(profile, _cache_generation)
+        )
         _profile_inflight[profile.name] = inflight
     aggregated = await inflight
     return _ok(req_id, {"tools": aggregated})
 
 
-async def _single_flight_build(profile: Profile) -> list[dict[str, Any]]:
+async def _single_flight_build(
+    profile: Profile, generation: int
+) -> list[dict[str, Any]]:
     """Run one aggregation and drop its in-flight slot when done."""
     try:
-        return await _build_profile_tools(profile)
+        return await _build_profile_tools(profile, generation)
     finally:
         _profile_inflight.pop(profile.name, None)
 
 
-async def _build_profile_tools(profile: Profile) -> list[dict[str, Any]]:
+async def _build_profile_tools(
+    profile: Profile, generation: int | None = None
+) -> list[dict[str, Any]]:
     """Fan out to every backend, aggregate, and cache the assembled list.
 
     The aggregate is cached only when no backend hard-failed (raised). A
@@ -234,7 +271,14 @@ async def _build_profile_tools(profile: Profile) -> list[dict[str, Any]]:
     recovers. (list_backend_tools single-flights per backend, so re-aggregation
     while a backend is down stays cheap: healthy backends are cache hits and the
     down one is a fast circuit-open reject.)
+
+    The aggregate is also discarded, rather than cached, when the profile was
+    invalidated while this build was running — see ``_cache_generation``.
+    ``generation`` is that counter as of when this build was SCHEDULED;
+    omitting it means "as of now".
     """
+    if generation is None:
+        generation = _cache_generation
     await maybe_trigger_compression()
 
     async def _fetch_one(
@@ -285,7 +329,7 @@ async def _build_profile_tools(profile: Profile) -> list[dict[str, Any]]:
             continue
         aggregated.extend(outcome)
 
-    if not any_hard_failed:
+    if not any_hard_failed and generation == _cache_generation:
         _profile_tools_cache[profile.name] = aggregated
         _profile_backend_urls[profile.name] = {
             b.url for b in profile.backends.values() if not b.is_internal

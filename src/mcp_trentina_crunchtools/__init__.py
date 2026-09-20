@@ -146,6 +146,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     from .gateway.circuit import breaker
     from .gateway.compress import load_compression_cache, set_profiles
     from .gateway.llm_proxy import load_llm_providers, register_llm_routes
+    from .gateway.loader import register_active_config
     from .gateway.matrix_proxy import register_matrix_routes
     from .gateway.sessions import session_registry
 
@@ -215,6 +216,11 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
                             "tool description and may take minutes)",
     )
     set_profiles(gateway_config.profiles)
+    # Last, and after every route is wired: this records both the config and
+    # the facts about what got wired that a later reload has to respect. See
+    # tools/reload.py — without it, an edit to profiles.yaml costs a restart,
+    # and a restart costs 40 minutes of re-judged tool descriptions.
+    register_active_config(profiles_path, gateway_config, llm_providers)
 
     _warm_classifier()
 

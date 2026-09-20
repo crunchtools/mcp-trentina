@@ -90,6 +90,10 @@ profiles:
         tools_allow: ["*"]
 ```
 
+Changes to `profiles.yaml` take effect on the next `reload_profiles` call or
+gateway restart — there is no file watcher. See
+[Applying a Change](profiles.md#applying-a-change).
+
 ### Real-World Scale
 
 The CrunchTools deployment proxies 21 backends through Trentina, serving three agent profiles (Josui, Kagetora, Takeda) with 440+ tools total. The gateway has processed 5,700+ calls in the last 30 days with sub-5ms routing overhead on `tools/list` responses.

@@ -9,9 +9,9 @@ class TestServerRegistration:
     """Test that all tools are registered correctly."""
 
     async def test_tool_count(self) -> None:
-        """Verify exactly 16 tools are registered."""
+        """Verify exactly 17 tools are registered."""
         tools = await mcp.list_tools()
-        assert len(tools) == 16, f"Expected 16 tools, got {len(tools)}"
+        assert len(tools) == 17, f"Expected 17 tools, got {len(tools)}"
 
     async def test_expected_tools_registered(self) -> None:
         """Verify all expected tool names are present."""
@@ -34,6 +34,7 @@ class TestServerRegistration:
             "quarantine_stats_tool",
             "cache_flush_tool",
             "reconnect_backend_tool",
+            "reload_profiles_tool",
         }
         assert tool_names == expected
 

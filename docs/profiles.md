@@ -116,7 +116,42 @@ backends:
       Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
 ```
 
-Environment variables in header values are expanded at request time.
+Environment variables in header values are expanded once, when the file is
+loaded — so rotating one means reloading the profiles (below), not just
+restarting the backend.
+
+## Applying a Change
+
+Editing `profiles.yaml` does not change the running gateway. The router filters
+from the `Profile` objects loaded at startup, so an edited allowlist sits on
+disk with no effect until it is loaded — which is the dangerous direction for
+the file that decides which destructive tools an agent may call.
+
+Apply it with the `reload_profiles` admin tool:
+
+```
+reload_profiles_tool()
+```
+
+It validates the whole file first and installs nothing unless all of it parses
+and every referenced env var resolves, so a bad edit leaves the gateway exactly
+as it was and returns the error. A good one swaps the profiles in place and
+returns a per-profile diff of what moved, then notifies connected sessions so
+clients refresh their tool list.
+
+A reload is cheap where a restart is not. A restart re-judges every tool
+description through the full defense pipeline before the first `tools/list` can
+answer — on a large deployment, tens of minutes during which clients time out
+on connect. A reload keeps the verdict cache, the compression cache and every
+backend's tool list, so a profile-only edit re-judges nothing. Changing a
+profile's `defense` thresholds is the exception: the verdicts were reached under
+the old thresholds, so that profile's descriptions are judged again.
+
+Some sections cannot reload, because their routes bind at startup: the
+`llm_providers` and `matrix` sections, and adding an `alert_ingress` or
+`matrix_ingress` where no such route was registered at boot. The reload result
+names any of these it finds in `not_applied` rather than reporting success over
+an edit that went nowhere.
 
 ## Related
 

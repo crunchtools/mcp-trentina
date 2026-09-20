@@ -23,7 +23,6 @@ from __future__ import annotations
 from enum import Enum
 
 from .errors import (
-    TrentinaError,
     BlockedSourceError,
     ConfigError,
     ContentSizeError,
@@ -31,6 +30,7 @@ from .errors import (
     FileReadError,
     QuarantineAgentError,
     SanitizationError,
+    TrentinaError,
     UnscannableContentError,
     UnsupportedContentTypeError,
 )

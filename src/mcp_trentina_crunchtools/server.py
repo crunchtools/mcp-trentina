@@ -19,6 +19,7 @@ from .tools import (
     quarantine_scan_dir,
     quarantine_search,
     reconnect_backend,
+    reload_profiles,
     safe_content,
     safe_fetch,
     safe_read,
@@ -332,3 +333,24 @@ async def reconnect_backend_tool(backend: str) -> dict[str, Any]:
         backend: Backend name to reconnect (e.g. "postiz", "slack", "jira").
     """
     return await reconnect_backend(backend)
+
+
+@mcp.tool()
+async def reload_profiles_tool() -> dict[str, Any]:
+    """Re-read profiles.yaml and apply it without restarting the gateway.
+
+    Use after editing the gateway profile config — an edit on disk has no
+    effect until this runs, because the router filters from the profiles it
+    loaded at startup. Validates the whole file first: if it does not parse,
+    the running config is kept and the error is returned.
+
+    Applies live: backends, tools_allow/tools_deny, parameter guards, defense
+    settings, per-profile llm_keys, bearer tokens, and session limits. Needs a
+    restart: the llm_providers and matrix sections, and adding an alert or
+    matrix ingress where no route was registered at startup — the result names
+    any of those it saw.
+
+    Returns a per-profile diff of what changed, and notifies connected
+    sessions so clients refresh their tool list.
+    """
+    return await reload_profiles()
