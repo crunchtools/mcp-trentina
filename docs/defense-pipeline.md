@@ -56,7 +56,7 @@ A hardened Gemini Flash Lite instance that receives the **original, unmodified c
 
 **What it catches:** Social engineering, data exfiltration intent, authority-based attacks, subtle semantic manipulation — everything that requires understanding *meaning*, not just *pattern*.
 
-**What it misses:** Nothing that gets past L1 and L2 (in practice). The Q-Agent's catch rate on attacks that evade both L1 and L2 is near 100%.
+**What it misses:** with the default `QUARANTINE_MODEL` (`gemini-2.5-flash-lite`), the Q-Agent's aggregate catch rate on attacks written to evade both L1 and L2 is 86% (see `benchmarks/results/`), not near-100% — and it drops to 33% on the `detector_meta` category (attacks targeting the detector itself). A stronger `QUARANTINE_MODEL` closes most of that gap; see `docs/benchmark.md` for per-model numbers before treating L3 as a reliable backstop.
 
 **Latency:** 1-2s (Gemini round-trip). **Cost:** Gemini API tokens. **Optional per profile.**
 
