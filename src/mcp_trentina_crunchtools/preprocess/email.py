@@ -81,8 +81,11 @@ _MAX_SIGNATURE_LINES = 20
 _MIN_HEADERS = 2
 _MIN_QUOTED_LINES = 5
 
-# Apply only if the reduced artifact is at most this fraction of the input.
-_MIN_REDUCTION_RATIO = 0.7
+# There is no minimum saving. A reducer that declines a 5% win throws
+# away 5%, and across a swarm of agents even 1% compounds. What remains
+# is arithmetic rather than policy: the rewrite appends a summary block,
+# so content with nothing to collapse can come out no smaller than it
+# went in, and delivering that would cost bytes for nothing.
 
 _QUOTE_OMITTED = "[email] {count} more quoted line(s) omitted"
 _SIGNATURE_OMITTED = "[email] signature omitted ({count} line(s))"
@@ -197,13 +200,12 @@ class EmailProcessor:
         reduced = "\n".join(kept)
         bytes_out = len(reduced.encode("utf-8"))
 
-        if bytes_in > 0 and bytes_out / bytes_in > _MIN_REDUCTION_RATIO:
+        if bytes_in > 0 and bytes_out >= bytes_in:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="reduction_below_floor",
+                self.name, self.cost, payload, reason="not_smaller",
                 details={
                     "would_be_bytes": bytes_out,
                     "would_be_ratio": round(bytes_out / bytes_in, 4),
-                    "floor": _MIN_REDUCTION_RATIO,
                 },
             )
 

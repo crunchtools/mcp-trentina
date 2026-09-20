@@ -122,9 +122,8 @@ def _text_blocks(content_blocks: list[Any] | None) -> list[tuple[int, str]]:
 def _describe_decline(outcome: Any) -> str:
     """One processor's decline, with the evidence it already measured.
 
-    "reduction_below_floor" on its own is the same word for a run that
-    missed the bar by a hair and one that saved nothing, and those argue
-    for opposite changes to the floor — so print what was measured.
+    A bare reason is the same word for very different outcomes, so print
+    what the processor measured before giving up.
 
     Shape stays `name:reason(...)` so existing greps for a reason string
     keep matching.
@@ -133,7 +132,6 @@ def _describe_decline(outcome: Any) -> str:
     parts: list[str] = []
     if "would_be_ratio" in detail:
         parts.append(f"would_be={detail['would_be_ratio']:.0%}")
-        parts.append(f"floor={float(detail.get('floor', 0)):.0%}")
     if "lines_in" in detail:
         parts.append(f"lines={detail['lines_in']}")
         if "bytes_in" in detail:

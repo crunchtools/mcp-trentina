@@ -76,9 +76,11 @@ _MIN_LINES = 20
 # Keep this many real sample lines per group.
 _SAMPLES_PER_GROUP = 3
 
-# Apply only if the reduced artifact is at most this fraction of the input;
-# otherwise the reshuffling costs more clarity than it saves tokens.
-_MIN_REDUCTION_RATIO = 0.7
+# There is no minimum saving. A reducer that declines a 5% win throws
+# away 5%, and across a swarm of agents even 1% compounds. What remains
+# is arithmetic rather than policy: the rewrite appends a summary block,
+# so content with nothing to collapse can come out no smaller than it
+# went in, and delivering that would cost bytes for nothing.
 
 
 class PetitProcessor:
@@ -155,18 +157,17 @@ class PetitProcessor:
         reduced = "\n".join(out_lines + summary)
         bytes_out = len(reduced.encode("utf-8"))
 
-        if bytes_in > 0 and bytes_out / bytes_in > _MIN_REDUCTION_RATIO:
+        if bytes_in > 0 and bytes_out >= bytes_in:
             # The work is already done and measured; report what it achieved.
             # Without this the log says 100% either way, so "missed the bar by
             # a hair" and "saved nothing at all" are the same word — and the
             # first means the floor is costing real savings while the second
             # means the data simply does not compress.
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="reduction_below_floor",
+                self.name, self.cost, payload, reason="not_smaller",
                 details={
                     "would_be_bytes": bytes_out,
                     "would_be_ratio": round(bytes_out / bytes_in, 4),
-                    "floor": _MIN_REDUCTION_RATIO,
                 },
             )
 
