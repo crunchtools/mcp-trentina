@@ -135,8 +135,12 @@ uv sync --all-extras
 uv run ruff check src tests
 uv run mypy src
 uv run pytest -v
-podman build -f Containerfile .
 ```
+
+The container image is built by the GHA pipeline
+([`container.yml`](.github/workflows/container.yml)), never locally. The model-export
+stage needs a gated HuggingFace credential that only CI holds, and building outside
+the pipeline causes drift. Push the branch and let the pipeline verify the image.
 
 ## License
 

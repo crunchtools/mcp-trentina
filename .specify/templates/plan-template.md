@@ -68,7 +68,7 @@ GitLab REST API v4
 - [ ] `uv run mypy src`
 - [ ] `uv run pytest -v`
 - [ ] `gourmand --full .`
-- [ ] `podman build -f Containerfile .`
+- [ ] Push the branch — GHA builds the container (`.github/workflows/container.yml`)
 
 ---
 

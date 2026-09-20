@@ -86,7 +86,9 @@ uv run ruff check src tests    # Lint
 uv run mypy src                # Type check
 uv run pytest -v               # Test
 podman run --rm -v .:/repo:Z quay.io/crunchtools/gourmand:latest --full /repo  # Slop detection
-podman build -f Containerfile . # Container
+# Container image: built by GHA (.github/workflows/container.yml), never locally —
+# the model-export stage needs a gated HF credential held only in CI. Push and let
+# the pipeline build it.
 uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across providers — see docs/benchmark.md
 ```
 
