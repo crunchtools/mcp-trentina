@@ -102,6 +102,18 @@ class Config:
         home_db = str(Path.home() / ".local" / "share" / "mcp-trentina" / "trentina.db")
         self.db_path: str = os.environ.get("QUARANTINE_DB", home_db)
 
+        # The perimeter's own store, deliberately a SEPARATE database file
+        # rather than another table next to the blocklist. On today's
+        # single-uid deployment that buys no isolation — both files belong
+        # to the same process — but it is what makes a later move to a real
+        # database able to give the two a different owner and a different
+        # code path. Cheap now, impossible to retrofit once callers assume
+        # one connection.
+        self.perimeter_db_path: str = os.environ.get(
+            "TRENTINA_PERIMETER_DB",
+            str(Path(self.db_path).parent / "perimeter.db"),
+        )
+
         trust_config_path = os.environ.get(
             "QUARANTINE_TRUST_CONFIG",
             str(Path.home() / ".config" / "mcp-env" / "mcp-trentina-trust.json"),
@@ -143,6 +155,10 @@ class Config:
     def ensure_db_dir(self) -> None:
         """Create the database directory if it does not exist."""
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+
+    def ensure_perimeter_db_dir(self) -> None:
+        """Create the perimeter database directory if it does not exist."""
+        Path(self.perimeter_db_path).parent.mkdir(parents=True, exist_ok=True)
 
 
 def get_config() -> Config:

@@ -1,9 +1,16 @@
 """Tests for the MCP ingress perimeter (plan step 5, annotate mode).
 
-Real L1 runs in most of these (the conftest guarantees no classifier and no
-Gemini key, so L1 is the only live layer) — the hostile fixture is
-multi-line and pattern-dense enough to cross the L1 blocking threshold on
-its own, which is exactly the production shape on a box where ONNX failed.
+Real L1 runs in these, and the hostile fixture is multi-line and
+pattern-dense enough to cross the L1 blocking threshold on its own, so no
+test here depends on a model being loaded to catch the bad case.
+
+L2 is stubbed BENIGN rather than left absent. The conftest guarantees no
+ONNX model and no Gemini key, which for a long time meant these tests
+described a box where the classifier had failed while asserting that clean
+content came back unannotated — a perimeter missing a layer should not look
+identical to a healthy one, and now it does not (see
+``TestClassifierUnavailable``). The stub puts the tests back on the
+production shape: all three layers present, L1 doing the flagging.
 """
 
 from __future__ import annotations
@@ -16,15 +23,37 @@ import pytest
 from pydantic import SecretStr
 
 from mcp_trentina_crunchtools.defense import Provenance
+from mcp_trentina_crunchtools.defense import defend as _real_defend
 from mcp_trentina_crunchtools.gateway.ingress_defense import (
     scan_tool_list,
     scan_tool_response,
 )
 from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
 
 pytestmark = pytest.mark.asyncio
 
 _I = "mcp_trentina_crunchtools.gateway.ingress_defense"
+
+# A completed, unexcited L2 scan. Mocked verdicts carry this: a verdict with
+# `classification=None` now means "the classifier never ran", and such a
+# verdict is deliberately not cacheable.
+_BENIGN = ClassifierResult(label="BENIGN", score=0.01, latency_ms=1.0)
+
+
+@pytest.fixture(autouse=True)
+def _l2_present() -> Any:
+    """A loaded, unexcited classifier — the production shape.
+
+    Without this the conftest's no-ONNX environment makes every scan carry
+    ``l2_unavailable``, which is correct reporting but not the case these
+    tests are about.
+    """
+    with patch(
+        "mcp_trentina_crunchtools.defense.classify_async",
+        AsyncMock(return_value=_BENIGN),
+    ):
+        yield
 
 HOSTILE = (
     "The maintenance window is Tuesday.\n"
@@ -89,7 +118,7 @@ class TestScanToolResponse:
         profile = _profile()
         with patch(f"{_I}.defend", new_callable=AsyncMock) as mock_defend:
             mock_defend.return_value.flagged = False
-            mock_defend.return_value.classification = None
+            mock_defend.return_value.classification = _BENIGN
             mock_defend.return_value.l3_assessment = None
             for _ in range(3):
                 await scan_tool_response(
@@ -176,7 +205,7 @@ class TestScanToolList:
         after = [{"name": "t", "description": "short compressed description"}]
         with patch(f"{_I}.defend", new_callable=AsyncMock) as mock_defend:
             mock_defend.return_value.flagged = False
-            mock_defend.return_value.classification = None
+            mock_defend.return_value.classification = _BENIGN
             mock_defend.return_value.l3_assessment = None
             await scan_tool_list(_profile(), "jira", before, after)
         assert mock_defend.call_args.kwargs["provenance"] is Provenance.MODEL_OUTPUT
@@ -185,7 +214,7 @@ class TestScanToolList:
         tools = [{"name": "t", "description": "same description"}]
         with patch(f"{_I}.defend", new_callable=AsyncMock) as mock_defend:
             mock_defend.return_value.flagged = False
-            mock_defend.return_value.classification = None
+            mock_defend.return_value.classification = _BENIGN
             mock_defend.return_value.l3_assessment = None
             await scan_tool_list(_profile(), "jira", tools, tools)
         assert mock_defend.call_args.kwargs["provenance"] is Provenance.EXTERNAL
@@ -197,7 +226,7 @@ class TestScanToolList:
         profile = _profile()
         with patch(f"{_I}.defend", new_callable=AsyncMock) as mock_defend:
             mock_defend.return_value.flagged = False
-            mock_defend.return_value.classification = None
+            mock_defend.return_value.classification = _BENIGN
             mock_defend.return_value.l3_assessment = None
             for _ in range(5):
                 await scan_tool_list(profile, "jira", tools, tools)
@@ -602,3 +631,57 @@ class TestAdversarialReviewFixes:
         blocks = resp["result"]["content"]
         assert blocks[0]["text"] == HOSTILE, "original content intact"
         assert "[TRENTINA WARNING]" in blocks[-1]["text"]
+
+
+class TestClassifierUnavailable:
+    """A perimeter missing a layer must not look like a healthy one.
+
+    When the ONNX model fails to load, ``classify_async`` returns None and
+    every scan used to come back indistinguishable from a clean one. That
+    was survivable while verdicts expired in fifteen minutes. Now that a
+    tool-description verdict is written down and replayed after a restart,
+    a "clean" reached with L2 absent would outlive the deploy that fixed
+    the image — so it is reported, and refused by the cache.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _l2_missing(self) -> Any:
+        with patch(
+            "mcp_trentina_crunchtools.defense.classify_async",
+            AsyncMock(return_value=None),
+        ):
+            yield
+
+    async def test_response_scan_reports_the_gap(self) -> None:
+        decision = await scan_tool_response(
+            profile=_profile(),
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=[{"type": "text", "text": "an ordinary ticket body"}],
+            structured_content=None,
+        )
+        assert decision.warning is not None
+        assert decision.warning["l2_unavailable"] is True
+
+    async def test_the_gap_does_not_block_in_annotate_mode(self) -> None:
+        """Reported, not refused. A missing model is a deploy fault, and
+        failing every response closed over it would turn one bad image into
+        a total outage."""
+        decision = await scan_tool_response(
+            profile=_profile(),
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=[{"type": "text", "text": "an ordinary ticket body"}],
+            structured_content=None,
+        )
+        assert not decision.blocked
+
+    async def test_the_verdict_is_not_cached(self) -> None:
+        """The whole reason this matters: an incomplete scan must be
+        re-judged, not replayed after the restart that fixed it."""
+        profile = _profile()
+        tools = [{"name": "t", "description": "an ordinary tool", "inputSchema": {}}]
+        with patch(f"{_I}.defend", wraps=_real_defend) as spy:
+            await scan_tool_list(profile, "jira", tools, tools)
+            await scan_tool_list(profile, "jira", tools, tools)
+        assert spy.call_count == 2, "an incomplete scan must not be cached"
