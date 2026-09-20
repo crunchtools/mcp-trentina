@@ -2,7 +2,9 @@
 name = "mcp-airlock-crunchtools"
 version = "0.4.1"
 description = "DEPRECATED: Use mcp-trentina-crunchtools instead. See https://crunchtools.com/trentina/"
-requires-python = ">=3.10"
+# Tracks mcp-trentina-crunchtools, this package's only dependency. Claiming a
+# floor below the real package's would advertise an uninstallable combination.
+requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
 authors = [{ name = "crunchtools.com" }]
 readme = "README.md"

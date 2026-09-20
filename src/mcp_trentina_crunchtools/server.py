@@ -6,6 +6,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from . import __version__
 from .tools import (
     cache_flush,
     deep_quarantine_scan,
@@ -27,7 +28,10 @@ from .tools import (
 
 mcp = FastMCP(
     "mcp-trentina-crunchtools",
-    version="0.4.0",
+    # Sourced from the package, never a literal: this sat at "0.4.0" through
+    # every release up to 0.7.0, so every client that asked the server its
+    # version got a three-year-old answer.
+    version=__version__,
     instructions=(
         "Quarantined web content extraction with three-layer prompt injection defense. "
         "Layer 1: deterministic sanitization. Layer 2: Prompt Guard 2 classifier. "

@@ -11,7 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        # Every version `requires-python` admits, INCLUDING the one the
+        # container runs. CI previously tested 3.11 and 3.12 -- neither of
+        # which is production (the Containerfile is on 3.14), while the
+        # advertised 3.10 floor could not be installed at all. An untested
+        # floor and an untested production version are how issue #100 happened.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v7
@@ -55,8 +60,11 @@ jobs:
         with:
           version: "latest"
 
-      - name: Set up Python 3.12
-        run: uv python install 3.12
+      # Single-version job: pinned to the NEWEST supported Python, which is
+      # what the container runs. Anything that cannot run across the whole
+      # matrix is tested on production's version. See constitution III.
+      - name: Set up Python 3.14
+        run: uv python install 3.14
 
       - name: Install dependencies
         run: uv sync --all-extras --locked
