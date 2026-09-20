@@ -66,8 +66,8 @@ classification = "by_design"
 check = "single_use_helpers"
 path = "tests/test_gateway_router.py"
 pattern = "_profile"
-justification = "Called from 19 sites across the module — gourmand miscounts when the helper is also called from the last class in the file (same class of miscount as the sessions.py _remove exception)"
-classification = "by_design"
+justification = "Not single-use: called from roughly 20 distinct test functions across the file, verified by grep. The single_use_helpers check appears to attribute callers per test class and undercounts once a module-level helper is also used by the file's last class -- re-flagging as a linter bug (gourmand_bug) rather than an architectural tradeoff."
+classification = "gourmand_bug"
 
 [[exceptions]]
 check = "redundant_error_handling"
@@ -315,7 +315,7 @@ classification = "by_design"
 [[exceptions]]
 check = "redundant_error_handling"
 path = "src/mcp_trentina_crunchtools/client.py"
-justification = "Best-effort client teardown. A failure while closing is logged; raising from a cleanup path would mask the original error that caused the teardown."
+justification = "fetch()'s HTTPStatusError handler best-effort-decodes the error response body for diagnostics before raising FetchError. A failure to decode is logged at debug and the decode is simply skipped (error_body stays None) -- raising from this enrichment step would mask the real HTTPStatusError being converted into FetchError two lines below. (Previous justification here described a client teardown/close() path that does not exist in this file; corrected to describe the actual code.)"
 classification = "by_design"
 
 [[exceptions]]
@@ -427,14 +427,14 @@ classification = "by_design"
 [[exceptions]]
 check = "single_use_helpers"
 path = "tests/test_content.py"
-justification = "_hash names the digest step so the assertions below read as comparisons rather than nested calls."
-classification = "by_design"
+justification = "Not single-use: called from 4 distinct test functions (test_safe_content_clean, test_quarantine_content_extracts, test_scan_content_clean, test_blocklist_uses_content_hash), verified by grep. Same single_use_helpers undercount as the test_gateway_router.py _profile exception -- reflagging as a linter bug (gourmand_bug) rather than an architectural tradeoff."
+classification = "gourmand_bug"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "tests/test_gateway_reduce.py"
-justification = "_blocks names the block-extraction step used across the assertions in this file."
-classification = "by_design"
+justification = "Not single-use: called from 4 distinct test functions (test_disabled_by_default_leaves_response_untouched, test_min_bytes_floor_skips_small_payloads, test_processor_failure_delivers_content_unchanged, test_perimeter_scans_the_reduced_artifact), verified by grep. Same single_use_helpers undercount as the test_gateway_router.py _profile exception -- reflagging as a linter bug (gourmand_bug) rather than an architectural tradeoff."
+classification = "gourmand_bug"
 
 [[exceptions]]
 check = "single_use_helpers"
