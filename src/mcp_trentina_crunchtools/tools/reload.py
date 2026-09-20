@@ -205,7 +205,14 @@ async def reload_profiles() -> dict[str, Any]:
         # instead of a refused reload.
         validate_profile_llm_keys(active.llm_providers, new_config.profiles)
     except Exception as exc:
-        logger.warning("gateway: profile reload REFUSED from %s: %s", path, exc)
+        # Deliberately everything: whatever went wrong reading or validating
+        # the file, the running config is the one that keeps serving. The
+        # traceback goes to the journal because the returned message is
+        # load_profiles' own for every expected cause, and an unexpected one
+        # is exactly where an operator needs more than its str().
+        logger.warning(
+            "gateway: profile reload REFUSED from %s: %s", path, exc, exc_info=True,
+        )
         return {
             "reloaded": False,
             "error": str(exc),
