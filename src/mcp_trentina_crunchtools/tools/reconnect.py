@@ -113,7 +113,9 @@ async def reconnect_backend(backend: str) -> dict[str, Any]:
 
     Returns:
         Status dict with an overall ``reconnected`` flag and a ``targets`` list
-        describing each URL that was reset. A refusal names nothing.
+        describing each URL that was reset. A refusal carries ``error`` and
+        ``available`` — the caller's OWN backend names, so a typo is
+        correctable — and nothing belonging to any other profile.
     """
     base: dict[str, Any]
     try:

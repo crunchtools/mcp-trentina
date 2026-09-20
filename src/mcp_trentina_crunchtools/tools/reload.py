@@ -278,12 +278,17 @@ async def reload_profiles() -> dict[str, Any]:
     """Re-read profiles.yaml and put it into force without a restart.
 
     Returns:
-        A result dict. ``reloaded`` is False with an ``error`` when the file
-        did not validate, in which case the running config is untouched. On
-        success ``scope`` says what was reloaded: the caller's profile name
-        for an agent, which applied and reports only its own section, or
-        "gateway" for an operator, which applied the whole file and reports
-        every profile that moved.
+        A result dict. On success ``scope`` says what was reloaded: the
+        caller's profile name for an agent, which applied and reports only its
+        own section, or "gateway" for an operator, which applied the whole
+        file and reports every profile that moved.
+
+        ``reloaded`` is False with an ``error`` when the caller is unknown, or
+        when the file did not validate — in which case the running config is
+        untouched. That refusal is itself scoped: an operator also gets the
+        ``path`` it failed to load and the ``profiles`` currently serving,
+        while an agent gets the parse error alone, because the file it cannot
+        read and the roster it does not hold are not its business.
     """
     active = get_active_config()
     if active is None:

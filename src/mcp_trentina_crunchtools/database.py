@@ -192,6 +192,11 @@ def get_blocklist_stats(profile: str | None = None) -> dict[str, Any]:
     backends they call and the URLs they fetched. Rows that predate the
     attribution columns have a NULL profile and belong to no one; a filtered
     query correctly leaves them out rather than crediting them to whoever asked.
+
+    Returns:
+        ``total_blocked``, ``by_risk_level``, ``recent_detections``, and
+        ``profile_filter`` — the profile the numbers are for, or None for the
+        whole gateway, so a reader never has to guess which it got.
     """
     db = get_db()
     # Same idiom as get_gateway_call_stats above: fixed query templates with

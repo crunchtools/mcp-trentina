@@ -73,9 +73,11 @@ async def get_trentina_stats() -> dict[str, Any]:
     """Get trentina session stats, configuration, and blocklist summary.
 
     Returns:
-        The caller's own audit rows, detections and effective defense settings;
-        or, for an operator, the gateway-wide view including compression
-        savings and the classifier's configured path.
+        The caller's own audit rows, detections and effective defense settings,
+        under ``scope: "<profile>"``; or, for an operator, the gateway-wide
+        view under ``scope: "gateway"``, including compression savings and the
+        classifier's configured path. A caller the gateway cannot identify
+        gets ``{"scope": "none", "error": ...}`` and no numbers at all.
     """
     try:
         scope = require_caller("quarantine_stats")
