@@ -213,9 +213,13 @@ async def reload_profiles() -> dict[str, Any]:
 
     Returns:
         A result dict. ``reloaded`` is False with an ``error`` when the file
-        did not validate — in which case the running config is untouched —
-        and True otherwise, naming every profile that moved and carrying the
-        diff for the calling profile alone (see the module docstring).
+        did not validate, in which case the running config is untouched and
+        only profile NAMES are reported. On success ``profiles`` names every
+        profile the reload added, removed, changed or left alone, and the
+        diff is scoped to the caller: ``changes`` holds it for the calling
+        profile alone, ``changes_scope`` names that profile (None when no
+        caller is bound), and ``changes_withheld`` names the other profiles
+        that moved without describing how.
     """
     active = get_active_config()
     if active is None:
