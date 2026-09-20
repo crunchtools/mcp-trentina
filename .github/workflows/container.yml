@@ -45,6 +45,17 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # The version belongs to the package, not to the ref that triggered the
+      # build. docker/metadata-action's `version` output is the BRANCH NAME on a
+      # branch push (so main builds labelled themselves "main"); the semver only
+      # appears on tag pushes. Read pyproject.toml, which is the single source.
+      - name: Read package version
+        id: pkgver
+        run: |
+          v=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          [ -n "$v" ] || { echo "could not read version from pyproject.toml" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -57,7 +68,7 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             HF_TOKEN=${{ secrets.HF_TOKEN }}
-            VERSION=${{ steps.meta.outputs.version }}
+            VERSION=${{ steps.pkgver.outputs.version }}
 
       - name: Run Trivy vulnerability scanner
         continue-on-error: true
@@ -104,6 +115,17 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # The version belongs to the package, not to the ref that triggered the
+      # build. docker/metadata-action's `version` output is the BRANCH NAME on a
+      # branch push (so main builds labelled themselves "main"); the semver only
+      # appears on tag pushes. Read pyproject.toml, which is the single source.
+      - name: Read package version
+        id: pkgver
+        run: |
+          v=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          [ -n "$v" ] || { echo "could not read version from pyproject.toml" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -116,4 +138,4 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             HF_TOKEN=${{ secrets.HF_TOKEN }}
-            VERSION=${{ steps.meta.outputs.version }}
+            VERSION=${{ steps.pkgver.outputs.version }}
