@@ -13,6 +13,7 @@ Profiles are defined in YAML, typically at `/etc/trentina/profiles.yaml` or wher
 ```yaml
 profiles:
   josui:
+    role: operator          # default: agent (see Roles)
     auth:
       bearer_token_env: TRENTINA_PROFILE_JOSUI_TOKEN
     backends:
@@ -51,6 +52,40 @@ profiles:
       l2_threshold: 0.3       # stricter classifier gate
       l3_threshold: 0.7
 ```
+
+## Roles
+
+One gateway process serves every profile out of one config file, one database
+and one set of caches. `role` decides how much of that a profile reaches
+through the gateway's own admin tools — `cache_flush`, `reconnect_backend`,
+`quarantine_stats` and `reload_profiles`:
+
+| | `role: agent` (default) | `role: operator` |
+|---|---|---|
+| `quarantine_stats` | its own audit rows and detections, and the defense settings it runs under | the whole gateway, plus compression savings |
+| `cache_flush` | its own backends and its own aggregate | every cache |
+| `reconnect_backend` | a backend in its own profile, with the tool count it would see | the name wherever it is configured, and who shares it |
+| `reload_profiles` | validates the whole file, applies its own section | applies the whole file and the gateway-wide settings |
+
+Omit `role` and the profile is an agent. Give it to the seat a human drives,
+not to an autonomous agent.
+
+An agent profile is not told what it cannot act on. Another profile's backend
+names, allowlist deltas, guarded parameter names, call volumes and blocked URLs
+are the shape of its permissions, and a routine flush or reload is not an
+occasion to hand that over — so the refusals name nothing either, and a backend
+in someone else's profile is refused exactly like one that does not exist.
+
+Two things a role does not change. Evicting a cache or resetting a circuit is
+keyed by backend URL, so doing it to a backend you do hold is felt by every
+profile that shares it — that is correctness, not disclosure, and it costs a
+re-probe. And a profile can never apply its **own** role change: an agent
+reload that finds its `role` moved on disk refuses and changes nothing, so a
+promotion costs an operator reload or a restart.
+
+Because every profile model is `extra="forbid"`, a `role:` key against a
+gateway older than this feature is a hard load error. Upgrade the gateway
+first — everything defaults to `agent` — then add the key.
 
 ## Authentication
 
@@ -147,28 +182,29 @@ backend's tool list, so a profile-only edit re-judges nothing. Changing a
 profile's `defense` thresholds is the exception: the verdicts were reached under
 the old thresholds, so that profile's descriptions are judged again.
 
-### The report is scoped to the caller
+### A reload is scoped to the caller's role
 
-The reload applies the whole file — every profile in it, not just the caller's.
-The *diff* is returned for the calling profile alone:
+An **operator** reload is the whole file: every profile, the gateway-wide
+settings, and a diff of everything that moved.
+
+An **agent** reload validates the whole file — a bad edit anywhere still
+refuses, because half a file is not a config — and then applies exactly one
+entry, its own:
 
 ```
-"profiles": {"changed": ["josui", "takeda"], ...}   # every profile that moved
-"changes": {"josui": {...}},                        # the caller's diff
-"changes_scope": "josui",
-"changes_withheld": ["takeda"]                      # named, not described
+"reloaded": true
+"scope": "beta"
+"applied": ["beta"]
+"changes": {"beta": {...}}
+"note": "agent scope — only this profile's section was applied; other
+         profiles and gateway-wide settings need an operator-scope reload"
 ```
 
-Without that scoping, granting this tool to one agent would hand it the other
-agents' backend names, allowlist deltas and guarded parameter names — the shape
-of their permissions — out of a routine config reload. No secret was ever in the
-diff (URLs, headers, tokens and `llm_keys` are reported by field name only), but
-the shape is worth as much to an attacker who has one agent and wants another.
-
-The scoping is why this tool can be granted like `cache_flush` rather than held
-for an operator seat. An operator who wants the whole picture reads the file
-they just edited. A call with no profile bound — which no in-tree path produces,
-since every internal dispatch goes through the router — withholds every diff.
+That note is fixed text. It does not say whether anyone else moved, or how
+many did, because either would be a fact about profiles the caller does not
+hold. Edits to other profiles stay on disk until an operator reload or a
+restart applies them, which is the cost of the insulation and worth knowing
+before you edit someone else's section and walk away.
 
 ### In a container, mount the DIRECTORY, not the file
 

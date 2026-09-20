@@ -73,19 +73,37 @@ scan and takes the gateway down with it.
 - quarantine_scan_dir — scan a directory for Python module shadowing attacks (e.g. struct.py replacing stdlib struct)
 
 ### Stats
-- quarantine_stats
+- quarantine_stats — role-scoped like the gateway admin tools below: an agent
+  profile gets its own audit rows, its own detections and the defense settings
+  it runs under; an operator gets the gateway.
 
 ### Gateway admin
-- cache_flush — flush tool-list caches (all or one backend)
-- reconnect_backend — reset one backend's circuit breaker + re-probe after it restarts, without restarting the gateway
-- reload_profiles — re-read `profiles.yaml` and apply it in place. Nothing else
-  applies a profile edit: the router filters from the `Profile` objects loaded
-  at startup, and `cache_flush`/`reconnect_backend` rebuild that aggregate from
+
+All four are scoped by the calling profile's `role` (`gateway/scope.py`, and
+the Roles table in `docs/profiles.md`). `role: agent` — the default — sees and
+acts on its own slice; `role: operator` holds the gateway. Refusals name
+nothing, so a backend in another profile is refused exactly like one that does
+not exist. Standalone (no gateway registered) is single-tenant and therefore
+operator; a live gateway with no bound caller is refused.
+
+- cache_flush — flush tool-list caches. Agent: its own backends and aggregate.
+  Operator: every cache. A name is resolved by EXACT name, never by substring
+  over cached URLs — that is how `gw` used to reach `gw-work` and
+  `gw-personal` both.
+- reconnect_backend — reset one backend's circuit breaker + re-probe after it
+  restarts, without restarting the gateway. Agent: a backend in its own
+  profile, with the tool count that profile would actually see. The breaker is
+  keyed by URL, so healing it heals it for every profile sharing that URL —
+  that is the point of the tool, not a leak.
+- reload_profiles — re-read `profiles.yaml` and apply it. Nothing else applies
+  a profile edit: the router filters from the `Profile` objects loaded at
+  startup, and `cache_flush`/`reconnect_backend` rebuild that aggregate from
   the same in-memory objects, so they look like they worked and change nothing.
   Validates the whole file before swapping (a bad edit keeps the running
-  config), leaves the perimeter verdict cache alone so nothing is re-judged,
-  and reports what it could not apply — `llm_providers`, `matrix`, and ingress
-  routes bind at startup.
+  config) and leaves the perimeter verdict cache alone so nothing is re-judged.
+  Agent: applies its own section only, and cannot apply a change to its own
+  `role`. Operator: the whole file, plus what it could not apply —
+  `llm_providers`, `matrix`, and ingress routes bind at startup.
 
 ## Development
 

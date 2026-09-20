@@ -301,7 +301,12 @@ async def quarantine_search_tool(
 
 @mcp.tool()
 async def quarantine_stats_tool() -> dict[str, Any]:
-    """Get trentina configuration, Q-Agent status, and blocklist summary."""
+    """Get trentina configuration, Q-Agent status, and blocklist summary.
+
+    Scoped to the calling profile: its own audit rows, its own detections, and
+    the defense settings it actually runs under. An operator profile gets the
+    gateway-wide view.
+    """
     return await get_trentina_stats()
 
 
@@ -311,11 +316,14 @@ async def cache_flush_tool(
 ) -> dict[str, Any]:
     """Flush gateway tool list caches.
 
-    With no arguments, flushes all cached tool lists. With a backend
-    name, flushes just that backend's cache.
+    Scoped to the calling profile: with no arguments it flushes the backends
+    in your own profile and your own aggregate; with a backend name, that one
+    backend, which must be in your profile. An operator profile flushes the
+    whole gateway.
 
     Args:
-        backend: Backend name to flush (e.g. "rt", "wiki"). Omit to flush all.
+        backend: Backend name to flush (e.g. "rt", "wiki"). Omit to flush
+            everything in scope.
     """
     return await cache_flush(backend)
 
@@ -328,6 +336,9 @@ async def reconnect_backend_tool(backend: str) -> dict[str, Any]:
     forces a fresh probe that re-warms the cache. Use this when a backend
     container was restarted and its calls now fail (cache_flush alone does not
     reset the circuit breaker).
+
+    The backend must be in your own profile. An operator profile reconnects
+    the name wherever it is configured.
 
     Args:
         backend: Backend name to reconnect (e.g. "postiz", "slack", "jira").
@@ -350,9 +361,10 @@ async def reload_profiles_tool() -> dict[str, Any]:
     matrix ingress where no route was registered at startup — the result names
     any of those it saw.
 
-    Names every profile the reload moved, and returns the diff of what moved
-    for the CALLING profile only — another profile's backends, allowlists and
-    guarded parameters are its own business. Notifies connected sessions so
-    clients refresh their tool list.
+    Scoped to the calling profile: the whole file is validated, then your own
+    section is put into force and your own diff returned. Other profiles keep
+    serving what they were serving. An operator profile applies the whole file,
+    including the gateway-wide settings, and is told what every profile did.
+    Connected sessions are notified so clients refresh their tool list.
     """
     return await reload_profiles()

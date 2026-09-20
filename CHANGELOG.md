@@ -11,6 +11,43 @@ under that name.
 ## [Unreleased]
 
 ### Added
+- **Profile roles, and role-scoped admin tools** (#133) — a new optional
+  `role: agent | operator` on each profile, defaulting to `agent`. The gateway
+  serves several agents from one config file, one database and one set of
+  caches, and its four admin tools reached all of it from any profile allowed
+  to call them: `quarantine_stats` returned the whole fleet's 30-day audit and
+  the last ten detections, whose `source` is written `profile:backend:tool`;
+  `reconnect_backend` resolved and reset a backend in any profile and listed
+  every profile sharing it; `cache_flush` cold-flushed every profile's caches
+  and reported how many were still warm. An agent profile now sees and acts on
+  its own slice only — its audit rows, its detections, its backends, its
+  section of `profiles.yaml` — and refusals name nothing, so a backend in
+  another profile is refused exactly like one that does not exist. An operator
+  profile keeps the gateway-wide view and the whole-file reload. A profile can
+  never apply its own role change; that costs an operator reload or a restart.
+  New `gateway/scope.py` is the single place any of this is decided.
+
+### Changed
+- **`reload_profiles` applies the caller's section, not the whole file**, when
+  the caller is an agent profile (it still validates the whole file first, so a
+  bad edit anywhere refuses). Operator profiles are unchanged. Result keys
+  moved with the roles: `scope` replaces `changes_scope`, an agent result
+  carries `applied` and a fixed `note` in place of `changes_withheld`, and the
+  gateway-wide `profiles` block is operator-only.
+- `quarantine_stats` reports a caller's own `defense` settings rather than the
+  process defaults, and no longer hands an agent profile the classifier's host
+  path or the fleet-wide compression aggregate.
+
+### Fixed
+- `cache_flush("gw")` used to evict every cached backend URL *containing* "gw"
+  — `gw-work` and `gw-personal` together, in any profile. A backend name is now
+  resolved by exact name in the caller's own profile, and for an operator
+  through the profile registry rather than the cache keys.
+- `get_blocklist_stats()` gained a `profile` filter, mirroring
+  `get_gateway_call_stats()`.
+- Tests no longer inherit a live `ActiveConfig` from whichever earlier test
+  booted the gateway; `conftest` resets it between tests.
+
 - **`reload_profiles` gateway admin tool** (#119) — applies a `profiles.yaml`
   edit without restarting the gateway. Until now a profile edit required a
   restart, and a restart re-judges every tool description through the three

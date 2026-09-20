@@ -1,0 +1,148 @@
+"""Tests for tools/stats.py — what quarantine_stats discloses, to whom.
+
+The audit and the blocklist are one database for the whole gateway, so this
+tool is the widest of the four. Two rows written by another profile are enough
+to prove the filter: an unfiltered read names that profile, its backends, its
+tools and the URLs it fetched.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+from mcp_trentina_crunchtools.database import record_detection, record_gateway_call
+from mcp_trentina_crunchtools.gateway import compress
+from mcp_trentina_crunchtools.gateway.compress import set_profiles
+from mcp_trentina_crunchtools.gateway.context import profile_context
+from mcp_trentina_crunchtools.gateway.loader import (
+    load_profiles,
+    register_active_config,
+)
+from mcp_trentina_crunchtools.outcomes import Outcome
+from mcp_trentina_crunchtools.tools.stats import get_trentina_stats
+
+pytestmark = pytest.mark.asyncio
+
+YAML = """\
+profiles:
+  alpha:
+    role: operator
+    auth:
+      bearer_token_env: TEST_ALPHA_TOKEN
+    backends:
+      jira:
+        url: http://jira:1/mcp
+  beta:
+    auth:
+      bearer_token_env: TEST_BETA_TOKEN
+    defense:
+      l2_threshold: 0.7
+    backends:
+      wiki:
+        url: http://wiki:1/mcp
+"""
+
+
+@pytest.fixture
+def gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
+    """Two profiles, and one audit row plus one detection each."""
+    monkeypatch.setenv("TEST_ALPHA_TOKEN", "a")
+    monkeypatch.setenv("TEST_BETA_TOKEN", "b")
+    monkeypatch.setenv("QUARANTINE_DB", str(tmp_path / "trentina.db"))
+    path = tmp_path / "profiles.yaml"
+    path.write_text(YAML, encoding="utf-8")
+    config = load_profiles(path)
+    register_active_config(path, config, {})
+    set_profiles(config.profiles)
+
+    record_gateway_call("alpha", "jira", "jira_delete_issue", Outcome.OK.value, 5)
+    record_gateway_call("beta", "wiki", "wiki_get_page_tool", Outcome.OK.value, 5)
+    record_detection(
+        source_type="url",
+        source="alpha:jira:jira_get_issue",
+        domain="alpha-secret-intranet.example",
+        layer1_stats={},
+        risk_level="high",
+        profile="alpha",
+    )
+    record_detection(
+        source_type="url",
+        source="beta:wiki:wiki_get_page_tool",
+        domain="beta-wiki.example",
+        layer1_stats={},
+        risk_level="high",
+        profile="beta",
+    )
+    yield config.profiles
+    compress._profiles = None
+
+
+class TestAgentScope:
+    async def test_the_audit_holds_only_the_callers_calls(
+        self, gateway: dict
+    ) -> None:
+        with profile_context(gateway["beta"]):
+            result = await get_trentina_stats()
+
+        audit = result["gateway_audit"]
+        assert audit["profile_filter"] == "beta"
+        assert [e["tool"] for e in audit["by_tool"]] == ["wiki_get_page_tool"]
+
+    async def test_another_profiles_detections_do_not_appear(
+        self, gateway: dict
+    ) -> None:
+        """A detection's source is 'profile:backend:tool' — it names names."""
+        with profile_context(gateway["beta"]):
+            result = await get_trentina_stats()
+
+        assert result["blocklist"]["total_blocked"] == 1
+        assert "alpha" not in str(result)
+        assert "alpha-secret-intranet.example" not in str(result)
+
+    async def test_the_config_block_is_the_profiles_own_defense(
+        self, gateway: dict
+    ) -> None:
+        """The process defaults never described a profile with overrides."""
+        with profile_context(gateway["beta"]):
+            result = await get_trentina_stats()
+
+        assert result["scope"] == "beta"
+        assert result["config"]["l2_threshold"] == 0.7
+
+    async def test_no_host_path_and_no_fleet_aggregate(
+        self, gateway: dict
+    ) -> None:
+        with profile_context(gateway["beta"]):
+            result = await get_trentina_stats()
+
+        assert "classifier_model_path" not in result["config"]
+        assert "model_path" not in result["classifier"]
+        assert "compression" not in result
+
+
+class TestOperatorScope:
+    async def test_the_whole_gateway_is_reported(self, gateway: dict) -> None:
+        with profile_context(gateway["alpha"]):
+            result = await get_trentina_stats()
+
+        assert result["scope"] == "gateway"
+        assert result["gateway_audit"]["profile_filter"] is None
+        assert {e["tool"] for e in result["gateway_audit"]["by_tool"]} == {
+            "jira_delete_issue",
+            "wiki_get_page_tool",
+        }
+        assert result["blocklist"]["total_blocked"] == 2
+        assert "compression" in result
+
+
+class TestUnknownCaller:
+    async def test_a_live_gateway_with_no_caller_gets_nothing(
+        self, gateway: dict
+    ) -> None:
+        result = await get_trentina_stats()
+
+        assert result["scope"] == "none"
+        assert "gateway_audit" not in result
