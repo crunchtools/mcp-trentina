@@ -357,7 +357,7 @@ Every gateway passthrough writes one row to trentina's SQLite audit table:
 New Cockpit panel **Gateway**:
 - **Top-N tools per profile (last 24h)** — informs allowlist tuning
 - **Detection events timeline** — every L2 flag and L3 trigger, with drill-down to the response that tripped it
-- **Profile editor** — read-write YAML editor with validation, writes back to `/etc/trentina/profiles.yaml`
+- **Profile editor** — read-write YAML editor with validation, writes back to `/etc/trentina/profiles.yaml`, then calls `reload_profiles` to put the edit in force. It must write in a way the gateway can see: if the gateway is containerized with a single-file bind mount, a temp-file-plus-rename save leaves the container on the old inode and the reload reports no change. See [Applying a Change](../profiles.md#applying-a-change).
 - **L3 master switch** — global on/off toggle (token-cost control)
 - **Real-time passthrough tail** — live view of in-flight gateway calls
 
