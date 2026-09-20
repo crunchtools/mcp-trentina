@@ -46,7 +46,7 @@ class TestParameterGuards:
     def test_glob_allow_match_passes(self) -> None:
         result = check_parameter_guards(
             "send_gmail_message",
-            {"to": "you@work-example.com"},
+            {"to": "you@redhat.com"},
             _backend({"send_gmail_message": {"to": ParameterConstraint(allow=["*@redhat.com"])}}),
         )
         assert result is None
