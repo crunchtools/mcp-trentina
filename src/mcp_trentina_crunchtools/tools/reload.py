@@ -27,6 +27,14 @@ The swap is all-or-nothing: the new YAML is parsed, validated and its secrets
 resolved in full BEFORE anything is mutated, so a bad edit leaves the running
 gateway exactly as it was and returns the error. See `loader.ActiveConfig`
 for why mutating the registry dict in place is the entire swap.
+
+What the caller is told is scoped to the caller. The reload acts on the whole
+file, so the result names every profile that moved — but the DIFF is returned
+only for the calling profile. Any profile holding this tool would otherwise
+read the other agents' backend names, allowlist deltas and guarded parameter
+names out of a routine config reload, which is the shape of their permissions
+and nobody else's business. An operator who wants the whole picture reads the
+file they just edited.
 """
 
 from __future__ import annotations
@@ -36,6 +44,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from ..gateway.compress import retrigger_compression
+from ..gateway.context import get_current_profile
 from ..gateway.llm_proxy import validate_profile_llm_keys
 from ..gateway.loader import (
     get_active_config,
@@ -182,13 +191,35 @@ def _unapplied(active: ActiveConfig, new_config: GatewayConfig) -> list[str]:
     return notes
 
 
+def _scope_changes(
+    changed: dict[str, dict[str, Any]],
+) -> tuple[str | None, dict[str, dict[str, Any]], list[str]]:
+    """Split the full diff into (caller, the caller's diff, withheld names).
+
+    The caller is the profile the gateway bound around this dispatch. Outside
+    that dispatch there is no caller to scope to, and the honest answer is to
+    withhold every diff rather than guess that whoever got here is entitled to
+    all of them — the only in-tree path that reaches this tool goes through
+    the router, so an unknown caller is a new path, not an operator.
+    """
+    profile = get_current_profile()
+    caller = profile.name if profile is not None else None
+    mine = {name: delta for name, delta in changed.items() if name == caller}
+    return caller, mine, sorted(set(changed) - set(mine))
+
+
 async def reload_profiles() -> dict[str, Any]:
     """Re-read profiles.yaml and put it into force without a restart.
 
     Returns:
         A result dict. ``reloaded`` is False with an ``error`` when the file
-        did not validate — in which case the running config is untouched —
-        and True otherwise, with a per-profile diff of what moved.
+        did not validate, in which case the running config is untouched and
+        only profile NAMES are reported. On success ``profiles`` names every
+        profile the reload added, removed, changed or left alone, and the
+        diff is scoped to the caller: ``changes`` holds it for the calling
+        profile alone, ``changes_scope`` names that profile (None when no
+        caller is bound), and ``changes_withheld`` names the other profiles
+        that moved without describing how.
     """
     active = get_active_config()
     if active is None:
@@ -260,9 +291,11 @@ async def reload_profiles() -> dict[str, Any]:
         for name in [*added, *changed]
     }
 
+    caller, my_changes, withheld = _scope_changes(changed)
+
     logger.warning(
-        "gateway: profiles reloaded from %s — %d added, %d removed, %d changed",
-        path, len(added), len(removed), len(changed),
+        "gateway: profiles reloaded from %s by %s — %d added, %d removed, %d changed",
+        path, caller or "an unknown caller", len(added), len(removed), len(changed),
     )
     return {
         "reloaded": True,
@@ -273,7 +306,9 @@ async def reload_profiles() -> dict[str, Any]:
             "changed": sorted(changed),
             "unchanged": sorted((set(before) & set(after)) - set(changed)),
         },
-        "changes": changed,
+        "changes": my_changes,
+        "changes_scope": caller,
+        "changes_withheld": withheld,
         "caches_invalidated": invalidated,
         "sessions_notified": {k: v for k, v in notified.items() if v},
         "sessions_dropped": dropped_sessions,
