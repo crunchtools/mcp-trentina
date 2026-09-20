@@ -78,6 +78,14 @@ scan and takes the gateway down with it.
 ### Gateway admin
 - cache_flush — flush tool-list caches (all or one backend)
 - reconnect_backend — reset one backend's circuit breaker + re-probe after it restarts, without restarting the gateway
+- reload_profiles — re-read `profiles.yaml` and apply it in place. Nothing else
+  applies a profile edit: the router filters from the `Profile` objects loaded
+  at startup, and `cache_flush`/`reconnect_backend` rebuild that aggregate from
+  the same in-memory objects, so they look like they worked and change nothing.
+  Validates the whole file before swapping (a bad edit keeps the running
+  config), leaves the perimeter verdict cache alone so nothing is re-judged,
+  and reports what it could not apply — `llm_providers`, `matrix`, and ingress
+  routes bind at startup.
 
 ## Development
 

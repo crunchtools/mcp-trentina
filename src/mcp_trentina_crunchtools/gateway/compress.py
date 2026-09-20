@@ -92,6 +92,20 @@ def get_profiles() -> dict[str, Profile] | None:
     return _profiles
 
 
+def retrigger_compression() -> None:
+    """Re-arm the one-shot trigger so the next tools/list compresses again.
+
+    Called after a profile reload adds or changes a backend. Without it the
+    trigger stays spent for the life of the process and a newly added
+    ``compress_descriptions`` backend would serve full-length descriptions
+    until a restart. Re-running is cheap: ``_find_uncached`` skips every
+    description already in the cache, so an unchanged backend costs one
+    tools/list and no model calls.
+    """
+    global _compress_triggered
+    _compress_triggered = False
+
+
 async def maybe_trigger_compression() -> None:
     """Trigger background compression on the first call, retrying on failure.
 

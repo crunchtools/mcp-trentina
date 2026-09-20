@@ -64,6 +64,13 @@ classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
+path = "tests/test_reload.py"
+pattern = "_registry"
+justification = "Not single-use: called from 10 distinct locations in the file, verified by grep. Same undercount as the tests/test_gateway_router.py `_profile` entry below -- the check appears to attribute callers per test class and stops counting once a module-level helper is also used by another module-level helper."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "single_use_helpers"
 path = "tests/test_gateway_router.py"
 pattern = "_profile"
 justification = "Not single-use: called from roughly 20 distinct test functions across the file, verified by grep. The single_use_helpers check appears to attribute callers per test class and undercounts once a module-level helper is also used by the file's last class -- re-flagging as a linter bug (gourmand_bug) rather than an architectural tradeoff."

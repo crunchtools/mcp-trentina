@@ -7,6 +7,7 @@ from .content import deep_scan_content, quarantine_content, safe_content, scan_c
 from .fetch import quarantine_fetch, safe_fetch
 from .read import quarantine_read, safe_read
 from .reconnect import reconnect_backend
+from .reload import reload_profiles
 from .scan import deep_quarantine_scan, quarantine_scan, quarantine_scan_dir
 from .search import quarantine_search, safe_search
 from .stats import get_trentina_stats
@@ -23,6 +24,7 @@ __all__ = [
     "quarantine_scan_dir",
     "quarantine_search",
     "reconnect_backend",
+    "reload_profiles",
     "safe_content",
     "safe_fetch",
     "safe_read",

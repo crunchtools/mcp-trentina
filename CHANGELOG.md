@@ -10,6 +10,31 @@ under that name.
 
 ## [Unreleased]
 
+### Added
+- **`reload_profiles` gateway admin tool** (#119) — applies a `profiles.yaml`
+  edit without restarting the gateway. Until now a profile edit required a
+  restart, and a restart re-judges every tool description through the three
+  defense layers before the first `tools/list` answers (40+ minutes on the
+  CrunchTools deployment, with every connected session dropped). Editing the
+  file without restarting did nothing at all, silently. The reload validates
+  the whole file before swapping — a bad edit keeps the running config — swaps
+  the profiles in place, invalidates only the affected profile aggregates, and
+  returns a per-profile diff. It keeps the perimeter verdict cache, so a
+  profile-only edit re-judges nothing; changing a profile's `defense`
+  thresholds re-judges that profile, which is the cost of changing the policy
+  the verdicts were reached under. Sections that bind at startup
+  (`llm_providers`, `matrix`, and ingress routes) are reported in
+  `not_applied` instead of being reported as applied.
+
+### Fixed
+- A profile tool-list aggregation already in flight can no longer write a
+  stale aggregate into the cache after an invalidation — it is now discarded.
+  The same window existed for circuit-breaker evictions.
+- `docs/internal/gateway-design.md` claimed profiles were "hot-reloaded on file
+  change". There was no file watcher and no reload path; corrected to name the
+  mechanism. `docs/profiles.md` likewise said backend header env vars expand at
+  request time — they expand once, at load.
+
 ## [0.5.0] - 2026-06-23
 
 **MCP-Airlock is now Trentina.** Named after the 1377 quarantine system from

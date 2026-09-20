@@ -106,8 +106,12 @@ response — web fetches included — flows through the single gateway chokepoin
 
 ## Profile schema
 
-YAML in `/etc/trentina/profiles.yaml` (or `$TRENTINA_PROFILES_PATH`), hot-reloaded
-on file change (handled by Cockpit when profiles are edited from the UI).
+YAML in `/etc/trentina/profiles.yaml` (or `$TRENTINA_PROFILES_PATH`). There is no
+file watcher: an edit takes effect when someone calls the `reload_profiles` admin
+tool, or when the gateway restarts. Editing the file and expecting the running
+gateway to notice is the one thing that does not work — the router filters from
+the `Profile` objects it loaded at startup, so an un-reloaded edit validates,
+looks applied, and changes nothing.
 
 ```yaml
 profiles:
