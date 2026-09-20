@@ -25,8 +25,8 @@ profiles:
     #   api_key_env: KAGETORA_GEMINI_API_KEY    # Environment variable reference
     #   api_key: "AIza..."                      # Direct key (bind-mounted config)
     #
-    # Direct keys match the lotor deployment pattern (bind-mounted config files in
-    # /srv/*/config, backed up by pbs.sh). Env var references work for other setups.
+    # Direct keys match a bind-mounted deployment pattern (config files under
+    # /srv/*/config, backed up separately). Env var references work for other setups.
     # Token reduction on tool responses. Runs OUTSIDE the perimeter and never
     # replaces it: the gateway reduces, then scans the reduced artifact, then
     # delivers that artifact (preprocess/base.py invariant 2).

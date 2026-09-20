@@ -14,7 +14,7 @@ defense (L1 sanitize → L2 Prompt Guard 2 classifier → L3 quarantined Gemini
 re-extraction) before returning anything to the LLM.
 
 This design extends airlock with a second surface — a **per-consumer MCP gateway**
-that proxies traffic to the 14 backend MCP servers running on lotor, applying the
+that proxies traffic to the 14 backend MCP servers, applying the
 same defense pipeline to every tool response on the way back, with per-profile
 control of which tools each consumer sees and which defense layers run.
 
@@ -259,7 +259,7 @@ through. ~200 lines of FastMCP server code + ~100 lines of profile loader +
 middleware makes these clean v2 additions.
 
 Tokens never appear in config files (only env var names do); env file lives at
-`/srv/mcp-trentina.crunchtools.com/config/profile-tokens.env` with chmod 600 +
+`/srv/<service>/config/profile-tokens.env` with chmod 600 +
 chcon etc_t per the crunchtools convention.
 
 ---
@@ -371,26 +371,26 @@ entries — including the old direct airlock `/mcp` entry — into a single
 gateway entry behind one bearer token. **Kagetora cuts over first** (smaller
 blast radius, autonomous agent), then Josui.
 
-**Kagetora (Hermes on lotor) — first:**
-1. Add the `kagetora` profile to airlock config: the `web` (`internal://web`)
+**An autonomous-agent consumer (small blast radius) — first:**
+1. Add its profile to airlock config: the `web` (`internal://web`)
    backend + a narrowed http backend set.
-2. Replace the 14 `mcp_servers:` entries in Hermes `config.yaml` with one
-   `airlock-gateway` entry pointing at
-   `http://mcp-trentina:8019/gateway/kagetora/mcp` (Bearer
-   `${AIRLOCK_GATEWAY_KAGETORA_TOKEN}`).
-3. Restart kagetora; verify a call exercises both an http backend
+2. Replace its `mcp_servers:` entries with one
+   `airlock-gateway` entry pointing at the gateway's
+   `/gateway/<profile>/mcp` route (Bearer
+   `${AIRLOCK_GATEWAY_<PROFILE>_TOKEN}`).
+3. Restart it; verify a call exercises both an http backend
    (`mcp-gemini__gemini_query_tool`) and the internal backend
    (`web__safe_fetch_tool`); confirm the prompt-token count drops from ~146K
    toward the <50K target.
 
-**Josui (Claude Code on Breetai) — second:**
-1. Add the `josui` profile with the `web` backend + the full http backend matrix.
-2. Replace the ~10 migrated `~/.claude.json` MCP entries + the old airlock entry
-   with one `airlock-gateway` entry pointing at
-   `http://127.0.0.1:8019/gateway/josui/mcp`. Genuinely-local servers (pcloud,
+**An interactive-session consumer — second:**
+1. Add its profile with the `web` backend + the full http backend matrix.
+2. Replace the ~10 migrated MCP client entries + the old airlock entry
+   with one `airlock-gateway` entry pointing at the gateway's
+   `/gateway/<profile>/mcp` route. Genuinely-local servers (pcloud,
    trove, claude-in-chrome, …) stay as-is.
-3. Shrink the `~/.ssh/config` `lotor-mcp` tunnel from 10 `LocalForward` lines to
-   one (8019).
+3. Shrink the SSH tunnel config from 10 `LocalForward` lines to
+   one (the gateway port).
 4. Confirm `web__safe_fetch_tool` returns sanitized content and a remote backend
    (`mcp-slack__slack_list_channels`) returns results — both via the same token,
    single endpoint.
@@ -401,24 +401,24 @@ prompt tokens.
 
 ---
 
-## Deployment (lotor)
+## Deployment
 
-Same `/srv/mcp-trentina.crunchtools.com/` layout the airlock service already
-uses on lotor. Adds:
+Same `/srv/<service>/` layout the airlock service already
+uses in production. Adds:
 
-- `/srv/mcp-trentina.crunchtools.com/config/profiles.yaml` — profile definitions
-- `/srv/mcp-trentina.crunchtools.com/config/profile-tokens.env` — bearer tokens
+- `/srv/<service>/config/profiles.yaml` — profile definitions
+- `/srv/<service>/config/profile-tokens.env` — bearer tokens
   (chmod 600, chcon etc_t, env-file passed to systemd unit)
-- `/srv/mcp-trentina.crunchtools.com/data/audit.db` — already exists for L1/L2/L3
+- `/srv/<service>/data/audit.db` — already exists for L1/L2/L3
   events; gains gateway-passthrough rows
 - Cockpit plugin gains the Gateway tab — same `cockpit-airlock/` package, lives
   in `/usr/share/cockpit/airlock/`
 
 No new container, no new port, no new systemd unit. The existing
-`mcp-trentina.crunchtools.com.service` stays as-is; the airlock binary gains a
-new endpoint family on its existing `127.0.0.1:8019` listener.
+service unit stays as-is; the airlock binary gains a
+new endpoint family on its existing localhost listener.
 
-Cockpit visualization comes free with the existing Cockpit instance on lotor —
+Cockpit visualization comes free with the existing Cockpit instance —
 the Gateway tab appears alongside the current Airlock tab on first login after
 the image bumps.
 
@@ -530,7 +530,7 @@ Each phase is independently mergeable behind a feature flag (`AIRLOCK_GATEWAY_EN
 
 - Existing airlock 3-layer defense: `src/mcp_trentina_crunchtools/sanitize/`,
   `quarantine/` (this repo)
-- crunchtools MCP fleet on lotor: see [[mcp-centralization-lotor]] memory note
+- crunchtools MCP fleet topology: see private ops notes
 - Autonomous-agent constitution profile §V (kill switches): drives the L3
   toggle requirement
 - FastMCP authentication middleware: https://gofastmcp.com/ (auth section)
