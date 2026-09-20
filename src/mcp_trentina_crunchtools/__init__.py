@@ -193,12 +193,26 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     from .gateway.backend import load_tool_list_cache
     from .gateway.ingress_defense import load_verdict_cache
 
-    load_compression_cache()
-    load_tool_list_cache()
+    compressions = load_compression_cache()
+    tool_lists = load_tool_list_cache()
     # Perimeter verdicts survive the restart that produced them. Without
     # this the first tools/list after a restart re-judges every description
     # through all three layers and times the client out.
-    load_verdict_cache()
+    verdicts = load_verdict_cache()
+
+    # WARNING, not INFO, and not because anything is wrong. Production runs
+    # at TRENTINA_LOG_LEVEL=WARNING, so INFO is discarded — which meant the
+    # one line that answers "did the caches load?" was invisible on the only
+    # box where the question gets asked. A cold verdict cache PREDICTS a slow
+    # first tools/list, and that prediction belongs in the journal before the
+    # timeout, not in an SSH session after it.
+    logger.warning(
+        "startup: caches loaded — %d tool list(s), %d compression(s), "
+        "%d perimeter verdict(s)%s",
+        tool_lists, compressions, verdicts,
+        "" if verdicts else " (COLD: the first tools/list will judge every "
+                            "tool description and may take minutes)",
+    )
     set_profiles(gateway_config.profiles)
 
     _warm_classifier()
