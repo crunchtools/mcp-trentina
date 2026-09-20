@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -564,11 +565,9 @@ class TestDualModelVerification:
 
         malicious_result = ClassifierResult(label="MALICIOUS", score=0.95, latency_ms=40.0)
 
-        import json as json_mod
-
         from mcp_trentina_crunchtools.quarantine.providers.base import ProviderResult
 
-        extract_text = json_mod.dumps({
+        extract_text = json.dumps({
             "extracted_text": "test content",
             "confidence": "high",
             "injection_detected": False,

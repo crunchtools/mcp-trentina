@@ -7,6 +7,7 @@ timeout wrapping, caching, and success/failure recording.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import patch
 
@@ -134,7 +135,7 @@ class TestListBackendToolsCircuit:
         """list_backend_tools uses list_timeout_seconds, not timeout_seconds."""
         captured_timeout: list[float] = []
 
-        original_wait_for = __import__("asyncio").wait_for
+        original_wait_for = asyncio.wait_for
 
         async def spy_wait_for(coro: Any, *, timeout: float) -> Any:
             captured_timeout.append(timeout)
@@ -214,7 +215,7 @@ class TestCallBackendToolCircuit:
         """call_backend_tool uses timeout_seconds, not list_timeout_seconds."""
         captured_timeout: list[float] = []
 
-        original_wait_for = __import__("asyncio").wait_for
+        original_wait_for = asyncio.wait_for
 
         async def spy_wait_for(coro: Any, *, timeout: float) -> Any:
             captured_timeout.append(timeout)
@@ -351,8 +352,6 @@ class TestBackendToolListCache:
 
     async def test_single_flight_coalesces_concurrent_misses(self) -> None:
         """Concurrent misses for one URL share a single transport fetch."""
-        import asyncio
-
         call_count = 0
         release = asyncio.Event()
 

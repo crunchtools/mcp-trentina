@@ -6,96 +6,112 @@ check = "generic_names"
 path = "src/mcp_trentina_crunchtools/sanitize/*.py"
 pattern = "stats"
 justification = "stats is the domain-standard name for sanitization statistics returned by each pipeline stage"
+classification = "by_design"
 
 [[exceptions]]
 check = "generic_names"
 path = "src/mcp_trentina_crunchtools/database.py"
 pattern = "query"
 justification = "query() is the standard database accessor function name matching feed-reader and other server patterns"
+classification = "by_design"
 
 [[exceptions]]
 check = "generic_names"
 path = "src/mcp_trentina_crunchtools/quarantine/agent.py"
 pattern = "response"
 justification = "response is the standard variable name for httpx HTTP response objects"
+classification = "by_design"
 
 [[exceptions]]
 check = "lint_suppression"
 path = "tests/test_models.py"
 pattern = "type: ignore"
 justification = "type: ignore[call-arg] required to test Pydantic extra='forbid' validation with intentionally invalid kwargs"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/sanitize/encoded.py"
 pattern = "_decode_base64_safe"
 justification = "Error isolation boundary — decoding untrusted base64 requires its own try/except with specific exception types"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/sanitize/encoded.py"
 pattern = "_decode_hex_safe"
 justification = "Error isolation boundary — decoding untrusted hex requires its own try/except with specific exception types"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/sanitize/exfiltration.py"
 pattern = "_is_suspicious_url"
 justification = "Predicate function used as filter callback in list comprehension for URL classification"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/sanitize/html.py"
 pattern = "_is_hidden"
 justification = "Used as function reference in _CHECK_FUNCTIONS dict — extracted per ruff C901 complexity limits"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/sanitize/html.py"
 pattern = "_is_off_screen"
 justification = "Used as function reference in _CHECK_FUNCTIONS dict — extracted per ruff C901 complexity limits"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/sanitize/html.py"
 pattern = "_has_same_color_text"
 justification = "Used as function reference in _CHECK_FUNCTIONS dict — extracted per ruff C901 complexity limits"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/sanitize/html.py"
 pattern = "_normalize_color"
 justification = "Complex CSS color normalization logic extracted per ruff C901 — handles named colors, hex3, hex6, and rgb()"
+classification = "by_design"
 
 [[exceptions]]
 check = "silent_fallbacks"
 path = "src/mcp_trentina_crunchtools/quarantine/agent.py"
 pattern = "quarantine_extract"
 justification = "Intentional fallback controlled by QUARANTINE_FALLBACK config — returns degraded content with confidence=low when Q-Agent unavailable"
+classification = "by_design"
 
 [[exceptions]]
 check = "silent_fallbacks"
 path = "src/mcp_trentina_crunchtools/quarantine/agent.py"
 pattern = "quarantine_detect"
 justification = "Detection is best-effort by design — safe default (injection_detected=False) with explanatory summary when Q-Agent unavailable"
+classification = "by_design"
 
 [[exceptions]]
 check = "primitive_obsession"
 path = "src/mcp_trentina_crunchtools/sanitize/encoded.py"
 pattern = "500"
 justification = "500 is the literal value in the MAX_BASE64_DECODE_LENGTH constant definition — the literal must exist somewhere"
+classification = "by_design"
 
 [[exceptions]]
 check = "summary_litter"
 path = "CLAUDE.md"
 pattern = "CLAUDE.md"
 justification = "Standard Claude Code project configuration file — provides codebase context and development instructions to the AI assistant"
+classification = "by_design"
 
 [[exceptions]]
 check = "summary_litter"
 path = "tests/test-injection.md"
 pattern = "test-injection.md"
 justification = "Test fixture containing sample prompt injection payloads for integration testing of the sanitization pipeline"
+classification = "by_design"
 
 # --- D-Bus interface: lint suppressions are required by dbus-fast framework ---
 # dbus-fast uses Python string annotations ("s", "u") as D-Bus type signatures.
@@ -109,24 +125,28 @@ check = "lint_suppression"
 path = "src/mcp_trentina_crunchtools/dbus_interface.py"
 pattern = "type: ignore[name-defined]"
 justification = "dbus-fast uses string annotations (\"s\", \"u\") as D-Bus type signatures, not Python types — mypy cannot resolve them"
+classification = "by_design"
 
 [[exceptions]]
 check = "lint_suppression"
 path = "src/mcp_trentina_crunchtools/dbus_interface.py"
 pattern = "noqa: N802"
 justification = "D-Bus specification requires PascalCase method and signal names (e.g. GetStats, RequestProcessed)"
+classification = "by_design"
 
 [[exceptions]]
 check = "lint_suppression"
 path = "src/mcp_trentina_crunchtools/dbus_interface.py"
 pattern = "noqa: F821"
 justification = "dbus-fast D-Bus type signature strings (\"s\", \"u\") are forward references resolved at D-Bus registration, not Python names"
+classification = "by_design"
 
 [[exceptions]]
 check = "lint_suppression"
 path = "src/mcp_trentina_crunchtools/dbus_interface.py"
 pattern = "noqa: F401"
 justification = "_has_dbus_fast() imports dbus_fast solely to check availability — the import is intentionally unused"
+classification = "by_design"
 
 # --- Classifier result dict: loose typing from classify() return ---
 
@@ -135,12 +155,14 @@ check = "lint_suppression"
 path = "src/mcp_trentina_crunchtools/tools/content.py"
 pattern = "type: ignore[arg-type]"
 justification = "classifier_result dict values are typed as Any — float() cast is safe but mypy cannot verify dict value types through conditional access"
+classification = "by_design"
 
 [[exceptions]]
 check = "lint_suppression"
 path = "src/mcp_trentina_crunchtools/tools/scan.py"
 pattern = "type: ignore[arg-type]"
 justification = "classifier_result dict values are typed as Any — float() cast is safe but mypy cannot verify dict value types through conditional access"
+classification = "by_design"
 
 # --- Cockpit UI: generic_names in D-Bus callback handlers ---
 
@@ -149,6 +171,7 @@ check = "generic_names"
 path = "cockpit-trentina/trentina.js"
 pattern = "data"
 justification = "D-Bus signal/callback handlers receive a generic payload object — 'data' is the Cockpit D-Bus API convention for response payloads"
+classification = "by_design"
 
 # --- Cockpit UI: single-use helpers provide semantic structure ---
 # airlock.js is a single-file Cockpit plugin. Named functions provide
@@ -160,148 +183,173 @@ check = "single_use_helpers"
 path = "cockpit-trentina/trentina.js"
 pattern = "formatTime"
 justification = "UI display helper — semantic name clarifies intent in single-file Cockpit plugin"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "cockpit-trentina/trentina.js"
 pattern = "truncateSource"
 justification = "UI display helper — semantic name clarifies intent in single-file Cockpit plugin"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "cockpit-trentina/trentina.js"
 pattern = "scoreBar"
 justification = "UI display helper — generates HTML for L2 classifier score visualization"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "cockpit-trentina/trentina.js"
 pattern = "renderPage"
 justification = "UI lifecycle function — builds the initial DOM structure for the Cockpit panel"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "cockpit-trentina/trentina.js"
 pattern = "renderDetail"
 justification = "UI lifecycle function — populates pipeline detail card on event selection"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "cockpit-trentina/trentina.js"
 pattern = "setupSignals"
 justification = "UI lifecycle function — registers D-Bus signal listeners for live event streaming"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "cockpit-trentina/trentina.js"
 pattern = "showDetectionAlert"
 justification = "UI lifecycle function — creates and auto-dismisses PatternFly alert banners for injection detections"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "cockpit-trentina/trentina.js"
 pattern = "init"
 justification = "UI lifecycle function — entry point that orchestrates page render, D-Bus connection, and signal setup"
+classification = "by_design"
 
 [[exceptions]]
 check = "generic_names"
 path = "src/mcp_trentina_crunchtools/gateway/router.py"
 pattern = "result"
 justification = "result is the JSON-RPC 2.0 wire-protocol field name for success responses (https://www.jsonrpc.org/specification §5.1); renaming would obscure the protocol mapping"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/__init__.py"
 pattern = "_run_with_gateway"
 justification = "Configuration gate isolated from the main() match statement so the gateway-disabled path stays a single mcp.run() call with no imports of starlette/uvicorn at startup time"
+classification = "by_design"
 
 [[exceptions]]
 check = "lint_suppression"
 path = "src/mcp_trentina_crunchtools/__init__.py"
 pattern = "type: ignore"
 justification = "Starlette's lifespan callable type signature uses opaque generics; the [no-untyped-def] ignore is the standard pattern for framework-supplied callbacks"
+classification = "by_design"
 
 [[exceptions]]
 check = "lint_suppression"
 path = "src/mcp_trentina_crunchtools/gateway/app.py"
 pattern = "type: ignore"
 justification = "FastMCP's custom_route decorator has no type stubs; the [misc] ignore is the standard pattern for typed code calling into untyped framework APIs"
+classification = "by_design"
 
 [[exceptions]]
 check = "summary_litter"
 path = "deprecation/README.md"
 pattern = "README.md"
 justification = "PyPI requires README.md in the deprecation shim package — it tells users the package was renamed to mcp-trentina-crunchtools"
+classification = "by_design"
 
 [[exceptions]]
 check = "lint_suppression"
 path = "deprecation/src/mcp_airlock_crunchtools/__init__.py"
 pattern = "noqa: F401,F403"
 justification = "Wildcard re-export is the entire purpose of the deprecation shim — it forwards all public names from the renamed package"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/gateway/sessions.py"
 pattern = "_remove"
 justification = "Called from 3 sites: delete_session, create_session (eviction loop), and _expire_stale — gourmand miscounted because create_session calls it inside a while loop"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "tests/test_gateway_router.py"
 pattern = "_profile"
 justification = "Called from 19 sites across the module — gourmand miscounts when the helper is also called from the last class in the file (same class of miscount as the sessions.py _remove exception)"
+classification = "by_design"
 
 [[exceptions]]
 check = "redundant_error_handling"
 path = "src/mcp_trentina_crunchtools/gateway/circuit.py"
 pattern = "_notify"
 justification = "Circuit breaker callbacks must not crash the breaker — catching and logging ensures a broken notification callback cannot prevent circuit state from updating correctly"
+classification = "by_design"
 
 [[exceptions]]
 check = "redundant_error_handling"
 path = "src/mcp_trentina_crunchtools/__init__.py"
 pattern = "on_circuit_change"
 justification = "Circuit state change handler catches RuntimeError when no event loop is available (sync context during testing) — legitimate fallback to skip async notification"
+classification = "by_design"
 
 [[exceptions]]
 check = "conditional_wrapper"
 path = "src/mcp_trentina_crunchtools/__init__.py"
 pattern = "on_circuit_change"
 justification = "Early returns filter out non-notifiable state transitions (e.g. OPEN→HALF_OPEN probe) before expensive broadcast — guard clauses not conditional wrapping"
+classification = "by_design"
 
 [[exceptions]]
 check = "primitive_obsession"
 path = "demo/attack-sim/payload/struct.py"
 justification = "The chr() codes ARE the attack. This file is a working stdlib `struct` shadow whose obfuscation (46,115,116,97,116,117,115 spelling '.status', plus 49 for '1') is precisely what sanitize/shadows.py detects and tests/test_shadows.py asserts on. Naming these constants would destroy the artifact and weaken the detection tests"
+classification = "by_design"
 
 [[exceptions]]
 check = "random_scripts"
 path = "demo/**"
 justification = "demo/ holds the attack-simulation harness — build_archive.py, server.py and the two run.sh drivers are standalone scripts by design, not library code. They exist to be run by hand when demonstrating the defense"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "demo/attack-sim/server.py"
 pattern = "_encode_b85z"
 justification = "Attack payload encoder for the demo archive. Each encoding is deliberately a distinct named step so the demo can show which obfuscation the pipeline caught"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "demo/attack-sim/server.py"
 pattern = "_encode_xor_b64"
 justification = "Attack payload encoder for the demo archive. Each encoding is deliberately a distinct named step so the demo can show which obfuscation the pipeline caught"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/sanitize/shadows.py"
 pattern = "_scan_for_obfuscation"
 justification = "Called from one production site but ten test sites (tests/test_shadows.py imports it directly and exercises each indicator category independently). It is a cohesive, separately-tested scanning primitive; inlining a 50-line scanner into the file walker would make both harder to read and drop the unit tests"
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/tools/fetch.py"
 pattern = "_build_advisory"
 justification = "Miscount — called from three sites (fetch.py:140, :151, :172), same class of gourmand miscount as the sessions.py _remove and _profile exceptions above"
+classification = "by_design"
 
 # --- Surfaced by restoring the [thresholds] block in gourmand.toml. ---
 # Until now this repo ran with every threshold silently zeroed, which switched
@@ -311,86 +359,384 @@ justification = "Miscount — called from three sites (fetch.py:140, :151, :172)
 check = "over_abstraction"
 path = "src/mcp_trentina_crunchtools/errors.py"
 justification = "_scrub_credentials is a named security boundary. It is the one place error text is stripped of keys, tokens and passwords before it can reach a log or a client; inlining the regex at each raise site is exactly how one of them gets missed."
+classification = "by_design"
 
 [[exceptions]]
 check = "over_abstraction"
 path = "src/mcp_trentina_crunchtools/gateway/app.py"
 justification = "_plain has twenty call sites. It is not an abstraction to remove, it is the response builder those twenty routes share."
+classification = "by_design"
 
 [[exceptions]]
 check = "over_abstraction"
 path = "src/mcp_trentina_crunchtools/gateway/context.py"
 justification = "get_current_profile reads a ContextVar. The wrapper is the point: callers get the profile without touching the contextvar, and the None-outside-gateway-context behaviour is documented in one place."
+classification = "by_design"
 
 [[exceptions]]
 check = "over_abstraction"
 path = "src/mcp_trentina_crunchtools/sanitize/pipeline.py"
 justification = "Two findings. PipelineStats.risk_level delegates to risk_level_for_count, which exists so callers that aggregate detections across several PipelineStats (alert ingress) classify risk identically. sanitize_text is a one-liner only because the stages it shared with sanitize() were just extracted into _run_text_stages; it remains a distinct public entry point with its own contract."
+classification = "by_design"
 
 [[exceptions]]
 check = "over_abstraction"
 path = "src/mcp_trentina_crunchtools/tools/scan.py"
 justification = "_risk_order is a dict lookup with a safe default. The name is what makes the comparison at the call site readable."
+classification = "by_design"
 
 [[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/database.py"
 justification = "record_detection, save_compression and save_tool_list write to three different tables with different columns; is_blocked and is_domain_blocked read the same table on different columns. What they share is connect, execute, commit. Collapsing them means passing table and column names into the SQL as strings, which trades readable auditable literal queries for dynamic SQL in a security gateway. Not a trade worth making."
+classification = "by_design"
 
 [[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/config.py"
 justification = "is_trusted_domain and is_trusted_path consult different allowlists with different matching rules — hostname suffix versus fnmatch globbing. They share the shape of the not-a-list guard, nothing else."
+classification = "by_design"
 
 [[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/gateway/circuit.py"
 justification = "record_success and record_failure share their first two lines and then diverge completely: one closes the circuit and resets the counter, the other increments it and may re-open or trip. Merging opposite state transitions to save two lines would be a poor trade in the component that decides whether a backend is reachable."
+classification = "by_design"
 
 [[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/gateway/alert_ingress.py"
 justification = "_get_alert_client, _get_llm_client and _get_matrix_client are the three-line lazy-singleton accessor, once per proxy. The duplication is the idiom."
+classification = "by_design"
 
 [[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/gateway/llm_proxy.py"
 justification = "_get_llm_client is the three-line lazy-singleton accessor, matching the same idiom in matrix_proxy and alert_ingress."
+classification = "by_design"
 
 [[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/gateway/backend.py"
 justification = "reset_tool_list_cache and reset_profile_tools_cache each clear one module-level cache for tests. Four statements, two different globals."
+classification = "by_design"
 
 [[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/gateway/compress.py"
 justification = "set_profiles and register_internal_server are both three-line module-global setters called once at startup. They assign different globals."
+classification = "by_design"
 
 [[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/gateway/profile.py"
 justification = "Four Pydantic field validators that each match a different value against a different pattern and raise a message naming the field that was wrong. The per-field message is what makes a bad profiles.yaml diagnosable; they share only the match-then-raise shape."
+classification = "by_design"
 
 [[exceptions]]
 check = "copy_paste_detection"
 path = "benchmarks/provider_benchmark.py"
 justification = "detection_rate/fp_rate and detection_by_category/fp_by_category compute the true-positive and false-positive halves of the same report. Reporting them as a matched pair is the point of the benchmark."
+classification = "by_design"
 
 [[exceptions]]
 check = "primitive_obsession"
 path = "src/mcp_trentina_crunchtools/defense.py"
 pattern = "_should_run_l3"
 justification = "is_trusted and l3_gate are two independent, orthogonal predicates on a private gate function (trust of the source vs. whether the caller runs L3 as a detector at all). Bundling them into a config object would add a type to carry two bools consumed one line apart — the over-abstraction the linter elsewhere forbids."
+classification = "by_design"
 
 [[exceptions]]
 check = "redundant_error_handling"
 path = "src/mcp_trentina_crunchtools/gateway/llm_proxy.py"
 pattern = "_schedule_completion_scan"
 justification = "The post-hoc completion scan is a fire-and-forget background task. Its except/log is not redundant defensiveness — a scan crash MUST NOT propagate into the streaming task or the whole completion fails after already reaching the client. Swallow-and-log is the required behaviour, and the finding it records still lands in the detections table."
+classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "tests/test_defense_contract.py"
 pattern = "_resolve"
 justification = "Relative-import resolution is a non-trivial, correctness-critical algorithm (its docstring documents the exact hole a naive text match would leave). Same rationale as the _decode_base64_safe/_decode_hex_safe exceptions: a named, documented algorithm step, not a readability wrapper."
+classification = "by_design"
+[[exceptions]]
+check = "hardcoded_years"
+path = "src/mcp_trentina_crunchtools/__init__.py"
+justification = "2026-09-09 documents the actual date of a real production incident (classifier lazy-load taking 8 hours to trigger after container start), not a decorative or AI-generated timestamp."
+classification = "by_design"
+
+[[exceptions]]
+check = "hardcoded_years"
+path = "src/mcp_trentina_crunchtools/defense.py"
+justification = "2026-09-13 documents the actual date of the owner's architectural ruling (L1 never modifies delivery text), cited so a future reader can trace the decision."
+classification = "by_design"
+
+[[exceptions]]
+check = "hardcoded_years"
+path = "src/mcp_trentina_crunchtools/gateway/app.py"
+justification = "2026-08-22 documents the actual date of a real production incident (an unbounded classifier scan wedging the event loop for 90 minutes)."
+classification = "by_design"
+
+[[exceptions]]
+check = "hardcoded_years"
+path = "src/mcp_trentina_crunchtools/gateway/profile.py"
+justification = "2026-09-13 documents the actual date of the owner's architectural ruling (no per-layer on/off switches), the same decision referenced in defense.py."
+classification = "by_design"
+
+[[exceptions]]
+check = "hardcoded_years"
+path = "src/mcp_trentina_crunchtools/gateway/router.py"
+justification = "PROTOCOL_VERSION is the literal MCP specification version string (dated versioning, e.g. 2024-11-05 / 2025-03-26 / 2025-06-18, is the protocol's actual versioning scheme) sent verbatim in the protocolVersion response field -- not a timestamp of any kind."
+classification = "by_design"
+
+[[exceptions]]
+check = "hardcoded_years"
+path = "src/mcp_trentina_crunchtools/preprocess/petit.py"
+justification = "2026-09-13 documents the actual date of an adversarial security review that identified this known limitation."
+classification = "by_design"
+
+[[exceptions]]
+check = "hardcoded_years"
+path = "src/mcp_trentina_crunchtools/sanitize/pipeline.py"
+justification = "2026-09-13 documents the actual date of the owner's architectural ruling (byte-identical passthrough or nothing), the same decision referenced in defense.py and profile.py."
+classification = "by_design"
+
+[[exceptions]]
+check = "hardcoded_years"
+path = "src/mcp_trentina_crunchtools/sanitize/shadows.py"
+justification = "2026-08-26 cites the actual publication date of wunderwuzzi's real-world Claude Code exploit chain using struct.py shadowing, referenced as prior art for this defense."
+classification = "by_design"
+
+[[exceptions]]
+check = "absolute_paths"
+path = "src/mcp_trentina_crunchtools/__init__.py"
+justification = "The literal path is the standard system-wide config location, used only as the default fallback for the configurable TRENTINA_PROFILES_PATH env var."
+classification = "by_design"
+
+[[exceptions]]
+check = "absolute_paths"
+path = "src/mcp_trentina_crunchtools/quarantine/classifier.py"
+justification = "These paths appear only in a docstring documenting which real filesystem locations a third-party library (onnxruntime) touches during telemetry -- the reason this module disables that telemetry. Documentation text, not hardcoded application paths."
+classification = "by_design"
+
+[[exceptions]]
+check = "security_practices"
+path = "cockpit-trentina/trentina.js"
+justification = "Reviewed all 6 innerHTML assignments individually. renderPage's is entirely static markup with no interpolation. renderLayerStatus, addEventRow and showDetectionAlert escape every interpolated string value via escapeHtml() (numeric/enum fields like scores and risk-level are not attacker-controlled strings). renderStats interpolates only numeric counts and fixed risk-level enum keys from server-computed stats. renderDetail had one real gap -- d.l2_label (the L2 classifier's output label) was escaped in addEventRow's table row but not in this detail view -- fixed by adding the same escapeHtml() call rather than excepting it; the dict-key iteration over pipeline stats in the same function uses PipelineStats' own fixed dataclass field names, never attacker-controlled strings."
+classification = "by_design"
+
+[[exceptions]]
+check = "security_practices"
+path = "src/mcp_trentina_crunchtools/defense.py"
+justification = "merge_stats()'s getattr/setattr operate exclusively on names returned by dataclasses.fields() -- the dataclass's own static field definitions -- never on a user- or content-controlled string. This is the standard generic-dataclass-merge reflection pattern, verified by reading the source: no external input reaches the attribute name."
+classification = "by_design"
+
+[[exceptions]]
+check = "vestigial_code"
+path = "src/mcp_trentina_crunchtools/dbus_interface.py"
+justification = "RequestProcessed and DetectionOccurred are @signal()-decorated D-Bus signal declarations (dbus_fast). The function body is intentionally empty -- dbus_fast uses the decorator plus the parameter type-signature strings (\"s\", \"u\") to construct and emit the signal; the function itself is a schema declaration, never executed."
+classification = "by_design"
+
+[[exceptions]]
+check = "vestigial_code"
+path = "src/mcp_trentina_crunchtools/gateway/backend.py"
+justification = "_noop_validate is a deliberate null-object callback substituted for session._validate_tool_result when validate_output is False, matching that callback's exact signature so client-side output schema validation is skipped without special-casing the call site."
+classification = "by_design"
+
+[[exceptions]]
+check = "unsafe_sql_construction"
+path = "src/mcp_trentina_crunchtools/database.py"
+justification = "_migrate()'s ALTER TABLE column name comes from a hardcoded tuple of column names ('profile', 'backend', 'tool', 'direction', 'provenance'), never from user or content input -- SQLite cannot parameterize identifiers (column/table names), only values, so this is the standard safe pattern for programmatic schema migration."
+classification = "by_design"
+
+[[exceptions]]
+check = "primitive_obsession"
+path = "demo/attack-sim/server.py"
+justification = "415 is the standard HTTP status code for Unsupported Media Type, used directly as both the response body text and the status_code argument in this small standalone demo script."
+classification = "by_design"
+
+[[exceptions]]
+check = "hidden_env_config"
+path = "src/mcp_trentina_crunchtools/__init__.py"
+justification = "TRENTINA_LOG_LEVEL, TRENTINA_GATEWAY_ENABLED, TRENTINA_PROFILES_PATH and TRENTINA_LEGACY_MCP are all documented in README.md's Environment Variables table with defaults verified against this file's actual os.environ.get() calls and fallback values."
+classification = "by_design"
+
+[[exceptions]]
+check = "hidden_env_config"
+path = "src/mcp_trentina_crunchtools/config.py"
+justification = "All 15 vars are documented in README.md's Environment Variables table with defaults verified line-by-line against this file's actual DEFAULT_* constants and computed fallbacks. Fixed two real inaccuracies found along the way: docs/blocklist.md and docs/audit-log.md documented QUARANTINE_DB's container default as /data/trentina.db, but the Containerfile actually sets /data/quarantine.db -- corrected both docs. Also deleted DEFAULT_DB_PATH, a dead constant (\"/data/trentina.db\") that was never referenced anywhere; the real default is a computed ~/.local/share/mcp-trentina/trentina.db path."
+classification = "by_design"
+
+[[exceptions]]
+check = "hidden_env_config"
+path = "tests/test_l3_live.py"
+justification = "TRENTINA_LIVE_L3 is a test-only opt-in gate (pytest.mark.skipif) for live-provider integration tests that need a real GEMINI_API_KEY -- it is not part of the deployed application's runtime configuration surface, so it belongs in an exception rather than README's env var reference."
+classification = "by_design"
+
+[[exceptions]]
+check = "dead_structs"
+path = "src/mcp_trentina_crunchtools/quarantine/providers/*.py"
+justification = "AnthropicProvider, GeminiProvider, OllamaProvider and OpenAIProvider are all genuinely constructed with a literal ClassName(...) call in providers/__init__.py's provider-selection factory (from .gemini import GeminiProvider; provider = GeminiProvider(...), etc. for each). The import and construction are inside per-branch conditional code in a factory function, which appears to be why the check's static analysis doesn't link the construction back to the class definition in the sibling file."
+classification = "gourmand_bug"
+
+# ---------------------------------------------------------------------------
+# Findings reviewed while migrating to gourmand 0.16.5 (RT #1482).
+# ---------------------------------------------------------------------------
+
+# Fan-out error isolation. One failing recipient must not abort the others, so
+# these handlers log with context and continue. That is the designed behaviour,
+# not a swallowed error -- every one of them records the exception.
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/gateway/sessions.py"
+justification = "Notifying one session must not abort notification of the rest, so a per-session failure is logged with exc_info and the loop continues. Re-raising would let a single dead subscriber silence every other session."
+classification = "by_design"
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/gateway/compress.py"
+justification = "Pre-compressing one backend must not abort the sweep over the others; the failure is logged with exc_info and the loop continues. The missing exc_info on this handler was a real gap and is fixed in this change."
+classification = "by_design"
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/client.py"
+justification = "Best-effort client teardown. A failure while closing is logged; raising from a cleanup path would mask the original error that caused the teardown."
+classification = "by_design"
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/dbus_interface.py"
+justification = "D-Bus is optional -- the server runs with --no-dbus and the import itself is deferred. A D-Bus failure is logged and the server continues without it rather than taking down the MCP server for an optional integration."
+classification = "by_design"
+
+# Lazy-singleton HTTP client accessors. Three proxies each own one client with
+# its own timeout and header policy; sharing one would couple their lifetimes.
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/gateway/alert_ingress.py"
+justification = "_get_alert_client is the lazy-singleton accessor for this proxy's own httpx client. It is called once because there is one place the client is needed, and it exists so the client is constructed on first use rather than at import."
+classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/gateway/llm_proxy.py"
+justification = "_get_llm_client is the lazy-singleton accessor for this proxy's own httpx client, with the LLM-specific timeout. Same idiom as alert_ingress and matrix_proxy; merging them would couple three independent proxies' client lifetimes."
+classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/gateway/matrix_proxy.py"
+justification = "_get_matrix_client is the lazy-singleton accessor for this proxy's own httpx client. Same idiom as alert_ingress and llm_proxy."
+classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/client.py"
+justification = "_build_redirect_chain is 17 lines of redirect-following bookkeeping. Keeping it out of the request path is what makes that path readable; it is called once because there is one place redirects are followed."
+classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/defense.py"
+justification = "_run_l1 is the L1 defense stage. The stages are named separately because the pipeline's shape is the design -- inlining L1 into its caller would hide one layer of a layered defense."
+classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/quarantine/agent.py"
+justification = "_check_canary is the canary-token check, named so the security control is findable by name rather than buried as three inline statements."
+classification = "by_design"
+
+# Copy-paste detection. Several of these are coincidental structural
+# collisions between functions that share nothing but a statement shape --
+# gourmand matches on structure, not meaning.
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/sanitize/html.py"
+justification = "_has_same_color_text is reported as identical to _safe_endpoint in tools/reconnect.py, and _normalize_color as identical to _validate_file in tools/read.py. These pairs share a guard-then-return statement shape and nothing else -- one detects hidden text in HTML, the others validate an endpoint and a file path. Structural collision, not duplication."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/perimeter_db.py"
+justification = "delete_all_verdicts is reported as identical to _sanitize_l0_output in tools/search.py. One truncates a SQLite table, the other strips fields from a dict. They share only a four-statement shape."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/guards.py"
+justification = "check_parameter_guards is reported as identical to _safe_endpoint in tools/reconnect.py on three statements. Same guard-then-return shape, unrelated purposes."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/auth.py"
+justification = "resolve_profile_by_token and matrix_proxy's _resolve_profile_by_matrix_token are deliberately parallel: each walks the profile table comparing a secret in constant time against a different credential field. Collapsing them into one generic taking a field name would put an attacker-influenced string in the lookup path of the gateway's authentication."
+classification = "by_design"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/sessions.py"
+justification = "SessionRegistry.unsubscribe and explain_missing both look a session up and branch on absence, which is the registry's access pattern. The similarity is the lookup; what follows it differs entirely."
+classification = "by_design"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/quarantine/classifier.py"
+justification = "_classify_segment and classify share the provider-dispatch-and-normalize shape at 88%; one handles a single segment, the other the whole document with segment aggregation on top."
+classification = "by_design"
+
+# Manifest lint suppression -- audited, see the comment block in pyproject.toml.
+
+[[exceptions]]
+check = "manifest_lint_suppression"
+path = "pyproject.toml"
+justification = "Every ignore was measured by emptying the list and counting real hits against src and tests separately. PIE790, S105 and RUF022 had ZERO hits and were deleted. S101 had 1597 hits, all in tests/, and moved to per-file-ignores -- it was never a src concern. The seven that remain are genuinely package-wide in src/: TRY003 (100), TID252 (141), PLC0415 (48, deferred CLI and optional-dependency imports), PLW0603 (29), PLR0913 (12), PLR2004 (10), PLR0917 (6). The per-file entries scope narrower rules to the specific modules that need them."
+classification = "by_design"
+
+# demo/attack-sim is a deliberately adversarial target used to exercise
+# trentina's own quarantine and defense layers. It is not production code and
+# is not linted as such -- but it is deliberately NOT excluded wholesale
+# either, so anything genuinely alarming in it still surfaces.
+
+[[exceptions]]
+check = "silent_fallbacks"
+path = "demo/attack-sim/server.py"
+justification = "A malformed request to the challenge server answers with the expected JSON shape instead of a stack trace, because the client under test is an AI agent being led through a puzzle. Distinguishing failure modes is the opposite of what this fixture is for."
+classification = "by_design"
+
+# Test and benchmark helpers named for readability at the call site.
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "tests/test_content.py"
+justification = "_hash names the digest step so the assertions below read as comparisons rather than nested calls."
+classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "tests/test_gateway_reduce.py"
+justification = "_blocks names the block-extraction step used across the assertions in this file."
+classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "benchmarks/provider_benchmark.py"
+justification = "_cost names the token-to-dollars conversion so the report builder below reads as a report rather than arithmetic."
+classification = "by_design"
+
+[[exceptions]]
+check = "conditional_wrapper"
+path = "tests/test_client.py"
+justification = "handler is an httpx MockTransport callback. Its leading conditional is the routing table -- it branches on the requested URL to decide which canned response to return. The condition cannot move to the call site because the call site is inside httpx."
+classification = "by_design"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/loader.py"
+justification = "_require_env is reported as 100% similar to register_matrix_routes in gateway/matrix_proxy.py on three statements. One reads a required secret from the environment and fails closed; the other registers Starlette routes. They share a guard-then-act shape and nothing else. The genuine duplication this check found in this file -- _resolve_bearer_token reimplementing _require_env line for line, despite _require_env's own docstring claiming to be shared by every token-in-env ingress -- was FIXED in this change rather than excepted."
+classification = "gourmand_bug"

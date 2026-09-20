@@ -116,7 +116,7 @@ The audit table lives in the same SQLite database as the blocklist and compressi
 Operators can reset the audit history with `reset_gateway_calls()`. It is deliberately **not** exposed as an MCP tool: erasing the audit trail is not a capability any consumer profile should hold. Database path is configurable:
 
 ```bash
-QUARANTINE_DB=/data/trentina.db  # default on container
+QUARANTINE_DB=/data/quarantine.db  # default on container
 ```
 
 ## Related

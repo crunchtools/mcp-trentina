@@ -222,7 +222,7 @@
             '<dt class="pf-v6-c-description-list__term">L2 Classify</dt>' +
             '<dd class="pf-v6-c-description-list__description">';
         if (d.l2_label) {
-            html += d.l2_label + ' ' + scoreBar(d.l2_score);
+            html += escapeHtml(d.l2_label) + ' ' + scoreBar(d.l2_score);
         } else {
             html += 'Not available';
         }

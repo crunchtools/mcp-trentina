@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -51,8 +52,6 @@ class TestEmitRequestEvent:
         assert received[0]["output_size"] == 3000
 
     def test_duration_calculated_from_start_time(self) -> None:
-        import time
-
         from mcp_trentina_crunchtools.events import get_event_bus
 
         bus = get_event_bus()
@@ -116,7 +115,10 @@ class TestDbusInterfaceMethods:
             "dbus_fast.service": MagicMock(),
             "dbus_fast.aio": MagicMock(),
         }):
-            pass
+            from mcp_trentina_crunchtools.dbus_interface import _build_interface
+
+            interface = _build_interface()
+            assert interface is not None
 
     def test_on_request_processed_callback(self) -> None:
         from mcp_trentina_crunchtools.events import get_event_bus

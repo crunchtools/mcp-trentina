@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from pydantic import SecretStr
@@ -212,8 +212,6 @@ class TestRegistryAndConfigAgree:
     """
 
     def test_every_registered_processor_is_configurable(self) -> None:
-        from typing import get_args
-
         from mcp_trentina_crunchtools.gateway.profile import ProcessorName
         from mcp_trentina_crunchtools.gateway.reduce import _REGISTRY
 

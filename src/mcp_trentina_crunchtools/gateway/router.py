@@ -44,6 +44,11 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = "2025-03-26"
 NAMESPACE_SEP = "__"
 
+# JSON-RPC 2.0 reserved error codes (https://www.jsonrpc.org/specification#error_object)
+JSONRPC_METHOD_NOT_FOUND = -32601
+JSONRPC_INVALID_PARAMS = -32602
+JSONRPC_INTERNAL_ERROR = -32603
+
 _profile_tools_cache: dict[str, list[dict[str, Any]]] = {}
 _profile_backend_urls: dict[str, set[str]] = {}
 
@@ -158,7 +163,7 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
     if method == "tools/call":
         return await _route_tools_call(profile, req_id, params)
 
-    return _err(req_id, -32601, f"Method not found: {method}")
+    return _err(req_id, JSONRPC_METHOD_NOT_FOUND, f"Method not found: {method}")
 
 
 async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
@@ -285,13 +290,13 @@ async def _route_tools_call(
     if NAMESPACE_SEP not in namespaced_name:
         return _err(
             req_id,
-            -32602,
+            JSONRPC_INVALID_PARAMS,
             f"Tool name {namespaced_name!r} must be <backend>{NAMESPACE_SEP}<tool>",
         )
 
     backend_name, _, tool_name = namespaced_name.partition(NAMESPACE_SEP)
     if not tool_name:
-        return _err(req_id, -32602, f"Empty tool component in {namespaced_name!r}")
+        return _err(req_id, JSONRPC_INVALID_PARAMS, f"Empty tool component in {namespaced_name!r}")
 
     backend = profile.backends.get(backend_name)
     if backend is None:
@@ -302,12 +307,12 @@ async def _route_tools_call(
     if not filter_tools([{"name": tool_name}], backend):
         message = f"Tool {tool_name!r} not permitted on backend {backend_name!r}"
         _audit(profile.name, backend_name, tool_name, Outcome.DENIED_ALLOWLIST, 0, message)
-        return _err(req_id, -32602, message)
+        return _err(req_id, JSONRPC_INVALID_PARAMS, message)
 
     guard_err = check_parameter_guards(tool_name, arguments, backend)
     if guard_err:
         _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, guard_err)
-        return _err(req_id, -32602, guard_err)
+        return _err(req_id, JSONRPC_INVALID_PARAMS, guard_err)
 
     t0 = time.monotonic()
     try:
@@ -324,7 +329,7 @@ async def _route_tools_call(
         duration_ms = int((time.monotonic() - t0) * 1000)
         outcome = classify_exception(exc)
         _audit(profile.name, backend_name, tool_name, outcome, duration_ms, str(exc))
-        return _err(req_id, -32603, str(exc))
+        return _err(req_id, JSONRPC_INTERNAL_ERROR, str(exc))
 
     duration_ms = int((time.monotonic() - t0) * 1000)
     call_outcome = Outcome.TOOL_ERROR if call_result.is_error else Outcome.OK

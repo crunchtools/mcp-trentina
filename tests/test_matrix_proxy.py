@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import typing
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
@@ -132,13 +133,11 @@ class TestMatrixAuth:
         assert resp.status_code == 401
 
     def test_valid_token_proxies(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import json as jsonlib
-
         from starlette.testclient import TestClient
 
         from mcp_trentina_crunchtools.gateway import matrix_proxy
 
-        upstream = _FakeUpstream(jsonlib.dumps({"rooms": {}}).encode())
+        upstream = _FakeUpstream(json.dumps({"rooms": {}}).encode())
         monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
 
         client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
@@ -175,13 +174,11 @@ class TestMatrixSyncScanning:
     def test_hostile_sync_is_annotated_not_modified(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import json as jsonlib
-
         from starlette.testclient import TestClient
 
         from mcp_trentina_crunchtools.gateway import matrix_proxy
 
-        upstream = _FakeUpstream(jsonlib.dumps(self.HOSTILE_SYNC).encode())
+        upstream = _FakeUpstream(json.dumps(self.HOSTILE_SYNC).encode())
         monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
 
         client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
@@ -197,14 +194,12 @@ class TestMatrixSyncScanning:
     def test_clean_sync_passes_untouched(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import json as jsonlib
-
         from starlette.testclient import TestClient
 
         from mcp_trentina_crunchtools.gateway import matrix_proxy
 
         clean = {"rooms": {}, "next_batch": "s1"}
-        upstream = _FakeUpstream(jsonlib.dumps(clean).encode())
+        upstream = _FakeUpstream(json.dumps(clean).encode())
         monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
 
         client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
@@ -214,13 +209,11 @@ class TestMatrixSyncScanning:
     def test_non_message_endpoints_are_not_buffered(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        import json as jsonlib
-
         from starlette.testclient import TestClient
 
         from mcp_trentina_crunchtools.gateway import matrix_proxy
 
-        upstream = _FakeUpstream(jsonlib.dumps({"versions": ["v1.11"]}).encode())
+        upstream = _FakeUpstream(json.dumps({"versions": ["v1.11"]}).encode())
         monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
 
         client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))

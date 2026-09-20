@@ -60,28 +60,37 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "S", "B", "C4", "C901", "DTZ", "T10", "ISC", "PIE", "PT", "RET", "SIM", "TID", "TCH", "ARG", "PLC", "PLE", "PLR", "PLW", "TRY", "RUF"]
+# Audited rule by rule (RT #1482) by emptying this list and counting real hits
+# against `src` and `tests` separately -- the scope CI lints. PIE790, S105 and
+# RUF022 had ZERO hits and were deleted. S101 had 1597 hits, every one of them
+# in tests/, and moved to per-file-ignores below; it was never a src concern.
+# The seven that remain are all genuinely package-wide in src/.
 ignore = [
-    "S101",     # assert allowed in tests
-    "TRY003",   # long exception messages ok
-    "PLR0913",  # many arguments ok for tools
-    "PLR0917",  # many positional arguments ok for tools (newer ruff enforces this)
-    "PLR2004",  # magic numbers ok (HTTP status codes, limits)
-    "PLW0603",  # global statement ok for singletons
-    "PIE790",   # pass in empty classes ok
-    "PLC0415",  # imports in tests ok
-    "S105",     # hardcoded passwords in tests ok
-    "TID252",   # relative imports in package ok
-    "RUF022",   # __all__ sorted by category, not alphabetically
+    "TRY003",   # 100 hits: exception messages built at the raise site
+    "TID252",   # 141 hits: this package's own internal relative imports
+    "PLC0415",  # 48 hits: deferred CLI imports and optional-dependency imports
+                #   (e.g. `from .dbus_interface import start_dbus` only when
+                #   --no-dbus is absent), concentrated in __init__ and dbus_interface
+    "PLW0603",  # 29 hits: module-level lazy singletons
+    "PLR0913",  # 12 hits: MCP tool signatures mirror the wire API
+    "PLR2004",  # 10 hits: HTTP status codes and byte limits
+    "PLR0917",  # 6 hits: ditto, positional
 ]
 
 [tool.ruff.lint.pylint]
 max-branches = 10
 max-statements = 50
 
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S105", "S106", "S108", "PLC0415", "PLR2004", "ARG002", "ARG005", "RUF003", "PT018", "TC003"]
+"tests/*" = ["S101", "S105", "S106", "S108", "PLC0415", "PLR2004", "ARG002", "ARG005", "RUF003", "PT018", "TC003"]
 "src/mcp_trentina_crunchtools/dbus_interface.py" = ["UP037", "C901", "TRY300"]
 "src/mcp_trentina_crunchtools/gateway/app.py" = ["C901", "PLR0911", "PLR0912"]
+# Request handler: each early return is a distinct HTTP failure response
+# (401, 404, 500, ...). Same shape as gateway/app.py above.
+"src/mcp_trentina_crunchtools/gateway/alert_ingress.py" = ["PLR0911"]
 # E402: the benchmark inserts the repo root on sys.path before importing the
 # corpus and package, so those imports intentionally follow that setup.
 # PLR0915: render_markdown is a linear report builder — many append statements,
