@@ -1,0 +1,13 @@
+# gourmand-audit-ledger.toml — managed by `gourmand audit --sign-off`
+# Do not edit manually.
+
+[entries.e43cda927a49f957]
+schema_version = 1
+reviewed_at_commit = "13098503e2cc16d7792c4cb11778fbd79c96f4a8"
+reviewed_at_date = "2026-09-20T12:40:31Z"
+tool_version = "0.16.5"
+
+[entries.e43cda927a49f957.location_hashes]
+e93d506510940941 = "17910c05a2569082"
+c6aca1c5c27a8da0 = "e685eb11f0178d40"
+dcfaaea474ae7031 = "aad00369524322d4"
