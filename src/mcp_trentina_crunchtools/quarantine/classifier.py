@@ -119,7 +119,11 @@ def _classify_segment(input_ids: list[int], attention_mask: list[int]) -> tuple[
         "attention_mask": np.array([attention_mask], dtype=np.int64),
     }
 
-    assert _session is not None  # guaranteed by is_classifier_available() check
+    if _session is None:
+        # is_classifier_available() guards every caller of this function, so
+        # this should be unreachable -- fail loudly rather than silently
+        # under python -O if that invariant ever breaks.
+        raise RuntimeError("_classify_segment called without a loaded classifier session")
     outputs = _session.run(None, inputs)
     logits = outputs[0][0]
 

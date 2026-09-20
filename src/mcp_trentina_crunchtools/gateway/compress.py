@@ -34,6 +34,8 @@ _profiles: dict[str, Profile] | None = None
 _compress_triggered: bool = False
 _compress_task: asyncio.Task[dict[str, int]] | None = None
 
+COMPRESS_MAX_OUTPUT_TOKENS = 4096
+
 COMPRESS_SYSTEM_PROMPT = """\
 You are a tool description compressor. Given MCP tool descriptions, produce \
 the shortest possible version of each that preserves:
@@ -166,7 +168,10 @@ async def precompress_all(
                 )
                 stats[backend_name] = count
             except Exception:
-                logger.warning("compress: backend %s failed, skipping", backend_name)
+                logger.warning(
+                    "compress: backend %s failed, skipping", backend_name,
+                    exc_info=True,
+                )
             await asyncio.sleep(DELAY_BETWEEN_BACKENDS)
 
     total = sum(stats.values())
@@ -275,7 +280,7 @@ async def _call_compress_model(
                 user_content=user_content,
                 response_schema=COMPRESS_RESPONSE_SCHEMA,
                 temperature=0.1,
-                max_output_tokens=4096,
+                max_output_tokens=COMPRESS_MAX_OUTPUT_TOKENS,
             )
             parsed = json.loads(provider_result.text)
             return _parse_compress_response(parsed)

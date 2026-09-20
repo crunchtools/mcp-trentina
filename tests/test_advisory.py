@@ -8,7 +8,7 @@ to less-secure tools like curl/wget.
 from __future__ import annotations
 
 import functools
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -245,8 +245,6 @@ class TestScanErrorBody:
 
     @pytest.mark.asyncio
     async def test_l2_malicious_is_suspicious(self) -> None:
-        from unittest.mock import MagicMock
-
         with (
             patch(
                 "mcp_trentina_crunchtools.defense.classify_async",

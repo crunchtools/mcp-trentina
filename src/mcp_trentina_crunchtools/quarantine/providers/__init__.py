@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 _provider_cache: dict[tuple[str, str, str], Provider] = {}
 
-__all__ = ["Provider", "ProviderResult", "get_provider", "get_fallback_providers"]
+__all__ = ["Provider", "ProviderResult", "get_fallback_providers", "get_provider"]
 
 _DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 

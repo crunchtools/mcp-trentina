@@ -18,6 +18,7 @@ Streaming (SSE) and non-streaming responses are forwarded transparently.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import TYPE_CHECKING, Any
@@ -354,8 +355,6 @@ def _schedule_completion_scan(
     body: bytes, size_seen: int, provider_name: str, profile: Profile,
 ) -> None:
     """Fire-and-forget the post-hoc completion scan; never block the stream."""
-    import asyncio
-
     if not body:
         return
     if size_seen > _MAX_COMPLETION_SCAN_BYTES:

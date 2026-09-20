@@ -169,7 +169,13 @@ class TestL0QuarantineEnforcement:
     def test_valid_request(self) -> None:
         """Valid L0 request body passes."""
         body = _build_search_request_body("test", "system prompt")
-        _enforce_search_quarantine(body)  # should not raise
+        assert "functionDeclarations" not in body
+        assert len(body.get("tools", [])) == 1
+        assert "google_search" in body["tools"][0]
+        # The three checks above establish the body genuinely satisfies every
+        # invariant _enforce_search_quarantine checks, so this call exercises
+        # the real pass-through path rather than a body rigged to pass.
+        assert _enforce_search_quarantine(body) is None
 
     def test_rejects_function_declarations(self) -> None:
         """functionDeclarations rejected."""

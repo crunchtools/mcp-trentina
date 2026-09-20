@@ -77,7 +77,7 @@ Some legitimate sources trigger the classifier due to security-adjacent content 
 The blocklist is stored in the same SQLite database as the audit log and compression cache. The table is append-only and survives container restarts when the database is mounted on a persistent volume:
 
 ```bash
-QUARANTINE_DB=/data/trentina.db
+QUARANTINE_DB=/data/quarantine.db
 ```
 
 ## Related

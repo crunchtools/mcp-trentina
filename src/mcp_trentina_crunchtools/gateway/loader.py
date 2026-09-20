@@ -89,11 +89,9 @@ def _build_profile(name: str, body: Any) -> Profile:
 
 
 def _resolve_bearer_token(name: str, profile: Profile) -> None:
-    env_name = profile.auth.bearer_token_env
-    token_value = os.environ.get(env_name, "")
-    if not token_value:
-        raise ProfileConfigError(f"Profile {name!r}: env var {env_name} not set or empty")
-    profile.auth.bearer_token = SecretStr(token_value)
+    profile.auth.bearer_token = _require_env(
+        name, profile.auth.bearer_token_env, "bearer token",
+    )
 
 
 def _resolve_llm_key_secrets(name: str, profile: Profile) -> None:

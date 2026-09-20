@@ -125,8 +125,24 @@ these variables control the process itself. Profile tokens
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TRENTINA_LOG_LEVEL` | `INFO` | Application log level, sent to stderr. Any standard Python level name. |
-| `OLLAMA_MODEL` | `qwen2.5:0.5b` | Model used when the Ollama provider is selected. See [LLM Key Proxying](docs/llm-proxying.md). |
+| `TRENTINA_GATEWAY_ENABLED` | unset (disabled) | Turns on the MCP gateway (profiles, auth, allowlists, audit). See [MCP Gateway](docs/gateway.md). |
+| `TRENTINA_PROFILES_PATH` | `/etc/trentina/profiles.yaml` | Path to the gateway's profile YAML file. See [Per-Agent Profiles](docs/profiles.md). |
 | `TRENTINA_LEGACY_MCP` | unset (disabled) | Restores the pre-gateway unguarded `/mcp` endpoint. **Bypasses auth, allowlists and audit** — migration aid only. See [MCP Gateway](docs/gateway.md). |
+| `TRENTINA_MODEL_PROVIDER` | `gemini` | Global LLM provider for L3 Q-Agent and tool-description compression, overridable per-profile. See [Per-Agent Profiles](docs/profiles.md). |
+| `TRENTINA_PROVIDER_FALLBACK` | unset (none) | Comma-separated provider names to fall back to if `TRENTINA_MODEL_PROVIDER` is unavailable. |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Base URL for the Ollama provider. |
+| `OLLAMA_MODEL` | `qwen2.5:0.5b` | Model used when the Ollama provider is selected. See [LLM Key Proxying](docs/llm-proxying.md). |
+| `QUARANTINE_MODEL` | `gemini-2.5-flash-lite` | Model used for quarantine agent (L3) extraction/detection calls. |
+| `QUARANTINE_SEARCH_MODEL` | `gemini-2.5-flash` | Model used for grounded L0 search. |
+| `QUARANTINE_FALLBACK` | `layer1` | Behavior when the LLM provider is unavailable during quarantine processing. |
+| `QUARANTINE_MAX_CONTENT` | `100000` | Max characters of content sent to the quarantine LLM per call. See [Token Routing](docs/token-routing.md). |
+| `CLASSIFIER_THRESHOLD` | `0.5` | Malicious-score threshold above which the L2 classifier flags content. |
+| `CLASSIFIER_MODEL_PATH` | `/models/prompt-guard-2-86m` | Filesystem path to the ONNX classifier model. Set to `/models/prompt-guard-2-86m` by the container image. |
+| `CLASSIFIER_MAX_TOKENS` | `32768` | Max tokens the L2 classifier will scan before truncating. |
+| `CLASSIFIER_THREADS` | `4` | ONNX Runtime intra-op thread count for the L2 classifier. |
+| `QUARANTINE_DB` | `~/.local/share/mcp-trentina/trentina.db` (container: `/data/quarantine.db`) | Path to the main SQLite database (blocklist, audit log). See [Audit Log](docs/audit-log.md) and [Blocklist](docs/blocklist.md). |
+| `TRENTINA_PERIMETER_DB` | `<QUARANTINE_DB's directory>/perimeter.db` | Path to the perimeter verdict-cache database, deliberately separate from `QUARANTINE_DB`. |
+| `QUARANTINE_TRUST_CONFIG` | `~/.config/mcp-env/mcp-trentina-trust.json` | Path to the trust-level configuration JSON. See [Quarantine Tools](docs/quarantine-tools.md). |
 
 ## Development
 

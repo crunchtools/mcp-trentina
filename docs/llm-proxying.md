@@ -10,7 +10,7 @@ API key theft is particularly dangerous because:
 
 - **Keys are reusable** — unlike session tokens, API keys don't expire on use
 - **Keys grant broad access** — a Gemini API key lets the attacker make arbitrary model calls, potentially running up costs or accessing fine-tuned models
-- **Exfiltration is subtle** — an agent can embed a key in an outbound API call or tool response without obviously malicious behavior
+- **Exfiltration is subtle** — an agent can embed a key in an outbound API call or tool response without triggering existing malicious-payload detection
 
 ## How It Works
 

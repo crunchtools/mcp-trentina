@@ -266,7 +266,12 @@ class TestRuntimeChecks:
             system_prompt="test",
             response_schema=EXTRACTION_RESPONSE_SCHEMA,
         )
-        _enforce_quarantine(body)
+        assert "tools" not in body
+        assert "functionDeclarations" not in body
+        # Must return None without raising -- the two checks above establish
+        # the body genuinely has neither forbidden key, so this call is the
+        # real thing being tested, not a body already rigged to pass.
+        assert _enforce_quarantine(body) is None
 
 
 class TestPostExtractionSanitization:

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from unittest.mock import patch
+import time
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from pydantic import SecretStr
@@ -92,7 +93,10 @@ class TestCircuitBreakerCallbacks:
     def test_callback_exception_does_not_propagate(self) -> None:
         cb = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.01)
         cb.on_state_change(lambda url, old, new: (_ for _ in ()).throw(RuntimeError("boom")))
+        # record_failure must not raise even though the callback does, and the
+        # breaker's own state transition must still have happened.
         cb.record_failure("http://test/mcp")
+        assert cb.get_state("http://test/mcp") is State.OPEN
 
 
 class TestStreamableHTTPPost:
@@ -134,8 +138,6 @@ class TestStreamableHTTPPost:
             headers=AUTH,
         )
         session_id = resp.headers[MCP_SESSION_ID_HEADER]
-
-        import time
 
         time.sleep(0.01)
         resp2 = client.post(
@@ -470,8 +472,6 @@ class TestBackwardsCompatibility:
         assert resp.status_code == 400
 
     def test_tools_call_dispatch(self) -> None:
-        from unittest.mock import AsyncMock
-
         mock_route = AsyncMock(return_value={
             "jsonrpc": "2.0",
             "id": 1,

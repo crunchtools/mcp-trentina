@@ -33,7 +33,7 @@ from .errors import (
     GatewayError,
     ProfileNotFoundError,
 )
-from .router import route_jsonrpc
+from .router import JSONRPC_INTERNAL_ERROR, JSONRPC_INVALID_PARAMS, route_jsonrpc
 from .sessions import SessionRegistry, session_registry
 
 if TYPE_CHECKING:
@@ -299,6 +299,13 @@ async def _handle_post(
     try:
         body_bytes = await request.body()
     except Exception:
+        # Same reasoning as alert_ingress: 400 is correct for every cause, but
+        # discarding the cause loses the only signal that separates a flaky
+        # client from someone probing the gateway.
+        logger.warning(
+            "gateway: could not read request body profile=%s", profile_name,
+            exc_info=True,
+        )
         return _plain(400, "Bad Request: cannot read body")
 
     if not body_bytes:
@@ -337,7 +344,7 @@ async def _handle_post(
             {
                 "jsonrpc": "2.0",
                 "id": body.get("id"),
-                "error": {"code": -32602, "message": str(exc)},
+                "error": {"code": JSONRPC_INVALID_PARAMS, "message": str(exc)},
             }
         )
     except ProfileNotFoundError:
@@ -347,7 +354,7 @@ async def _handle_post(
             {
                 "jsonrpc": "2.0",
                 "id": body.get("id"),
-                "error": {"code": -32603, "message": str(exc)},
+                "error": {"code": JSONRPC_INTERNAL_ERROR, "message": str(exc)},
             },
             status_code=502,
         )
@@ -357,7 +364,7 @@ async def _handle_post(
             {
                 "jsonrpc": "2.0",
                 "id": body.get("id"),
-                "error": {"code": -32603, "message": "Internal gateway error"},
+                "error": {"code": JSONRPC_INTERNAL_ERROR, "message": "Internal gateway error"},
             },
             status_code=500,
         )
@@ -367,7 +374,7 @@ async def _handle_post(
             {
                 "jsonrpc": "2.0",
                 "id": body.get("id"),
-                "error": {"code": -32603, "message": "Internal error"},
+                "error": {"code": JSONRPC_INTERNAL_ERROR, "message": "Internal error"},
             },
             status_code=500,
         )
