@@ -191,9 +191,14 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     register_alert_routes(mcp_server, gateway_config.profiles)
 
     from .gateway.backend import load_tool_list_cache
+    from .gateway.ingress_defense import load_verdict_cache
 
     load_compression_cache()
     load_tool_list_cache()
+    # Perimeter verdicts survive the restart that produced them. Without
+    # this the first tools/list after a restart re-judges every description
+    # through all three layers and times the client out.
+    load_verdict_cache()
     set_profiles(gateway_config.profiles)
 
     _warm_classifier()
