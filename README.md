@@ -115,6 +115,19 @@ export TRENTINA_PROFILE_MYAGENT_TOKEN=your-token
 | [Cockpit Plugin](docs/cockpit-plugin.md) | Live defense pipeline dashboard |
 | [Internal: Gateway Design](docs/internal/gateway-design.md) | Original design document for contributors |
 
+## Environment Variables
+
+Trentina reads its gateway, profile and backend configuration from a YAML file;
+these variables control the process itself. Profile tokens
+(`TRENTINA_PROFILE_<NAME>_TOKEN`) and provider API keys are covered in
+[Per-Agent Profiles](docs/profiles.md) and [LLM Key Proxying](docs/llm-proxying.md).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TRENTINA_LOG_LEVEL` | `INFO` | Application log level, sent to stderr. Any standard Python level name. |
+| `OLLAMA_MODEL` | `qwen2.5:0.5b` | Model used when the Ollama provider is selected. See [LLM Key Proxying](docs/llm-proxying.md). |
+| `TRENTINA_LEGACY_MCP` | unset (disabled) | Restores the pre-gateway unguarded `/mcp` endpoint. **Bypasses auth, allowlists and audit** — migration aid only. See [MCP Gateway](docs/gateway.md). |
+
 ## Development
 
 ```bash
