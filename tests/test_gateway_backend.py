@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from mcp_trentina_crunchtools.gateway.backend import (
     _tool_list_cache,
@@ -31,28 +32,25 @@ def _backend(
     return Backend(url=url, timeout_seconds=timeout, list_timeout_seconds=list_timeout)
 
 
-class _FakeTool:
-    def __init__(self, name: str) -> None:
-        self.name = name
-        self.description = ""
-        self.inputSchema: dict[str, Any] = {}
+# Real SDK models, not hand-rolled stand-ins. Fakes carrying hand-written
+# attribute names cannot detect an SDK field rename -- they kept reporting
+# camelCase long after the SDK moved to snake_case, so the suite stayed green
+# while the serializers read fields that no longer existed. Building the real
+# types means a future rename fails here instead of in production.
+def _tools_result(names: list[str] | None = None) -> ListToolsResult:
+    return ListToolsResult(
+        tools=[
+            Tool(name=n, description="", input_schema={})
+            for n in (names or ["some_tool"])
+        ]
+    )
 
 
-class _FakeToolsResult:
-    def __init__(self, names: list[str] | None = None) -> None:
-        self.tools = [_FakeTool(n) for n in (names or ["some_tool"])]
-
-
-class _FakeCallResult:
-    def __init__(self) -> None:
-        self.content = [_FakeTextBlock()]
-        self.isError = False
-        self.structuredContent = None
-
-
-class _FakeTextBlock:
-    type = "text"
-    text = "ok"
+def _call_result() -> CallToolResult:
+    return CallToolResult(
+        content=[TextContent(type="text", text="ok")],
+        is_error=False,
+    )
 
 
 URL = "http://mcp-rotv:8080/mcp"
@@ -85,8 +83,8 @@ class TestListBackendToolsCircuit:
         breaker.record_failure(URL)
         assert breaker.get_state(URL) is State.CLOSED
 
-        async def ok_transport(_url: str, _headers: Any) -> _FakeToolsResult:
-            return _FakeToolsResult()
+        async def ok_transport(_url: str, _headers: Any) -> ListToolsResult:
+            return _tools_result()
 
         with patch(
             "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
@@ -141,8 +139,8 @@ class TestListBackendToolsCircuit:
             captured_timeout.append(timeout)
             return await original_wait_for(coro, timeout=timeout)
 
-        async def ok_transport(_url: str, _headers: Any) -> _FakeToolsResult:
-            return _FakeToolsResult()
+        async def ok_transport(_url: str, _headers: Any) -> ListToolsResult:
+            return _tools_result()
 
         backend = _backend(timeout=30.0, list_timeout=7.5)
         with (
@@ -184,8 +182,8 @@ class TestCallBackendToolCircuit:
         breaker.record_failure(URL)
         breaker.record_failure(URL)
 
-        async def ok_transport(*_args: Any, **_kwargs: Any) -> _FakeCallResult:
-            return _FakeCallResult()
+        async def ok_transport(*_args: Any, **_kwargs: Any) -> CallToolResult:
+            return _call_result()
 
         with patch(
             "mcp_trentina_crunchtools.gateway.backend._do_call_tool",
@@ -221,8 +219,8 @@ class TestCallBackendToolCircuit:
             captured_timeout.append(timeout)
             return await original_wait_for(coro, timeout=timeout)
 
-        async def ok_transport(*_args: Any, **_kwargs: Any) -> _FakeCallResult:
-            return _FakeCallResult()
+        async def ok_transport(*_args: Any, **_kwargs: Any) -> CallToolResult:
+            return _call_result()
 
         backend = _backend(timeout=30.0, list_timeout=7.5)
         with (
@@ -247,10 +245,10 @@ class TestBackendToolListCache:
     async def test_cache_hit_skips_transport(self) -> None:
         call_count = 0
 
-        async def counting_transport(_url: str, _headers: Any) -> _FakeToolsResult:
+        async def counting_transport(_url: str, _headers: Any) -> ListToolsResult:
             nonlocal call_count
             call_count += 1
-            return _FakeToolsResult()
+            return _tools_result()
 
         with patch(
             "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
@@ -264,9 +262,9 @@ class TestBackendToolListCache:
     async def test_cache_keyed_by_url(self) -> None:
         urls_called: list[str] = []
 
-        async def tracking_transport(url: str, _headers: Any) -> _FakeToolsResult:
+        async def tracking_transport(url: str, _headers: Any) -> ListToolsResult:
             urls_called.append(url)
-            return _FakeToolsResult()
+            return _tools_result()
 
         url_a = "http://backend-a:8000/mcp"
         url_b = "http://backend-b:8000/mcp"
@@ -287,8 +285,8 @@ class TestBackendToolListCache:
         Behavior change: serving the last-known-good list through an outage is
         the whole point — a backend blip must not collapse the tool list.
         """
-        async def ok_transport(_url: str, _headers: Any) -> _FakeToolsResult:
-            return _FakeToolsResult()
+        async def ok_transport(_url: str, _headers: Any) -> ListToolsResult:
+            return _tools_result()
 
         with patch(
             "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
@@ -316,8 +314,8 @@ class TestBackendToolListCache:
 
     async def test_call_failure_does_not_evict_list_cache(self) -> None:
         """A failed tool call must not evict the cached tool list."""
-        async def ok_list(_url: str, _headers: Any) -> _FakeToolsResult:
-            return _FakeToolsResult()
+        async def ok_list(_url: str, _headers: Any) -> ListToolsResult:
+            return _tools_result()
 
         with patch(
             "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
@@ -355,11 +353,11 @@ class TestBackendToolListCache:
         call_count = 0
         release = asyncio.Event()
 
-        async def slow_transport(_url: str, _headers: Any) -> _FakeToolsResult:
+        async def slow_transport(_url: str, _headers: Any) -> ListToolsResult:
             nonlocal call_count
             call_count += 1
             await release.wait()
-            return _FakeToolsResult()
+            return _tools_result()
 
         with patch(
             "mcp_trentina_crunchtools.gateway.backend._do_list_tools",

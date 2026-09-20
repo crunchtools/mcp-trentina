@@ -85,7 +85,7 @@ scan and takes the gateway down with it.
 uv run ruff check src tests    # Lint
 uv run mypy src                # Type check
 uv run pytest -v               # Test
-podman run --rm -v .:/repo:Z quay.io/crunchtools/gourmand:latest --full /repo  # Slop detection
+podman run --rm -v .:/repo:Z quay.io/crunchtools/gourmand:latest check /repo  # Slop detection
 # Container image: built by GHA (.github/workflows/container.yml), never locally —
 # the model-export stage needs a gated HF credential held only in CI. Push and let
 # the pipeline build it.

@@ -116,8 +116,14 @@ RUN tr -d - < /proc/sys/kernel/random/uuid > /etc/machine-id.seed
 # ============================================================
 FROM quay.io/hummingbird/python:latest
 
+# Supplied by CI from the release metadata. It was a hardcoded "0.4.0" that
+# went unchanged through every release up to 0.7.0, so the image labelled
+# itself with a version it had not been for a long time. A default is kept so
+# a local build still works; CI always overrides it.
+ARG VERSION=0.0.0-dev
+
 LABEL name="mcp-trentina-crunchtools" \
-      version="0.4.0" \
+      version="${VERSION}" \
       summary="Secure MCP server for quarantined web content extraction" \
       description="Three-layer defense against prompt injection: deterministic sanitization + Prompt Guard 2 classifier + quarantined LLM" \
       maintainer="crunchtools.com" \

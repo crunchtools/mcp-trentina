@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .config import get_config
@@ -157,7 +157,7 @@ def record_detection(
     semantics and step 7's calibration read.
     """
     db = get_db()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     cursor = db.execute(
         "INSERT INTO detections (source_type, source, domain, detected_at, "
         "layer1_stats, qagent_assessment, risk_level, blocked, "
@@ -335,7 +335,7 @@ def save_compression(
 ) -> None:
     """Persist a compressed description to SQLite."""
     db = get_db()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     db.execute(
         "INSERT OR REPLACE INTO tool_compressions "
         "(description_hash, original_description, compressed_description, "
@@ -385,7 +385,7 @@ def save_tool_list(
 ) -> None:
     """Persist a tool list to SQLite."""
     db = get_db()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     db.execute(
         "INSERT OR REPLACE INTO tool_list_cache "
         "(backend_url, tools_json, cached_at) VALUES (?, ?, ?)",

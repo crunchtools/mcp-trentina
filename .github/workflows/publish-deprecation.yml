@@ -17,8 +17,11 @@ jobs:
         with:
           version: "latest"
 
+      # Single-version job: pinned to the NEWEST supported Python, which is
+      # what the container runs. Anything that cannot run across the whole
+      # matrix is tested on production's version. See constitution III.
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv python install 3.14
 
       - name: Build deprecation package
         working-directory: deprecation

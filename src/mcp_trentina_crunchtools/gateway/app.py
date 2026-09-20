@@ -221,7 +221,7 @@ async def _sse_event_stream(
                 notification = await asyncio.wait_for(
                     queue.get(), timeout=keepalive_seconds
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if not sessions.is_active(session_id):
                     return
                 yield ": keepalive\n\n"

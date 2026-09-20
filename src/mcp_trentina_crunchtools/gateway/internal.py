@@ -22,7 +22,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .backend import BackendCall, _serialize_content_block, _serialize_tool
+from .backend import (
+    BackendCall,
+    _field,
+    _serialize_content_block,
+    _serialize_tool,
+)
 from .errors import BackendCallError
 
 logger = logging.getLogger(__name__)
@@ -49,6 +54,32 @@ def internal_server_registered() -> bool:
     return _server is not None
 
 
+async def _walk_server_tools(server: Any) -> list[Any]:
+    """Enumerate a FastMCP server's tools across both framework generations.
+
+    fastmcp 2.x exposed ``get_tools()`` returning a ``{name: Tool}`` dict;
+    fastmcp 4.x removed it in favour of ``list_tools()`` returning a list.
+    Accept either shape so the gateway is not pinned to one framework
+    generation by its own internal backend.
+
+    Raises:
+        AttributeError: the server exposes neither enumeration method. Raised
+            bare so the caller's existing handler wraps it in BackendCallError
+            with the offending type name.
+    """
+    for method in ("list_tools", "get_tools"):
+        walk = getattr(server, method, None)
+        if walk is None:
+            continue
+        tools = await walk()
+        # dict on fastmcp 2.x, list on 4.x.
+        return list(tools.values()) if hasattr(tools, "values") else list(tools)
+
+    raise AttributeError(
+        f"{type(server).__name__} exposes neither list_tools() nor get_tools()"
+    )
+
+
 async def list_internal_tools() -> list[dict[str, Any]]:
     """Fetch trentina's own tool list, serialized like a remote backend's.
 
@@ -62,7 +93,7 @@ async def list_internal_tools() -> list[dict[str, Any]]:
     if _server is None:
         raise BackendCallError("internal tool backend not registered")
     try:
-        tools = list((await _server.get_tools()).values())
+        tools = await _walk_server_tools(_server)
     except Exception as exc:
         logger.warning("gateway: internal list_tools failed err=%s", exc)
         raise BackendCallError(
@@ -95,9 +126,9 @@ async def call_internal_tool(tool_name: str, arguments: dict[str, Any]) -> Backe
         ) from exc
 
     content = [_serialize_content_block(block) for block in result.content]
-    structured = getattr(result, "structured_content", None)
+    structured = _field(result, "structured_content", "structuredContent")
     return BackendCall(
         content=content,
-        is_error=bool(getattr(result, "is_error", False)),
+        is_error=bool(_field(result, "is_error", "isError", False)),
         structured_content=structured if isinstance(structured, dict) else None,
     )
