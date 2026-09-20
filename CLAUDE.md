@@ -17,6 +17,9 @@ uv run mcp-trentina-crunchtools
 - `QUARANTINE_FALLBACK` — "layer1" (default) or "fail"
 - `QUARANTINE_MAX_CONTENT` — Max chars to Q-Agent (default: 100000)
 - `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-trentina/trentina.db)
+- `TRENTINA_PERIMETER_DB` — perimeter verdict store, a SEPARATE database from the
+  blocklist (default: `perimeter.db` beside `QUARANTINE_DB`). See `perimeter_db.py`
+  for why it is its own file. Deleting it costs one slow restart and nothing else.
 - `QUARANTINE_TRUST_CONFIG` — Trust allowlist JSON path
 - `CLASSIFIER_THRESHOLD` — L2 malicious score cutoff (default: 0.5)
 - `CLASSIFIER_MODEL_PATH` — Prompt Guard 2 ONNX dir (default: /models/prompt-guard-2-86m)
@@ -94,6 +97,9 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
 - `quarantine/` — Layer 2: Q-Agent (Gemini REST via httpx, NO SDK, NO tools)
 - `tools/` — Tool implementations called by server.py wrappers
 - `database.py` — SQLite blocklist for cumulative detection memory
+- `perimeter_db.py` — the perimeter's own store, deliberately a second database:
+  verdicts `defend()` reached, so a restart does not re-judge ~210 tool
+  descriptions through all three layers before the first `tools/list` answers
 - `preprocess/` — Token reduction, OUTSIDE the perimeter. Makes payloads
   smaller, never safer; everything it emits still crosses `defend()`.
   - `petit.py` — line grouping via the `petit-log` package (petit itself,

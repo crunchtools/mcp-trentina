@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import contextlib
+import pathlib
 
 import pytest
 
 from mcp_trentina_crunchtools import config as config_mod
 from mcp_trentina_crunchtools import database as database_mod
+from mcp_trentina_crunchtools import perimeter_db as perimeter_db_mod
 from mcp_trentina_crunchtools.gateway.backend import reset_tool_list_cache
 from mcp_trentina_crunchtools.gateway.circuit import breaker
 from mcp_trentina_crunchtools.gateway.ingress_defense import reset_verdict_cache
@@ -33,6 +35,27 @@ def _reset_singletons() -> None:
             # part that matters.
             database_mod._db.close()
         database_mod._db = None
+    # Same for the perimeter store, which is a second connection with the
+    # same thread affinity.
+    if perimeter_db_mod._db is not None:
+        with contextlib.suppress(Exception):
+            perimeter_db_mod._db.close()
+        perimeter_db_mod._db = None
+
+
+@pytest.fixture(autouse=True)
+def _isolated_perimeter_store(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Never let a test write the developer's real perimeter store.
+
+    ``scan_tool_list`` persists every verdict it reaches, so without this a
+    unit test leaves rows in ~/.local/share/mcp-trentina/perimeter.db — and
+    a verdict cached from a mocked pipeline is exactly the kind of row that
+    should not outlive the test that invented it.
+    """
+    monkeypatch.setenv("TRENTINA_PERIMETER_DB", str(tmp_path / "perimeter.db"))
+    config_mod._config = None
 
 
 @pytest.fixture(autouse=True)
