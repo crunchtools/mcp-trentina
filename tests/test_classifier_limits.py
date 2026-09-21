@@ -19,6 +19,8 @@ import pytest
 
 from mcp_trentina_crunchtools.errors import UnscannableContentError
 from mcp_trentina_crunchtools.quarantine.classifier import (
+    WINDOW_CONTENT_TOKENS,
+    WINDOW_SPECIAL_TOKENS,
     WINDOW_STRIDE,
     WINDOW_TOKENS,
     classifier_status,
@@ -55,6 +57,11 @@ def mocked_model(token_count: int, max_tokens: int = MAX_TOKENS) -> Iterator[Mag
 
     tokenizer = MagicMock(side_effect=tokenize)
     tokenizer.decode.return_value = "decoded segment"
+    # Match DebertaV2Tokenizer, which is what Prompt Guard 2 ships with.
+    tokenizer.cls_token_id = 1
+    tokenizer.sep_token_id = 2
+    tokenizer.pad_token_id = 0
+    tokenizer.num_special_tokens_to_add.return_value = 2
 
     session = MagicMock()
     session.run.return_value = [np.array([[5.0, -5.0, -5.0]])]
@@ -273,11 +280,20 @@ class TestWindowGeometry:
     is a real speedup and a real risk if taken too far, so pin both ends.
     """
 
-    GUARD_BAND = WINDOW_TOKENS - WINDOW_STRIDE
+    # Stated against CONTENT, not the raw window: the special tokens take two
+    # of the 512 slots, so a window carries 510 tokens of input. Measuring the
+    # band against WINDOW_TOKENS reports 64 while the code delivers 62 -- the
+    # exact drift between a constant and the implementation this file exists
+    # to prevent.
+    GUARD_BAND = WINDOW_CONTENT_TOKENS - WINDOW_STRIDE
+
+    def test_content_tokens_account_for_the_special_tokens(self) -> None:
+        """The geometry constants and the wrapping must agree."""
+        assert WINDOW_CONTENT_TOKENS == WINDOW_TOKENS - WINDOW_SPECIAL_TOKENS
 
     def test_windows_overlap_at_all(self) -> None:
         """stride >= window means adjacent windows touch but never overlap."""
-        assert WINDOW_STRIDE < WINDOW_TOKENS
+        assert WINDOW_STRIDE < WINDOW_CONTENT_TOKENS
 
     def test_guard_band_covers_a_canonical_injection(self) -> None:
         """Canonical injections run 10-30 tokens; keep comfortable headroom.
@@ -289,7 +305,7 @@ class TestWindowGeometry:
 
     def test_guard_band_is_not_a_second_full_pass(self) -> None:
         """Overlap above half the window is pure duplicated inference."""
-        assert self.GUARD_BAND <= WINDOW_TOKENS // 2
+        assert self.GUARD_BAND <= WINDOW_CONTENT_TOKENS // 2
 
     def test_every_short_span_lands_intact_in_some_window(self) -> None:
         """The property the guard band exists to provide.
@@ -300,7 +316,7 @@ class TestWindowGeometry:
         """
         total = 4_096
         segments = [
-            (start, min(start + WINDOW_TOKENS, total))
+            (start, min(start + WINDOW_CONTENT_TOKENS, total))
             for start in range(0, total, WINDOW_STRIDE)
         ]
 
@@ -310,3 +326,65 @@ class TestWindowGeometry:
                 seg_start <= pos and span_end <= seg_end
                 for seg_start, seg_end in segments
             ), f"a {self.GUARD_BAND}-token span at {pos} is split across every window"
+
+class TestPadSegment:
+    """Model input is built from token IDs instead of a decode/re-encode round trip."""
+
+    def _tokenizer(self) -> MagicMock:
+        tok = MagicMock()
+        tok.cls_token_id = 1
+        tok.sep_token_id = 2
+        tok.pad_token_id = 0
+        tok.num_special_tokens_to_add.return_value = 2
+        return tok
+
+    def test_wraps_and_pads_a_short_segment(self) -> None:
+        from mcp_trentina_crunchtools.quarantine import classifier as mod
+
+        with patch.object(mod, "_tokenizer", self._tokenizer()):
+            ids, mask = mod._pad_segment([7, 8, 9], 8)
+
+        assert ids == [1, 7, 8, 9, 2, 0, 0, 0]
+        assert mask == [1, 1, 1, 1, 1, 0, 0, 0]
+        assert len(ids) == len(mask) == 8
+
+    def test_full_window_needs_no_padding(self) -> None:
+        from mcp_trentina_crunchtools.quarantine import classifier as mod
+
+        with patch.object(mod, "_tokenizer", self._tokenizer()):
+            ids, mask = mod._pad_segment(list(range(10, 520)), 512)
+
+        assert len(ids) == 512
+        assert ids[0] == 1
+        assert ids[-1] == 2
+        assert mask == [1] * 512
+
+    def test_oversized_segment_is_clipped_not_overflowed(self) -> None:
+        """A caller passing too many IDs must not produce a 514-wide tensor."""
+        from mcp_trentina_crunchtools.quarantine import classifier as mod
+
+        with patch.object(mod, "_tokenizer", self._tokenizer()):
+            ids, mask = mod._pad_segment(list(range(600)), 512)
+
+        assert len(ids) == 512
+        assert len(mask) == 512
+
+    def test_segment_loop_never_exceeds_the_window(self) -> None:
+        """Every tensor handed to ONNX is exactly max_length wide."""
+        import numpy as np
+
+        widths: list[int] = []
+        masks: list[int] = []
+
+        def record(_names: object, inputs: dict[str, object]) -> list[object]:
+            widths.append(len(inputs["input_ids"][0]))
+            masks.append(len(inputs["attention_mask"][0]))
+            return [np.array([[5.0, -5.0, -5.0]])]
+
+        with mocked_model(token_count=4_000) as session:
+            session.run.side_effect = record
+            classify("x")
+
+        assert widths, "no segments were classified"
+        assert set(widths) == {WINDOW}
+        assert set(masks) == {WINDOW}
