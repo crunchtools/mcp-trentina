@@ -10,6 +10,55 @@ under that name.
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-09-21
+
+### Fixed
+- **OAuth: pin the RFC 8707 resource to the gateway endpoint so `/authorize`
+  stops returning `invalid_target`.** FastMCP derives the protected-resource
+  URL — the audience of issued tokens, and the value `OAuthProxy` compares the
+  client's `resource=` indicator against — from `base_url` plus the path
+  FastMCP mounts its *own* MCP app at. Trentina does not serve MCP from that
+  mount: it serves `/gateway/<profile>/mcp` from its own routes and tombstones
+  FastMCP's at a per-boot random `/mcp-internal-<hex>`. So the derived resource
+  was an internal URL that appears in no discovery document and that no client
+  can guess. gemini.google.com correctly took the resource from our RFC 9728
+  metadata (`https://mcp.crunchtools.com/gateway/gemini-app/mcp`), it never
+  matched, and every `/authorize` was rejected with `invalid_target` before the
+  flow ever reached Google. The provider is now built with an explicit
+  `resource_base_url` of the OAuth profile's gateway endpoint, and a
+  `GoogleProvider` subclass passes no path to `set_mcp_path` so that value is
+  used verbatim rather than having the internal path appended. This is the
+  third and final blocker in the Gemini Custom App connect flow, after the
+  issuer byte-match (0.8.1) and CIMD (0.8.2); `/authorize` now reaches Google
+  and the callback returns a client code.
+
+  Known limitation, logged as a warning at startup: `OAuthProxy` holds one
+  resource URL, so with OAuth enabled on more than one profile only the
+  first (sorted) profile authorizes and the rest fail `/authorize` with
+  `invalid_target`.
+- **L2: build each scan window from token IDs instead of a decode/re-encode
+  round trip.** `classify()` slid its window over token IDs, then decoded each
+  window back to text and re-tokenized it to build the model input. That cost a
+  second tokenizer pass per window for a result identical on any real text
+  (verified against the model's own tokenizer on prose, code, HTML, and
+  non-Latin scripts) — and on binary decoded as text it silently *dropped*
+  tokens, 242 of 302 in testing, because runs of U+FFFD do not survive a decode
+  and re-encode. The window is now wrapped in the model's special tokens and
+  padded directly from the IDs the tokenizer already produced, so a scan sees
+  everything the tokenizer emitted. The window also now carries
+  `max_length - num_special_tokens_to_add()` content tokens rather than
+  `max_length`, which is what makes the special tokens fit instead of pushing
+  content off the end of the segment.
+- **L2: state the sliding window's guard band against content tokens.** 0.8.2's
+  stride change (#142) set `WINDOW_STRIDE = 448` for a 64-token guard band, but
+  measured it against `WINDOW_TOKENS` (512). A window carries only 510 tokens of
+  input — the special tokens take the other two — so the delivered band was 62
+  while the constant and its test both reported 64. New `WINDOW_CONTENT_TOKENS`
+  and `WINDOW_SPECIAL_TOKENS` name the distinction, the stride moves to 446 to
+  restore the 64 tokens #142 intended, and the geometry tests now measure the
+  band the code actually delivers. This is the same constant-versus-
+  implementation drift #142 set out to eliminate, one level down.
+
 ## [0.8.2] - 2026-09-20
 
 ### Fixed

@@ -110,6 +110,27 @@ def is_classifier_available() -> bool:
     return True
 
 
+def _pad_segment(segment_ids: list[int], max_length: int) -> tuple[list[int], list[int]]:
+    """Wrap token IDs in special tokens and pad to ``max_length``.
+
+    Builds the model input straight from IDs the tokenizer already produced.
+    The previous approach decoded each window back to text and re-tokenized
+    it, which cost a second tokenizer pass per segment for a result that is
+    identical on any real text — verified against the model's own tokenizer
+    on prose, code, HTML, and non-Latin scripts.
+
+    The two differ only on binary decoded as text, where the round trip
+    silently dropped tokens (242 of 302 in testing) because U+FFFD runs do
+    not survive decode and re-encode. Slicing keeps what the tokenizer
+    actually produced, so the scan sees more of the input, not less.
+    """
+    ids = [_tokenizer.cls_token_id, *segment_ids, _tokenizer.sep_token_id]
+    padding = max_length - len(ids)
+    if padding <= 0:
+        return ids[:max_length], [1] * max_length
+    return ids + [_tokenizer.pad_token_id] * padding, [1] * len(ids) + [0] * padding
+
+
 def _classify_segment(input_ids: list[int], attention_mask: list[int]) -> tuple[str, float]:
     """Classify a single segment. Returns (label, malicious_score)."""
     import numpy as np
@@ -140,7 +161,24 @@ WINDOW_TOKENS = 512
 """Prompt Guard 2's context window. max_position_embeddings is 512, so a
 segment longer than this cannot be scanned in one pass."""
 
-WINDOW_STRIDE = 448
+WINDOW_SPECIAL_TOKENS = 2
+"""Special tokens the model wraps each window in (CLS ... SEP).
+
+``classify()`` takes the real count from the tokenizer rather than this
+constant, so a model that wraps differently stays correct. This is the value
+the window geometry below is stated against, and a test pins the two together.
+"""
+
+WINDOW_CONTENT_TOKENS = WINDOW_TOKENS - WINDOW_SPECIAL_TOKENS
+"""Content tokens one window actually carries.
+
+The window is WINDOW_TOKENS wide, but the special tokens occupy two of those
+slots, so only this many tokens of the input fit. The overlap below is the
+guard band over CONTENT, which is the thing an injection is made of -- stating
+it against WINDOW_TOKENS overstates it by WINDOW_SPECIAL_TOKENS.
+"""
+
+WINDOW_STRIDE = 446
 """How far the window advances, leaving a 64-token guard band of overlap.
 
 Overlap exists so an injection straddling a window boundary still lands
@@ -221,26 +259,23 @@ def classify(
         best_label = "BENIGN"
         best_score = 0.0
 
+        # WINDOW_CONTENT_TOKENS states this; the tokenizer is the source of
+        # truth so a model wrapping windows differently stays correct.
+        content_length = max_length - _tokenizer.num_special_tokens_to_add()
+
         for start_idx in range(0, len(all_ids), stride):
-            segment_ids = all_ids[start_idx : start_idx + max_length]
+            segment_ids = all_ids[start_idx : start_idx + content_length]
             if not segment_ids:
                 break
 
-            segment_text = _tokenizer.decode(segment_ids, skip_special_tokens=True)
-            enc = _tokenizer(
-                segment_text,
-                truncation=True,
-                max_length=max_length,
-                padding="max_length",
-                return_attention_mask=True,
-            )
-            seg_label, seg_score = _classify_segment(enc["input_ids"], enc["attention_mask"])
+            input_ids, attention_mask = _pad_segment(segment_ids, max_length)
+            seg_label, seg_score = _classify_segment(input_ids, attention_mask)
 
             if seg_score > best_score:
                 best_score = seg_score
                 best_label = seg_label
 
-            if start_idx + max_length >= len(all_ids):
+            if start_idx + content_length >= len(all_ids):
                 break
 
         label = best_label

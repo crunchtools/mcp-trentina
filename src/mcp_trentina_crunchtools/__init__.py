@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.8.2"
+__version__ = "0.8.3"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -333,10 +333,49 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
 
     from fastmcp.server.auth.providers.google import GoogleProvider
 
-    provider = GoogleProvider(
+    class _GatewayGoogleProvider(GoogleProvider):
+        """GoogleProvider whose protected-resource URL is the gateway endpoint.
+
+        FastMCP derives the RFC 8707 resource (the audience of issued tokens and
+        the value OAuthProxy's /authorize resource-indicator check compares
+        against) from base_url + the path FastMCP mounts its OWN MCP app at.
+        Trentina serves MCP from custom routes (/gateway/<profile>/mcp) and
+        tombstones FastMCP's mount at a per-boot random internal path, so that
+        derived resource is an unadvertisable internal URL that never matches the
+        indicator a client takes from our RFC 9728 metadata (the gateway URL).
+        gemini.google.com sends it and OAuthProxy rejected /authorize with
+        invalid_target before ever reaching Google. Passing no path to the base
+        set_mcp_path makes _get_resource_url return resource_base_url verbatim,
+        and OAuthProxy.set_mcp_path then binds the JWT audience to it.
+        """
+
+        def set_mcp_path(self, mcp_path: str | None) -> None:
+            logger.debug(
+                "gateway: ignoring FastMCP mount path %s; OAuth resource stays "
+                "pinned to the advertised gateway endpoint",
+                mcp_path,
+            )
+            super().set_mcp_path(None)
+
+    # Pin the OAuth resource to the OAuth profile's gateway endpoint (see
+    # _GatewayGoogleProvider). FastMCP's OAuthProxy holds one resource per proxy,
+    # so with more than one OAuth profile only the pinned one authorizes; warn
+    # when that happens. See CHANGELOG 0.8.3.
+    resource_profile = sorted(enabled)[0]
+    resource_url = f"{base_url}/gateway/{resource_profile}/mcp"
+    if len(enabled) > 1:
+        logger.warning(
+            "gateway: OAuth enabled on %d profiles %s but FastMCP's OAuthProxy "
+            "holds one resource URL; pinned to %s — others fail /authorize "
+            "with invalid_target",
+            len(enabled), sorted(enabled), resource_url,
+        )
+
+    provider = _GatewayGoogleProvider(
         client_id=client_id,
         client_secret=client_secret,
         base_url=base_url,
+        resource_base_url=resource_url,
         required_scopes=["openid", "email", "profile"],
         jwt_signing_key=signing_key,
         # CIMD off deliberately: OAuthProxy advertises client_id_metadata_

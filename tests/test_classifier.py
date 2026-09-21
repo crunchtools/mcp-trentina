@@ -28,6 +28,19 @@ def _reset_classifier_state() -> Any:
     reset_classifier()
 
 
+
+def _as_deberta(tokenizer: MagicMock) -> None:
+    """Give a mock tokenizer the special-token IDs Prompt Guard 2 actually uses.
+
+    The classifier builds model input from token IDs directly, so these have
+    to be real integers rather than MagicMocks or numpy rejects the array.
+    """
+    tokenizer.cls_token_id = 1
+    tokenizer.sep_token_id = 2
+    tokenizer.pad_token_id = 0
+    tokenizer.num_special_tokens_to_add.return_value = 2
+
+
 class TestClassifierConfig:
     """Verify classifier configuration defaults."""
 
@@ -101,6 +114,7 @@ class TestClassifyWithMockedModel:
     ) -> tuple[MagicMock, MagicMock]:
         """Set up mocked tokenizer and session for classify tests."""
         mock_tokenizer = MagicMock()
+        _as_deberta(mock_tokenizer)
         mock_tokenizer.return_value = {"input_ids": list(range(token_count))}
         mock_tokenizer.side_effect = None
         mock_tokenizer.return_value = {
@@ -121,6 +135,7 @@ class TestClassifyWithMockedModel:
         import numpy as np
 
         mock_tokenizer = MagicMock()
+        _as_deberta(mock_tokenizer)
         mock_tokenizer.return_value = {
             "input_ids": list(range(10)),
             "attention_mask": [1] * 10,
@@ -158,6 +173,7 @@ class TestClassifyWithMockedModel:
         import numpy as np
 
         mock_tokenizer = MagicMock()
+        _as_deberta(mock_tokenizer)
         mock_tokenizer.return_value = {
             "input_ids": list(range(10)),
             "attention_mask": [1] * 10,
@@ -194,6 +210,7 @@ class TestClassifyWithMockedModel:
         import numpy as np
 
         mock_tokenizer = MagicMock()
+        _as_deberta(mock_tokenizer)
         mock_tokenizer.return_value = {
             "input_ids": list(range(10)),
             "attention_mask": [1] * 10,
@@ -234,6 +251,7 @@ class TestSegmentSplitting:
         import numpy as np
 
         mock_tokenizer = MagicMock()
+        _as_deberta(mock_tokenizer)
         short_ids = list(range(100))
         mock_tokenizer.return_value = {
             "input_ids": short_ids,
@@ -282,6 +300,7 @@ class TestSegmentSplitting:
             }
 
         mock_tokenizer = MagicMock()
+        _as_deberta(mock_tokenizer)
         mock_tokenizer.side_effect = mock_tokenizer_call
         mock_tokenizer.decode.return_value = "decoded segment text"
 
@@ -327,6 +346,7 @@ class TestSegmentSplitting:
             }
 
         mock_tokenizer = MagicMock()
+        _as_deberta(mock_tokenizer)
         mock_tokenizer.side_effect = mock_tokenizer_call
         mock_tokenizer.decode.return_value = "decoded segment"
 
