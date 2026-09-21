@@ -19,6 +19,8 @@ import pytest
 
 from mcp_trentina_crunchtools.errors import UnscannableContentError
 from mcp_trentina_crunchtools.quarantine.classifier import (
+    WINDOW_STRIDE,
+    WINDOW_TOKENS,
     classifier_status,
     classify,
     classify_async,
@@ -30,8 +32,12 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 MAX_TOKENS = 32_768
-WINDOW = 512
-STRIDE = 256
+
+# Imported, not restated. These were local copies that silently agreed with
+# the implementation until someone changed one of them; the pass-count
+# assertions below are only meaningful if they track the real geometry.
+WINDOW = WINDOW_TOKENS
+STRIDE = WINDOW_STRIDE
 
 
 @contextmanager
@@ -255,3 +261,52 @@ class TestTelemetryDisabled:
         monkeypatch.setenv(mod.TELEMETRY_ENV, "0")
         importlib.reload(mod)
         assert os.environ[mod.TELEMETRY_ENV] == "0"
+
+
+class TestWindowGeometry:
+    """The sliding window must still overlap, and not by more than it needs.
+
+    Overlap is what stops an injection that straddles a window boundary from
+    being split across two segments and judged benign in both. It was set to
+    256 tokens -- a 50% overlap, which ran the model over every token twice
+    and made a /sync scan cost ~47 s of duplicate work on lotor. Cutting it
+    is a real speedup and a real risk if taken too far, so pin both ends.
+    """
+
+    GUARD_BAND = WINDOW_TOKENS - WINDOW_STRIDE
+
+    def test_windows_overlap_at_all(self) -> None:
+        """stride >= window means adjacent windows touch but never overlap."""
+        assert WINDOW_STRIDE < WINDOW_TOKENS
+
+    def test_guard_band_covers_a_canonical_injection(self) -> None:
+        """Canonical injections run 10-30 tokens; keep comfortable headroom.
+
+        Below ~64 the margin stops being a margin, and the failure is silent:
+        a split phrase simply scores benign in both halves.
+        """
+        assert self.GUARD_BAND >= 64
+
+    def test_guard_band_is_not_a_second_full_pass(self) -> None:
+        """Overlap above half the window is pure duplicated inference."""
+        assert self.GUARD_BAND <= WINDOW_TOKENS // 2
+
+    def test_every_short_span_lands_intact_in_some_window(self) -> None:
+        """The property the guard band exists to provide.
+
+        For any starting position, a GUARD_BAND-length run of tokens must sit
+        wholly inside at least one segment -- otherwise there is a phrase of
+        that length the classifier only ever sees in pieces.
+        """
+        total = 4_096
+        segments = [
+            (start, min(start + WINDOW_TOKENS, total))
+            for start in range(0, total, WINDOW_STRIDE)
+        ]
+
+        for pos in range(total - self.GUARD_BAND):
+            span_end = pos + self.GUARD_BAND
+            assert any(
+                seg_start <= pos and span_end <= seg_end
+                for seg_start, seg_end in segments
+            ), f"a {self.GUARD_BAND}-token span at {pos} is split across every window"
