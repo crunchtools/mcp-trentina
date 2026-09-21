@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -370,7 +370,9 @@ def _advertise_secret_post(route: Any) -> Any:
     )
 
 
-def _provisioned_clients(profiles: Mapping[str, Profile]) -> dict[str, Any]:
+def _provisioned_clients(
+    profiles: Mapping[str, Profile], scope: str
+) -> dict[str, Any]:
     """Build the confidential clients declared across the OAuth profiles.
 
     OAuthConfig refuses a half-declared client and the loader fails closed on an
@@ -379,6 +381,13 @@ def _provisioned_clients(profiles: Mapping[str, Profile]) -> dict[str, Any]:
     ``allowed_redirect_uri_patterns`` is pinned to that same list: a client the
     operator provisioned by hand has one known callback, and pattern widening
     exists for DCR clients on unpredictable localhost ports, not for this.
+
+    ``scope`` is the provider's own normalized scope string, and registering the
+    client with it is load-bearing: the SDK checks every requested scope against
+    the client's registered scope, so a provisioned client left with none has
+    every ``/authorize`` refused as ``invalid_scope`` before the flow reaches
+    consent. FastMCP's DCR path gets this from ``_default_scope_str``; a
+    provisioned client has to be handed the same value.
     """
     from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
     from pydantic import AnyUrl
@@ -408,7 +417,7 @@ def _provisioned_clients(profiles: Mapping[str, Profile]) -> dict[str, Any]:
             client_secret=secret.get_secret_value(),
             redirect_uris=[AnyUrl(uri) for uri in oauth.client_redirect_uris],
             grant_types=["authorization_code", "refresh_token"],
-            scope=None,
+            scope=scope,
             token_endpoint_auth_method=_AUTH_METHOD_POST,
             allowed_redirect_uri_patterns=list(oauth.client_redirect_uris),
             client_name=f"provisioned:{name}",
@@ -546,15 +555,6 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
     # DCR store, and their presence is what turns on the client_secret_post
     # advertisement in get_routes. Built before the provider so the class
     # attribute is populated by the time FastMCP asks for routes.
-    provisioned = _provisioned_clients(profiles)
-    _GatewayGoogleProvider.provisioned = provisioned
-    if provisioned:
-        logger.info(
-            "gateway: %d provisioned OAuth client(s): %s "
-            "(confidential, client_secret_post enforced)",
-            len(provisioned), ", ".join(sorted(provisioned)),
-        )
-
     provider = _GatewayGoogleProvider(
         client_id=client_id,
         client_secret=client_secret,
@@ -571,6 +571,21 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
         # fall through to DCR, which the proxy does implement. See CHANGELOG 0.8.2.
         enable_cimd=False,
     )
+    # Provisioned confidential clients are resolved by get_client ahead of the
+    # DCR store, and their presence is what turns on the client_secret_post
+    # advertisement in get_routes. Built AFTER the provider so they can carry
+    # its normalized scope string — registering them without it refuses every
+    # /authorize as invalid_scope. Assigned before run(), which is when FastMCP
+    # first asks for routes.
+    provisioned = _provisioned_clients(profiles, " ".join(provider.required_scopes or []))
+    _GatewayGoogleProvider.provisioned = provisioned
+    if provisioned:
+        logger.info(
+            "gateway: %d provisioned OAuth client(s): %s "
+            "(confidential, client_secret_post enforced)",
+            len(provisioned), ", ".join(sorted(provisioned)),
+        )
+
     # The issuer FastMCP will advertise in its own authorization-server metadata.
     # Sourced from the provider (not rebuilt from base_url) so our protected-
     # resource metadata names the AS with the identical string — a pydantic

@@ -10,6 +10,25 @@ under that name.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-21
+
+### Fixed
+- **Provisioned OAuth clients are registered with the provider's scope.** 0.9.0
+  built them with no scope at all. The MCP SDK validates every requested scope
+  against the client's registered scope, so each `/authorize` was refused with
+  `error=invalid_scope` (`Client was not registered with scope openid`) and
+  redirected straight back to the client carrying that error — before `/consent`
+  and before Google. From the connector's side this looks like an immediate
+  "Account linking is required", failing faster than the bug it was meant to
+  fix. FastMCP's DCR path takes this value from `_default_scope_str`; a
+  provisioned client has to be handed the same thing, so the clients are now
+  built after the provider and carry its normalized scope string.
+
+  0.9.0's tests covered storage, lookup, redirect URIs and the metadata
+  document, but never the scope the authorization path actually checks. Two
+  tests now pin it: the registered scope must equal the provider's, and every
+  advertised scope must appear on the client.
+
 ## [0.9.0] - 2026-09-21
 
 ### Added
