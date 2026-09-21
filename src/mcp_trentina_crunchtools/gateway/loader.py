@@ -179,9 +179,16 @@ def _warn_on_loose_mode(path: Path, file_var: str) -> None:
     except OSError:
         return
     if mode & 0o077:
+        # The env var NAME and the mode, never the path. An operator can
+        # resolve the path from the name, and a log line that points at where
+        # the secrets live is a small disclosure that travels to the
+        # centralized collector and sits there for 90 days. CodeQL flags the
+        # path form as clear-text logging of sensitive data, and on this one
+        # it is right for the right reason.
         logger.warning(
-            "%s=%s: secret file mode %04o is more permissive than 0600",
-            file_var, path, mode,
+            "%s names a secret file whose mode is %04o — more permissive "
+            "than 0600",
+            file_var, mode,
         )
 
 
@@ -211,7 +218,7 @@ def _read_secret_env(env_var: str) -> str:
             raw = path.read_text(encoding="utf-8")
         except OSError as exc:
             raise ProfileConfigError(
-                f"{file_var}={path_value}: cannot read secret file "
+                f"{file_var}: cannot read the secret file it names "
                 f"({exc.strerror or exc})"
             ) from exc
         _warn_on_loose_mode(path, file_var)

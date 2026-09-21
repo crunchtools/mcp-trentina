@@ -72,7 +72,7 @@ class TestReadSecretEnv:
         so it must not fall through to the plain env var."""
         monkeypatch.setenv("SECRET_X", "from-env")
         monkeypatch.setenv("SECRET_X_FILE", str(tmp_path / "nope"))
-        with pytest.raises(ProfileConfigError, match="cannot read secret file"):
+        with pytest.raises(ProfileConfigError, match="cannot read the secret file"):
             _read_secret_env("SECRET_X")
 
     def test_empty_file_is_empty(
@@ -82,6 +82,37 @@ class TestReadSecretEnv:
         secret.write_text("\n")
         monkeypatch.setenv("SECRET_X_FILE", str(secret))
         assert _read_secret_env("SECRET_X") == ""
+
+    def test_the_secret_path_is_never_logged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Name the env var, never the path.
+
+        A log line pointing at where secrets live is a small disclosure that
+        travels to the centralized collector and sits there for 90 days.
+        CodeQL flags the path form as clear-text logging of sensitive data,
+        and on this one it is right.
+        """
+        secret = tmp_path / "very-secret-location"
+        secret.write_text("value")
+        secret.chmod(0o644)
+        monkeypatch.setenv("SECRET_X_FILE", str(secret))
+        with caplog.at_level("WARNING"):
+            _read_secret_env("SECRET_X")
+        assert "SECRET_X_FILE" in caplog.text
+        assert "very-secret-location" not in caplog.text
+        assert str(tmp_path) not in caplog.text
+
+    def test_the_secret_path_is_never_in_the_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        missing = tmp_path / "very-secret-location"
+        monkeypatch.setenv("SECRET_X_FILE", str(missing))
+        with pytest.raises(ProfileConfigError) as exc:
+            _read_secret_env("SECRET_X")
+        assert "SECRET_X_FILE" in str(exc.value)
+        assert "very-secret-location" not in str(exc.value)
 
     def test_loose_permissions_warn_but_do_not_fail(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
