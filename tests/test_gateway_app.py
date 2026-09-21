@@ -224,6 +224,11 @@ class _StubProvider:
 
 
 OAUTH_BASE_URL = "https://mcp.example.com"
+# The AS identifier FastMCP advertises as `issuer` — a bare origin rendered
+# through pydantic AnyHttpUrl gains a trailing slash. The protected-resource
+# metadata must name the AS with this exact string, not the slash-less base URL,
+# or RFC 8414 §3.3 makes a strict client (gemini.google.com) reject the AS.
+OAUTH_ISSUER = OAUTH_BASE_URL + "/"
 
 
 @pytest.fixture
@@ -239,7 +244,9 @@ def oauth_client() -> TestClient:
         "good": _StubAccessToken({"email": "scott@example.com", "email_verified": True}),
         "wrong-user": _StubAccessToken({"email": "eve@evil.com", "email_verified": True}),
     })
-    oauth = OAuthContext(provider=provider, base_url=OAUTH_BASE_URL)
+    oauth = OAuthContext(
+        provider=provider, base_url=OAUTH_BASE_URL, issuer=OAUTH_ISSUER
+    )
     return TestClient(gateway_app({"gemini-app": profile}, oauth=oauth))
 
 
@@ -298,7 +305,12 @@ class TestGatewayOAuth:
         assert resp.status_code == 200
         body = resp.json()
         assert body["resource"] == f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp"
-        assert body["authorization_servers"] == [OAUTH_BASE_URL]
+        # Regression: the AS identifier is the provider's exact `issuer` string
+        # (trailing slash and all), not the slash-less base URL. A mismatch here
+        # is what made gemini.google.com reject the metadata and report
+        # "automatic registration failed".
+        assert body["authorization_servers"] == [OAUTH_ISSUER]
+        assert body["authorization_servers"] != [OAUTH_BASE_URL]
         assert body["bearer_methods_supported"] == ["header"]
         assert "openid" in body["scopes_supported"]
 

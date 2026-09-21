@@ -65,12 +65,23 @@ class OAuthContext:
     ``provider`` is the FastMCP OAuth provider (a ``GoogleProvider``/
     ``OAuthProxy``) that validates presented tokens; ``base_url`` is the public
     origin (no trailing slash) used to build the RFC 9728 resource-metadata URL
-    in the 401 challenge. Built once at startup and threaded into the handlers;
-    None on a gateway with no OAuth-enabled profile.
+    in the 401 challenge. ``issuer`` is the authorization-server identifier the
+    provider advertises as ``issuer`` in its own ``/.well-known/oauth-authorization-server``
+    document — captured byte-for-byte so our protected-resource metadata names
+    the AS with the *exact* same string. FastMCP renders the issuer through a
+    pydantic ``AnyHttpUrl``, which appends a trailing slash to a bare-authority
+    origin (``https://host`` -> ``https://host/``); RFC 8414 §3.3 requires the
+    client to find ``issuer`` identical to the AS identifier it discovered, so a
+    protected-resource doc naming ``https://host`` (no slash) against an AS
+    issuer of ``https://host/`` is rejected as non-conformant — which is what
+    made gemini.google.com report "automatic registration failed" without ever
+    POSTing to ``/register``. Built once at startup and threaded into the
+    handlers; None on a gateway with no OAuth-enabled profile.
     """
 
     provider: Any
     base_url: str
+    issuer: str
 
 
 async def _authorize(
@@ -232,7 +243,11 @@ def _resource_metadata(
         return _plain(404, "Not Found")
     return JSONResponse({
         "resource": f"{oauth.base_url}/gateway/{profile_name}/mcp",
-        "authorization_servers": [oauth.base_url],
+        # oauth.issuer, not oauth.base_url: the AS identifier here must match the
+        # `issuer` FastMCP advertises byte-for-byte (trailing slash included), or
+        # RFC 8414 §3.3 makes a strict client reject the AS metadata — see the
+        # OAuthContext docstring.
+        "authorization_servers": [oauth.issuer],
         "scopes_supported": ["openid", "email", "profile"],
         "bearer_methods_supported": ["header"],
     })
