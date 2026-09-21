@@ -61,6 +61,7 @@ from ..gateway.loader import (
     load_profiles,
     replace_active_config,
 )
+from ..gateway.profile import SCAN_VIEW_AGENT_FIELDS
 from ..gateway.router import invalidate_profile_cache
 from ..gateway.scope import CallerScope, require_caller
 from ..gateway.sessions import session_registry
@@ -226,6 +227,35 @@ def _profile_compression_surface(profile: Profile) -> set[tuple[str, bool]]:
     }
 
 
+def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
+    """Carry operator-only scan-view settings across an AGENT reload.
+
+    An agent may retune its own performance — the sampling budget, the
+    coverage floor, the deadline. It may not reshape its own perimeter.
+    ``extractor`` decides how much of a payload is read at all, so an agent
+    able to set it could narrow what gets scanned on content an operator meant
+    to be read in full. The agent does not control profiles.yaml, but it does
+    control when a reload happens, and "cannot write the file" is a weaker
+    guarantee than "cannot apply the field".
+
+    The held values are reported back, so an operator whose edit did not take
+    effect is told rather than left to discover it.
+    """
+    b = before.matrix_ingress
+    a = after.matrix_ingress
+    if b is None or a is None:
+        return []
+    held: list[str] = []
+    for field_name in type(a.scan_view).model_fields:
+        if field_name in SCAN_VIEW_AGENT_FIELDS:
+            continue
+        old = getattr(b.scan_view, field_name)
+        if old != getattr(a.scan_view, field_name):
+            setattr(a.scan_view, field_name, old)
+            held.append(f"matrix_ingress.scan_view.{field_name}")
+    return held
+
+
 async def _apply_own_profile(
     scope: CallerScope,
     registry: dict[str, Profile],
@@ -261,6 +291,7 @@ async def _apply_own_profile(
             ),
         }
 
+    held = _hold_perimeter_fields(before, after)
     delta = _profile_delta(before, after)
     registry[name] = after
     invalidated = invalidate_profile_cache(name)
@@ -272,7 +303,7 @@ async def _apply_own_profile(
         "gateway: profile %s reloaded its own section — %d field group(s) moved",
         name, len(delta),
     )
-    return {
+    result: dict[str, Any] = {
         "reloaded": True,
         "scope": name,
         "applied": [name],
@@ -281,6 +312,15 @@ async def _apply_own_profile(
         "sessions_notified": notified,
         "note": AGENT_SCOPE_NOTE,
     }
+    if held:
+        result["not_applied"] = {
+            "operator_only": held,
+            "reason": (
+                "these settings decide how much of a payload is scanned; an "
+                "operator reload or a restart applies them"
+            ),
+        }
+    return result
 
 
 async def reload_profiles() -> dict[str, Any]:

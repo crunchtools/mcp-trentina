@@ -39,13 +39,15 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from starlette.responses import Response, StreamingResponse
 
-from ..defense import defend, defend_json
+from ..defense import defend, defend_scan_view
+from ..scanview import Channel, ScanViewContext
 from .proxy_utils import (
     PLAIN_TEXT,
     filter_response_headers,
     forward_request_headers,
     sanitize_proxy_path,
 )
+from .scanview import build_extractor, build_scan_view, describe
 from .warning import build_warning
 
 if TYPE_CHECKING:
@@ -80,8 +82,10 @@ _SCANNED_PATH_MARKERS = (
 # responses are typically tens of KB; 32MB is far past any honest one.
 _MAX_SCAN_BYTES = 32 * 1024 * 1024
 
-_SCAN_DEADLINE_SECONDS = 20.0
-"""How long the whole judgement may take before the response forwards anyway.
+_FALLBACK_SCAN_DEADLINE_SECONDS = 20.0
+"""Deadline used when a profile has no matrix_ingress config to read one from.
+
+How long the whole judgement may take before the response forwards anyway.
 
 There was no deadline here at all. ``defend_json`` runs L2 (ONNX, hundreds of
 ms per window) and may call L3 (a network round-trip to a third-party LLM),
@@ -245,6 +249,43 @@ async def _proxy_matrix(
     )
 
 
+_EXTRACTORS: dict[str, Any] = {}
+
+
+def _extractor_for(profile: Profile) -> Any:
+    """The profile's extractor, built once.
+
+    Cached per profile name because an extractor may own state — the Matrix
+    one will own a Megolm session cache — and rebuilding it per request would
+    throw that away on the path where it matters most.
+    """
+    ingress = profile.matrix_ingress
+    cfg = ingress.scan_view if ingress is not None else None
+    # Keyed on every input the factory reads, not just the name: two
+    # profiles, or one profile across a reload, must not share an instance
+    # built from different settings.
+    key = (
+        f"{profile.name}:{cfg.extractor if cfg else 'full'}"
+        f":{cfg.skip_sample_bytes if cfg else 0}"
+    )
+    cached = _EXTRACTORS.get(key)
+    if cached is None:
+        from .profile import ScanViewConfig
+
+        cached = build_extractor(
+            cfg or ScanViewConfig(),
+            channel=Channel.MATRIX,
+            profile_name=profile.name,
+        )
+        _EXTRACTORS[key] = cached
+    return cached
+
+
+def reset_extractors() -> None:
+    """Drop cached extractors. Called on profile reload and by tests."""
+    _EXTRACTORS.clear()
+
+
 async def _scan_and_forward(
     resp: httpx.Response,
     resp_headers: dict[str, str],
@@ -293,12 +334,30 @@ async def _scan_and_forward(
     await resp.aclose()
     body = b"".join(chunks)
 
+    ingress = profile.matrix_ingress
+    cfg = ingress.scan_view if ingress is not None else None
+    deadline = cfg.deadline_seconds if cfg else _FALLBACK_SCAN_DEADLINE_SECONDS
+
     payload: Any = None
+    view = None
     try:
         payload = json.loads(body)
-        async with asyncio.timeout(_SCAN_DEADLINE_SECONDS):
-            result = await defend_json(
+        # The deadline wraps extraction AND judgement. Bounding only the
+        # judge would leave any I/O an extractor does (a key fetch, later)
+        # unbounded, which is the stall risk selection itself introduces.
+        async with asyncio.timeout(deadline):
+            extractor = _extractor_for(profile)
+            view = await build_scan_view(
                 payload,
+                extractor=extractor,
+                ctx=ScanViewContext(
+                    source=f"matrix:{profile.name}:{path}",
+                    profile_name=profile.name,
+                    path=path,
+                ),
+            )
+            verdict = await defend_scan_view(
+                view,
                 source=f"matrix:{profile.name}:{path}",
                 source_type="matrix_sync",
                 defense=profile.defense,
@@ -319,7 +378,7 @@ async def _scan_and_forward(
             # timeout machinery's own and tells an operator nothing.
             "matrix_proxy: scan deadline %.1fs exceeded for %s profile=%s — "
             "forwarding UNSCANNED with a warning",
-            _SCAN_DEADLINE_SECONDS, path, profile.name,
+            deadline, path, profile.name,
         )
         return _respond(payload, body, headers, content_type,
                         {"risk_level": "unknown", "scan_timeout": True})
@@ -337,8 +396,8 @@ async def _scan_and_forward(
         return Response(content=body, status_code=200,
                         headers=headers, media_type=content_type)
 
-    verdict = result.verdict
-    warning = build_warning(verdict)
+    extras = describe(view, cfg) if (view is not None and cfg is not None) else {}
+    warning = build_warning(verdict, extras=extras)
     if verdict.flagged:
         logger.warning(
             "matrix_proxy: flagged %s for profile=%s risk=%s flagged_by=%s",

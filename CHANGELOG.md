@@ -10,6 +10,39 @@ under that name.
 
 ## [Unreleased]
 
+### Added
+- **Scan-view extractors: the pipeline no longer has to read the whole
+  payload.** A measured Matrix initial sync put 68,042 characters in front of
+  the classifier, of which 45,552 were Megolm ciphertext, ~15,000 were
+  repeated JSON key names, and 245 were human-readable prose. The scan spent
+  46 seconds reading base64 it cannot decrypt, which is long enough that
+  OpenClaw's 30-second readiness budget expires and the agent never connects
+  at all — a perimeter slow enough to be skipped is not a perimeter.
+  `scanview/` adds a driver type that selects what the pipeline reads, with
+  three mechanisms: structural skipping of strings incapable of carrying
+  language, deduplication of exact repeats, and sampling of skipped openings
+  as a backstop. **Measured on the live payload: 68,042 -> 3,856 characters,
+  a 17.6x reduction.**
+
+  This is a sibling of `preprocess/`, not an extension of it, because the
+  safety property inverts: a pre-processor's output is what gets delivered, so
+  what it drops nobody sees, whereas an extractor selects a subset to scan
+  while the full original is delivered. Five invariants replace the borrowed
+  three, including "skipping is structural, never semantic" — no trusted-room
+  or trusted-sender list, ever — and "fail open to MORE scanning, never less".
+  The default extractor is `full`, which is exactly today's behaviour, so this
+  changes nothing until an operator opts in.
+
+- **Per-profile scan-view policy, channel locking and RBAC.** Extractors
+  declare which ingress channels they understand, and naming one on a channel
+  it does not declare is a load-time error rather than a silently wrong
+  perimeter. `extractor` is operator-only: an agent reloading its own profile
+  may retune its sampling budget, coverage floor and deadline, but the fields
+  deciding how much of a payload is read at all are held and reported in
+  `not_applied`. An agent does not control profiles.yaml, but it does control
+  when a reload happens, and "cannot write the file" is a weaker guarantee
+  than "cannot apply the field".
+
 ### Fixed
 - **A partial scan of a Matrix response no longer looks like a clean one.**
   `ClassifierResult.truncated` — L2 ran out of context window and read only
