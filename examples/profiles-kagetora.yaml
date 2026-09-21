@@ -19,7 +19,7 @@ profiles:
     defense:
       enforcement: annotate   # flip to `block` after calibration (step 8)
       l2_threshold: 0.3       # stricter classifier gate for an autonomous agent
-      l3_threshold: 0.7       # L2 score that triggers Q-Agent review
+      l3_threshold: 0.7       # deprecated, ignored — L3 always runs
 
     # Per-profile LLM API keys. Isolates this profile's rate-limit quota and
     # token spend. The provider name must match the configured provider.

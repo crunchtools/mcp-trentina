@@ -10,6 +10,51 @@ under that name.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-21
+
+### Changed
+- **BREAKING (behaviour): L3 runs on every input the gateway scans.** L3
+  escalated only on model-output provenance, on a suspicious L1 detection, or
+  on an L2 score at or above `l3_threshold`. Clean traffic never reached the
+  judge — and because L2 *flags* at `l2_threshold` (0.3 in production) while
+  escalation needed `l3_threshold` (0.7), there was a band that L2 flagged and
+  L3 never reviewed. Gating the semantic judge on the pattern classifier
+  agreeing there is something to look at inverts why L3 exists: it is the
+  layer built for attacks phrased as ordinary prose, which is exactly what L2
+  is documented to miss.
+
+  This was a defensible reading of the "all three layers, full stop" decision
+  in c2be892 — that change removed the per-layer `quarantine: false` boolean
+  and kept cost control as a threshold. It was not the intended reading. A
+  threshold deciding whether a layer executes is an off switch with a dial on
+  it. **Cost: every scanned payload now makes an L3 call.**
+
+- **An L3 that cannot run is now reported instead of being silent.** With no
+  provider configured, `l3_assessment` was `None` — indistinguishable from
+  "ran and found nothing". It now carries `l3_unavailable`, which the warning
+  builder already surfaces, the verdict cache already refuses to store (so an
+  outage's "clean" cannot outlive the outage), and `block` enforcement already
+  refuses on. Closing this was the difference between "L3 always runs" being a
+  guarantee and being an aspiration.
+
+- **Trust changes consequence, not execution.** `is_trusted` no longer skips
+  L3. It still suppresses the L1 tripwire — a trusted CVE ticket quoting
+  attack syntax is the false positive L1 exists to tolerate — but it no longer
+  suppresses a judge that read the content and concluded it is an attack.
+  Nothing in the tree sets `is_trusted=True`, so this changes no production
+  behaviour today.
+
+- **`defense.l3_threshold` is deprecated and ignored.** Retained for one
+  release so profiles written for 0.9.x keep loading under `extra="forbid"`;
+  setting it logs a warning at load and it is rejected from 0.11.0.
+
+### Added
+- `tests/test_l3_always_runs.py` — 26 tests pinning the mandate: every L2
+  score below the old threshold reaches L3, no `l3_threshold` value can
+  suppress it, the flagged-but-unjudged 0.3–0.7 band is covered explicitly,
+  and the gate function's signature is asserted so a new parameter cannot
+  become a new way to skip L3 without a test saying why.
+
 ## [0.9.1] - 2026-09-21
 
 ### Fixed

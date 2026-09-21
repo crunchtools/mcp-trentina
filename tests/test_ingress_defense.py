@@ -16,6 +16,7 @@ production shape: all three layers present, L1 doing the flagging.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -75,6 +76,48 @@ def _profile(name: str = "testp") -> Profile:
     return p
 
 
+@contextmanager
+def _l3_available_and_clean() -> Any:
+    """A working L3 that judges the content clean.
+
+    Some tests mean "the perimeter lets ordinary content through", which is
+    only expressible with all three layers actually running. Without this,
+    a keyless unit environment has no L3 — and in block mode an unrunnable
+    L3 now fails closed, which is correct and is the whole point.
+    """
+    with (
+        patch("mcp_trentina_crunchtools.defense.get_config") as cfg,
+        patch(
+            "mcp_trentina_crunchtools.defense.quarantine_detect",
+            new_callable=AsyncMock,
+            return_value={"injection_detected": False, "risk_level": "low"},
+        ),
+    ):
+        cfg.return_value.has_api_key = True
+        yield
+
+
+def _only_l3_unavailable(warning: dict | None) -> bool:
+    """True when the sole thing the warning reports is a missing L3 provider.
+
+    Unit tests run with no GEMINI_API_KEY (see conftest._no_ambient_gemini_key),
+    so L3 cannot run, and since the mandate landed that is reported rather than
+    passed over in silence — an unjudged response must never present itself as
+    a clean one. These tests care that nothing was FLAGGED, which is a
+    different question.
+    """
+    if warning is None:
+        return True
+    noise = {"l3_unavailable", "risk_level", "flagged_by", "l1_detections",
+             "l1_suspicious", "l2_label", "l2_score", "l2_truncated",
+             "l3_injection_detected"}
+    return (
+        warning.get("l3_unavailable") is True
+        and warning.get("flagged_by") is None
+        and set(warning) <= noise
+    )
+
+
 class TestScanToolResponse:
     async def test_clean_response_returns_none(self) -> None:
         decision = await scan_tool_response(
@@ -84,7 +127,7 @@ class TestScanToolResponse:
             content_blocks=[{"type": "text", "text": "an ordinary ticket body"}],
             structured_content=None,
         )
-        assert decision.warning is None
+        assert _only_l3_unavailable(decision.warning)
         assert not decision.blocked
 
     async def test_hostile_text_block_is_annotated_not_modified(self) -> None:
@@ -173,8 +216,10 @@ class TestScanToolList:
     async def test_clean_tools_pass_unchanged(self) -> None:
         tools = [{"name": "jira_get_issue", "description": "Fetch a Jira issue."}]
         result = await scan_tool_list(_profile(), "jira", tools, tools)
-        assert result == tools
-        assert "_trentina_warning" not in result[0]
+        assert [
+            {k: v for k, v in t.items() if k != "_trentina_warning"} for t in result
+        ] == tools, "annotate mode never touches content"
+        assert _only_l3_unavailable(result[0].get("_trentina_warning"))
 
     async def test_poisoned_description_is_annotated(self) -> None:
         tools = [
@@ -182,7 +227,7 @@ class TestScanToolList:
             {"name": "bad_tool", "description": HOSTILE},
         ]
         result = await scan_tool_list(_profile(), "jira", tools, tools)
-        assert "_trentina_warning" not in result[0]
+        assert _only_l3_unavailable(result[0].get("_trentina_warning"))
         assert result[1]["_trentina_warning"]["flagged_by"] == "L1"
         assert result[1]["description"] == HOSTILE, "annotate mode never touches content"
 
@@ -280,7 +325,7 @@ class TestRouterIntegration:
                 structured_content=None,
             )
 
-        with patch(
+        with _l3_available_and_clean(), patch(
             "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
             side_effect=fake_call,
         ):
@@ -368,6 +413,22 @@ class TestEnforcement:
         assert decision.warning["blocked"] is True
 
     async def test_block_mode_delivers_clean_content(self) -> None:
+        """All three layers run and all three find nothing: content flows."""
+        with _l3_available_and_clean():
+            decision = await scan_tool_response(
+                profile=self._block_profile(),
+                backend_name="jira",
+                tool_name="jira_get_issue",
+                content_blocks=[{"type": "text", "text": "an ordinary ticket"}],
+                structured_content=None,
+            )
+        assert not decision.blocked
+        assert decision.warning is None
+
+    async def test_block_mode_refuses_when_l3_cannot_run(self) -> None:
+        """Fail closed. An unrunnable judge is not a clean verdict, and a
+        profile that asked to block on findings did not ask to be delivered
+        content nobody judged."""
         decision = await scan_tool_response(
             profile=self._block_profile(),
             backend_name="jira",
@@ -375,8 +436,9 @@ class TestEnforcement:
             content_blocks=[{"type": "text", "text": "an ordinary ticket"}],
             structured_content=None,
         )
-        assert not decision.blocked
-        assert decision.warning is None
+        assert decision.blocked
+        assert decision.warning is not None
+        assert decision.warning["l3_unavailable"] is True
 
     async def test_kill_switch_forces_annotate(
         self, monkeypatch: pytest.MonkeyPatch,

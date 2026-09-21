@@ -620,13 +620,23 @@ class TestCacheBehaviour:
             judged.append(str(kwargs.get("source")))
             return await real_defend(*args, **kwargs)
 
+        # A working L3 matters here, not as scenery: a verdict reached while
+        # L3 was unavailable is deliberately NOT cached (see
+        # ingress_defense._cache_put — an outage's "clean" must not outlive
+        # the outage), and this test is about the cache holding across a
+        # reload. Without a judge there is nothing to cache and nothing to
+        # measure.
         with patch(
             f"{_ROUTER}.list_backend_tools",
             AsyncMock(return_value=_tools_result(["jira_get_issue", "jira_delete_issue"])),
         ), patch(
             "mcp_trentina_crunchtools.defense.classify_async",
             AsyncMock(return_value=_BENIGN),
+        ), patch("mcp_trentina_crunchtools.defense.get_config") as _cfg, patch(
+            "mcp_trentina_crunchtools.defense.quarantine_detect",
+            AsyncMock(return_value={"injection_detected": False, "risk_level": "low"}),
         ), patch(f"{_INGRESS}.defend", counting_defend):
+            _cfg.return_value.has_api_key = True
             assert await _list_tools("alpha") == ["jira__jira_get_issue", "jira__jira_delete_issue"]
             after_warmup = len(judged)
             assert after_warmup == 2

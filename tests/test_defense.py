@@ -123,19 +123,22 @@ class TestLayerPrecedence:
         mocks["record_detection"].assert_not_called()
 
 
-class TestTrustExcusesLayers:
+class TestTrustChangesConsequenceNotExecution:
+    """Trust never decides whether a layer runs — only what its finding costs."""
+
     async def test_trusted_is_not_flagged_by_l2(self) -> None:
         verdict, _ = await _defend(classification=MALICIOUS, is_trusted=True)
         assert not verdict.flagged
 
-    async def test_trusted_skips_l3(self) -> None:
+    async def test_trusted_still_runs_l3(self) -> None:
+        """This asserted the opposite until the mandate landed."""
         verdict, mocks = await _defend(
             classification=BENIGN_LOW,
             is_trusted=True,
             detection={"injection_detected": True},
         )
-        mocks["quarantine_detect"].assert_not_called()
-        assert not verdict.flagged
+        mocks["quarantine_detect"].assert_called_once()
+        assert verdict.flagged_by is Layer.L3
 
 
 class TestProvenanceGate:
@@ -166,11 +169,12 @@ class TestProvenanceGate:
         )
         mocks["quarantine_detect"].assert_called_once()
 
-    async def test_external_below_threshold_skips_l3(self) -> None:
-        """The cost control still applies to ordinary external content."""
+    async def test_external_below_threshold_still_runs_l3(self) -> None:
+        """No score gate. L3 is the layer built for attacks L2 cannot see,
+        so 'L2 found nothing' is the weakest reason to skip it."""
         defense = DefenseConfig(l3_threshold=0.7)
         _, mocks = await _defend(classification=BENIGN_LOW, defense=defense)
-        mocks["quarantine_detect"].assert_not_called()
+        mocks["quarantine_detect"].assert_called_once()
 
     async def test_external_above_threshold_runs_l3(self) -> None:
         defense = DefenseConfig(l3_threshold=0.7)
