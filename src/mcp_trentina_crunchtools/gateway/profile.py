@@ -64,6 +64,10 @@ SCAN_VIEW_AGENT_FIELDS: frozenset[str] = frozenset(
     {"skip_sample_bytes", "min_coverage", "deadline_seconds"}
 )
 
+# 64 KiB of sampled openings is already ~36 L2 windows, which costs more than
+# the extraction saved. A ceiling, not a recommendation.
+_MAX_SKIP_SAMPLE_BYTES = 65536
+
 # Reduction budget, in bytes of a single tool response.
 #
 # ~20 KB is roughly 5K tokens: large enough that ordinary responses pass
@@ -526,7 +530,7 @@ class ScanViewConfig(BaseModel):
     skip_sample_bytes: int = Field(
         default=1024,
         ge=0,
-        le=65536,
+        le=_MAX_SKIP_SAMPLE_BYTES,
         description=(
             "Budget for sampling the opening of skipped strings, so a "
             "payload hidden in a declined field still reaches L1/L2. Zero "

@@ -46,9 +46,16 @@ _REGISTRY: dict[str, Callable[[ScanViewConfig], ScanViewExtractor]] = {
 
 
 def build_extractor(
-    cfg: ScanViewConfig, *, channel: Channel, profile_name: str = "",
+    cfg: ScanViewConfig | None, *, channel: Channel, profile_name: str = "",
 ) -> ScanViewExtractor:
-    """Construct the configured extractor, or fail closed at config load."""
+    """Construct the configured extractor, or fail closed at config load.
+
+    ``None`` means "no scan_view block", which is the same thing as the
+    default: read everything.
+    """
+    from .profile import ScanViewConfig as _Cfg
+
+    cfg = cfg or _Cfg()
     factory = _REGISTRY.get(cfg.extractor)
     if factory is None:  # pragma: no cover - the Literal makes this unreachable
         raise ProfileConfigError(

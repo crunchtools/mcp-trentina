@@ -259,16 +259,6 @@ def _collect_block(
                 unscannable["blobs"] += 1
 
 
-def _build_warning(verdict: Any, unscannable: dict[str, int]) -> dict[str, Any] | None:
-    """Thin alias kept so existing call sites and tests keep their name.
-
-    The body moved to gateway/warning.py because the Matrix proxy needs the
-    same logic and a third hand-rolled copy is how the `truncated` gap got
-    there in the first place.
-    """
-    return build_warning(verdict, unscannable=unscannable)
-
-
 async def scan_tool_response(
     *,
     profile: Profile,
@@ -330,7 +320,7 @@ async def scan_tool_response(
             "blocked": enforcement in ("block", "extract"),
         },
     )
-    warning = _build_warning(verdict, unscannable)
+    warning = build_warning(verdict, unscannable=unscannable)
 
     # Under block/extract, "we could not finish judging this" is treated
     # exactly like "this is hostile" — the adversarial review's H1/H3:
@@ -351,7 +341,7 @@ async def scan_tool_response(
     if (verdict.flagged or unjudgeable) and enforcement in ("block", "extract"):
         blocked = True
         if warning is None:
-            # _build_warning() only returns None when nothing was flagged and
+            # build_warning() only returns None when nothing was flagged and
             # nothing was unjudgeable -- entering this branch means one of
             # those was true, so warning cannot be None here. If it is, the
             # invariant broke and failing loudly beats silently skipping the
@@ -446,7 +436,7 @@ async def scan_tool_list(
                     "blocked": effective_enforcement(profile) in ("block", "extract"),
                 },
             )
-            warning = _build_warning(verdict, {})
+            warning = build_warning(verdict)
             _cache_put(key, warning, persist=True)
 
         if warning is not None:

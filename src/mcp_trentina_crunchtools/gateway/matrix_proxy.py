@@ -270,12 +270,8 @@ def _extractor_for(profile: Profile) -> Any:
     )
     cached = _EXTRACTORS.get(key)
     if cached is None:
-        from .profile import ScanViewConfig
-
         cached = build_extractor(
-            cfg or ScanViewConfig(),
-            channel=Channel.MATRIX,
-            profile_name=profile.name,
+            cfg, channel=Channel.MATRIX, profile_name=profile.name,
         )
         _EXTRACTORS[key] = cached
     return cached
@@ -373,9 +369,11 @@ async def _scan_and_forward(
         # Must precede the bare `except Exception`: TimeoutError descends from
         # OSError, so the order here is what makes the deadline observable
         # rather than silently reported as a failed scan.
-        logger.error(  # noqa: TRY400 - a deadline is an expected condition,
-            # not a crash; the traceback logging.exception would attach is the
-            # timeout machinery's own and tells an operator nothing.
+        # WARNING rather than ERROR, and deliberately not logger.exception:
+        # a deadline is an expected condition, and the traceback would be the
+        # timeout machinery's own. The finding an operator acts on is the
+        # rate, which the annotation and the audit row carry.
+        logger.warning(
             "matrix_proxy: scan deadline %.1fs exceeded for %s profile=%s — "
             "forwarding UNSCANNED with a warning",
             deadline, path, profile.name,

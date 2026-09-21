@@ -10,7 +10,7 @@ latency, CI names the attack it just blinded.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast, get_args
 
 import pytest
 
@@ -170,8 +170,6 @@ class TestGenericOnASync:
 
 class TestRegistryAndConfigAgree:
     def test_registry_matches_the_literal(self) -> None:
-        from typing import get_args
-
         assert set(_REGISTRY) == set(get_args(ScanViewName))
 
     def test_default_is_full(self) -> None:
@@ -180,7 +178,7 @@ class TestRegistryAndConfigAgree:
 
     def test_every_name_is_constructible(self) -> None:
         for name in _REGISTRY:
-            cfg = ScanViewConfig(extractor=name)  # type: ignore[arg-type]
+            cfg = ScanViewConfig(extractor=cast("ScanViewName", name))
             assert build_extractor(cfg, channel=Channel.MATRIX).name == name
 
 
