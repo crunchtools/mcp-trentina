@@ -30,6 +30,7 @@ claim otherwise.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import logging
@@ -45,6 +46,7 @@ from .proxy_utils import (
     forward_request_headers,
     sanitize_proxy_path,
 )
+from .warning import build_warning
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -77,6 +79,22 @@ _SCANNED_PATH_MARKERS = (
 # unscanned WITH a logged warning rather than OOMing the gateway. /sync
 # responses are typically tens of KB; 32MB is far past any honest one.
 _MAX_SCAN_BYTES = 32 * 1024 * 1024
+
+_SCAN_DEADLINE_SECONDS = 20.0
+"""How long the whole judgement may take before the response forwards anyway.
+
+There was no deadline here at all. ``defend_json`` runs L2 (ONNX, hundreds of
+ms per window) and may call L3 (a network round-trip to a third-party LLM),
+and a Matrix ``/sync`` sits on the client's critical path — OpenClaw gives a
+channel 30 seconds to become ready and starts over if it does not. A slow or
+hanging judge therefore did not degrade Matrix, it stopped it.
+
+Twenty seconds is chosen against that 30 s budget: long enough that a healthy
+scan never trips it, short enough to leave the client room to finish. On
+expiry the body forwards — fail open on the request path, as everything else
+here does — but it forwards WITH a warning, because an unscanned response must
+never look like a clean one.
+"""
 
 _matrix_client: httpx.AsyncClient | None = None
 
@@ -275,21 +293,36 @@ async def _scan_and_forward(
     await resp.aclose()
     body = b"".join(chunks)
 
+    payload: Any = None
     try:
         payload = json.loads(body)
-        result = await defend_json(
-            payload,
-            source=f"matrix:{profile.name}:{path}",
-            source_type="matrix_sync",
-            defense=profile.defense,
-            record=True,
-            attribution={
-                "profile": profile.name,
-                "backend": "matrix",
-                "direction": "sync",
-                "blocked": False,
-            },
+        async with asyncio.timeout(_SCAN_DEADLINE_SECONDS):
+            result = await defend_json(
+                payload,
+                source=f"matrix:{profile.name}:{path}",
+                source_type="matrix_sync",
+                defense=profile.defense,
+                record=True,
+                attribution={
+                    "profile": profile.name,
+                    "backend": "matrix",
+                    "direction": "sync",
+                    "blocked": False,
+                },
+            )
+    except TimeoutError:
+        # Must precede the bare `except Exception`: TimeoutError descends from
+        # OSError, so the order here is what makes the deadline observable
+        # rather than silently reported as a failed scan.
+        logger.error(  # noqa: TRY400 - a deadline is an expected condition,
+            # not a crash; the traceback logging.exception would attach is the
+            # timeout machinery's own and tells an operator nothing.
+            "matrix_proxy: scan deadline %.1fs exceeded for %s profile=%s — "
+            "forwarding UNSCANNED with a warning",
+            _SCAN_DEADLINE_SECONDS, path, profile.name,
         )
+        return _respond(payload, body, headers, content_type,
+                        {"risk_level": "unknown", "scan_timeout": True})
     except Exception:
         # A parse failure here is attacker-reachable (any room member can
         # ship pathological JSON), so "scan failed" must not mean "clean":
@@ -305,19 +338,45 @@ async def _scan_and_forward(
                         headers=headers, media_type=content_type)
 
     verdict = result.verdict
-    if verdict.flagged and isinstance(payload, dict):
-        payload["_trentina_warning"] = {
-            "risk_level": verdict.risk_level,
-            "flagged_by": verdict.flagged_by.value if verdict.flagged_by else None,
-            "l1_detections": verdict.pipeline.stats.total_detections(),
-        }
+    warning = build_warning(verdict)
+    if verdict.flagged:
         logger.warning(
             "matrix_proxy: flagged %s for profile=%s risk=%s flagged_by=%s",
             path, profile.name, verdict.risk_level,
             verdict.flagged_by.value if verdict.flagged_by else None,
         )
-        body = json.dumps(payload).encode("utf-8")
+    elif warning is not None:
+        # Not flagged, but the scan did not fully happen — L2 truncated the
+        # input, the classifier never loaded, or the judge was unavailable.
+        # This branch is the whole point of sharing the builder: this path
+        # used to annotate on `flagged` alone, so a partial scan of a Matrix
+        # response was delivered indistinguishable from a complete clean one.
+        logger.warning(
+            "matrix_proxy: incomplete scan of %s for profile=%s — %s",
+            path, profile.name,
+            ",".join(sorted(k for k in warning if k.endswith(("truncated", "unavailable")))),
+        )
 
+    return _respond(payload, body, headers, content_type, warning)
+
+
+def _respond(
+    payload: Any,
+    body: bytes,
+    headers: dict[str, str],
+    content_type: str,
+    warning: dict[str, Any] | None,
+) -> Response:
+    """Forward the upstream bytes, re-serialising only to attach a warning.
+
+    The delivered content is the upstream buffer. The only thing this proxy
+    adds is the `_trentina_warning` key, and only when there is something to
+    say — so a response with nothing to report is byte-identical to what the
+    homeserver sent.
+    """
+    if warning is not None and isinstance(payload, dict):
+        payload["_trentina_warning"] = warning
+        body = json.dumps(payload).encode("utf-8")
     return Response(content=body, status_code=200,
                     headers=headers, media_type=content_type)
 

@@ -191,9 +191,17 @@ class TestMatrixSyncScanning:
         )
         assert body["_trentina_warning"]["flagged_by"] == "L1"
 
-    def test_clean_sync_passes_untouched(
+    def test_clean_sync_content_is_untouched(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """Clean content is delivered verbatim.
+
+        Without the ONNX model present — which is the case in unit CI — L2
+        never runs, so the response also carries an ``l2_unavailable``
+        warning. That is the point: a scan that did not happen must not be
+        delivered looking like a scan that found nothing. The content itself
+        is still untouched.
+        """
         from starlette.testclient import TestClient
 
         from mcp_trentina_crunchtools.gateway import matrix_proxy
@@ -203,8 +211,62 @@ class TestMatrixSyncScanning:
         monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
 
         client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
+        body = client.get("/matrix/sekrit/_matrix/client/v3/sync").json()
+
+        warning = body.pop("_trentina_warning", None)
+        assert body == clean
+        assert warning is not None, "L2 did not run; that must be visible"
+        assert warning["l2_unavailable"] is True
+        assert warning["flagged_by"] is None
+
+    def test_nothing_to_report_is_byte_identical(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When every layer ran and found nothing, the bytes are the upstream
+        bytes — no re-serialisation, no key ordering surprises."""
+        from starlette.testclient import TestClient
+
+        from mcp_trentina_crunchtools.gateway import matrix_proxy
+
+        raw = b'{"rooms": {}, "next_batch": "s1"}'
+        upstream = _FakeUpstream(raw)
+        monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
+        monkeypatch.setattr(matrix_proxy, "build_warning", lambda verdict, **kw: None)
+
+        client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
         resp = client.get("/matrix/sekrit/_matrix/client/v3/sync")
-        assert resp.json() == clean
+        assert resp.content == raw
+
+    def test_scan_deadline_forwards_with_a_warning(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A hanging judge must not stop Matrix — but the response that gets
+        through must say it was never scanned."""
+        import asyncio
+
+        from starlette.testclient import TestClient
+
+        from mcp_trentina_crunchtools.gateway import matrix_proxy
+
+        clean = {"rooms": {}, "next_batch": "s1"}
+        upstream = _FakeUpstream(json.dumps(clean).encode())
+        monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
+        monkeypatch.setattr(matrix_proxy, "_SCAN_DEADLINE_SECONDS", 0.05)
+
+        async def _hang(*_args: object, **_kwargs: object) -> None:
+            await asyncio.sleep(30)
+
+        monkeypatch.setattr(matrix_proxy, "defend_json", _hang)
+
+        client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
+        resp = client.get("/matrix/sekrit/_matrix/client/v3/sync")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        warning = body.pop("_trentina_warning")
+        assert body == clean, "the body still forwards"
+        assert warning["scan_timeout"] is True
+        assert warning["risk_level"] == "unknown"
 
     def test_non_message_endpoints_are_not_buffered(
         self, monkeypatch: pytest.MonkeyPatch,
