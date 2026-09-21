@@ -228,11 +228,14 @@ class ActiveConfig:
     with a new dict would leave every holder pointing at the old one, which is
     exactly the silent no-op this machinery exists to prevent.
 
-    The three remaining fields record what CANNOT be changed by a reload,
-    because they were bound into closures when the routes were registered:
-    the LLM provider set, and whether the alert and matrix routes exist at
-    all. A reload compares against them so it can say what it did not apply,
-    instead of reporting success over a change that went nowhere.
+    The remaining fields record what CANNOT be changed by a reload, because
+    they were bound into closures when the routes were registered: the LLM
+    provider set, and whether the alert, matrix and OAuth routes exist at all.
+    A reload compares against them so it can say what it did not apply, instead
+    of reporting success over a change that went nowhere. OAuth is in this set
+    because the provider and its authorization-server routes bind at startup —
+    turning ``oauth.enabled`` on for a profile in the YAML and reloading cannot
+    conjure a provider that boot did not build.
     """
 
     path: Path
@@ -240,6 +243,7 @@ class ActiveConfig:
     llm_providers: dict[str, Any]
     alert_route_registered: bool
     matrix_route_registered: bool
+    oauth_route_registered: bool
 
 
 _active: ActiveConfig | None = None
@@ -249,6 +253,7 @@ def register_active_config(
     path: Path,
     config: GatewayConfig,
     llm_providers: dict[str, Any] | None = None,
+    oauth_route_registered: bool = False,
 ) -> None:
     """Record the running configuration so it can be reloaded in place.
 
@@ -264,6 +269,7 @@ def register_active_config(
             p.alert_ingress is not None for p in config.profiles.values()
         ),
         matrix_route_registered=bool(config.matrix.get("enabled")),
+        oauth_route_registered=oauth_route_registered,
     )
 
 
@@ -287,6 +293,7 @@ def replace_active_config(config: GatewayConfig) -> None:
         llm_providers=_active.llm_providers,
         alert_route_registered=_active.alert_route_registered,
         matrix_route_registered=_active.matrix_route_registered,
+        oauth_route_registered=_active.oauth_route_registered,
     )
 
 

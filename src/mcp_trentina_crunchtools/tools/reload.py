@@ -199,6 +199,15 @@ def _unapplied(active: ActiveConfig, new_config: GatewayConfig) -> list[str]:
             "matrix_ingress added but /matrix is off (matrix.enabled) — "
             "restart with it enabled to serve it"
         )
+    if not active.oauth_route_registered and any(
+        p.oauth is not None and p.oauth.enabled
+        for p in new_config.profiles.values()
+    ):
+        notes.append(
+            "oauth.enabled added but no OAuth provider was built at startup "
+            "(no profile had it, or the client credentials were unset) — "
+            "restart to serve it"
+        )
     return notes
 
 

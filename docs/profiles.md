@@ -105,6 +105,56 @@ Authorization: Bearer your-secret-token
 
 Trentina matches the token to a profile. No token or wrong token = 401.
 
+### Google-backed OAuth (optional)
+
+Some clients cannot send a static header — gemini.google.com's Custom app
+connector, for example, offers only "No authentication" or "OAuth". For those,
+a profile can additionally accept a Google-backed OAuth token. Static bearer
+still works on the same profile; OAuth is only tried when the static token does
+not match, so nothing about the existing profiles changes.
+
+Turn it on with an `oauth` block and an email allowlist:
+
+```yaml
+profiles:
+  gemini-app:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_GEMINI_APP_TOKEN
+    oauth:
+      enabled: true
+      allowed_emails:
+        - scott@example.com
+```
+
+`enabled: true` requires a non-empty `allowed_emails` (a seat open to any Google
+account is a misconfiguration, so it fails validation). Emails are matched
+case-insensitively against the verified `email` claim Google returns.
+
+The OAuth client itself is gateway-wide, not per-profile — one Google client
+serves every OAuth-enabled profile. Set it in the env file:
+
+```bash
+TRENTINA_OAUTH_GOOGLE_CLIENT_ID=...          # required when any profile enables oauth
+TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET=...      # required
+TRENTINA_OAUTH_BASE_URL=https://mcp.crunchtools.com   # public origin; default shown
+TRENTINA_OAUTH_JWT_SIGNING_KEY=...           # optional; pin it so issued tokens and
+                                             # client registrations survive a secret rotation
+```
+
+If a profile sets `oauth.enabled` but the client credentials are absent, the
+gateway refuses to start rather than serve the seat unprotected. Set
+`FASTMCP_HOME=/data/fastmcp` so the OAuth provider's client registrations and
+tokens persist across a container restart.
+
+Trentina runs as an OAuth **proxy**: it presents the discovery, dynamic client
+registration, authorize, and token endpoints an MCP client expects, and proxies
+the actual login up to Google. An unauthenticated request to an OAuth-enabled
+profile returns 401 with a `WWW-Authenticate: Bearer resource_metadata=…` header
+pointing at
+`/.well-known/oauth-protected-resource/gateway/<profile>/mcp`, which is how the
+client bootstraps the flow. A valid Google identity that is not on the
+allowlist gets 403.
+
 ## Multi-Agent Deployment
 
 A typical deployment serves multiple agents with different trust levels:

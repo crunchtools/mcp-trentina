@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from .gateway.app import OAuthContext
     from .gateway.circuit import CircuitBreaker
+    from .gateway.loader import GatewayConfig
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -167,8 +169,17 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         profiles_path,
     )
 
+    oauth_context = _build_oauth_context(gateway_config)
+    if oauth_context is not None:
+        # http_app() reads mcp_server.auth at run() time, so setting it here —
+        # before run() below — is what mounts Google's authorize/token/register
+        # and the .well-known authorization-server metadata at the root.
+        mcp_server.auth = oauth_context.provider
+
     register_internal_server(mcp_server)
-    register_with_fastmcp(mcp_server, gateway_config.profiles, session_registry)
+    register_with_fastmcp(
+        mcp_server, gateway_config.profiles, session_registry, oauth_context,
+    )
 
     _wire_circuit_notifications(breaker, session_registry, gateway_config.profiles)
 
@@ -220,7 +231,12 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     # the facts about what got wired that a later reload has to respect. See
     # tools/reload.py — without it, an edit to profiles.yaml costs a restart,
     # and a restart costs 40 minutes of re-judged tool descriptions.
-    register_active_config(profiles_path, gateway_config, llm_providers)
+    register_active_config(
+        profiles_path,
+        gateway_config,
+        llm_providers,
+        oauth_route_registered=oauth_context is not None,
+    )
 
     _warm_classifier()
 
@@ -264,6 +280,71 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         log_level=log_level,
         path=mcp_path,
     )
+
+
+def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
+    """Construct the gateway's Google-backed OAuth context, or None.
+
+    Returns None when no profile opts into OAuth — the common case, and the
+    gateway behaves exactly as before. When at least one profile sets
+    ``oauth.enabled`` this builds one ``GoogleProvider`` for the whole gateway
+    (the human-facing authorization server that proxies login to Google) and
+    fails closed if the client credentials are absent: an enabled profile with
+    no provider is a misconfiguration, not a reason to serve it unprotected.
+
+    Env:
+        TRENTINA_OAUTH_GOOGLE_CLIENT_ID / _CLIENT_SECRET — the one Google OAuth
+            client registered for this deployment (required when any profile
+            enables OAuth).
+        TRENTINA_OAUTH_BASE_URL — public origin clients reach (default
+            https://mcp.crunchtools.com); the OAuth endpoints and the RFC 9728
+            resource metadata are advertised under it.
+        TRENTINA_OAUTH_JWT_SIGNING_KEY — optional. Pins the key that signs
+            FastMCP tokens and derives the on-disk storage location. Set it so
+            issued tokens and stored registrations survive a Google client
+            secret rotation; if unset, the key derives from the secret.
+    """
+    from .gateway.app import OAuthContext
+    from .gateway.errors import ProfileConfigError
+
+    profiles = gateway_config.profiles
+    enabled = [
+        name
+        for name, p in profiles.items()
+        if p.oauth is not None and p.oauth.enabled
+    ]
+    if not enabled:
+        return None
+
+    client_id = os.environ.get("TRENTINA_OAUTH_GOOGLE_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET", "").strip()
+    base_url = os.environ.get(
+        "TRENTINA_OAUTH_BASE_URL", "https://mcp.crunchtools.com"
+    ).strip().rstrip("/")
+    signing_key = os.environ.get("TRENTINA_OAUTH_JWT_SIGNING_KEY", "").strip() or None
+
+    if not client_id or not client_secret:
+        raise ProfileConfigError(
+            "profile(s) "
+            f"{', '.join(sorted(enabled))} set oauth.enabled but "
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_ID / _CLIENT_SECRET are not set — "
+            "refusing to start an OAuth seat with no provider"
+        )
+
+    from fastmcp.server.auth.providers.google import GoogleProvider
+
+    provider = GoogleProvider(
+        client_id=client_id,
+        client_secret=client_secret,
+        base_url=base_url,
+        required_scopes=["openid", "email", "profile"],
+        jwt_signing_key=signing_key,
+    )
+    logger.info(
+        "gateway: Google OAuth provider built for %d profile(s): %s (base_url=%s)",
+        len(enabled), ", ".join(sorted(enabled)), base_url,
+    )
+    return OAuthContext(provider=provider, base_url=base_url)
 
 
 def _warm_classifier() -> None:

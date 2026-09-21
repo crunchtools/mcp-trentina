@@ -14,9 +14,66 @@ from mcp_trentina_crunchtools.gateway.profile import (
     Backend,
     DefenseConfig,
     LlmKeyOverride,
+    OAuthConfig,
     ParameterConstraint,
     Profile,
 )
+
+
+class TestOAuthConfig:
+    """OAuthConfig: opt-in Google-backed access with an email allowlist."""
+
+    def test_disabled_default(self) -> None:
+        cfg = OAuthConfig()
+        assert cfg.enabled is False
+        assert cfg.allowed_emails == []
+
+    def test_enabled_with_allowlist_valid(self) -> None:
+        cfg = OAuthConfig(enabled=True, allowed_emails=["scott@example.com"])
+        assert cfg.enabled is True
+        assert cfg.allowed_emails == ["scott@example.com"]
+
+    def test_emails_lowercased(self) -> None:
+        cfg = OAuthConfig(enabled=True, allowed_emails=["  Scott@Example.COM "])
+        assert cfg.allowed_emails == ["scott@example.com"]
+
+    def test_enabled_without_allowlist_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="allowed_emails is empty"):
+            OAuthConfig(enabled=True)
+
+    def test_enabled_with_empty_allowlist_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="allowed_emails is empty"):
+            OAuthConfig(enabled=True, allowed_emails=[])
+
+    def test_disabled_without_allowlist_ok(self) -> None:
+        # A block present but off is fine — nothing to authorize.
+        cfg = OAuthConfig(enabled=False)
+        assert cfg.allowed_emails == []
+
+    @pytest.mark.parametrize(
+        "bad",
+        ["notanemail", "@example.com", "scott@", "scott@localhost", ""],
+    )
+    def test_malformed_email_rejected(self, bad: str) -> None:
+        with pytest.raises(ValidationError, match="not an email"):
+            OAuthConfig(enabled=True, allowed_emails=[bad])
+
+    def test_extra_key_forbidden(self) -> None:
+        with pytest.raises(ValidationError):
+            OAuthConfig(enabled=True, allowed_emails=["a@b.co"], sneaky=1)
+
+    def test_profile_oauth_optional_and_default_none(self) -> None:
+        p = Profile(name="x", auth=AuthConfig(bearer_token_env="X"))
+        assert p.oauth is None
+
+    def test_profile_with_oauth_block(self) -> None:
+        p = Profile(
+            name="gemini-app",
+            auth=AuthConfig(bearer_token_env="X"),
+            oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+        )
+        assert p.oauth is not None
+        assert p.oauth.enabled is True
 
 
 class TestProfileModel:

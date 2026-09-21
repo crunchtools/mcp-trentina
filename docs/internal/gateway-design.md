@@ -260,8 +260,11 @@ through. ~200 lines of FastMCP server code + ~100 lines of profile loader +
 **v1**: bearer token per profile. Token value read from the env var named in
 `auth.bearer_token_env`. Consumer sends `Authorization: Bearer <token>`.
 
-**Out of scope for v1**: OAuth 2.0, OIDC, per-user-within-profile. FastMCP's auth
-middleware makes these clean v2 additions.
+**Added in 0.8.0**: optional Google-backed OAuth per profile (`oauth.enabled`
+plus an `allowed_emails` allowlist), for clients that cannot send a static
+header. Trentina runs as an OAuth proxy in front of Google; static bearer is
+still tried first, so it is purely additive. See `docs/profiles.md` →
+Authentication. Still out of scope: OIDC beyond Google, per-user-within-profile.
 
 Tokens never appear in config files (only env var names do); env file lives at
 `/srv/<service>/config/profile-tokens.env` with chmod 600 +

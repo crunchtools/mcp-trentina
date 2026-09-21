@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from starlette.applications import Starlette
@@ -25,12 +26,13 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from ..quarantine.classifier import classifier_status
-from .auth import verify_bearer
+from .auth import verify_bearer, verify_oauth
 from .errors import (
     AuthError,
     BackendCallError,
     BackendNotInProfileError,
     GatewayError,
+    OAuthForbiddenError,
     ProfileNotFoundError,
 )
 from .router import JSONRPC_INTERNAL_ERROR, JSONRPC_INVALID_PARAMS, route_jsonrpc
@@ -56,6 +58,103 @@ SSE_RETRY_MS = 15000
 ``retry:`` and back off at the protocol layer, bypassing app-level retry caps."""
 
 
+@dataclass(frozen=True)
+class OAuthContext:
+    """What the gateway needs to enforce and advertise Google-backed OAuth.
+
+    ``provider`` is the FastMCP OAuth provider (a ``GoogleProvider``/
+    ``OAuthProxy``) that validates presented tokens; ``base_url`` is the public
+    origin (no trailing slash) used to build the RFC 9728 resource-metadata URL
+    in the 401 challenge. Built once at startup and threaded into the handlers;
+    None on a gateway with no OAuth-enabled profile.
+    """
+
+    provider: Any
+    base_url: str
+
+
+async def _authorize(
+    request: Request,
+    profile: Profile,
+    oauth: OAuthContext | None,
+) -> Response | None:
+    """Authorize one request against a profile. Return None if allowed.
+
+    Static bearer is tried first and, on success, nothing else runs — every
+    existing profile behaves exactly as before. Only when the static token does
+    not match AND the profile opted into OAuth does the OAuth path run, so an
+    OAuth failure never masks a plain static-token typo for a static profile.
+
+    On failure returns the response to send: a bare 401 for a static-only
+    profile (unchanged), a 401 carrying a ``WWW-Authenticate`` challenge for an
+    OAuth-enabled profile with no usable token, or a 403 when a valid Google
+    identity is simply not on the allowlist.
+    """
+    auth_header = request.headers.get("authorization")
+    if _static_bearer_ok(auth_header, profile):
+        return None
+
+    if profile.oauth is not None and profile.oauth.enabled:
+        try:
+            await verify_oauth(
+                auth_header, profile, oauth.provider if oauth is not None else None
+            )
+        except OAuthForbiddenError as exc:
+            logger.info(
+                "gateway: oauth forbidden profile=%s reason=%s [%s]",
+                profile.name, exc, _client_desc(request),
+            )
+            return _plain(403, "Forbidden")
+        except AuthError as exc:
+            logger.info(
+                "gateway: oauth challenge profile=%s reason=%s [%s]",
+                profile.name, exc, _client_desc(request),
+            )
+            return _oauth_challenge(profile.name, oauth)
+        else:
+            return None
+
+    logger.info("gateway: auth failed profile=%s", profile.name)
+    return _plain(401, "Unauthorized")
+
+
+def _static_bearer_ok(authorization_header: str | None, profile: Profile) -> bool:
+    """Return True iff the profile's static bearer token matches; never raises.
+
+    A predicate over ``verify_bearer`` for the gateway's two-stage auth: a
+    static-token miss is not an error here but the signal to try the OAuth path
+    next, so the raised ``AuthError`` is converted to a plain False rather than
+    swallowed — the decision to fall through is the recovery.
+    """
+    try:
+        verify_bearer(authorization_header, profile)
+    except AuthError:
+        return False
+    return True
+
+
+def _oauth_challenge(profile_name: str, oauth: OAuthContext | None) -> Response:
+    """401 that points an MCP client at this resource's RFC 9728 metadata.
+
+    The ``resource_metadata`` URL is where the client learns which authorization
+    server to use, which is how gemini.google.com bootstraps the whole flow from
+    a single unauthenticated request.
+    """
+    headers: dict[str, str] = {}
+    if oauth is not None:
+        metadata_url = (
+            f"{oauth.base_url}/.well-known/oauth-protected-resource"
+            f"/gateway/{profile_name}/mcp"
+        )
+        headers["WWW-Authenticate"] = f'Bearer resource_metadata="{metadata_url}"'
+    return Response(
+        content="Unauthorized",
+        media_type="text/plain",
+        status_code=401,
+        headers=headers,
+    )
+
+
 def _client_desc(request: Request) -> str:
     """Identify the caller for correlating a disconnect with one client.
 
@@ -71,6 +170,7 @@ def _client_desc(request: Request) -> str:
 def gateway_app(
     registry: dict[str, Profile],
     sessions: SessionRegistry | None = None,
+    oauth: OAuthContext | None = None,
 ) -> Starlette:
     """Build the Starlette sub-app exposing ``/{profile}/mcp``.
 
@@ -81,24 +181,61 @@ def gateway_app(
     sr = sessions or session_registry
 
     async def handle_post(request: Request) -> Response:
-        return await _handle_post(request, registry, sr)
+        return await _handle_post(request, registry, sr, oauth)
 
     async def handle_get(request: Request) -> Response:
-        return await _handle_get(request, registry, sr)
+        return await _handle_get(request, registry, sr, oauth)
 
     async def handle_delete(request: Request) -> Response:
-        return await _handle_delete(request, registry, sr)
+        return await _handle_delete(request, registry, sr, oauth)
 
     async def handle_health(_request: Request) -> Response:
         return _health_payload(registry)
 
+    async def handle_resource_metadata(request: Request) -> Response:
+        return _resource_metadata(request, registry, oauth)
+
     routes = [
         Route("/health", endpoint=handle_health, methods=["GET"]),
+        Route(
+            "/.well-known/oauth-protected-resource/gateway/{profile}/mcp",
+            endpoint=handle_resource_metadata,
+            methods=["GET"],
+        ),
         Route("/{profile}/mcp", endpoint=handle_post, methods=["POST"]),
         Route("/{profile}/mcp", endpoint=handle_get, methods=["GET"]),
         Route("/{profile}/mcp", endpoint=handle_delete, methods=["DELETE"]),
     ]
     return Starlette(routes=routes)
+
+
+def _resource_metadata(
+    request: Request,
+    registry: dict[str, Profile],
+    oauth: OAuthContext | None,
+) -> Response:
+    """Serve RFC 9728 protected-resource metadata for one gateway profile.
+
+    FastMCP registers this document only for its own MCP mount path, never for
+    the gateway's ``/gateway/{profile}/mcp`` routes, so the gateway serves its
+    own — naming itself as the authorization server the client should use. Only
+    OAuth-enabled profiles have one; everything else is a 404.
+    """
+    profile_name = request.path_params.get("profile", "")
+    profile = registry.get(profile_name)
+    if (
+        oauth is None
+        or profile is None
+        or profile.oauth is None
+        or not profile.oauth.enabled
+    ):
+        return _plain(404, "Not Found")
+    return JSONResponse({
+        "resource": f"{oauth.base_url}/gateway/{profile_name}/mcp",
+        "authorization_servers": [oauth.base_url],
+        "scopes_supported": ["openid", "email", "profile"],
+        "bearer_methods_supported": ["header"],
+    })
 
 
 def _health_payload(registry: dict[str, Profile]) -> Response:
@@ -120,6 +257,7 @@ def register_with_fastmcp(
     mcp_server: Any,
     registry: dict[str, Profile],
     sessions: SessionRegistry | None = None,
+    oauth: OAuthContext | None = None,
 ) -> None:
     """Wire gateway routes onto a FastMCP server via its custom_route decorator."""
     sr = sessions or session_registry
@@ -128,19 +266,28 @@ def register_with_fastmcp(
     async def health_endpoint(_request: Request) -> Response:
         return _health_payload(registry)
 
+    if oauth is not None:
+        @mcp_server.custom_route(  # type: ignore[untyped-decorator]
+            "/.well-known/oauth-protected-resource/gateway/{profile}/mcp",
+            methods=["GET"],
+        )
+        async def resource_metadata_endpoint(request: Request) -> Response:
+            return _resource_metadata(request, registry, oauth)
+
     @mcp_server.custom_route("/gateway/{profile}/mcp", methods=["POST", "GET", "DELETE"])  # type: ignore[untyped-decorator]
     async def gateway_endpoint(request: Request) -> Response:
         if request.method == "GET":
-            return await _handle_get(request, registry, sr)
+            return await _handle_get(request, registry, sr, oauth)
         if request.method == "DELETE":
-            return await _handle_delete(request, registry, sr)
-        return await _handle_post(request, registry, sr)
+            return await _handle_delete(request, registry, sr, oauth)
+        return await _handle_post(request, registry, sr, oauth)
 
 
 async def _handle_get(
     request: Request,
     registry: dict[str, Profile],
     sessions: SessionRegistry,
+    oauth: OAuthContext | None = None,
 ) -> Response:
     """Open a long-lived SSE stream for server-push notifications.
 
@@ -155,10 +302,9 @@ async def _handle_get(
     if profile is None:
         return _plain(404, "Not Found")
 
-    try:
-        verify_bearer(request.headers.get("authorization"), profile)
-    except AuthError:
-        return _plain(401, "Unauthorized")
+    auth_response = await _authorize(request, profile, oauth)
+    if auth_response is not None:
+        return auth_response
 
     session_id = request.headers.get(MCP_SESSION_ID_HEADER, "")
     if not session_id:
@@ -237,6 +383,7 @@ async def _handle_delete(
     request: Request,
     registry: dict[str, Profile],
     sessions: SessionRegistry,
+    oauth: OAuthContext | None = None,
 ) -> Response:
     """Tear down an MCP session."""
     profile_name = request.path_params.get("profile", "")
@@ -244,10 +391,9 @@ async def _handle_delete(
     if profile is None:
         return _plain(404, "Not Found")
 
-    try:
-        verify_bearer(request.headers.get("authorization"), profile)
-    except AuthError:
-        return _plain(401, "Unauthorized")
+    auth_response = await _authorize(request, profile, oauth)
+    if auth_response is not None:
+        return auth_response
 
     session_id = request.headers.get(MCP_SESSION_ID_HEADER, "")
     if not session_id:
@@ -276,6 +422,7 @@ async def _handle_post(
     request: Request,
     registry: dict[str, Profile],
     sessions: SessionRegistry,
+    oauth: OAuthContext | None = None,
 ) -> Response:
     """Authenticate, parse, dispatch, and return one gateway JSON-RPC request.
 
@@ -290,11 +437,9 @@ async def _handle_post(
         logger.info("gateway: unknown profile %r", profile_name)
         return _plain(404, "Not Found")
 
-    try:
-        verify_bearer(request.headers.get("authorization"), profile)
-    except AuthError as exc:
-        logger.info("gateway: auth failed profile=%s reason=%s", profile_name, exc)
-        return _plain(401, "Unauthorized")
+    auth_response = await _authorize(request, profile, oauth)
+    if auth_response is not None:
+        return auth_response
 
     try:
         body_bytes = await request.body()
