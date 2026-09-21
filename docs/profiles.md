@@ -146,6 +146,49 @@ gateway refuses to start rather than serve the seat unprotected. Set
 `FASTMCP_HOME=/data/fastmcp` so the OAuth provider's client registrations and
 tokens persist across a container restart.
 
+### Clients that cannot register themselves
+
+Dynamic client registration covers most MCP clients. Some connectors instead ask
+an operator to paste a client ID and secret into a console — gemini.google.com
+Custom Apps offers exactly three fields (MCP server URL, Client ID, Client
+Secret) and no authorization or token URL. Such a client discovers this
+authorization server from the MCP URL and then authenticates to it as a
+*confidential* client using those credentials.
+
+Declare that client on the profile:
+
+```yaml
+profiles:
+  gemini-app:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_GEMINI_APP_TOKEN
+    oauth:
+      enabled: true
+      allowed_emails:
+        - scott@example.com
+      client_id: 375f3fdb-c322-41bc-8dc6-c2010a095f04
+      client_secret_env: TRENTINA_GEMINI_APP_CLIENT_SECRET
+      client_redirect_uris:
+        - https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-…
+```
+
+Put the **same** client ID and secret into the connector's form, and copy the
+redirect URI the connector displays into `client_redirect_uris` verbatim — it is
+matched exactly, with none of the pattern widening DCR clients get for their
+unpredictable localhost ports.
+
+All three keys are required together, and `oauth.enabled` must be on; anything
+less is refused at load. The secret is named by environment variable and never
+written in this file.
+
+With such a client declared, the authorization-server metadata advertises
+`client_secret_post` alongside `none`, and the secret is genuinely checked on
+every `/token` call. Without one the metadata is unchanged. This matters more
+than it sounds: a connector holding a secret, reading metadata that offers only
+`none`, concludes its credentials are unusable and abandons the flow — in the
+Gemini case `/authorize`, `/consent` and `/auth/callback` all succeeded and
+`POST /token` was simply never issued.
+
 Trentina runs as an OAuth **proxy**: it presents the discovery, dynamic client
 registration, authorize, and token endpoints an MCP client expects, and proxies
 the actual login up to Google. An unauthenticated request to an OAuth-enabled

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import secrets
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.8.3"
+__version__ = "0.9.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -282,6 +283,139 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     )
 
 
+_AS_METADATA_PREFIX = "/.well-known/oauth-authorization-server"
+
+#: The one client-auth method this proxy enforces beyond "none". Named
+#: rather than repeated as a literal so the advertisement in the metadata
+#: and the method stored on the client can never drift apart.
+_AUTH_METHOD_POST = "client_secret_post"
+
+
+class _AdvertiseSecretPost:
+    """ASGI wrapper that adds client_secret_post to the AS metadata document.
+
+    FastMCP wraps the metadata handler in CORS middleware, so the route's
+    endpoint is a full ASGI app rather than a request/response function — the
+    body has to be intercepted on the way out. Buffering is safe here: the
+    document is a few hundred bytes and is not streamed.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        start_message: dict[str, Any] | None = None
+        chunks: list[bytes] = []
+
+        async def capture(message: dict[str, Any]) -> None:
+            nonlocal start_message
+            if message["type"] == "http.response.start":
+                start_message = message
+                return
+            if message["type"] != "http.response.body":
+                await send(message)
+                return
+            chunks.append(message.get("body", b""))
+            if message.get("more_body"):
+                return
+            await self._flush(start_message, b"".join(chunks), send)
+
+        await self._inner(scope, receive, capture)
+
+    async def _flush(
+        self, start: dict[str, Any] | None, body: bytes, send: Any
+    ) -> None:
+        """Emit the patched document, or the original when it is not ours."""
+        if start is None:
+            return
+        try:
+            document = json.loads(body)
+            methods = list(document.get("token_endpoint_auth_methods_supported") or [])
+            if _AUTH_METHOD_POST not in methods:
+                methods.append(_AUTH_METHOD_POST)
+            document["token_endpoint_auth_methods_supported"] = methods
+            body = json.dumps(document).encode()
+        except (ValueError, AttributeError):
+            # A non-JSON body here means CORS answered a preflight or the route
+            # errored; pass it through rather than turning it into a 500.
+            pass
+
+        headers = [
+            (name, value)
+            for name, value in start.get("headers", [])
+            if name.lower() != b"content-length"
+        ]
+        headers.append((b"content-length", str(len(body)).encode()))
+        await send({**start, "headers": headers})
+        await send({"type": "http.response.body", "body": body})
+
+
+def _advertise_secret_post(route: Any) -> Any:
+    """Wrap one authorization-server metadata route; pass anything else through.
+
+    The document is edited on the way out rather than rebuilt: FastMCP composes
+    it from several options objects inside get_routes, and duplicating that
+    construction here would be a second copy to keep in step on every upgrade.
+    """
+    from starlette.routing import Route
+
+    if not isinstance(route, Route) or not route.path.startswith(_AS_METADATA_PREFIX):
+        return route
+
+    return Route(
+        path=route.path,
+        endpoint=_AdvertiseSecretPost(route.app),
+        methods=list(route.methods or ["GET", "OPTIONS"]),
+        name=route.name,
+    )
+
+
+def _provisioned_clients(profiles: Mapping[str, Profile]) -> dict[str, Any]:
+    """Build the confidential clients declared across the OAuth profiles.
+
+    OAuthConfig refuses a half-declared client and the loader fails closed on an
+    unresolved secret, so every entry reaching here has an id, a secret and at
+    least one redirect URI. Redirect URIs are registered verbatim and
+    ``allowed_redirect_uri_patterns`` is pinned to that same list: a client the
+    operator provisioned by hand has one known callback, and pattern widening
+    exists for DCR clients on unpredictable localhost ports, not for this.
+    """
+    from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
+    from pydantic import AnyUrl
+
+    from .gateway.errors import ProfileConfigError
+
+    clients: dict[str, Any] = {}
+    for name, profile in sorted(profiles.items()):
+        oauth = profile.oauth
+        if oauth is None or oauth.client_id is None:
+            continue
+        secret = oauth.client_secret
+        if secret is None:
+            raise ProfileConfigError(
+                f"profile {name!r}: oauth.client_id is set but the client "
+                "secret did not resolve — refusing to serve a provisioned "
+                "client whose secret would never be checked"
+            )
+        if oauth.client_id in clients:
+            raise ProfileConfigError(
+                f"profile {name!r}: oauth.client_id {oauth.client_id!r} is "
+                "already provisioned by another profile — one client id cannot "
+                "carry two secrets or two redirect sets"
+            )
+        clients[oauth.client_id] = ProxyDCRClient(
+            client_id=oauth.client_id,
+            client_secret=secret.get_secret_value(),
+            redirect_uris=[AnyUrl(uri) for uri in oauth.client_redirect_uris],
+            grant_types=["authorization_code", "refresh_token"],
+            scope=None,
+            token_endpoint_auth_method=_AUTH_METHOD_POST,
+            allowed_redirect_uri_patterns=list(oauth.client_redirect_uris),
+            client_name=f"provisioned:{name}",
+        )
+    return clients
+
+
 def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
     """Construct the gateway's Google-backed OAuth context, or None.
 
@@ -349,6 +483,9 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
         and OAuthProxy.set_mcp_path then binds the JWT audience to it.
         """
 
+        #: Statically provisioned confidential clients, by client_id.
+        provisioned: ClassVar[dict[str, Any]] = {}
+
         def set_mcp_path(self, mcp_path: str | None) -> None:
             logger.debug(
                 "gateway: ignoring FastMCP mount path %s; OAuth resource stays "
@@ -356,6 +493,40 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
                 mcp_path,
             )
             super().set_mcp_path(None)
+
+        async def get_client(self, client_id: str) -> Any:
+            """Resolve a provisioned confidential client ahead of the DCR store.
+
+            Both `/authorize` and the SDK's ClientAuthenticator at `/token` go
+            through here, so returning the provisioned record is what makes the
+            secret actually checked rather than merely advertised. Answering
+            before the store also means DCR can never overwrite a provisioned
+            client by registering the same id.
+            """
+            client = self.provisioned.get(client_id)
+            if client is not None:
+                return client
+            return await super().get_client(client_id)
+
+        def get_routes(self, mcp_path: str | None = None) -> list[Any]:
+            """Advertise the client-auth methods this proxy genuinely enforces.
+
+            OAuthProxy hardcodes `token_endpoint_auth_methods_supported` to
+            `["none"]` because it never enforces a downstream client secret.
+            With a provisioned client the SDK's ClientAuthenticator does enforce
+            one (hmac-compared, expiry-checked), so `client_secret_post` becomes
+            true rather than decorative — and a client holding credentials, like
+            gemini.google.com Custom Apps, needs to be told it may present them
+            or it abandons the flow before calling `/token` at all.
+
+            The metadata route is rebuilt deep inside the base `get_routes`, so
+            the advertised document is patched on the way out instead of
+            reimplementing that construction. See CHANGELOG 0.9.0, RT #1502.
+            """
+            routes = super().get_routes(mcp_path)
+            if not self.provisioned:
+                return routes
+            return [_advertise_secret_post(route) for route in routes]
 
     # Pin the OAuth resource to the OAuth profile's gateway endpoint (see
     # _GatewayGoogleProvider). FastMCP's OAuthProxy holds one resource per proxy,
@@ -369,6 +540,19 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
             "holds one resource URL; pinned to %s — others fail /authorize "
             "with invalid_target",
             len(enabled), sorted(enabled), resource_url,
+        )
+
+    # Provisioned confidential clients are resolved by get_client ahead of the
+    # DCR store, and their presence is what turns on the client_secret_post
+    # advertisement in get_routes. Built before the provider so the class
+    # attribute is populated by the time FastMCP asks for routes.
+    provisioned = _provisioned_clients(profiles)
+    _GatewayGoogleProvider.provisioned = provisioned
+    if provisioned:
+        logger.info(
+            "gateway: %d provisioned OAuth client(s): %s "
+            "(confidential, client_secret_post enforced)",
+            len(provisioned), ", ".join(sorted(provisioned)),
         )
 
     provider = _GatewayGoogleProvider(

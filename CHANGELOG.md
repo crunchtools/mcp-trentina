@@ -10,6 +10,49 @@ under that name.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-21
+
+### Added
+- **Statically provisioned confidential OAuth clients.** A profile's `oauth`
+  block may now declare `client_id`, `client_secret_env` and
+  `client_redirect_uris`, describing a client whose credentials an operator
+  types into a third-party console rather than one that registers itself
+  through DCR. The secret is named by environment variable, never written in
+  the config file, so the "no secret in this block" rule the config documents
+  still holds. A half-declared client (any one of the three without the others,
+  or a `client_id` on a profile with `oauth.enabled` off) is refused at load
+  rather than failing later in a way that is hard to read from the outside.
+
+  gemini.google.com Custom Apps is the motivating case, and this is the last
+  blocker in that connect flow. Its connector offers exactly three fields — MCP
+  server URL, Client ID, Client Secret — and no Authorization or Token URL. So
+  it discovers our authorization server from the MCP URL via RFC 9728 → RFC
+  8414 and then authenticates to it as a *confidential* client using those
+  credentials. Our metadata advertised `token_endpoint_auth_methods_supported:
+  ["none"]`, telling a client holding a secret that the only supported method
+  is no-client-authentication. Gemini abandoned the flow there: `/authorize`,
+  `/consent` and `/auth/callback` all completed, and `POST /token` was never
+  issued at all.
+
+  This is 0.8.2's CIMD fix biting from the other side. Narrowing the advertised
+  methods to `["none"]` is what pushed Gemini off the CIMD path and onto DCR —
+  and simultaneously told it the Custom App credentials were unusable.
+
+### Changed
+- **The authorization-server metadata advertises `client_secret_post` when a
+  provisioned client exists.** `OAuthProxy` hardcodes the advertisement to
+  `["none"]` because it never enforces a downstream client secret, which was
+  accurate for it and is no longer accurate for us: a provisioned client is
+  resolved by `get_client` ahead of the DCR store, so the SDK's
+  `ClientAuthenticator` performs a real `hmac.compare_digest` check and an
+  expiry check against the stored secret. The method is advertised because it
+  is now genuinely enforced, not to make a client proceed. With no provisioned
+  client the document is untouched and still reads `["none"]`.
+
+  PKCE remains the primary binding; the secret is a second factor, not a
+  replacement. DCR-registered public clients are unaffected — `none` stays in
+  the advertised list and their registration path is unchanged.
+
 ## [0.8.3] - 2026-09-21
 
 ### Fixed
