@@ -145,55 +145,46 @@ def _run_l1(content: str, *, is_html: bool | None) -> PipelineResult:
     return sanitize(content) if html else sanitize_text(content)
 
 
-def _should_run_l3(
-    *,
-    defense: DefenseConfig | None,
-    provenance: Provenance,
-    is_trusted: bool,
-    classification: ClassifierResult | None,
-    l1_suspicious: int,
-    l3_gate: bool,
-) -> bool:
-    """Provenance OR L1 suspicion OR L2 score.
+def _should_run_l3(*, defense: DefenseConfig | None, l3_gate: bool) -> bool:
+    """L3 runs on everything the gateway scans. There is no score gate.
 
-    See Provenance.MODEL_OUTPUT for the provenance leg. The L1 leg exists
-    because L1 no longer strips: its detections are a warning in a sidecar,
-    and a warning nobody is forced to act on is nothing. Any suspicious L1
-    hit sends the full original to the judge that can tell an attack from a
-    CVE ticket discussing one.
+    This used to escalate to L3 only on model-output provenance, on a
+    suspicious L1 detection, or on an L2 score at or above ``l3_threshold``.
+    Clean traffic therefore never reached the judge at all — and because L2
+    FLAGS at ``l2_threshold`` (0.3 in production) while escalation needed
+    ``l3_threshold`` (0.7), there was a band that L2 flagged and L3 never
+    reviewed.
+
+    Gating the semantic judge on the pattern classifier agreeing there is
+    something worth looking at inverts why L3 exists. It is the layer built
+    for attacks phrased as ordinary prose — exactly the shape L2 is
+    documented to miss — so "L2 saw nothing" is the weakest possible reason
+    to skip it.
+
+    That gate was a defensible reading of "all three layers, full stop"
+    (c2be892, which removed the per-layer ``quarantine: false`` boolean and
+    kept cost control as a threshold). It was not the intended reading. A
+    threshold deciding whether a layer executes is an off switch with a dial
+    on it. The mandate is that L1, L2 and L3 run on every input to the
+    gateway, with no conditionality.
+
+    The only thing that stops L3 now is L3 being unable to run: no provider
+    configured to ask. That is a DEGRADED state, not a policy one — it
+    surfaces as ``l3_unavailable`` in the assessment and in the warning, so
+    it can never read as a clean scan.
+
+    ``l3_gate=False`` is not a policy switch either. Two callers set it,
+    ``advise()`` and ``safe_search``, and both spend L3 on *extraction*
+    rather than detection — the layer still runs, in a different mode.
     """
-    # Gate shut by the caller, or no provider configured to ask. has_api_key
-    # is Gemini's; a profile that overrides defense.provider brings its own
-    # key (validated at profile load) or is keyless ollama — for those the
-    # gate opens and an actually-broken provider surfaces as l3_unavailable
-    # in the assessment rather than as a silent never-ran.
+    # has_api_key is Gemini's; a profile that overrides defense.provider
+    # brings its own key (validated at profile load) or is keyless ollama.
+    # For those the gate opens and an actually-broken provider surfaces as
+    # l3_unavailable rather than as a silent never-ran.
     no_provider = not get_config().has_api_key and (
         defense is None or defense.provider is None
     )
-    if not l3_gate or no_provider:
-        return False
-
-    # Model output always earns the Q-Agent's opinion, trusted or not. What a
-    # coerced summariser emits is exactly the shape L2 is blind to, so a score
-    # gate here would mean L3 never runs on the one input that most needs it.
-    if provenance is Provenance.MODEL_OUTPUT:
-        return True
-
-    if is_trusted:
-        return False
-
-    if l1_suspicious > 0:
-        return True
-
-    # No profile, or no L2 opinion to threshold against: run it (this also
-    # preserves today's tool behaviour, where L3 runs for any untrusted
-    # content whenever an API key is present). Otherwise, the score leg.
-    return (
-        defense is None
-        or classification is None
-        or classification.score >= defense.l3_threshold
-    )
-
+    return l3_gate and not no_provider
 
 
 def _decide(
@@ -330,14 +321,7 @@ async def defend(
 
     l3_assessment: dict[str, Any] | None = None
     l3_flagged = False
-    if has_text and _should_run_l3(
-        defense=defense,
-        provenance=provenance,
-        is_trusted=is_trusted,
-        classification=classification,
-        l1_suspicious=pipeline.stats.suspicious_detections(),
-        l3_gate=l3_gate,
-    ):
+    if has_text and _should_run_l3(defense=defense, l3_gate=l3_gate):
         l3_input = (
             pipeline.content[:l3_max_chars]
             if l3_max_chars is not None
@@ -345,6 +329,13 @@ async def defend(
         )
         l3_assessment = await quarantine_detect(l3_input, layer1_context=l3_context)
         l3_flagged = bool(l3_assessment.get("injection_detected"))
+    elif has_text and l3_gate:
+        # L3 was supposed to run and could not: there is no provider to ask.
+        # Record that as a gap rather than leaving l3_assessment None, which
+        # is indistinguishable from "ran and found nothing" — the warning
+        # builder reads this key, so an unjudged response cannot present
+        # itself as a clean one. This is the L3 twin of l2_unavailable.
+        l3_assessment = {"l3_unavailable": True, "injection_detected": False}
 
     flagged_by, risk_level, assessment = _decide(
         pipeline=pipeline,

@@ -410,11 +410,20 @@ class DefenseConfig(BaseModel):
     reports and block-mode refuses on — never a config option that fails
     silent.
 
-    Cost control for L3 lives in `l3_threshold`, not in an off switch: L3
-    fires on model-output provenance, on any suspicious L1 detection, or on
-    an L2 score at/above the threshold — so clean traffic costs nothing and
-    an operator who wants L3 rarer raises the threshold in daylight instead
-    of turning the layer off in the dark.
+    There is no cost control for L3 any more, and that is the point. It used
+    to live in `l3_threshold`, which meant clean traffic never reached the
+    judge — and since L2 FLAGS at `l2_threshold` while escalation needed
+    `l3_threshold`, there was a band L2 flagged that L3 never reviewed.
+
+    That was read as satisfying "all three layers, full stop" because it
+    removed the per-layer booleans. It did not: a threshold deciding whether
+    a layer executes is an off switch with a dial on it. The mandate is that
+    L1, L2 and L3 run on every input to the gateway. They do, and
+    `l3_threshold` is ignored.
+
+    What a profile still controls is `l2_threshold` — how suspicious L2 must
+    be before it FLAGS, which is a consequence and not an execution — and
+    `enforcement`, which is what a flag costs.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -445,10 +454,11 @@ class DefenseConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "L2 score at or above which L3 (the Q-Agent) reviews the "
-            "content. L3 also always fires on model-output provenance and "
-            "on any suspicious L1 detection; this threshold only adds the "
-            "score trigger. Raise it to spend less on L3, in daylight."
+            "DEPRECATED and ignored. L3 runs on every input the gateway "
+            "scans, with no score gate. The field is retained for one "
+            "release so profiles written for 0.9.x keep loading "
+            "(extra=forbid would otherwise reject them); it is removed in "
+            "0.11.0. Setting it has no effect."
         ),
     )
     audit: bool = Field(default=True, description="Write detection rows to SQLite")

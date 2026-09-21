@@ -155,12 +155,17 @@ class TestSafeFetchBlockMatrix:
         )
         assert outcome == "ok"
 
-    async def test_l3_skipped_when_trusted(self) -> None:
+    async def test_trusted_content_is_still_judged_by_l3(self) -> None:
+        """Until the mandate, trust skipped L3 entirely, so a trusted source
+        carrying a critical injection was delivered without the judge ever
+        looking. Trust still suppresses the L1 tripwire — a trusted CVE
+        ticket quoting attack syntax is the false positive L1 exists to
+        tolerate — but not a judge that read the content."""
         outcome, _, _ = await self._run(
             classification=BENIGN, trusted=True, has_api_key=True,
             detection={"injection_detected": True, "risk_level": "critical"},
         )
-        assert outcome == "ok"
+        assert outcome == "blocked"
 
     async def test_l1_alone_blocks_when_high(self) -> None:
         """safe_* blocks on L1 risk by itself, with L2 benign. quarantine_* does not."""

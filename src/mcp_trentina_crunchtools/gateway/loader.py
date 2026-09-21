@@ -77,6 +77,7 @@ def _build_profile(name: str, body: Any) -> Profile:
     except ValidationError as exc:
         raise ProfileConfigError(f"Profile {name!r}: {exc}") from exc
 
+    _warn_deprecated_defense_keys(name, body)
     _resolve_bearer_token(name, profile)
     _resolve_oauth_client_secret(name, profile)
     _resolve_llm_key_secrets(name, profile)
@@ -88,6 +89,25 @@ def _build_profile(name: str, body: Any) -> Profile:
         _resolve_matrix_ingress_secrets(name, profile.matrix_ingress)
 
     return profile
+
+
+def _warn_deprecated_defense_keys(name: str, body: dict[str, Any]) -> None:
+    """Say so when a profile sets a key that no longer does anything.
+
+    `l3_threshold` gated whether L3 ran. It does not any more — L3 runs on
+    every input the gateway scans — and a config key that silently stopped
+    mattering is exactly what an operator should be told about rather than
+    discover. Retained for one release so `extra="forbid"` does not reject
+    profiles written for 0.9.x; removed in 0.11.0.
+    """
+    defense = body.get("defense")
+    if isinstance(defense, dict) and "l3_threshold" in defense:
+        logger.warning(
+            "Profile %r sets defense.l3_threshold, which is ignored — L3 "
+            "runs on every scanned input. Remove the key; it is rejected "
+            "from 0.11.0.",
+            name,
+        )
 
 
 def _resolve_bearer_token(name: str, profile: Profile) -> None:
