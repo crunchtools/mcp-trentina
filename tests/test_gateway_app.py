@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 
 from mcp_trentina_crunchtools.gateway.app import OAuthContext, gateway_app
 from mcp_trentina_crunchtools.gateway.backend import BackendCall
+from mcp_trentina_crunchtools.gateway.loader import GatewayConfig
 from mcp_trentina_crunchtools.gateway.profile import (
     AuthConfig,
     Backend,
@@ -360,3 +361,70 @@ class TestGatewayOAuthDisabled:
             "/.well-known/oauth-protected-resource/gateway/alice/mcp"
         )
         assert resp.status_code == 404
+
+
+class TestOAuthResourcePin:
+    """_build_oauth_context pins the RFC 8707 resource to the gateway endpoint.
+
+    FastMCP would otherwise derive it from the path it mounts its own MCP app
+    at, which Trentina tombstones at a per-boot random /mcp-internal-<hex> —
+    a URL no discovery document advertises, so a client's resource indicator
+    never matched and /authorize failed with invalid_target. See CHANGELOG 0.8.3.
+    """
+
+    @staticmethod
+    def _build(profiles: dict[str, Profile]) -> OAuthContext:
+        from mcp_trentina_crunchtools import _build_oauth_context
+
+        env = {
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET": "secret",
+            "TRENTINA_OAUTH_BASE_URL": OAUTH_BASE_URL,
+        }
+        with patch.dict("os.environ", env, clear=False):
+            ctx = _build_oauth_context(GatewayConfig(profiles=profiles))
+        assert ctx is not None
+        return ctx
+
+    @staticmethod
+    def _oauth_profile(name: str) -> Profile:
+        return Profile(
+            name=name,
+            auth=AuthConfig(bearer_token_env="A"),
+            oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+        )
+
+    def test_resource_url_is_the_gateway_endpoint(self) -> None:
+        ctx = self._build({"gemini-app": self._oauth_profile("gemini-app")})
+        ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
+        assert str(ctx.provider._resource_url) == (
+            f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp"
+        )
+
+    def test_internal_mount_path_is_not_appended(self) -> None:
+        ctx = self._build({"gemini-app": self._oauth_profile("gemini-app")})
+        ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
+        assert "mcp-internal" not in str(ctx.provider._resource_url)
+
+    def test_jwt_audience_is_bound_to_the_pinned_resource(self) -> None:
+        ctx = self._build({"gemini-app": self._oauth_profile("gemini-app")})
+        ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
+        assert ctx.provider.jwt_issuer.audience == (
+            f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp"
+        )
+
+    def test_multiple_oauth_profiles_pin_the_first_sorted(self) -> None:
+        ctx = self._build({
+            "zulu-app": self._oauth_profile("zulu-app"),
+            "gemini-app": self._oauth_profile("gemini-app"),
+        })
+        ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
+        assert str(ctx.provider._resource_url) == (
+            f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp"
+        )
+
+    def test_no_oauth_profile_builds_no_context(self) -> None:
+        from mcp_trentina_crunchtools import _build_oauth_context
+
+        profile = Profile(name="alice", auth=AuthConfig(bearer_token_env="A"))
+        assert _build_oauth_context(GatewayConfig(profiles={"alice": profile})) is None
