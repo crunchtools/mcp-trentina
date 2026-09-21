@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -339,6 +339,14 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
         base_url=base_url,
         required_scopes=["openid", "email", "profile"],
         jwt_signing_key=signing_key,
+        # CIMD off deliberately: OAuthProxy advertises client_id_metadata_
+        # document_supported=true but never implements server-side CIMD. The MCP
+        # spec makes clients try CIMD before DCR whenever that flag is set, so
+        # gemini.google.com took the CIMD branch, found nothing, and reported
+        # "automatic registration failed" without ever POSTing /register.
+        # Disabling it drops the flag and its private_key_jwt method, so clients
+        # fall through to DCR, which the proxy does implement. See CHANGELOG 0.8.2.
+        enable_cimd=False,
     )
     # The issuer FastMCP will advertise in its own authorization-server metadata.
     # Sourced from the provider (not rebuilt from base_url) so our protected-
@@ -346,12 +354,18 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
     # AnyHttpUrl appends a trailing slash to a bare origin, and RFC 8414 §3.3
     # rejects any mismatch. See OAuthContext.
     issuer = str(provider.issuer_url)
+    # The scopes the provider advertises as scopes_supported in its AS metadata,
+    # normalized (email/profile -> full googleapis URIs). Captured so our
+    # protected-resource document names the identical list. See OAuthContext.
+    scopes = tuple(provider.required_scopes or [])
     logger.info(
         "gateway: Google OAuth provider built for %d profile(s): %s "
-        "(base_url=%s issuer=%s)",
-        len(enabled), ", ".join(sorted(enabled)), base_url, issuer,
+        "(base_url=%s issuer=%s scopes=%s)",
+        len(enabled), ", ".join(sorted(enabled)), base_url, issuer, " ".join(scopes),
     )
-    return OAuthContext(provider=provider, base_url=base_url, issuer=issuer)
+    return OAuthContext(
+        provider=provider, base_url=base_url, issuer=issuer, scopes=scopes
+    )
 
 
 def _warm_classifier() -> None:

@@ -10,6 +10,36 @@ under that name.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-09-20
+
+### Fixed
+- **OAuth discovery: stop advertising CIMD so Gemini falls through to dynamic
+  client registration.** The gateway's `/.well-known/oauth-authorization-server`
+  document advertised `client_id_metadata_document_supported: true`, because
+  FastMCP's `OAuthProxy` sets that flag whenever CIMD is enabled (the default).
+  But the proxy does not actually implement server-side CIMD (Client ID Metadata
+  Documents, SEP-991). The MCP authorization spec makes a client attempt CIMD
+  *before* Dynamic Client Registration whenever the flag is set, so
+  gemini.google.com's Custom app connector fetched both discovery documents,
+  chose the CIMD path, found nothing to service it, and reported "automatic
+  registration with this server failed" — without ever POSTing to `/register`.
+  The gateway now builds the provider with `enable_cimd=False`, which drops the
+  flag (and the `private_key_jwt` token-endpoint auth method that rides with it),
+  leaving `token_endpoint_auth_methods_supported: ["none"]`. A client now falls
+  straight through to DCR, which the proxy does implement (and which returns 201
+  for the public clients it issues). This is the second half of the Gemini
+  connect fix begun in 0.8.1 (the issuer byte-match); the trailing-slash fix was
+  necessary but not sufficient — Gemini re-fetched both docs post-0.8.1 and still
+  never registered, because it was taking the CIMD branch.
+- **OAuth discovery: the two documents now advertise the same scopes.** The
+  RFC 9728 protected-resource document advertised the `openid`/`email`/`profile`
+  shorthand while FastMCP's authorization-server metadata advertised the
+  normalized full `googleapis.com` scope URIs. A client that read the shorthand
+  here and requested it against an AS that lists only the full URIs can be
+  refused at authorization time (`invalid_scope`). `OAuthContext` now captures
+  the provider's normalized `scopes_supported` at startup and the
+  protected-resource document advertises that identical list.
+
 ## [0.8.1] - 2026-09-20
 
 ### Fixed

@@ -77,11 +77,20 @@ class OAuthContext:
     made gemini.google.com report "automatic registration failed" without ever
     POSTing to ``/register``. Built once at startup and threaded into the
     handlers; None on a gateway with no OAuth-enabled profile.
+
+    ``scopes`` is the scope list the provider advertises as ``scopes_supported``
+    in its own AS metadata — the *normalized* form (GoogleProvider expands the
+    ``email``/``profile`` shorthands to their full ``googleapis.com`` URIs). Our
+    protected-resource document must advertise the identical list: a client that
+    reads short names here but sees full URIs at the AS (or vice versa) can
+    request a scope the AS does not recognize and fail authorization. Captured
+    from the provider so the two documents never drift.
     """
 
     provider: Any
     base_url: str
     issuer: str
+    scopes: tuple[str, ...]
 
 
 async def _authorize(
@@ -248,7 +257,11 @@ def _resource_metadata(
         # RFC 8414 §3.3 makes a strict client reject the AS metadata — see the
         # OAuthContext docstring.
         "authorization_servers": [oauth.issuer],
-        "scopes_supported": ["openid", "email", "profile"],
+        # The provider's own advertised scopes (normalized to full googleapis
+        # URIs), not the shorthand — the two discovery documents must name the
+        # same scope strings or a strict client requests a scope the AS rejects.
+        # See the OAuthContext docstring.
+        "scopes_supported": list(oauth.scopes),
         "bearer_methods_supported": ["header"],
     })
 
