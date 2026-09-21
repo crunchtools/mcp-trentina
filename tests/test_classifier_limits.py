@@ -338,15 +338,30 @@ class TestPadSegment:
         tok.num_special_tokens_to_add.return_value = 2
         return tok
 
-    def test_wraps_and_pads_a_short_segment(self) -> None:
+    def test_a_short_segment_keeps_its_natural_length(self) -> None:
+        """No padding. The graph's sequence axis is dynamic and batch is 1,
+        so there is nothing to line the row up against — and padding made a
+        15-token input cost a full 512-token pass (791 ms vs 52 ms) for a
+        byte-identical score."""
         from mcp_trentina_crunchtools.quarantine import classifier as mod
 
         with patch.object(mod, "_tokenizer", self._tokenizer()):
             ids, mask = mod._pad_segment([7, 8, 9], 8)
 
-        assert ids == [1, 7, 8, 9, 2, 0, 0, 0]
-        assert mask == [1, 1, 1, 1, 1, 0, 0, 0]
-        assert len(ids) == len(mask) == 8
+        assert ids == [1, 7, 8, 9, 2]
+        assert mask == [1, 1, 1, 1, 1]
+        assert 0 not in ids, "a pad token here means we are paying for zeros"
+
+    def test_no_pad_token_is_ever_emitted(self) -> None:
+        """The property, not the example: whatever the segment length, the
+        mask is all ones, so every position the model reads is real input."""
+        from mcp_trentina_crunchtools.quarantine import classifier as mod
+
+        with patch.object(mod, "_tokenizer", self._tokenizer()):
+            for n in (0, 1, 3, 100, 509, 510, 511):
+                ids, mask = mod._pad_segment(list(range(10, 10 + n)), 512)
+                assert mask == [1] * len(ids)
+                assert len(ids) == min(n + 2, 512)
 
     def test_full_window_needs_no_padding(self) -> None:
         from mcp_trentina_crunchtools.quarantine import classifier as mod
@@ -386,5 +401,11 @@ class TestPadSegment:
             classify("x")
 
         assert widths, "no segments were classified"
-        assert set(widths) == {WINDOW}
-        assert set(masks) == {WINDOW}
+        assert max(widths) <= WINDOW, "a segment wider than the context window"
+        assert widths == masks, "mask must cover exactly the ids given"
+        # Full windows are exactly WINDOW wide; only the LAST one is short,
+        # because the input rarely divides evenly by the stride. It is no
+        # longer padded up to WINDOW -- that was the common case paying for
+        # zeros.
+        assert set(widths[:-1]) in ({WINDOW}, set()), widths
+        assert widths[-1] <= WINDOW

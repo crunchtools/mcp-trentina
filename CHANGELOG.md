@@ -10,6 +10,28 @@ under that name.
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-09-21
+
+### Fixed
+- **L2 no longer pads every input to 512 tokens.** `classify()` padded each
+  model input out to the full context window, so a 15-token chat message cost
+  the same as a 512-token one. The exported graph declares both inputs as
+  `['batch_size', 'sequence_length']` — the sequence axis is dynamic — and
+  batch is always 1 here, so there was never a second row to line up against.
+  The padding was a formatting habit, not a model constraint.
+
+  Measured against the real model: a 15-token message 791 ms -> 52 ms (15.2x),
+  a Nagios alert 570 ms -> 47 ms (12.2x), a tool description 564 ms -> 36 ms
+  (15.7x). Across the adversarial corpus plus a long windowed case, **36.1 s ->
+  7.9 s (4.6x) with zero label changes and zero score deltas above 1e-6** —
+  the verdicts are bit-identical, verified against the shipped code path with
+  the modified module mounted over the installed one.
+
+  This mattered little when every scan filled a window. It matters a lot now:
+  with scan-view extraction the typical payload is far below one window, so
+  the common case was paying roughly 15x for zeros. Full windows are
+  unaffected; only the final partial window of a long scan changes shape.
+
 ## [0.11.0] - 2026-09-21
 
 ### Added

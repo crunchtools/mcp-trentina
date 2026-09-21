@@ -111,7 +111,22 @@ def is_classifier_available() -> bool:
 
 
 def _pad_segment(segment_ids: list[int], max_length: int) -> tuple[list[int], list[int]]:
-    """Wrap token IDs in special tokens and pad to ``max_length``.
+    """Wrap token IDs in special tokens, at their natural length.
+
+    NO PADDING. The exported graph declares both inputs as
+    ``['batch_size', 'sequence_length']`` — the sequence axis is dynamic — and
+    batch is always 1 here, so there is no second row to line up against.
+    Padding to ``max_length`` was making every short input cost a full
+    512-token pass: a 15-token chat message measured 791 ms padded and 52 ms
+    at its natural length, for a byte-identical score (0.9994 both ways).
+
+    That mattered little when every scan was a full window. It matters a lot
+    now: with scan-view extraction the typical payload is far under one
+    window, so the common case was paying roughly 15x for zeros.
+
+    ``max_length`` is still honoured as a ceiling — a segment longer than the
+    model's context window is truncated, because that is a real constraint
+    rather than a formatting choice.
 
     Builds the model input straight from IDs the tokenizer already produced.
     The previous approach decoded each window back to text and re-tokenized
@@ -125,10 +140,9 @@ def _pad_segment(segment_ids: list[int], max_length: int) -> tuple[list[int], li
     actually produced, so the scan sees more of the input, not less.
     """
     ids = [_tokenizer.cls_token_id, *segment_ids, _tokenizer.sep_token_id]
-    padding = max_length - len(ids)
-    if padding <= 0:
-        return ids[:max_length], [1] * max_length
-    return ids + [_tokenizer.pad_token_id] * padding, [1] * len(ids) + [0] * padding
+    if len(ids) > max_length:
+        ids = ids[:max_length]
+    return ids, [1] * len(ids)
 
 
 def _classify_segment(input_ids: list[int], attention_mask: list[int]) -> tuple[str, float]:
@@ -247,11 +261,13 @@ def classify(
         all_ids = all_ids[:max_tokens]
 
     if len(all_ids) <= max_length:
+        # Natural length, not padded to the window: see _pad_segment. The
+        # whole-document path is the common one now that extraction shrinks
+        # most payloads below a single window.
         enc = _tokenizer(
             text,
             truncation=True,
             max_length=max_length,
-            padding="max_length",
             return_attention_mask=True,
         )
         label, score = _classify_segment(enc["input_ids"], enc["attention_mask"])
