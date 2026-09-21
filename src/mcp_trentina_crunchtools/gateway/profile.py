@@ -20,6 +20,7 @@ from pydantic import (
     Field,
     SecretStr,
     field_validator,
+    model_validator,
 )
 
 from ..config import SUPPORTED_PROVIDERS
@@ -499,6 +500,63 @@ class MatrixIngressConfig(BaseModel):
     )
 
 
+class OAuthConfig(BaseModel):
+    """Per-profile Google-backed OAuth access, opt-in on top of static bearer.
+
+    A profile always carries a static bearer (``auth``). When ``oauth.enabled``
+    is set it ALSO accepts a Google-backed OAuth token whose verified email is
+    in ``allowed_emails`` — the seat for a client that cannot send a static
+    ``Authorization`` header (gemini.google.com Custom Apps, which offers only
+    "no auth" or OAuth). The static token keeps working for every other client.
+
+    There is no secret in this block: the OAuth client credentials are a
+    gateway-wide setting (``TRENTINA_OAUTH_GOOGLE_CLIENT_ID`` /
+    ``_CLIENT_SECRET``), not per-profile. What a profile holds is the
+    authorization decision — who may use it — which is not a secret and belongs
+    in the config the operator reads.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=False,
+        description="Accept Google-backed OAuth tokens for this profile",
+    )
+    allowed_emails: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Verified Google account emails permitted through this profile. "
+            "Compared case-insensitively. Empty while enabled is a hard error "
+            "— an OAuth seat open to any Google account is never intended."
+        ),
+    )
+
+    @field_validator("allowed_emails")
+    @classmethod
+    def emails_normalized(cls, v: list[str]) -> list[str]:
+        """Lower-case each entry and reject anything that is not an email."""
+        normalized: list[str] = []
+        for raw in v:
+            email = raw.strip().lower()
+            local, sep, domain = email.partition("@")
+            if not sep or not local or "." not in domain:
+                raise ValueError(
+                    f"allowed_emails entry {raw!r} is not an email address"
+                )
+            normalized.append(email)
+        return normalized
+
+    @model_validator(mode="after")
+    def allowlist_required_when_enabled(self) -> OAuthConfig:
+        """A profile that turns OAuth on must name who may use it."""
+        if self.enabled and not self.allowed_emails:
+            raise ValueError(
+                "oauth.enabled is true but allowed_emails is empty — refusing "
+                "to expose an OAuth seat open to any Google account"
+            )
+        return self
+
+
 class Profile(BaseModel):
     """One consumer profile: name, auth, backends, defense config."""
 
@@ -542,6 +600,10 @@ class Profile(BaseModel):
     matrix_ingress: MatrixIngressConfig | None = Field(
         default=None,
         description="Matrix reverse-proxy access for this profile (optional)",
+    )
+    oauth: OAuthConfig | None = Field(
+        default=None,
+        description="Google-backed OAuth access for this profile (optional)",
     )
 
     @field_validator("name")

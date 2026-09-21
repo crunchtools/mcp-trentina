@@ -27,6 +27,24 @@ class AuthError(GatewayError):
     """
 
 
+class OAuthChallengeError(AuthError):
+    """Raised when an OAuth-enabled profile got no usable OAuth credential.
+
+    Covers a missing/malformed Authorization header and a token that fails
+    upstream validation. Maps to HTTP 401 with a ``WWW-Authenticate: Bearer
+    resource_metadata=…`` challenge so an MCP client discovers the flow.
+    """
+
+
+class OAuthForbiddenError(AuthError):
+    """Raised when a valid Google identity is not permitted by the profile.
+
+    The token verified against Google, but its email is absent, unverified,
+    or not on the profile's ``oauth.allowed_emails``. Maps to HTTP 403: a new
+    login will not help, so no ``WWW-Authenticate`` challenge is issued.
+    """
+
+
 class ProfileNotFoundError(GatewayError):
     """Raised when a request targets a profile not in the loaded registry.
 

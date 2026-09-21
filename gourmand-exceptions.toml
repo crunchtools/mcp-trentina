@@ -460,3 +460,9 @@ check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/gateway/loader.py"
 justification = "_require_env is reported as 100% similar to register_matrix_routes in gateway/matrix_proxy.py on three statements. One reads a required secret from the environment and fails closed; the other registers Starlette routes. They share a guard-then-act shape and nothing else. The genuine duplication this check found in this file -- _resolve_bearer_token reimplementing _require_env line for line, despite _require_env's own docstring claiming to be shared by every token-in-env ingress -- was FIXED in this change rather than excepted."
 classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/__init__.py"
+justification = "_build_oauth_context is reported as 100% similar to get_provider in quarantine/providers/__init__.py on nine statements. Both are factories -- resolve inputs, validate them, fail closed on a missing one, construct a provider, log, return -- but they share only that shape: different env vars, a GoogleProvider vs an LLM Provider, a ProfileConfigError vs a QuarantineAgentError, no shared control flow. Same over-match on the factory guard-then-construct shape as the loader.py _require_env exception above."
+classification = "gourmand_bug"

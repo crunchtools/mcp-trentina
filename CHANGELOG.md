@@ -10,7 +10,30 @@ under that name.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-20
+
 ### Added
+- **Google-backed OAuth per profile** (#137) — an optional `oauth` block on a
+  profile (`enabled: bool`, `allowed_emails: list`) lets it accept a
+  Google-backed OAuth token in addition to its static bearer, for clients that
+  cannot send a static `Authorization` header (gemini.google.com's Custom app
+  connector offers only "No authentication" or "OAuth"). Trentina runs as an
+  OAuth proxy in front of Google — it presents the discovery, dynamic client
+  registration, authorize, and token endpoints an MCP client expects and proxies
+  the human login up to Google, so no self-hosted identity provider is needed.
+  Static bearer is tried first and, on a match, nothing else runs, so every
+  existing profile is untouched. An OAuth-enabled profile with no usable token
+  answers 401 with `WWW-Authenticate: Bearer resource_metadata=…` pointing at
+  its RFC 9728 metadata at `/.well-known/oauth-protected-resource/gateway/<profile>/mcp`
+  (which the gateway serves itself, because FastMCP serves it only for its own
+  mount path); a valid Google identity absent from `allowed_emails` gets 403.
+  Emails are matched case-insensitively against Google's verified `email` claim,
+  re-validated live on every request. The OAuth client is gateway-wide, read from
+  `TRENTINA_OAUTH_GOOGLE_CLIENT_ID` / `_CLIENT_SECRET` (with `TRENTINA_OAUTH_BASE_URL`
+  and an optional `TRENTINA_OAUTH_JWT_SIGNING_KEY`); a profile that enables OAuth
+  with no client configured fails the gateway closed at startup. OAuth routes
+  bind at startup and do not hot-reload — `reload_profiles` says so when an
+  `oauth` block is added without a restart.
 - **Profile roles, and role-scoped admin tools** (#133) — a new optional
   `role: agent | operator` on each profile, defaulting to `agent`. The gateway
   serves several agents from one config file, one database and one set of
