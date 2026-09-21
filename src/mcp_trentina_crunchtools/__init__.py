@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -340,11 +340,18 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
         required_scopes=["openid", "email", "profile"],
         jwt_signing_key=signing_key,
     )
+    # The issuer FastMCP will advertise in its own authorization-server metadata.
+    # Sourced from the provider (not rebuilt from base_url) so our protected-
+    # resource metadata names the AS with the identical string — a pydantic
+    # AnyHttpUrl appends a trailing slash to a bare origin, and RFC 8414 §3.3
+    # rejects any mismatch. See OAuthContext.
+    issuer = str(provider.issuer_url)
     logger.info(
-        "gateway: Google OAuth provider built for %d profile(s): %s (base_url=%s)",
-        len(enabled), ", ".join(sorted(enabled)), base_url,
+        "gateway: Google OAuth provider built for %d profile(s): %s "
+        "(base_url=%s issuer=%s)",
+        len(enabled), ", ".join(sorted(enabled)), base_url, issuer,
     )
-    return OAuthContext(provider=provider, base_url=base_url)
+    return OAuthContext(provider=provider, base_url=base_url, issuer=issuer)
 
 
 def _warm_classifier() -> None:

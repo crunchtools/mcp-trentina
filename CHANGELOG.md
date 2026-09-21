@@ -10,7 +10,25 @@ under that name.
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-09-20
+## [0.8.1] - 2026-09-20
+
+### Fixed
+- **OAuth discovery: authorization-server identifier now matches FastMCP's
+  `issuer` byte-for-byte**, so gemini.google.com's Custom app connector completes
+  dynamic client registration instead of reporting "automatic registration with
+  this server failed". The gateway's own RFC 9728 protected-resource metadata
+  advertised the authorization server as `https://host` (no trailing slash),
+  while FastMCP renders the `issuer` in its `/.well-known/oauth-authorization-server`
+  document through a pydantic `AnyHttpUrl`, which appends a slash (`https://host/`).
+  RFC 8414 §3.3 requires a client to find the AS `issuer` identical to the
+  identifier it discovered it by; strict clients (Gemini's connector, Google's
+  ADK) reject the metadata on the mismatch and fall back to asking for a manual
+  client ID and secret, never POSTing to `/register`. `OAuthContext` now captures
+  the provider's exact `issuer_url` at startup and the protected-resource document
+  advertises that string. FastMCP commits to the slashed issuer everywhere it
+  matters (the RFC 9207 `iss` on authorization responses, the JWT `iss`), so
+  matching it — rather than stripping the slash — keeps the whole flow internally
+  consistent.
 
 ### Added
 - **Google-backed OAuth per profile** (#137) — an optional `oauth` block on a
