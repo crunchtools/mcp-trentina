@@ -59,8 +59,9 @@ def _expand_env_refs(value: str, *, context: str) -> str:
 def _build_profile(name: str, body: Any) -> Profile:
     """Validate one profile entry and resolve its secrets from the environment.
 
-    Resolves the bearer token from `auth.bearer_token_env` and expands any
-    ${VAR} references in backend headers. Both fail closed on a missing env var.
+    Resolves the bearer token from `auth.bearer_token_env`, the provisioned
+    OAuth client secret from `oauth.client_secret_env`, and expands any
+    ${VAR} references in backend headers. All fail closed on a missing env var.
 
     Each `llm_keys` entry supplies its secret one of two ways: `api_key`
     inline in the YAML, or `api_key_env` naming an environment variable.
@@ -77,6 +78,7 @@ def _build_profile(name: str, body: Any) -> Profile:
         raise ProfileConfigError(f"Profile {name!r}: {exc}") from exc
 
     _resolve_bearer_token(name, profile)
+    _resolve_oauth_client_secret(name, profile)
     _resolve_llm_key_secrets(name, profile)
     _expand_backend_headers(name, profile)
     if profile.alert_ingress is not None:
@@ -91,6 +93,23 @@ def _build_profile(name: str, body: Any) -> Profile:
 def _resolve_bearer_token(name: str, profile: Profile) -> None:
     profile.auth.bearer_token = _require_env(
         name, profile.auth.bearer_token_env, "bearer token",
+    )
+
+
+def _resolve_oauth_client_secret(name: str, profile: Profile) -> None:
+    """Resolve a provisioned OAuth client's secret from the environment.
+
+    OAuthConfig already refuses a half-declared client, so reaching here with a
+    client_secret_env means client_id and the redirect URIs are present too.
+    Fails closed on an unset var: a provisioned client whose secret resolved to
+    empty would be stored with no secret, and the SDK's ClientAuthenticator
+    rejects exactly that as misconfigured — better to say so at load.
+    """
+    oauth = profile.oauth
+    if oauth is None or oauth.client_secret_env is None:
+        return
+    oauth.client_secret = _require_env(
+        name, oauth.client_secret_env, "OAuth client secret",
     )
 
 

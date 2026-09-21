@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 from starlette.testclient import TestClient
 
 from mcp_trentina_crunchtools.gateway.app import OAuthContext, gateway_app
@@ -18,6 +19,9 @@ from mcp_trentina_crunchtools.gateway.profile import (
     Profile,
 )
 from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 @pytest.fixture
@@ -428,3 +432,176 @@ class TestOAuthResourcePin:
 
         profile = Profile(name="alice", auth=AuthConfig(bearer_token_env="A"))
         assert _build_oauth_context(GatewayConfig(profiles={"alice": profile})) is None
+
+
+class TestProvisionedConfidentialClient:
+    """Statically provisioned confidential clients (RT #1502).
+
+    gemini.google.com Custom Apps offers only an MCP URL, a Client ID and a
+    Client Secret: it discovers our AS from the URL and then authenticates to
+    it with those credentials. A proxy advertising only `none` tells it the
+    credentials are unusable, and it abandons the flow before calling /token.
+    """
+
+    CLIENT_ID = "375f3fdb-c322-41bc-8dc6-c2010a095f04"
+    REDIRECT = "https://oauth-redirect.googleusercontent.com/r/user_bound_x"
+
+    @staticmethod
+    def _profile(**oauth_kwargs: Any) -> Profile:
+        return Profile(
+            name="gemini-app",
+            auth=AuthConfig(bearer_token_env="A"),
+            oauth=OAuthConfig(
+                enabled=True,
+                allowed_emails=["scott@example.com"],
+                **oauth_kwargs,
+            ),
+        )
+
+    def _provisioned_profile(self) -> Profile:
+        return self._profile(
+            client_id=self.CLIENT_ID,
+            client_secret_env="GEMINI_APP_SECRET",
+            client_redirect_uris=[self.REDIRECT],
+        )
+
+    def _build(self, profiles: dict[str, Profile]) -> OAuthContext:
+        from mcp_trentina_crunchtools import _build_oauth_context
+        from mcp_trentina_crunchtools.gateway.loader import _resolve_oauth_client_secret
+
+        for name, profile in profiles.items():
+            _resolve_oauth_client_secret(name, profile)
+
+        env = {
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET": "upstream-secret",
+            "TRENTINA_OAUTH_BASE_URL": OAUTH_BASE_URL,
+        }
+        with patch.dict("os.environ", env, clear=False):
+            ctx = _build_oauth_context(GatewayConfig(profiles=profiles))
+        assert ctx is not None
+        return ctx
+
+    @pytest.fixture(autouse=True)
+    def _secret_env(self) -> Iterator[None]:
+        with patch.dict("os.environ", {"GEMINI_APP_SECRET": "s3cr3t"}, clear=False):
+            yield
+
+    @pytest.fixture(autouse=True)
+    def _clean_provisioned(self) -> Iterator[None]:
+        """The provisioned map is a class attribute, so it outlives one test.
+
+        _build_oauth_context defines the provider class on each call, but the
+        map is reachable through any context built earlier in the session --
+        clear it so a provisioned client from one test cannot satisfy another.
+        """
+        yield
+        from mcp_trentina_crunchtools import _build_oauth_context
+
+        env = {
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET": "upstream-secret",
+            "TRENTINA_OAUTH_BASE_URL": OAUTH_BASE_URL,
+        }
+        bare = Profile(name="bare", auth=AuthConfig(bearer_token_env="A"))
+        with patch.dict("os.environ", env, clear=False):
+            _build_oauth_context(GatewayConfig(profiles={"bare": bare}))
+
+    def test_provisioned_client_is_confidential(self) -> None:
+        ctx = self._build({"gemini-app": self._provisioned_profile()})
+        client = ctx.provider.provisioned[self.CLIENT_ID]
+        assert client.token_endpoint_auth_method == "client_secret_post"
+        assert client.client_secret == "s3cr3t"
+
+    @pytest.mark.asyncio
+    async def test_get_client_resolves_provisioned_ahead_of_store(self) -> None:
+        ctx = self._build({"gemini-app": self._provisioned_profile()})
+        client = await ctx.provider.get_client(self.CLIENT_ID)
+        assert client is not None
+        assert client.client_secret == "s3cr3t"
+
+    def test_redirect_uris_are_registered_verbatim(self) -> None:
+        ctx = self._build({"gemini-app": self._provisioned_profile()})
+        client = ctx.provider.provisioned[self.CLIENT_ID]
+        assert [str(u) for u in client.redirect_uris] == [self.REDIRECT]
+        assert client.allowed_redirect_uri_patterns == [self.REDIRECT]
+
+    def test_no_provisioned_client_leaves_the_map_empty(self) -> None:
+        ctx = self._build({"gemini-app": self._profile()})
+        assert ctx.provider.provisioned == {}
+
+    def test_half_declared_client_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="client_secret_env"):
+            OAuthConfig(
+                enabled=True,
+                allowed_emails=["scott@example.com"],
+                client_id=self.CLIENT_ID,
+                client_redirect_uris=[self.REDIRECT],
+            )
+
+    def test_provisioned_client_requires_oauth_enabled(self) -> None:
+        with pytest.raises(ValidationError, match=r"requires oauth\.enabled"):
+            OAuthConfig(
+                enabled=False,
+                client_id=self.CLIENT_ID,
+                client_secret_env="GEMINI_APP_SECRET",
+                client_redirect_uris=[self.REDIRECT],
+            )
+
+    def test_lowercase_secret_env_name_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="UPPERCASE"):
+            OAuthConfig(
+                enabled=True,
+                allowed_emails=["scott@example.com"],
+                client_id=self.CLIENT_ID,
+                client_secret_env="gemini_app_secret",
+                client_redirect_uris=[self.REDIRECT],
+            )
+
+    def test_unset_secret_env_fails_closed(self) -> None:
+        from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
+        from mcp_trentina_crunchtools.gateway.loader import _resolve_oauth_client_secret
+
+        profile = self._provisioned_profile()
+        with (
+            patch.dict("os.environ", {"GEMINI_APP_SECRET": ""}, clear=False),
+            pytest.raises(ProfileConfigError),
+        ):
+            _resolve_oauth_client_secret("gemini-app", profile)
+
+    @staticmethod
+    def _metadata_document(ctx: OAuthContext) -> dict[str, Any]:
+        """Render the AS metadata document the provider's routes actually serve."""
+        from starlette.applications import Starlette
+        from starlette.testclient import TestClient as _TestClient
+
+        routes = ctx.provider.get_routes("/mcp-internal-deadbeef")
+        app = Starlette(routes=list(routes))
+        resp = _TestClient(app).get("/.well-known/oauth-authorization-server")
+        assert resp.status_code == 200
+        return dict(resp.json())
+
+    def test_metadata_advertises_client_secret_post_when_provisioned(self) -> None:
+        ctx = self._build({"gemini-app": self._provisioned_profile()})
+        document = self._metadata_document(ctx)
+        methods: list[str] = document["token_endpoint_auth_methods_supported"]
+        assert "client_secret_post" in methods
+
+    def test_metadata_keeps_none_for_dcr_clients(self) -> None:
+        """DCR-registered public clients must keep working alongside."""
+        ctx = self._build({"gemini-app": self._provisioned_profile()})
+        document = self._metadata_document(ctx)
+        methods: list[str] = document["token_endpoint_auth_methods_supported"]
+        assert "none" in methods
+
+    def test_metadata_unchanged_without_a_provisioned_client(self) -> None:
+        """No provisioned client means nothing to enforce, so advertise nothing."""
+        ctx = self._build({"gemini-app": self._profile()})
+        document = self._metadata_document(ctx)
+        assert document["token_endpoint_auth_methods_supported"] == ["none"]
+
+    def test_other_routes_are_untouched(self) -> None:
+        ctx = self._build({"gemini-app": self._provisioned_profile()})
+        paths = {r.path for r in ctx.provider.get_routes("/mcp-internal-deadbeef")}
+        assert "/token" in paths
+        assert "/authorize" in paths

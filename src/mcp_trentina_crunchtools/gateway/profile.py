@@ -509,11 +509,23 @@ class OAuthConfig(BaseModel):
     ``Authorization`` header (gemini.google.com Custom Apps, which offers only
     "no auth" or OAuth). The static token keeps working for every other client.
 
-    There is no secret in this block: the OAuth client credentials are a
-    gateway-wide setting (``TRENTINA_OAUTH_GOOGLE_CLIENT_ID`` /
-    ``_CLIENT_SECRET``), not per-profile. What a profile holds is the
+    There is no secret in this block: the UPSTREAM Google client credentials are
+    a gateway-wide setting (``TRENTINA_OAUTH_GOOGLE_CLIENT_ID`` /
+    ``_CLIENT_SECRET``), not per-profile, and the DOWNSTREAM client secret is
+    named here by env var rather than written here. What a profile holds is the
     authorization decision — who may use it — which is not a secret and belongs
     in the config the operator reads.
+
+    ``client_id``/``client_secret_env``/``client_redirect_uris`` declare a
+    statically provisioned CONFIDENTIAL client: one whose credentials the
+    operator types into a third-party console rather than one that registers
+    itself through DCR. gemini.google.com Custom Apps is the motivating case —
+    its connector offers only an MCP server URL, a Client ID and a Client
+    Secret, so it discovers our authorization server from the URL and then
+    authenticates to it with those credentials. A proxy that advertises only
+    ``token_endpoint_auth_method=none`` tells such a client the credentials it
+    holds are unusable, and it abandons the flow before ever calling ``/token``.
+    See CHANGELOG 0.9.0 and RT #1502.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -530,6 +542,71 @@ class OAuthConfig(BaseModel):
             "— an OAuth seat open to any Google account is never intended."
         ),
     )
+    client_id: str | None = Field(
+        default=None,
+        description=(
+            "Client ID of a statically provisioned confidential OAuth client, "
+            "as typed into the third-party console. Requires "
+            "client_secret_env and client_redirect_uris."
+        ),
+    )
+    client_secret_env: str | None = Field(
+        default=None,
+        description=(
+            "Env var name whose value is that client's secret. The secret "
+            "itself is never written in this file."
+        ),
+    )
+    client_secret: SecretStr | None = Field(
+        default=None,
+        exclude=True,
+        description="Resolved client secret (load-time only)",
+    )
+    client_redirect_uris: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Exact redirect URIs the provisioned client may use. Matched "
+            "verbatim — a provisioned client gets no pattern matching."
+        ),
+    )
+
+    @field_validator("client_secret_env")
+    @classmethod
+    def client_secret_env_is_uppercase_identifier(cls, v: str | None) -> str | None:
+        """Reject lowercase, leading digits, or non-identifier characters."""
+        if v is not None and not ENV_NAME_RE.match(v):
+            raise ValueError(
+                f"client_secret_env {v!r} must be an UPPERCASE env-var identifier"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def provisioned_client_is_all_or_nothing(self) -> OAuthConfig:
+        """A half-declared confidential client must not start.
+
+        Each piece is useless alone and a missing piece fails in a way that is
+        hard to read from the outside: no client_id and the secret is never
+        consulted; no redirect URI and every /authorize is rejected as an
+        unregistered redirect. Refuse at load instead.
+        """
+        declared = {
+            "client_id": self.client_id is not None,
+            "client_secret_env": self.client_secret_env is not None,
+            "client_redirect_uris": bool(self.client_redirect_uris),
+        }
+        if any(declared.values()) and not all(declared.values()):
+            missing = sorted(k for k, present in declared.items() if not present)
+            raise ValueError(
+                "a provisioned OAuth client needs client_id, client_secret_env "
+                f"and client_redirect_uris together — missing {', '.join(missing)}"
+            )
+        if self.client_id is not None and not self.enabled:
+            raise ValueError(
+                "a provisioned OAuth client requires oauth.enabled — a client "
+                "that can authenticate but reaches a profile with OAuth off is "
+                "a misconfiguration, not a degraded mode"
+            )
+        return self
 
     @field_validator("allowed_emails")
     @classmethod
