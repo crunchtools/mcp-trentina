@@ -66,6 +66,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .gateway.profile import DefenseConfig
+    from .scanview import ScanView
 
 
 class Layer(str, Enum):
@@ -562,6 +563,47 @@ async def defend_json(
     rebuilt = sanitize_json_value(payload, texts, stats, scan_views)
     joined = "\n".join(texts)
 
+    verdict = await _defend_texts(
+        texts,
+        scan_views,
+        stats,
+        source=source,
+        source_type=source_type,
+        is_trusted=is_trusted,
+        defense=defense,
+        provenance=provenance,
+        guarded=guarded,
+        record=record,
+        l3_context=l3_context,
+        attribution=attribution,
+    )
+    return JsonVerdict(payload=rebuilt, verdict=verdict, joined_text=joined)
+
+
+async def _defend_texts(
+    texts: list[str],
+    scan_views: list[str],
+    stats: PipelineStats,
+    *,
+    source: str,
+    source_type: str,
+    is_trusted: bool = False,
+    defense: DefenseConfig | None = None,
+    provenance: Provenance = Provenance.EXTERNAL,
+    guarded: bool = False,
+    record: bool = False,
+    l3_context: str | None = None,
+    attribution: dict[str, Any] | None = None,
+) -> DefenseVerdict:
+    """Judge an already-collected set of leaf texts as one document.
+
+    Shared by ``defend_json``, which collects every leaf, and
+    ``defend_scan_view``, which collects the subset an extractor selected.
+    Leaves are inspected individually but judged as ONE document — a
+    classifier shown one field at a time cannot see an instruction split
+    across two of them, which is why both callers join rather than loop.
+    """
+    joined = "\n".join(texts)
     pipeline = PipelineResult(
         content=joined,
         scan_view="\n".join(scan_views),
@@ -569,8 +611,7 @@ async def defend_json(
         input_size=len(joined),
         output_size=len(joined),
     )
-
-    verdict = await defend(
+    return await defend(
         joined,
         source=source,
         source_type=source_type,
@@ -583,4 +624,71 @@ async def defend_json(
         precomputed_l1=pipeline,
         attribution=attribution,
     )
-    return JsonVerdict(payload=rebuilt, verdict=verdict, joined_text=joined)
+
+
+async def defend_scan_view(
+    view: ScanView,
+    *,
+    source: str,
+    source_type: str,
+    defense: DefenseConfig | None = None,
+    provenance: Provenance = Provenance.EXTERNAL,
+    is_trusted: bool = False,
+    guarded: bool = False,
+    record: bool = False,
+    attribution: dict[str, Any] | None = None,
+) -> DefenseVerdict:
+    """Judge the subset of a payload an extractor selected.
+
+    The extractor decided WHAT to read; this decides what it means. The split
+    matters: an extractor never makes a security decision, and the pipeline
+    never chooses its own input.
+
+    The judge is told what it is looking at. "This scan read 4% of the
+    document" is context L3 should have before it concludes a payload is
+    clean, because the honest answer to a 4% sample is less confident than
+    the honest answer to a complete read.
+    """
+    texts: list[str] = []
+    scan_views: list[str] = []
+    stats = PipelineStats()
+    for segment in view.segments:
+        leaf = sanitize_text(segment)
+        merge_stats(stats, leaf.stats)
+        texts.append(leaf.content)
+        scan_views.append(leaf.scan_view)
+
+    briefing = _default_l3_context(stats)
+    if view.chars_total and view.coverage < 1.0:
+        skipped = ", ".join(
+            f"{reason.value}={count}"
+            for reason, count in sorted(
+                view.skipped_chars.items(), key=lambda kv: -kv[1]
+            )
+        )
+        briefing = (
+            f"{briefing}\nThis scan read {view.chars_scanned} of "
+            f"{view.chars_total} characters ({view.coverage:.1%}); the rest "
+            f"was skipped as structurally non-linguistic ({skipped}). "
+            f"Judge what you were given; do not assume the remainder was read."
+        )
+    if view.undecryptable:
+        briefing = (
+            f"{briefing}\n{len(view.undecryptable)} encrypted event(s) could "
+            f"not be decrypted and were not scanned at all."
+        )
+
+    return await _defend_texts(
+        texts,
+        scan_views,
+        stats,
+        source=source,
+        source_type=source_type,
+        is_trusted=is_trusted,
+        defense=defense,
+        provenance=provenance,
+        guarded=guarded,
+        record=record,
+        l3_context=briefing,
+        attribution=attribution,
+    )

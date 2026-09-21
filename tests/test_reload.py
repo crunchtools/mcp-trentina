@@ -81,6 +81,22 @@ profiles:
         tools_allow: ["*"]
 """
 
+BETA_MATRIX_YAML = BASE_YAML.replace(
+    "  beta:\n    auth:\n      bearer_token_env: TEST_BETA_TOKEN\n",
+    "  beta:\n    auth:\n      bearer_token_env: TEST_BETA_TOKEN\n"
+    "    matrix_ingress:\n"
+    "      token_env: TEST_BETA_TOKEN\n"
+    "      scan_view:\n"
+    "        extractor: full\n"
+    "        deadline_seconds: 20.0\n",
+)
+
+# The same, with BOTH an operator-only field and an agent-settable one moved.
+BETA_MATRIX_NARROWED_YAML = BETA_MATRIX_YAML.replace(
+    "        extractor: full\n        deadline_seconds: 20.0\n",
+    "        extractor: generic\n        deadline_seconds: 5.0\n",
+)
+
 # alpha alone: the tail of the file, from "  beta:" on, cut off.
 ALPHA_ONLY_YAML = BASE_YAML.split("  beta:", maxsplit=1)[0]
 
@@ -476,6 +492,41 @@ class TestAgentScope:
         assert result["reloaded"] is False
         assert "profiles" not in result
         assert "path" not in result
+
+
+class TestPerimeterIsOperatorOnly:
+    """An agent may retune its own performance; it may not decide how much of
+    a payload gets scanned."""
+
+    async def test_agent_cannot_narrow_its_own_scan(
+        self, profiles_path: Path
+    ) -> None:
+        profiles_path.write_text(BETA_MATRIX_YAML, encoding="utf-8")
+        await _reload_as("alpha")  # operator puts the ingress in force
+
+        profiles_path.write_text(BETA_MATRIX_NARROWED_YAML, encoding="utf-8")
+        result = await _reload_as("beta")
+
+        assert result["reloaded"] is True
+        ingress = _registry()["beta"].matrix_ingress
+        assert ingress.scan_view.extractor == "full", (
+            "an agent reload must not reshape its own perimeter"
+        )
+        assert ingress.scan_view.deadline_seconds == 5.0, (
+            "but it may still retune its own performance"
+        )
+        held = result["not_applied"]["operator_only"]
+        assert "matrix_ingress.scan_view.extractor" in held
+
+    async def test_operator_reload_applies_it(self, profiles_path: Path) -> None:
+        profiles_path.write_text(BETA_MATRIX_YAML, encoding="utf-8")
+        await _reload_as("alpha")
+
+        profiles_path.write_text(BETA_MATRIX_NARROWED_YAML, encoding="utf-8")
+        result = await _reload_as("alpha")
+
+        assert result["reloaded"] is True
+        assert _registry()["beta"].matrix_ingress.scan_view.extractor == "generic"
 
 
 class TestUnknownCaller:

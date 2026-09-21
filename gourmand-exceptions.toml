@@ -466,3 +466,30 @@ check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/__init__.py"
 justification = "_build_oauth_context is reported as 100% similar to get_provider in quarantine/providers/__init__.py on nine statements. Both are factories -- resolve inputs, validate them, fail closed on a missing one, construct a provider, log, return -- but they share only that shape: different env vars, a GoogleProvider vs an LLM Provider, a ProfileConfigError vs a QuarantineAgentError, no shared control flow. Same over-match on the factory guard-then-construct shape as the loader.py _require_env exception above."
 classification = "gourmand_bug"
+
+# --- scan-view extractors: structural similarity, not copied code ---
+# All three are short, generic shapes that any two independent
+# implementations converge on. Collapsing them would couple modules that are
+# deliberately independent -- the whole point of scanview/ being a sibling of
+# preprocess/ rather than an extension is that the two must be free to diverge.
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/scanview/generic.py"
+pattern = "GenericExtractor.select"
+justification = "Flagged as similar to gateway/app.py:gateway_app. The shared shape is an accumulate-into-locals-then-construct loop, which is structural coincidence -- the two functions share no domain, no types and no caller."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/scanview.py"
+pattern = "build_extractor"
+justification = "Flagged as similar to gateway/scope.py:resolve_backend. Both are three statements of registry-lookup-then-raise, which is what every lookup-or-fail-closed function looks like. Sharing a helper would put the security-relevant channel check behind an indirection."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/scanview/base.py"
+pattern = "ScanView.coverage"
+justification = "Flagged as similar to preprocess/base.py:PreProcessResult.ratio. Both are a guarded division. They are intentionally separate: ratio measures how much a payload SHRANK, coverage measures how much of it was READ, and merging them would imply the two driver types share a contract they specifically do not."
+classification = "by_design"

@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..defense import Provenance, defend
+from .warning import build_warning
 
 if TYPE_CHECKING:
     from .profile import Profile
@@ -258,53 +259,6 @@ def _collect_block(
                 unscannable["blobs"] += 1
 
 
-def _build_warning(verdict: Any, unscannable: dict[str, int]) -> dict[str, Any] | None:
-    classification = verdict.classification
-    l2_truncated = bool(classification is not None and classification.truncated)
-    # There was text for L2 to read and no result came back: the ONNX model
-    # is missing or failed to load, so the classifier silently did not run.
-    # ``classify_async`` returns None for that, which used to read as a
-    # clean scan — survivable while a verdict expired in fifteen minutes,
-    # not survivable now that one is written down.
-    l2_unavailable = bool(verdict.pipeline.scan_view.strip()) and classification is None
-    l3_unavailable = bool(
-        verdict.l3_assessment is not None
-        and verdict.l3_assessment.get("l3_unavailable")
-    )
-    gaps = {k: v for k, v in unscannable.items() if v}
-
-    if (
-        not verdict.flagged
-        and not l2_truncated
-        and not l2_unavailable
-        and not l3_unavailable
-        and not gaps
-    ):
-        return None
-
-    warning: dict[str, Any] = {
-        "risk_level": verdict.risk_level,
-        "flagged_by": verdict.flagged_by.value if verdict.flagged_by else None,
-        "l1_detections": verdict.pipeline.stats.total_detections(),
-        "l1_suspicious": verdict.pipeline.stats.suspicious_detections(),
-        "l2_label": classification.label if classification else None,
-        "l2_score": classification.score if classification else None,
-        "l2_truncated": l2_truncated,
-        "l3_injection_detected": (
-            verdict.l3_assessment.get("injection_detected")
-            if verdict.l3_assessment is not None
-            else None
-        ),
-    }
-    if l2_unavailable:
-        warning["l2_unavailable"] = True
-    if l3_unavailable:
-        warning["l3_unavailable"] = True
-    if gaps:
-        warning["unscannable"] = gaps
-    return warning
-
-
 async def scan_tool_response(
     *,
     profile: Profile,
@@ -366,7 +320,7 @@ async def scan_tool_response(
             "blocked": enforcement in ("block", "extract"),
         },
     )
-    warning = _build_warning(verdict, unscannable)
+    warning = build_warning(verdict, unscannable=unscannable)
 
     # Under block/extract, "we could not finish judging this" is treated
     # exactly like "this is hostile" — the adversarial review's H1/H3:
@@ -387,7 +341,7 @@ async def scan_tool_response(
     if (verdict.flagged or unjudgeable) and enforcement in ("block", "extract"):
         blocked = True
         if warning is None:
-            # _build_warning() only returns None when nothing was flagged and
+            # build_warning() only returns None when nothing was flagged and
             # nothing was unjudgeable -- entering this branch means one of
             # those was true, so warning cannot be None here. If it is, the
             # invariant broke and failing loudly beats silently skipping the
@@ -482,7 +436,7 @@ async def scan_tool_list(
                     "blocked": effective_enforcement(profile) in ("block", "extract"),
                 },
             )
-            warning = _build_warning(verdict, {})
+            warning = build_warning(verdict)
             _cache_put(key, warning, persist=True)
 
         if warning is not None:

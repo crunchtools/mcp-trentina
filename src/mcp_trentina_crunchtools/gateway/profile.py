@@ -50,6 +50,24 @@ ProcessorName = Literal["petit", "structured", "email", "summarize"]
 # draws unconditional L3, so it costs two model calls.
 _DEFAULT_PROCESSORS: list[ProcessorName] = ["structured", "email", "petit"]
 
+# Registered scan-view extractors. Adding one means adding it here, to
+# gateway.scanview._REGISTRY, and nowhere else. Declared twice on purpose:
+# this Literal is what makes pydantic reject an unknown name at YAML load,
+# and a parity test keeps the two in step.
+ScanViewName = Literal["full", "generic"]
+
+# Fields of ScanViewConfig an AGENT may change by reloading its own profile.
+# Everything else in that block decides how much of the payload is read at
+# all -- an agent may retune its own performance, it may not reshape its own
+# perimeter. Enforced in tools/reload.py.
+SCAN_VIEW_AGENT_FIELDS: frozenset[str] = frozenset(
+    {"skip_sample_bytes", "min_coverage", "deadline_seconds"}
+)
+
+# 64 KiB of sampled openings is already ~36 L2 windows, which costs more than
+# the extraction saved. A ceiling, not a recommendation.
+_MAX_SKIP_SAMPLE_BYTES = 65536
+
 # Reduction budget, in bytes of a single tool response.
 #
 # ~20 KB is roughly 5K tokens: large enough that ordinary responses pass
@@ -458,7 +476,7 @@ class DefenseConfig(BaseModel):
             "scans, with no score gate. The field is retained for one "
             "release so profiles written for 0.9.x keep loading "
             "(extra=forbid would otherwise reject them); it is removed in "
-            "0.11.0. Setting it has no effect."
+            "0.12.0. Setting it has no effect."
         ),
     )
     audit: bool = Field(default=True, description="Write detection rows to SQLite")
@@ -488,6 +506,58 @@ class DefenseConfig(BaseModel):
         return v
 
 
+class ScanViewConfig(BaseModel):
+    """What the defense pipeline is allowed to read, and how it reports gaps.
+
+    The default is ``full`` -- scan every string leaf, which is what shipped
+    before extractors existed. That default is load-bearing: merging this
+    changes no deployment's behaviour until an operator opts in, and a
+    defense change whose default narrows the perimeter is one that lands by
+    accident.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    extractor: ScanViewName = Field(
+        default="full",
+        description=(
+            "Which extractor selects the scanned subset. full: every leaf, "
+            "no selection. generic: skip only what is structurally incapable "
+            "of carrying language -- ciphertext, identifiers, enum "
+            "constants, numbers, and exact duplicates."
+        ),
+    )
+    skip_sample_bytes: int = Field(
+        default=1024,
+        ge=0,
+        le=_MAX_SKIP_SAMPLE_BYTES,
+        description=(
+            "Budget for sampling the opening of skipped strings, so a "
+            "payload hidden in a declined field still reaches L1/L2. Zero "
+            "disables the backstop -- do that only with a reason."
+        ),
+    )
+    min_coverage: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Below this fraction of characters read, the response carries a "
+            "low_scan_coverage warning. Not a block: an observable, on the "
+            "same channel as l2_truncated."
+        ),
+    )
+    deadline_seconds: float = Field(
+        default=20.0,
+        gt=0.0,
+        le=120.0,
+        description=(
+            "How long extraction plus judgement may take before the response "
+            "forwards anyway, annotated scan_timeout."
+        ),
+    )
+
+
 class MatrixIngressConfig(BaseModel):
     """Per-profile access to the Matrix reverse proxy.
 
@@ -507,6 +577,14 @@ class MatrixIngressConfig(BaseModel):
     )
     token: SecretStr | None = Field(
         default=None, exclude=True, description="Resolved token (load-time only)",
+    )
+    scan_view: ScanViewConfig = Field(
+        default_factory=ScanViewConfig,
+        description=(
+            "How much of a Matrix response the defense pipeline reads. "
+            "Defaults to scanning everything, so adopting this is an "
+            "explicit operator decision rather than a silent narrowing."
+        ),
     )
 
 

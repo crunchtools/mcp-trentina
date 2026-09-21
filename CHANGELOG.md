@@ -10,6 +10,81 @@ under that name.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-21
+
+### Added
+- **Scan-view extractors: the pipeline no longer has to read the whole
+  payload.** A measured Matrix initial sync put 68,042 characters in front of
+  the classifier, of which 45,552 were Megolm ciphertext, ~15,000 were
+  repeated JSON key names, and 245 were human-readable prose. The scan spent
+  46 seconds reading base64 it cannot decrypt, which is long enough that
+  OpenClaw's 30-second readiness budget expires and the agent never connects
+  at all — a perimeter slow enough to be skipped is not a perimeter.
+  `scanview/` adds a driver type that selects what the pipeline reads, with
+  three mechanisms: structural skipping of strings incapable of carrying
+  language, deduplication of exact repeats, and sampling of skipped openings
+  as a backstop. **Measured on the live payload: 68,042 -> 3,856 characters,
+  a 17.6x reduction.**
+
+  This is a sibling of `preprocess/`, not an extension of it, because the
+  safety property inverts: a pre-processor's output is what gets delivered, so
+  what it drops nobody sees, whereas an extractor selects a subset to scan
+  while the full original is delivered. Five invariants replace the borrowed
+  three, including "skipping is structural, never semantic" — no trusted-room
+  or trusted-sender list, ever — and "fail open to MORE scanning, never less".
+  The default extractor is `full`, which is exactly today's behaviour, so this
+  changes nothing until an operator opts in.
+
+- **Per-profile scan-view policy, channel locking and RBAC.** Extractors
+  declare which ingress channels they understand, and naming one on a channel
+  it does not declare is a load-time error rather than a silently wrong
+  perimeter. `extractor` is operator-only: an agent reloading its own profile
+  may retune its sampling budget, coverage floor and deadline, but the fields
+  deciding how much of a payload is read at all are held and reported in
+  `not_applied`. An agent does not control profiles.yaml, but it does control
+  when a reload happens, and "cannot write the file" is a weaker guarantee
+  than "cannot apply the field".
+
+### Fixed
+- **A partial scan of a Matrix response no longer looks like a clean one.**
+  `ClassifierResult.truncated` — L2 ran out of context window and read only
+  part of the content — was honoured by the tool path and the alert ingress
+  but not by the Matrix proxy, which annotated on `flagged` alone. A `/sync`
+  whose tail was never classified was therefore delivered indistinguishable
+  from one that came back clean. The same was true when the ONNX model failed
+  to load and L2 never ran at all. Fixed at the root cause: the annotation is
+  now built in one place, `gateway/warning.py`, shared by the tool path and
+  the Matrix proxy. The triplication is *why* the Matrix copy was missed, and
+  a fourth copy would have been missed too. (The alert ingress still builds
+  its own, because it derives `risk_level` from its own detection counts
+  rather than from the verdict; reconciling the two risk models is a
+  behaviour change to that path and is tracked separately.)
+- **The Matrix scan now has a deadline.** `defend_json` runs L2 and may call
+  L3 — a network round-trip to a third-party LLM — with no timeout around it,
+  while a `/sync` sits on the client's critical path. OpenClaw gives a channel
+  30 seconds to become ready and starts over if it does not, so a slow judge
+  did not degrade Matrix, it stopped it. The judgement is now bounded at 20
+  seconds; on expiry the body forwards (fail open, as the rest of this path
+  does) carrying a `scan_timeout` warning, because an unscanned response must
+  never look clean.
+
+### Added
+- **`_FILE` indirection for every credential env var.** Any credential the
+  gateway reads from `FOO` is now equally readable from the file named by
+  `FOO_FILE`, which is the shape podman secrets, Kubernetes secret volumes and
+  systemd `LoadCredential=` actually produce. The value then lives in a
+  mode-0600 file instead of in `/proc/<pid>/environ`, where anything able to
+  inspect the container can read it. `_FILE` takes precedence when both are
+  set, per the crunchtools mcp-server profile: a mounted secret is the
+  explicit deployment-time answer and a stale inherited env var must not
+  quietly outrank it. A secret file that is named but unreadable is a hard
+  config error rather than a silent fall-through, and loose file permissions
+  warn without failing the load (constitution Section X). Routed through every
+  existing consumer — bearer tokens, `llm_keys`, alert ingress tokens and
+  forward secrets, Matrix ingress tokens, and `${VAR}` backend headers — not
+  just new ones, since a half-compliant loader is worse than one that was
+  never started.
+
 ## [0.10.0] - 2026-09-21
 
 ### Changed

@@ -14,6 +14,7 @@ from mcp_trentina_crunchtools.gateway.backend import reset_tool_list_cache
 from mcp_trentina_crunchtools.gateway.circuit import breaker
 from mcp_trentina_crunchtools.gateway.ingress_defense import reset_verdict_cache
 from mcp_trentina_crunchtools.gateway.loader import reset_active_config
+from mcp_trentina_crunchtools.gateway.matrix_proxy import reset_extractors
 from mcp_trentina_crunchtools.gateway.router import reset_profile_tools_cache
 from mcp_trentina_crunchtools.quarantine.providers import reset_provider
 
@@ -28,6 +29,7 @@ def _reset_singletons() -> None:
     # that singleton to tell a multi-tenant gateway from a standalone server,
     # so a leftover turns later tests into a different scope than they wrote.
     reset_active_config()
+    reset_extractors()
     reset_tool_list_cache()
     reset_profile_tools_cache()
     reset_verdict_cache()
