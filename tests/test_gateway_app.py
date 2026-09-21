@@ -229,6 +229,15 @@ OAUTH_BASE_URL = "https://mcp.example.com"
 # metadata must name the AS with this exact string, not the slash-less base URL,
 # or RFC 8414 §3.3 makes a strict client (gemini.google.com) reject the AS.
 OAUTH_ISSUER = OAUTH_BASE_URL + "/"
+# The provider's normalized scopes_supported — GoogleProvider expands the
+# email/profile shorthands to their full googleapis URIs, and our
+# protected-resource document must advertise this identical list so the two
+# discovery docs never name different scope strings.
+OAUTH_SCOPES = (
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+)
 
 
 @pytest.fixture
@@ -245,7 +254,10 @@ def oauth_client() -> TestClient:
         "wrong-user": _StubAccessToken({"email": "eve@evil.com", "email_verified": True}),
     })
     oauth = OAuthContext(
-        provider=provider, base_url=OAUTH_BASE_URL, issuer=OAUTH_ISSUER
+        provider=provider,
+        base_url=OAUTH_BASE_URL,
+        issuer=OAUTH_ISSUER,
+        scopes=OAUTH_SCOPES,
     )
     return TestClient(gateway_app({"gemini-app": profile}, oauth=oauth))
 
@@ -312,7 +324,11 @@ class TestGatewayOAuth:
         assert body["authorization_servers"] == [OAUTH_ISSUER]
         assert body["authorization_servers"] != [OAUTH_BASE_URL]
         assert body["bearer_methods_supported"] == ["header"]
-        assert "openid" in body["scopes_supported"]
+        # Regression: advertise the provider's exact (normalized) scope list, not
+        # the email/profile shorthand — the two discovery docs must agree or a
+        # strict client requests a scope the AS rejects at authorization time.
+        assert body["scopes_supported"] == list(OAUTH_SCOPES)
+        assert "email" not in body["scopes_supported"]
 
     def test_resource_metadata_unknown_profile_404(
         self, oauth_client: TestClient
