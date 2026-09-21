@@ -478,18 +478,18 @@ check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/scanview/generic.py"
 pattern = "GenericExtractor.select"
 justification = "Flagged as similar to gateway/app.py:gateway_app. The shared shape is an accumulate-into-locals-then-construct loop, which is structural coincidence -- the two functions share no domain, no types and no caller."
-classification = "false_positive"
+classification = "gourmand_bug"
 
 [[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/gateway/scanview.py"
 pattern = "build_extractor"
 justification = "Flagged as similar to gateway/scope.py:resolve_backend. Both are three statements of registry-lookup-then-raise, which is what every lookup-or-fail-closed function looks like. Sharing a helper would put the security-relevant channel check behind an indirection."
-classification = "false_positive"
+classification = "gourmand_bug"
 
 [[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/scanview/base.py"
 pattern = "ScanView.coverage"
 justification = "Flagged as similar to preprocess/base.py:PreProcessResult.ratio. Both are a guarded division. They are intentionally separate: ratio measures how much a payload SHRANK, coverage measures how much of it was READ, and merging them would imply the two driver types share a contract they specifically do not."
-classification = "false_positive"
+classification = "by_design"

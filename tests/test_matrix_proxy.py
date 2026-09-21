@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import typing
 from collections.abc import AsyncIterator, Callable
@@ -250,8 +251,6 @@ class TestMatrixSyncScanning:
     ) -> None:
         """A hanging judge must not stop Matrix — but the response that gets
         through must say it was never scanned."""
-        import asyncio
-
         from starlette.testclient import TestClient
 
         from mcp_trentina_crunchtools.gateway import matrix_proxy

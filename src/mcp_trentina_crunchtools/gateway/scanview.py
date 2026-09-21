@@ -28,11 +28,10 @@ from ..scanview import (
     ScanViewExtractor,
 )
 from .errors import ProfileConfigError
+from .profile import ScanViewConfig
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from .profile import ScanViewConfig
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +52,7 @@ def build_extractor(
     ``None`` means "no scan_view block", which is the same thing as the
     default: read everything.
     """
-    from .profile import ScanViewConfig as _Cfg
-
-    cfg = cfg or _Cfg()
+    cfg = cfg or ScanViewConfig()
     factory = _REGISTRY.get(cfg.extractor)
     if factory is None:  # pragma: no cover - the Literal makes this unreachable
         raise ProfileConfigError(
