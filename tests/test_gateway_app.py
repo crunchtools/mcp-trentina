@@ -605,3 +605,26 @@ class TestProvisionedConfidentialClient:
         paths = {r.path for r in ctx.provider.get_routes("/mcp-internal-deadbeef")}
         assert "/token" in paths
         assert "/authorize" in paths
+
+    def test_provisioned_client_carries_the_provider_scope(self) -> None:
+        """Registering with no scope refuses every /authorize as invalid_scope.
+
+        The SDK validates each requested scope against the client's registered
+        scope. 0.9.0 registered provisioned clients with scope=None, so live
+        /authorize returned
+        `error=invalid_scope&error_description=Client was not registered with
+        scope openid` and the flow died before consent. See CHANGELOG 0.9.1.
+        """
+        ctx = self._build({"gemini-app": self._provisioned_profile()})
+        client = ctx.provider.provisioned[self.CLIENT_ID]
+        assert client.scope
+        assert set(str(client.scope).split()) == set(ctx.scopes)
+
+    def test_every_advertised_scope_is_registered_on_the_client(self) -> None:
+        """A scope we advertise but did not register is refused at /authorize."""
+        ctx = self._build({"gemini-app": self._provisioned_profile()})
+        client = ctx.provider.provisioned[self.CLIENT_ID]
+        registered = set(str(client.scope).split())
+        assert "openid" in registered
+        for advertised in ctx.scopes:
+            assert advertised in registered
