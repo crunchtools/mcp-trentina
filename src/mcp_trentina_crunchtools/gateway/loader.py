@@ -46,10 +46,11 @@ def _expand_env_refs(value: str, *, context: str) -> str:
 
     def _replace(match: re.Match[str]) -> str:
         var_name = match.group(1)
-        resolved = os.environ.get(var_name, "")
+        resolved = _read_secret_env(var_name)
         if not resolved:
             raise ProfileConfigError(
-                f"{context}: env var {var_name} referenced but not set or empty"
+                f"{context}: env var {var_name} (or {var_name}"
+                f"{_ENV_FILE_SUFFIX}) referenced but not set or empty"
             )
         return resolved
 
@@ -142,7 +143,7 @@ def _resolve_llm_key_secrets(name: str, profile: Profile) -> None:
                 f"Profile {name!r} llm_keys.{provider_name}: must provide "
                 f"either 'api_key' or 'api_key_env'"
             )
-        key_value = os.environ.get(override.api_key_env, "")
+        key_value = _read_secret_env(override.api_key_env)
         if not key_value:
             raise ProfileConfigError(
                 f"Profile {name!r} llm_keys.{provider_name}: env var "
@@ -163,16 +164,72 @@ def _expand_backend_headers(name: str, profile: Profile) -> None:
             }
 
 
+_ENV_FILE_SUFFIX = "_FILE"
+
+
+def _warn_on_loose_mode(path: Path, file_var: str) -> None:
+    """Warn, never fail, when a secret file is group- or world-readable.
+
+    Constitution Section X: a runtime warning, not a hard error. Refusing to
+    start over a permission bit would brick a deploy for something the
+    operator can fix in place while the service keeps running.
+    """
+    try:
+        mode = path.stat().st_mode & 0o777
+    except OSError:
+        return
+    if mode & 0o077:
+        logger.warning(
+            "%s=%s: secret file mode %04o is more permissive than 0600",
+            file_var, path, mode,
+        )
+
+
+def _read_secret_env(env_var: str) -> str:
+    """Resolve a secret from ``FOO``, or from the file named by ``FOO_FILE``.
+
+    The ``_FILE`` indirection is the preferred shape for container
+    deployments — podman secrets, Kubernetes secret volumes, systemd
+    ``LoadCredential=`` — because the value lands in a mode-0600 file instead
+    of in ``/proc/<pid>/environ``, which anything that can inspect the
+    container can read.
+
+    ``_FILE`` takes precedence when both are set, per the crunchtools
+    mcp-server profile. That direction is deliberate: a mounted secret is the
+    explicit, deployment-time answer, and an env var inherited from a shell or
+    a stale unit file must not quietly outrank it.
+
+    Returns "" when neither is set, leaving "is this required?" to the caller.
+    Raises only when the operator named a file we cannot use — a secret
+    pointed at a missing file is a broken deployment, not an absent secret.
+    """
+    file_var = f"{env_var}{_ENV_FILE_SUFFIX}"
+    path_value = os.environ.get(file_var, "").strip()
+    if path_value:
+        path = Path(path_value)
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ProfileConfigError(
+                f"{file_var}={path_value}: cannot read secret file "
+                f"({exc.strerror or exc})"
+            ) from exc
+        _warn_on_loose_mode(path, file_var)
+        return raw.strip()
+    return os.environ.get(env_var, "")
+
+
 def _require_env(name: str, env_var: str, what: str) -> SecretStr:
     """Read a required secret from the environment, failing closed if absent.
 
     Shared by every ingress that authenticates by a token-in-env: a missing
     or empty var is a fatal config error, not a silent None.
     """
-    value = os.environ.get(env_var, "")
+    value = _read_secret_env(env_var)
     if not value:
         raise ProfileConfigError(
-            f"Profile {name!r}: {what} env var {env_var} not set or empty"
+            f"Profile {name!r}: {what} env var {env_var} (or "
+            f"{env_var}{_ENV_FILE_SUFFIX}) not set or empty"
         )
     return SecretStr(value)
 
@@ -185,7 +242,7 @@ def _resolve_alert_ingress_secrets(name: str, alert_ingress: AlertIngressConfig)
     alert_ingress.token = _require_env(name, alert_ingress.token_env, "alert_ingress")
 
     if alert_ingress.forward_secret_env:
-        fwd_secret = os.environ.get(alert_ingress.forward_secret_env, "")
+        fwd_secret = _read_secret_env(alert_ingress.forward_secret_env)
         if not fwd_secret:
             raise ProfileConfigError(
                 f"Profile {name!r}: alert_ingress forward_secret_env "

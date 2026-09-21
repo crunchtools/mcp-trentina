@@ -10,6 +10,23 @@ under that name.
 
 ## [Unreleased]
 
+### Added
+- **`_FILE` indirection for every credential env var.** Any credential the
+  gateway reads from `FOO` is now equally readable from the file named by
+  `FOO_FILE`, which is the shape podman secrets, Kubernetes secret volumes and
+  systemd `LoadCredential=` actually produce. The value then lives in a
+  mode-0600 file instead of in `/proc/<pid>/environ`, where anything able to
+  inspect the container can read it. `_FILE` takes precedence when both are
+  set, per the crunchtools mcp-server profile: a mounted secret is the
+  explicit deployment-time answer and a stale inherited env var must not
+  quietly outrank it. A secret file that is named but unreadable is a hard
+  config error rather than a silent fall-through, and loose file permissions
+  warn without failing the load (constitution Section X). Routed through every
+  existing consumer — bearer tokens, `llm_keys`, alert ingress tokens and
+  forward secrets, Matrix ingress tokens, and `${VAR}` backend headers — not
+  just new ones, since a half-compliant loader is worse than one that was
+  never started.
+
 ## [0.10.0] - 2026-09-21
 
 ### Changed
