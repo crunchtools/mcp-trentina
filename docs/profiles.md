@@ -224,7 +224,7 @@ Each profile configures its defense **policy** — never the layers' existence. 
 |---------|------|---------|-------------|
 | `enforcement` | string | `annotate` | What a flagged response becomes: `annotate` (delivered intact + warning — the calibration mode), `block` (refused — autonomous agents), `extract` (Q-Agent rewrite — interactive agents) |
 | `l2_threshold` | float | `0.5` | L2 score at/above which content is flagged, in addition to the model's own MALICIOUS label. Lower = stricter. |
-| `l3_threshold` | float | `0.7` | **Deprecated and ignored.** L3 runs on every input the gateway scans; there is no score gate. Retained for one release so existing profiles keep loading, removed in 0.11.0. |
+| `l3_threshold` | float | `0.7` | **Deprecated and ignored.** L3 runs on every input the gateway scans; there is no score gate. Retained for one release so existing profiles keep loading, removed in 0.12.0. |
 | `audit` | bool | `true` | Write detection rows to SQLite |
 | `provider` | string | `null` | LLM provider override (`gemini`, `openai`, `anthropic`, `ollama`) |
 

@@ -476,7 +476,7 @@ class DefenseConfig(BaseModel):
             "scans, with no score gate. The field is retained for one "
             "release so profiles written for 0.9.x keep loading "
             "(extra=forbid would otherwise reject them); it is removed in "
-            "0.11.0. Setting it has no effect."
+            "0.12.0. Setting it has no effect."
         ),
     )
     audit: bool = Field(default=True, description="Write detection rows to SQLite")

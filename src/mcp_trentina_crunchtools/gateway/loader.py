@@ -99,14 +99,14 @@ def _warn_deprecated_defense_keys(name: str, body: dict[str, Any]) -> None:
     every input the gateway scans — and a config key that silently stopped
     mattering is exactly what an operator should be told about rather than
     discover. Retained for one release so `extra="forbid"` does not reject
-    profiles written for 0.9.x; removed in 0.11.0.
+    profiles written for 0.9.x; removed in 0.12.0.
     """
     defense = body.get("defense")
     if isinstance(defense, dict) and "l3_threshold" in defense:
         logger.warning(
             "Profile %r sets defense.l3_threshold, which is ignored — L3 "
             "runs on every scanned input. Remove the key; it is rejected "
-            "from 0.11.0.",
+            "from 0.12.0.",
             name,
         )
 
