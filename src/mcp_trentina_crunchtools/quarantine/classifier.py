@@ -136,6 +136,29 @@ def _classify_segment(input_ids: list[int], attention_mask: list[int]) -> tuple[
     return label, malicious_score
 
 
+WINDOW_TOKENS = 512
+"""Prompt Guard 2's context window. max_position_embeddings is 512, so a
+segment longer than this cannot be scanned in one pass."""
+
+WINDOW_STRIDE = 448
+"""How far the window advances, leaving a 64-token guard band of overlap.
+
+Overlap exists so an injection straddling a window boundary still lands
+intact inside at least one window. It only has to exceed the longest
+injection we care about catching whole: the canonical forms
+("ignore all previous instructions and ...") run 10-30 tokens, so 64 is a
+comfortable margin.
+
+This was stride=256 -- a 256-token guard band, which meant a 50% overlap
+and ran the model over every token TWICE. On a 32,768-token scan that is
+128 passes instead of 74, and at the measured 872 ms per pass on lotor it
+cost roughly 47 seconds of pure duplicate work per scan. The Matrix proxy
+scans every /sync response, so Kagetora paid it on every message and
+Takeda could not finish an initial sync inside its 30 s budget at all
+(RT #1460).
+"""
+
+
 def classify(
     text: str, *, fail_on_truncate: bool = False, source: str = "content"
 ) -> ClassifierResult | None:
@@ -146,8 +169,9 @@ def classify(
     Prefer :func:`classify_async` from async code so a long scan cannot
     block the event loop.
 
-    For text longer than 512 tokens, splits into overlapping segments
-    (stride=256) and returns the highest malicious score.  Scanning stops
+    For text longer than ``WINDOW_TOKENS``, splits into overlapping segments
+    (advancing by ``WINDOW_STRIDE``, leaving a 64-token guard band) and
+    returns the highest malicious score.  Scanning stops
     after ``CLASSIFIER_MAX_TOKENS`` tokens and the result is marked
     ``truncated``; callers must treat a truncated scan of an untrusted
     source as unscannable rather than clean.  Without that bound an 855 KB
@@ -156,7 +180,7 @@ def classify(
 
     ``fail_on_truncate`` raises :class:`UnscannableContentError` as soon as
     the token count is known, before any inference runs.  A caller that
-    will reject a truncated scan anyway gains nothing from the ~128 passes
+    will reject a truncated scan anyway gains nothing from the ~74 passes
     it would take to produce one, and letting them run hands an attacker a
     cheap way to burn two minutes of CPU per request.
     """
@@ -165,8 +189,8 @@ def classify(
 
     start = time.monotonic()
 
-    max_length = 512
-    stride = 256
+    max_length = WINDOW_TOKENS
+    stride = WINDOW_STRIDE
 
     encoding = _tokenizer(
         text,
@@ -299,7 +323,7 @@ async def classify_guarded(
     ``truncated`` flag set for the caller to surface.
 
     Untrusted input bails at the token count rather than after the scan, so
-    oversized content costs one tokenizer pass instead of ~128 inference
+    oversized content costs one tokenizer pass instead of ~74 inference
     passes for a verdict that was never going to be accepted.
     """
     return await asyncio.to_thread(

@@ -20,7 +20,7 @@ DEFAULT_MAX_CONTENT = 100_000
 DEFAULT_CLASSIFIER_THRESHOLD = 0.5
 DEFAULT_CLASSIFIER_MODEL_PATH = "/models/prompt-guard-2-86m"
 DEFAULT_CLASSIFIER_MAX_TOKENS = 32_768
-"""Token ceiling for a Layer 2 scan, ~128 sliding windows at stride 256.
+"""Token ceiling for a Layer 2 scan, ~74 sliding windows at stride 448.
 
 Kept above what DEFAULT_MAX_CONTENT (100k chars, roughly 28k tokens of
 ordinary prose) can produce, so the two limits never fight: content small
