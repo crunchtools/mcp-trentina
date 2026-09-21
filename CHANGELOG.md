@@ -10,6 +10,8 @@ under that name.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-21
+
 ### Added
 - **Scan-view extractors: the pipeline no longer has to read the whole
   payload.** A measured Matrix initial sync put 68,042 characters in front of
