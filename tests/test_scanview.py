@@ -204,7 +204,9 @@ class TestChannelLocking:
             async def extract(self, payload: Any, ctx: ScanViewContext) -> Any:
                 raise AssertionError("never called")
 
-        _REGISTRY["matrix-only"] = lambda _cfg: cast("ScanViewExtractor", _MatrixOnly())
+        _REGISTRY["matrix-only"] = lambda _cfg, _keys: cast(
+            "ScanViewExtractor", _MatrixOnly()
+        )
         try:
             cfg = ScanViewConfig.model_construct(extractor="matrix-only")
             with pytest.raises(ProfileConfigError, match="not valid on the alert"):

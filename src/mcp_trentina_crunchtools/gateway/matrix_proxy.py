@@ -40,6 +40,7 @@ import httpx
 from starlette.responses import Response, StreamingResponse
 
 from ..defense import defend, defend_scan_view
+from ..matrix.keybackup import KeyBackupProvider
 from ..scanview import Channel, ScanViewContext
 from .proxy_utils import (
     PLAIN_TEXT,
@@ -250,14 +251,78 @@ async def _proxy_matrix(
 
 
 _EXTRACTORS: dict[str, Any] = {}
+_PROVIDERS: dict[str, Any] = {}
+_PROVIDER_LOCK = asyncio.Lock()
 
 
-def _extractor_for(profile: Profile) -> Any:
-    """The profile's extractor, built once.
+async def _provider_for(profile: Profile) -> Any:
+    """The profile's key-backup provider, started once.
 
-    Cached per profile name because an extractor may own state — the Matrix
-    one will own a Megolm session cache — and rebuilding it per request would
-    throw that away on the path where it matters most.
+    Built lazily rather than at route registration because starting it makes
+    network calls -- it verifies the backup version and checks that our
+    recovery key derives the public key the homeserver published. Doing that
+    in the first request that needs it keeps boot synchronous and keeps a
+    homeserver outage from preventing startup.
+
+    A failure here is logged and remembered as "no provider": decryption then
+    degrades to the undecryptable path, which is reported, rather than taking
+    the Matrix proxy down with it.
+    """
+    ingress = profile.matrix_ingress
+    cfg = ingress.scan_view.decrypt if ingress is not None else None
+    if cfg is None or not cfg.enabled:
+        return None
+    if profile.name in _PROVIDERS:
+        return _PROVIDERS[profile.name]
+
+    async with _PROVIDER_LOCK:
+        if profile.name in _PROVIDERS:
+            return _PROVIDERS[profile.name]
+        provider: Any = None
+        if cfg.access_token is None or cfg.recovery_key is None:
+            # The loader resolves these at config load, so reaching here means
+            # a Profile was built without going through it. Report and degrade
+            # rather than raising into the request path.
+            logger.error(
+                "matrix_proxy: decrypt enabled for profile=%s but its secrets "
+                "are unresolved — encrypted events will be unreadable",
+                profile.name,
+            )
+            _PROVIDERS[profile.name] = None
+            return None
+        try:
+            provider = KeyBackupProvider(
+                homeserver=cfg.homeserver,
+                access_token=cfg.access_token.get_secret_value(),
+                recovery_key=cfg.recovery_key.get_secret_value(),
+                client=_get_matrix_client(),
+                max_sessions=cfg.max_sessions,
+                ttl_seconds=cfg.session_ttl_seconds,
+                concurrency=cfg.concurrency,
+                refetch_cooldown_seconds=cfg.refetch_cooldown_seconds,
+            )
+            await provider.start()
+            logger.warning(
+                "matrix_proxy: key backup ready for profile=%s", profile.name
+            )
+        except Exception:
+            logger.exception(
+                "matrix_proxy: key backup unavailable for profile=%s — "
+                "encrypted events will be reported as undecryptable",
+                profile.name,
+            )
+            provider = None
+        _PROVIDERS[profile.name] = provider
+        return provider
+
+
+async def _extractor_for(profile: Profile) -> Any:
+    """The profile's extractor, built once, with its key provider attached.
+
+    Cached because the Matrix extractor holds a session cache, and rebuilding
+    it per request would throw that away on the path where it matters most.
+    Async because the provider it depends on verifies the backup over the
+    network the first time it is needed.
     """
     ingress = profile.matrix_ingress
     cfg = ingress.scan_view if ingress is not None else None
@@ -271,15 +336,19 @@ def _extractor_for(profile: Profile) -> Any:
     cached = _EXTRACTORS.get(key)
     if cached is None:
         cached = build_extractor(
-            cfg, channel=Channel.MATRIX, profile_name=profile.name,
+            cfg,
+            channel=Channel.MATRIX,
+            profile_name=profile.name,
+            keys=await _provider_for(profile),
         )
         _EXTRACTORS[key] = cached
     return cached
 
 
 def reset_extractors() -> None:
-    """Drop cached extractors. Called on profile reload and by tests."""
+    """Drop cached extractors and providers. On reload and by tests."""
     _EXTRACTORS.clear()
+    _PROVIDERS.clear()
 
 
 async def _scan_and_forward(
@@ -342,7 +411,7 @@ async def _scan_and_forward(
         # judge would leave any I/O an extractor does (a key fetch, later)
         # unbounded, which is the stall risk selection itself introduces.
         async with asyncio.timeout(deadline):
-            extractor = _extractor_for(profile)
+            extractor = await _extractor_for(profile)
             view = await build_scan_view(
                 payload,
                 extractor=extractor,

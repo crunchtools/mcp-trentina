@@ -10,6 +10,7 @@ from .base import (
 )
 from .full import FullExtractor
 from .generic import DEFAULT_SKIP_SAMPLE_BYTES, GenericExtractor
+from .matrix import MatrixExtractor
 from .walk import iter_leaves
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "Channel",
     "FullExtractor",
     "GenericExtractor",
+    "MatrixExtractor",
     "ScanView",
     "ScanViewContext",
     "ScanViewExtractor",

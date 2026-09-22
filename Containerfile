@@ -79,6 +79,12 @@ COPY src/ ./src/
 # released that morning — the artifact that actually runs was the least pinned
 # thing we owned, and it was resolved separately from the set CI tested.
 #
+# The `matrix` extra must appear in BOTH places below or the dependency is
+# half-installed: `--extra matrix` puts vodozemac in the exported, hash-pinned
+# requirements, and `.[matrix]` on the final --no-deps install is what records
+# it against the project. Exporting without installing gives you a verified
+# wheel nobody imports; installing without exporting gives you an unpinned one.
+#
 # `uv export` emits hashes, so this is also a verified install. The project
 # itself goes in second with --no-deps so pip cannot re-resolve around the lock.
 #
@@ -97,12 +103,12 @@ COPY src/ ./src/
 #
 # Delete this block and drop --no-emit-package once 3.0.0 is on PyPI.
 RUN pip install --no-cache-dir uv \
- && uv export --frozen --no-dev --no-emit-project --no-emit-package petit-log \
+ && uv export --frozen --no-dev --extra matrix --no-emit-project --no-emit-package petit-log \
       --format requirements-txt -o /tmp/requirements.txt \
  && pip install --no-cache-dir --prefix=/usr -r /tmp/requirements.txt \
  && printf '%s\n' "petit-log @ https://github.com/crunchtools/petit/archive/e74f8e2cc6aa2484463511534ca3b1cef747c00b.tar.gz --hash=sha256:105645a4fb495c2ef4ebea6f19b70cca5991f24ba5101e9e9355ad2263ef4372" > /tmp/petit-log.txt \
  && pip install --no-cache-dir --prefix=/usr --no-deps --require-hashes -r /tmp/petit-log.txt \
- && pip install --no-cache-dir --prefix=/usr --no-deps .
+ && pip install --no-cache-dir --prefix=/usr --no-deps '.[matrix]'
 
 # onnxruntime >= 1.29 reads /etc/machine-id during module init. When that file
 # is absent it falls back to popen("blkid")/popen("hostname"), and popen returns

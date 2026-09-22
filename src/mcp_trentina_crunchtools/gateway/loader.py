@@ -273,6 +273,27 @@ def _require_env(name: str, env_var: str, what: str) -> SecretStr:
 def _resolve_matrix_ingress_secrets(name: str, matrix_ingress: MatrixIngressConfig) -> None:
     matrix_ingress.token = _require_env(name, matrix_ingress.token_env, "matrix_ingress")
 
+    decrypt = matrix_ingress.scan_view.decrypt
+    if decrypt is not None and decrypt.enabled:
+        decrypt.access_token = _require_env(
+            name, decrypt.access_token_env, "matrix decrypt access token",
+        )
+        decrypt.recovery_key = _require_env(
+            name, decrypt.recovery_key_env, "matrix decrypt recovery key",
+        )
+        # Decode now, at load, so a mistyped key is a refused start rather
+        # than a silent inability to decrypt anything in production. The
+        # parity byte in the format exists for exactly this check.
+        from ..matrix.recovery_key import RecoveryKeyError, decode_recovery_key
+
+        try:
+            decode_recovery_key(decrypt.recovery_key.get_secret_value())
+        except RecoveryKeyError as exc:
+            raise ProfileConfigError(
+                f"Profile {name!r}: {decrypt.recovery_key_env} is not a valid "
+                f"recovery key ({exc})"
+            ) from exc
+
 
 def _resolve_alert_ingress_secrets(name: str, alert_ingress: AlertIngressConfig) -> None:
     alert_ingress.token = _require_env(name, alert_ingress.token_env, "alert_ingress")

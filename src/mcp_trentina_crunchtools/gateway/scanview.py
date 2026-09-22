@@ -23,6 +23,7 @@ from ..scanview import (
     Channel,
     FullExtractor,
     GenericExtractor,
+    MatrixExtractor,
     ScanView,
     ScanViewContext,
     ScanViewExtractor,
@@ -38,14 +39,24 @@ logger = logging.getLogger(__name__)
 # Factories, not the singletons gateway/reduce.py uses: an extractor may own
 # per-profile state (the Matrix one will own a key cache), so one instance per
 # configured profile rather than one per process.
-_REGISTRY: dict[str, Callable[[ScanViewConfig], ScanViewExtractor]] = {
-    "full": lambda _cfg: FullExtractor(),
-    "generic": lambda cfg: GenericExtractor(skip_sample_bytes=cfg.skip_sample_bytes),
+_REGISTRY: dict[str, Callable[[ScanViewConfig, Any], ScanViewExtractor]] = {
+    "full": lambda _cfg, _keys: FullExtractor(),
+    "generic": lambda cfg, _keys: GenericExtractor(
+        skip_sample_bytes=cfg.skip_sample_bytes
+    ),
+    "matrix": lambda cfg, keys: MatrixExtractor(
+        generic=GenericExtractor(skip_sample_bytes=cfg.skip_sample_bytes),
+        keys=keys,
+    ),
 }
 
 
 def build_extractor(
-    cfg: ScanViewConfig | None, *, channel: Channel, profile_name: str = "",
+    cfg: ScanViewConfig | None,
+    *,
+    channel: Channel,
+    profile_name: str = "",
+    keys: Any = None,
 ) -> ScanViewExtractor:
     """Construct the configured extractor, or fail closed at config load.
 
@@ -59,7 +70,7 @@ def build_extractor(
             f"Profile {profile_name!r}: unknown scan_view extractor "
             f"{cfg.extractor!r}; known: {sorted(_REGISTRY)}"
         )
-    extractor = factory(cfg)
+    extractor = factory(cfg, keys)
     if channel not in extractor.channels:
         raise ProfileConfigError(
             f"Profile {profile_name!r}: scan_view extractor "

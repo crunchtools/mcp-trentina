@@ -10,6 +10,45 @@ under that name.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-22
+
+### Added
+- **Matrix E2EE termination: the perimeter can finally read message bodies.**
+  Until now, message bodies in an encrypted room were ciphertext at the proxy.
+  An injection in a chat message crossed Trentina as an opaque blob and became
+  plaintext inside the agent, past the perimeter — the gap
+  `docs/defense-pipeline.md` has always described honestly. Trentina now reads
+  room keys from the homeserver's encrypted backup and decrypts events **to
+  build a scan view only**. The response forwarded to the client is the
+  upstream ciphertext, untouched; matrix.org never sees plaintext and the
+  agent still performs its own decryption.
+
+  Trentina takes no Matrix device identity, uploads nothing, and issues only
+  GET requests. Recovered plaintext is never forwarded, never written to disk,
+  and never logged in full. Nothing is persisted: a Megolm session key is a
+  permanent decryption capability, and `/data` already holds
+  attacker-supplied content.
+
+  Three properties are load-bearing rather than incidental. The backup's
+  **public key is verified at startup** against the one the recovery key
+  derives, so a wrong key is a refused start rather than a silent inability to
+  decrypt anything. Key fetches are **per-room, single-flight and
+  cooldown-limited** — a rate limit, not a cache tuning, because session IDs
+  arrive inside events and without it any room member could turn every `/sync`
+  into N homeserver round-trips inside the request path. And **decrypted text
+  goes back through the same generic rules as anything else**: plaintext
+  recovered from ciphertext is no more trustworthy than plaintext that arrived
+  in the clear.
+
+  Events that cannot be read are reported by identity and counted, never
+  passed over in silence. `to_device` olm events are excluded from that rate,
+  because key backup does not cover olm and counting them would pin the metric
+  high for ever.
+
+  Off by default, behind `scan_view.decrypt.enabled`. `vodozemac` ships as the
+  optional `matrix` extra, so a deployment asking for decryption on a platform
+  without the wheel fails at config load rather than at request time.
+
 ## [0.17.0] - 2026-09-22
 
 ### Changed

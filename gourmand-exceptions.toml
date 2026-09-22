@@ -493,3 +493,33 @@ path = "src/mcp_trentina_crunchtools/scanview/base.py"
 pattern = "ScanView.coverage"
 justification = "Flagged as similar to preprocess/base.py:PreProcessResult.ratio. Both are a guarded division. They are intentionally separate: ratio measures how much a payload SHRANK, coverage measures how much of it was READ, and merging them would imply the two driver types share a contract they specifically do not."
 classification = "by_design"
+
+# --- Matrix E2EE termination ---
+
+[[exceptions]]
+check = "hidden_env_config"
+path = "tests/test_matrix_keybackup.py"
+pattern = "CI"
+justification = "Not a runtime toggle. This test reads CI to FAIL when the vodozemac wheel is missing on a CI leg, so the decryption suite cannot skip itself into a green run. It changes no production behaviour -- there is no CI check anywhere in src/ -- and the check it guards is documented in the test's own docstring."
+classification = "by_design"
+
+[[exceptions]]
+check = "dead_structs"
+path = "src/mcp_trentina_crunchtools/matrix/keybackup.py"
+pattern = "KeyBackupProvider"
+justification = "Instantiated in production by gateway/matrix_proxy.py::_provider_for, which builds it lazily on the first request that needs a room key. Gourmand does not see the construction because it happens inside an async factory behind an enabled-check."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "conditional_wrapper"
+path = "tests/test_matrix_keybackup.py"
+pattern = "handle"
+justification = "httpx.MockTransport handler. Dispatching on the request path IS the function -- it stands in for a homeserver's routing table. Moving the condition to the call site would mean the call site is the transport, which is the thing being mocked."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "conditional_wrapper"
+path = "tests/test_scanview_matrix.py"
+pattern = "handle"
+justification = "Same: an httpx.MockTransport handler routing by request path."
+classification = "gourmand_bug"
