@@ -612,7 +612,29 @@ class TestProvisionedConfidentialClient:
         methods = self._metadata_document(ctx)[
             "token_endpoint_auth_methods_supported"
         ]
-        assert methods == ["none", "client_secret_post"]
+        assert "client_secret_post" in methods
+        assert "none" in methods
+
+    def test_metadata_advertises_cimd(self) -> None:
+        """CIMD is implemented by fastmcp and preferred by the MCP spec over
+        DCR, so the flag and its private_key_jwt method are both advertised.
+        0.8.2 suppressed them when the library only claimed support."""
+        ctx = self._build({"gemini-app": self._profile()})
+        document = self._metadata_document(ctx)
+        assert document["client_id_metadata_document_supported"] is True
+        assert "private_key_jwt" in document["token_endpoint_auth_methods_supported"]
+
+    def test_cimd_honours_the_redirect_allowlist(self) -> None:
+        """The CIMD path must not be a way around 0.16.0's callback
+        restriction: a CIMD client's redirect URIs are checked against the
+        same patterns DCR registrations are."""
+        ctx = self._build({"gemini-app": self._profile()})
+        manager = ctx.provider._cimd_manager
+        assert manager is not None
+        assert (
+            manager.allowed_redirect_uri_patterns
+            == ctx.provider._allowed_client_redirect_uris
+        )
 
     def test_other_routes_are_untouched(self) -> None:
         ctx = self._build({"gemini-app": self._provisioned_profile()})
