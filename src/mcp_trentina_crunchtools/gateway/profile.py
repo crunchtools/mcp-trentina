@@ -863,7 +863,14 @@ class Profile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., description="Profile name (URL-safe slug)")
-    auth: AuthConfig
+    auth: AuthConfig | None = Field(
+        default=None,
+        description=(
+            "Static bearer token config. Optional since 0.15.0: a profile "
+            "authenticated by OAuth alone omits it. See the model validator — "
+            "a profile with no authentication at all is refused."
+        ),
+    )
     backends: dict[str, Backend] = Field(
         default_factory=dict,
         description="Backend MCP servers reachable from this profile",
@@ -937,3 +944,28 @@ class Profile(BaseModel):
             if not PROVIDER_NAME_RE.match(name):
                 raise ValueError(f"Provider name {name!r} must match ^[a-z][a-z0-9-]*$")
         return v
+
+    @model_validator(mode="after")
+    def profile_has_an_authentication_method(self) -> Profile:
+        """Refuse a profile nothing authenticates.
+
+        Until 0.15.0 `auth` was required, so every profile carried a static
+        bearer token and this property held by accident. That had a cost: the
+        only way to add OAuth to a seat was to ALSO give it a permanent
+        anonymous credential which, because the bearer is checked first,
+        bypassed the OAuth entirely — the opposite of what an operator adding
+        OAuth believes they are doing.
+
+        So the requirement is now what it always meant: at least one way to
+        authenticate, of any kind. A bearer-only agent, an OAuth-only web seat,
+        or both together are all valid; neither is not.
+        """
+        if self.auth is not None:
+            return self
+        if self.oauth is not None and self.oauth.enabled:
+            return self
+        raise ValueError(
+            f"profile {self.name!r} has no authentication: set auth.bearer_token_env, "
+            "or oauth.enabled with allowed_emails, or both. A profile with "
+            "neither would serve its backends to anyone who found the URL"
+        )

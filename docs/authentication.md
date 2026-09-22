@@ -140,10 +140,16 @@ persist across a restart.
 Endpoints mounted: `/authorize`, `/token`, `/register`, `/consent`,
 `/auth/callback`, and a root `/.well-known/oauth-authorization-server`.
 
-Registration is confidential when the client asks for it. A client registering
-with `token_endpoint_auth_method: client_secret_post` is issued a real secret and
-must present it at `/token`; one registering with `none` stays public, which is
-what Claude Code and most MCP clients do. `client_secret_basic` is deliberately
+Registration is confidential **unless the client opts out**. RFC 7591's default
+is a confidential client, and the MCP SDK follows it: a registration that omits
+`token_endpoint_auth_method` is treated as `client_secret_post`, issued a real
+secret, and must present it at `/token` from then on. Only a client that
+explicitly registers with `"none"` stays public — which the Python MCP client
+and FastMCP's own client both do, so Claude Code is unaffected.
+
+The secret never expires. That is deliberate: an expiring secret would strand a
+connector that cannot re-register on its own, which is exactly the position
+gemini.google.com is in. `client_secret_basic` is deliberately
 not offered — the SDK reads `client_id` from the form body before the
 `Authorization` header, so the RFC 6749 §2.3.1 form that omits it would fail.
 

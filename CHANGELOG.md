@@ -10,6 +10,37 @@ under that name.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-22
+
+### Changed
+- **A profile now needs at least one authentication method, of any kind —
+  not a bearer token specifically.** `auth` becomes optional and a model
+  validator refuses any profile with neither `auth.bearer_token_env` nor
+  `oauth.enabled`.
+
+  `auth` was required until now, so every profile carried a static bearer and
+  the "nothing is unauthenticated" property held by accident. That had a real
+  cost: the only way to add OAuth to a seat was to *also* give it a permanent
+  anonymous credential, and since the static bearer is checked first, that
+  credential bypassed the OAuth entirely — the opposite of what an operator
+  adding OAuth believes they are doing. An OAuth-only seat was simply not
+  expressible.
+
+  Bearer-only, OAuth-only and both-together are all valid now; neither still
+  fails at load rather than quietly serving an open seat. `verify_bearer`
+  distinguishes "this profile has no static bearer" from "its token did not
+  resolve", which are different faults.
+
+### Documentation
+- Corrected `docs/authentication.md` and the `register_client` docstring on when
+  a client secret is issued. Both said "only when the client asks for one".
+  RFC 7591's default is a confidential client and the MCP SDK follows it, so a
+  registration that *omits* `token_endpoint_auth_method` is treated as
+  `client_secret_post` and gets a secret. It is opt-out, not opt-in. The Python
+  MCP client and FastMCP's client both send `"none"` explicitly, which is why
+  Claude Code is unaffected. Also documented that the secret never expires, and
+  why: an expiring secret would strand a connector that cannot re-register.
+
 ## [0.14.0] - 2026-09-22
 
 ### Added

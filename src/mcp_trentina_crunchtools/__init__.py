@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -711,12 +711,18 @@ def _build_proxy_provider(
             registration failed" and stops — which is why nothing was ever
             logged here: the flow ended before a single POST was sent.
 
-            So the SDK's secret is put back for a client that asked for
-            `client_secret_post`, and the stored record carries it, which is what
-            makes the SDK's ClientAuthenticator enforce it at `/token` rather
-            than merely advertise it. A client that asked for `"none"` is left
-            exactly as OAuthProxy made it — Claude Code and every other DCR
-            client keep the public registration they already have.
+            So the SDK's secret is put back for a `client_secret_post`
+            registration, and the stored record carries it, which is what makes
+            the SDK's ClientAuthenticator enforce it at `/token` rather than
+            merely advertise it. A client that registered `"none"` is left
+            exactly as OAuthProxy made it, so Claude Code and every other public
+            DCR client keeps the registration it already has.
+
+            Note this is opt-OUT, not opt-in: the SDK defaults an omitted
+            `token_endpoint_auth_method` to `client_secret_post` (RFC 7591's own
+            default), so a client that says nothing gets a secret and must then
+            present it. The Python MCP client and FastMCP's client both send
+            `"none"` explicitly, which is why that does not surprise them.
 
             Only `client_secret_post` is honoured. The SDK reads `client_id`
             from the form body before it looks at the Authorization header, so

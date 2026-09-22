@@ -583,3 +583,82 @@ class TestDelegatedOAuthConfig:
                 issuer=self.ISSUER,
                 audience_env="trentina_gemini_google_client_id",
             )
+
+
+class TestProfileNeedsAnAuthenticationMethod:
+    """A profile must have at least one way to authenticate (0.15.0).
+
+    `auth` was required until now, so every profile carried a static bearer and
+    this property held by accident. The cost was that adding OAuth to a seat
+    forced a permanent anonymous credential alongside it — and because the
+    bearer is checked first, that credential bypassed the OAuth entirely.
+    """
+
+    OAUTH = OAuthConfig(enabled=True, allowed_emails=["scott@example.com"])
+
+    def test_oauth_only_profile_is_valid(self) -> None:
+        """The shape that was impossible to express before."""
+        profile = Profile(name="claude-web", oauth=self.OAUTH)
+        assert profile.auth is None
+        assert profile.oauth is not None and profile.oauth.enabled
+
+    def test_bearer_only_profile_is_valid(self) -> None:
+        profile = Profile(name="kagetora", auth=AuthConfig(bearer_token_env="TOK"))
+        assert profile.oauth is None
+
+    def test_both_together_is_valid(self) -> None:
+        """gemini-web deliberately keeps both while the connector is in beta."""
+        profile = Profile(
+            name="gemini-web",
+            auth=AuthConfig(bearer_token_env="TOK"),
+            oauth=self.OAUTH,
+        )
+        assert profile.auth is not None and profile.oauth is not None
+
+    def test_neither_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="has no authentication"):
+            Profile(name="wide-open")
+
+    def test_disabled_oauth_does_not_count(self) -> None:
+        """`enabled: false` authenticates nobody, so it cannot stand in for auth."""
+        with pytest.raises(ValidationError, match="has no authentication"):
+            Profile(name="wide-open", oauth=OAuthConfig(enabled=False))
+
+    def test_the_refusal_names_both_remedies(self) -> None:
+        with pytest.raises(ValidationError) as exc:
+            Profile(name="wide-open")
+        message = str(exc.value)
+        assert "bearer_token_env" in message
+        assert "oauth.enabled" in message
+
+
+class TestBearerPathWithNoStaticToken:
+    """gateway/auth.py must tolerate a profile that has no `auth` block."""
+
+    OAUTH_ONLY = Profile(
+        name="claude-web",
+        oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+    )
+
+    def test_verify_bearer_refuses_and_says_why(self) -> None:
+        from mcp_trentina_crunchtools.gateway.auth import AuthError, verify_bearer
+
+        with pytest.raises(AuthError, match="no static bearer token"):
+            verify_bearer("Bearer anything", self.OAUTH_ONLY)
+
+    def test_token_lookup_skips_it_rather_than_crashing(self) -> None:
+        """resolve_profile_by_token walks every profile in the registry."""
+        from mcp_trentina_crunchtools.gateway.auth import resolve_profile_by_token
+
+        registry = {"claude-web": self.OAUTH_ONLY}
+        assert resolve_profile_by_token("Bearer whatever", registry) is None
+
+    def test_loader_does_not_demand_an_env_var(self) -> None:
+        from mcp_trentina_crunchtools.gateway.loader import _resolve_bearer_token
+
+        profile = Profile(
+            name="claude-web",
+            oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+        )
+        _resolve_bearer_token("claude-web", profile)  # must not raise
+        assert profile.auth is None
