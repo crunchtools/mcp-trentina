@@ -10,6 +10,40 @@ under that name.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-22
+
+### Changed
+- **Advertise CIMD again (Client ID Metadata Documents, SEP-991).** 0.8.2
+  disabled it because `OAuthProxy` set
+  `client_id_metadata_document_supported=true` while implementing nothing
+  behind it, so a client that preferred CIMD took a dead branch and gave up
+  without registering. That premise no longer holds: fastmcp 2.14.4 ships
+  `CIMDClientManager` (`fastmcp/server/auth/cimd.py`) with SSRF-safe document
+  fetching, `Cache-Control`/`ETag` validation, a response size cap and
+  `private_key_jwt` verification, wired into `get_client` and the authorize
+  path. Meanwhile the MCP authorization spec (2026-07-28) now orders
+  pre-registered, then CIMD, then DCR, and marks DCR deprecated — so
+  suppressing the flag advertises this gateway as older than it is.
+
+  The redirect allowlist added in 0.16.0 covers this path too: the manager is
+  constructed with the same `allowed_redirect_uri_patterns` DCR uses, so CIMD
+  is not a way around the callback restriction. Pinned by a test.
+
+  DCR keeps working and stays advertised, so `claude-web` and Claude Code are
+  unaffected — clients that prefer DCR still get it.
+
+### Notes
+- This does **not** fix gemini.google.com. Its Custom App connector reads our
+  protected-resource and authorization-server documents and then stops, and
+  that behaviour was invariant across five metadata configurations tested on a
+  throwaway host: issuer with and without a trailing slash (byte-matched per
+  RFC 8414 §3.3 either way), Google-branded versus plain scope names, two
+  versus four advertised client-authentication methods, and CIMD advertised
+  versus not. Cloudflare, CORS and browser-origin requests are ruled out with
+  captures. Three independent reporters on Google's own developer forum show
+  the same client failing at three further stages against servers that work
+  with Cursor, Claude, Copilot and ChatGPT. See RT #1502.
+
 ## [0.16.0] - 2026-09-22
 
 ### Security

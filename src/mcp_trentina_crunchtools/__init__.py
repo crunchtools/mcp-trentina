@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.16.0"
+__version__ = "0.17.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -900,14 +900,14 @@ def _build_proxy_provider(
         # which is an authorization-code theft path behind one consent click.
         # See DEFAULT_ALLOWED_REDIRECT_URIS.
         allowed_client_redirect_uris=_allowed_redirect_uris(profiles, proxied),
-        # CIMD off deliberately: OAuthProxy advertises client_id_metadata_
-        # document_supported=true but never implements server-side CIMD. The MCP
-        # spec makes clients try CIMD before DCR whenever that flag is set, so
-        # gemini.google.com took the CIMD branch, found nothing, and reported
-        # "automatic registration failed" without ever POSTing /register.
-        # Disabling it drops the flag and its private_key_jwt method, so clients
-        # fall through to DCR, which the proxy does implement. See CHANGELOG 0.8.2.
-        enable_cimd=False,
+        # CIMD on. 0.8.2 disabled it because OAuthProxy advertised support it
+        # did not implement, which sent clients down a dead branch. That is no
+        # longer true: fastmcp 2.14.4 ships CIMDClientManager with SSRF-safe
+        # document fetching, cache validation and private_key_jwt checking, and
+        # it honours the same allowed_redirect_uri_patterns as DCR. The MCP
+        # spec now orders CIMD ahead of DCR, leaving DCR the last-resort
+        # fallback, so suppressing the flag advertises us as older than we are.
+        enable_cimd=True,
     )
     # Provisioned confidential clients are resolved by get_client ahead of the
     # DCR store, and their presence is what turns on the client_secret_post

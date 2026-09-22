@@ -23,6 +23,26 @@ Two quick tests. If the client can send an `Authorization` header you choose,
 use a static bearer and stop. If it cannot, and it can register itself, use the
 proxy — nothing to configure beyond the allowlist.
 
+```mermaid
+flowchart TD
+    A([A new client needs a seat on the gateway]) --> D1
+    D1{"Can the client send an Authorization<br/>header you choose?"} -- Yes --> P1
+    D1 -- No --> D2
+    D2{"Can it register itself?<br/>(RFC 7591 dynamic registration)"} -- Yes --> P2
+    D2 -- No --> D3
+    D3{"Will it accept Trentina as<br/>its authorization server?"} -- Yes --> P3
+    D3 -- No --> P4
+    P1["<b>Static bearer</b><br/>auth.bearer_token_env<br/>Agents you control"]
+    P2["<b>OAuth proxy + DCR</b><br/>oauth.enabled + allowed_emails<br/>Claude Code and most MCP clients"]
+    P3["<b>OAuth proxy + provisioned client</b><br/>client_id + client_secret_env<br/>Gemini Custom Apps"]
+    P4["<b>Delegated issuer</b><br/>issuer + audience_env<br/>A connector that refuses a third-party AS"]
+```
+<!-- Editable source: https://lucid.app/lucidchart/5c2501c9-73f1-4ba5-b6f4-3eb74f8b86fa/edit -->
+
+Whichever you pick, remember that the static bearer is checked first: a profile
+carrying both mechanisms holds two independent credentials, and the one that
+never expires wins.
+
 ## How proxy mode actually works
 
 OAuth in this shape confuses almost everyone, because three different
@@ -56,6 +76,36 @@ The full sequence for one login:
 3. The person signs in. Google returns the address it just verified.
 4. Trentina checks that address against the profile's `allowed_emails` and
    decides whether to issue a token.
+
+
+```mermaid
+sequenceDiagram
+    participant C as MCP client
+    participant T as Trentina
+    participant G as Google
+    actor P as Person
+
+    Note over C,T: Leg 1 — minted by Trentina, one per client
+    Note over T,G: Leg 2 — one per SERVER, not per profile
+
+    C->>T: GET /authorize (leg-1 id)
+    T->>G: hand off login (leg-2 id)
+    P->>G: signs in
+    G-->>T: verified email
+    Note over C,G: Google authenticates. Trentina authorizes.
+    T->>T: in allowed_emails?
+    alt on the allowlist
+        T-->>C: auth code (5 min, single use)
+        C->>T: POST /token
+        T-->>C: access token 1h + refresh 1y
+    else not on the allowlist
+        T-->>C: refused
+    end
+    C->>T: every later request
+    T->>T: re-check allowed_emails
+    T-->>C: tool result
+```
+<!-- Editable source: https://lucid.app/lucidchart/e9bf44b3-8cb0-4ea6-bda0-31fb34da9f7a/edit -->
 
 Step 4 is the one that matters. **Google does authentication; Trentina does
 authorization.** Google has never heard of your allowlist and will vouch for
@@ -175,6 +225,31 @@ https URL as its own, and that is an authorization-code theft path:
    holds a token carrying **your** verified identity — which passes
    `allowed_emails`, because it really is you.
 
+```mermaid
+sequenceDiagram
+    actor A as Attacker
+    actor Y as You
+    participant T as Trentina
+    participant E as Attacker's callback
+
+    A->>T: POST /register, calling itself Claude
+    Note over A,T: redirect_uri points at their own server
+    alt URI not on allowed_redirect_uris
+        T-->>A: refused at registration
+    else no list, or a wildcard matches
+        T-->>A: client_id issued
+        A->>Y: a link to /authorize
+        Y->>T: GET /authorize (their id)
+        T-->>Y: consent page titled Claude
+        Y->>T: approve
+        T-->>E: your authorization code
+        E->>T: POST /token
+        T-->>E: token with YOUR identity
+        Note over E: It passes allowed_emails — it really is you
+    end
+```
+<!-- Editable source: https://lucid.app/lucidchart/e8a753ba-b016-470f-9582-8258e061d316/edit -->
+
 It takes one bad click. So Trentina ships a closed list, and anything not on it
 is refused at registration.
 
@@ -276,6 +351,31 @@ and Secret into the connector's form, and give Trentina only the Client ID via
 No `/authorize`, `/token` or `/register` is mounted for this profile. If every
 OAuth profile delegates, none is mounted at all and the upstream
 `TRENTINA_OAUTH_GOOGLE_CLIENT_ID`/`_CLIENT_SECRET` are not required.
+
+
+```mermaid
+sequenceDiagram
+    participant C as Connector
+    participant T as Trentina
+    participant G as Google
+    actor P as Person
+
+    C->>T: GET the RFC 9728 document
+    T-->>C: AS = accounts.google.com
+    Note over C,G: No /authorize, /token or /register for this profile
+    C->>G: OAuth against your Google Cloud client
+    P->>G: signs in
+    G-->>C: access token
+    Note over C,G: Trentina never sees that client's secret
+    C->>T: MCP request + bearer token
+    T->>G: tokeninfo (token in the POST body)
+    G-->>T: verified email + aud
+    T->>T: aud matches audience_env?
+    T->>T: email in allowed_emails?
+    T-->>C: tool result
+    Note over C,G: Valid tokens are never cached — a revoked one dies next request
+```
+<!-- Editable source: https://lucid.app/lucidchart/323e002c-eb4d-4f1c-b9f8-594334edb330/edit -->
 
 ### Why this exists
 
