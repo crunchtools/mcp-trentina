@@ -921,3 +921,124 @@ class TestConfidentialDynamicRegistration:
         await provider.register_client(info)
         stored = await provider.get_client(info.client_id)
         assert stored.scope
+
+
+class TestMultiProfileResourceIndicator:
+    """Two OAuth profiles on one gateway (RT #1502).
+
+    OAuthProxy stores a single `_resource_url` and refuses every other RFC 8707
+    indicator with `invalid_target`. That is correct for one OAuth seat and an
+    outage for two: the pin goes to whichever profile sorts first and the other
+    one's every login fails — the 0.8.3 incident. Both Claude and Gemini send
+    the indicator, so this is not hypothetical.
+    """
+
+    BASE = OAUTH_BASE_URL
+    A = f"{OAUTH_BASE_URL}/gateway/claude-web/mcp"
+    B = f"{OAUTH_BASE_URL}/gateway/gemini-web/mcp"
+
+    class _Params:
+        def __init__(self, resource: str | None) -> None:
+            self.resource = resource
+
+    @staticmethod
+    def _profile(name: str, emails: list[str] | None = None) -> Profile:
+        return Profile(
+            name=name,
+            auth=AuthConfig(bearer_token_env="A"),
+            oauth=OAuthConfig(
+                enabled=True, allowed_emails=emails or ["scott@example.com"]
+            ),
+        )
+
+    def _build(self, profiles: dict[str, Profile]) -> OAuthContext:
+        from mcp_trentina_crunchtools import _build_oauth_context
+
+        env = {
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET": "upstream-secret",
+            "TRENTINA_OAUTH_BASE_URL": self.BASE,
+        }
+        with patch.dict("os.environ", env, clear=False):
+            ctx = _build_oauth_context(GatewayConfig(profiles=profiles))
+        assert ctx is not None
+        return ctx
+
+    def _both(self) -> OAuthContext:
+        return self._build({
+            "claude-web": self._profile("claude-web"),
+            "gemini-web": self._profile("gemini-web"),
+        })
+
+    def test_every_proxied_profile_is_registered(self) -> None:
+        ctx = self._both()
+        assert ctx.provider.gateway_resources == frozenset({self.A, self.B})
+
+    def test_the_unpinned_profile_is_accepted(self) -> None:
+        """'gemini-web' sorts second, so it is the one the base class would
+        refuse. This is the whole point of the override."""
+        from mcp_trentina_crunchtools import _clear_known_resource
+
+        ctx = self._both()
+        params = self._Params(self.B)
+        _clear_known_resource(params, ctx.provider.gateway_resources)
+        assert params.resource is None  # cleared => base check will skip
+
+    def test_the_pinned_profile_is_accepted(self) -> None:
+        from mcp_trentina_crunchtools import _clear_known_resource
+
+        ctx = self._both()
+        params = self._Params(self.A)
+        _clear_known_resource(params, ctx.provider.gateway_resources)
+        assert params.resource is None
+
+    def test_a_foreign_resource_is_still_refused(self) -> None:
+        """Clearing the indicator must not become 'accept anything'."""
+        from mcp.server.auth.provider import AuthorizeError
+
+        from mcp_trentina_crunchtools import _clear_known_resource
+
+        ctx = self._both()
+        params = self._Params("https://evil.example.com/gateway/claude-web/mcp")
+        with pytest.raises(AuthorizeError) as exc:
+            _clear_known_resource(params, ctx.provider.gateway_resources)
+        assert exc.value.error == "invalid_target"
+
+    def test_a_profile_that_is_not_oauth_enabled_is_refused(self) -> None:
+        from mcp.server.auth.provider import AuthorizeError
+
+        from mcp_trentina_crunchtools import _clear_known_resource
+
+        ctx = self._both()
+        params = self._Params(f"{self.BASE}/gateway/kagetora/mcp")
+        with pytest.raises(AuthorizeError):
+            _clear_known_resource(params, ctx.provider.gateway_resources)
+
+    def test_no_indicator_is_left_alone(self) -> None:
+        """RFC 8707 is optional; a client that sends nothing is not refused."""
+        from mcp_trentina_crunchtools import _clear_known_resource
+
+        ctx = self._both()
+        params = self._Params(None)
+        _clear_known_resource(params, ctx.provider.gateway_resources)
+        assert params.resource is None
+
+    def test_matching_allowlists_are_silent(self, caplog: Any) -> None:
+        with caplog.at_level("WARNING"):
+            self._both()
+        assert "different allowed_emails" not in caplog.text
+
+    def test_divergent_allowlists_warn(self, caplog: Any) -> None:
+        """One audience covers both seats, so differing allowlists are a
+        boundary the operator thinks exists and does not."""
+        with caplog.at_level("WARNING"):
+            self._build({
+                "claude-web": self._profile("claude-web", ["scott@example.com"]),
+                "gemini-web": self._profile("gemini-web", ["someone@example.com"]),
+            })
+        assert "different allowed_emails" in caplog.text
+
+    def test_a_single_profile_never_warns(self, caplog: Any) -> None:
+        with caplog.at_level("WARNING"):
+            self._build({"claude-web": self._profile("claude-web")})
+        assert "different allowed_emails" not in caplog.text

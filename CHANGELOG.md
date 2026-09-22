@@ -10,6 +10,38 @@ under that name.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-22
+
+### Added
+- **More than one OAuth profile per gateway.** FastMCP's `OAuthProxy` stores a
+  single `_resource_url` and refuses every other RFC 8707 resource indicator
+  with `invalid_target`. Correct for one OAuth seat; an outage for two, because
+  the pin goes to whichever profile sorts first and the other one's every login
+  fails — the 0.8.3 incident. Both claude.ai and gemini.google.com send the
+  indicator, so this was not hypothetical: it is why the gateway ran exactly one
+  OAuth seat until now.
+
+  The indicator is now validated against every proxied profile's resource URL
+  and cleared before delegating. Clearing is what makes the base check skip, and
+  it is safe only because a value that is not one of ours has already been
+  refused — `invalid_target`, same as before.
+
+  The token audience stays gateway-wide (`proxy.py:785`), so it cannot tell two
+  seats apart. The boundary between profiles is `allowed_emails` plus the tool
+  allowlist, not the audience. Profiles whose allowlists differ now warn at
+  startup, because that is the case where an operator believes in an isolation
+  that does not exist.
+
+### Documentation
+- `docs/authentication.md` gains **How proxy mode actually works** — the two
+  credential legs (client→Trentina, Trentina→Google) and why the Google Cloud
+  credential is one per *server* rather than one per profile; the four-step
+  login sequence; that Google performs authentication while Trentina performs
+  authorization, and `allowed_emails` is the only thing between a stranger with
+  a Google account and the gateway; and a table of why this beats a static
+  bearer, including the caveat that a static bearer on the same profile is
+  checked first and wins.
+
 ## [0.13.0] - 2026-09-22
 
 ### Fixed

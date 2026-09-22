@@ -23,6 +23,70 @@ Two quick tests. If the client can send an `Authorization` header you choose,
 use a static bearer and stop. If it cannot, and it can register itself, use the
 proxy — nothing to configure beyond the allowlist.
 
+## How proxy mode actually works
+
+OAuth in this shape confuses almost everyone, because three different
+credentials are in play and they all look alike. It helps to see that there are
+two separate legs, each with its own credential, doing different jobs.
+
+```
+  Claude / Gemini  ───1───>  Trentina  ───2───>  Google
+     the client              the server          the identity provider
+```
+
+**Leg 1 — the client proves itself to Trentina.** Trentina mints these
+credentials. A client that supports dynamic registration asks for a pair and
+gets one; a client that cannot, like gemini.google.com Custom Apps, has an
+operator paste a pair declared in `profiles.yaml`. Either way there is one per
+client, and this is the boundary that separates one seat from another.
+
+**Leg 2 — Trentina proves itself to Google.** This is the Google Cloud OAuth
+client (`TRENTINA_OAUTH_GOOGLE_CLIENT_ID` / `_CLIENT_SECRET`), and there is
+exactly **one per server**, not one per profile. It identifies the gateway, so
+Google knows which application is asking and what to name on the consent
+screen. Every proxied profile shares it. A second one would only be a second
+name for the same server; it would not separate two seats, because by the time
+a login reaches this leg, which seat asked is no longer part of the question.
+
+The full sequence for one login:
+
+1. The client presents its leg-1 credential at `/authorize`.
+2. Trentina hands the person to Google, presenting its leg-2 credential so
+   Google knows who is asking.
+3. The person signs in. Google returns the address it just verified.
+4. Trentina checks that address against the profile's `allowed_emails` and
+   decides whether to issue a token.
+
+Step 4 is the one that matters. **Google does authentication; Trentina does
+authorization.** Google has never heard of your allowlist and will vouch for
+any Google account in the world — it is answering "who is this", not "should
+they be here". The only thing standing between a stranger with a Google account
+and your gateway is `allowed_emails`, which is why a profile with
+`enabled: true` and an empty allowlist fails validation rather than starting.
+
+It is also re-checked on **every request**, not once at login. Removing an
+address cuts that person off at their next call, even though the token they
+already hold is still cryptographically valid for up to another hour.
+
+### Why this beats a static bearer
+
+| | Static bearer | OAuth proxy |
+|---|---|---|
+| Lifetime | Forever, until you change it | Access token 1 hour, refreshed automatically |
+| Identity | None — possession is the identity | A Google account, verified each request |
+| Revoking one person | Rotate the token everywhere | Remove one line from `allowed_emails` |
+| If it leaks | Full access until noticed | Useless within the hour |
+
+The refresh token lasts a year by default and only rotates when Google rotates
+its own; the authorization code in the middle of the flow is single-use and
+lives five minutes.
+
+One caveat that undoes all of it: **the static bearer is checked first**. A
+profile carrying both `bearer_token_env` and `oauth` has two independent
+credentials, and the never-expiring anonymous one wins. That is intended for
+seats that need both, but a browser-only client cannot send a custom header
+anyway, so leaving a static token on such a profile is a liability with no use.
+
 ## Static bearer
 
 The default, and still checked first on every request regardless of what else

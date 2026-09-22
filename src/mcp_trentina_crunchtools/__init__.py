@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.13.0"
+__version__ = "0.14.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -533,6 +533,63 @@ def _delegated_auth(
     return built
 
 
+def _clear_known_resource(params: Any, allowed: frozenset[str]) -> None:
+    """Validate an RFC 8707 indicator against this gateway, then clear it.
+
+    Clearing is what makes OAuthProxy's own single-URL check skip, and it is
+    safe only because the value has been checked here first: an indicator
+    naming something that is not a profile on this gateway raises
+    ``AuthorizeError(invalid_target)`` and never reaches the base class.
+    """
+    requested = getattr(params, "resource", None)
+    if not requested or not allowed:
+        return
+
+    from fastmcp.server.auth.identity_assertion import normalize_resource_url
+    from mcp.server.auth.provider import AuthorizeError
+
+    if normalize_resource_url(str(requested)) not in {
+        normalize_resource_url(url) for url in allowed
+    }:
+        logger.warning(
+            "gateway: refusing /authorize — resource %s is not a profile on "
+            "this gateway",
+            requested,
+        )
+        raise AuthorizeError(
+            error="invalid_target",
+            error_description="Resource does not match this server",
+        )
+    params.resource = None
+
+
+def _warn_on_divergent_allowlists(
+    profiles: Mapping[str, Profile], proxied: list[str]
+) -> None:
+    """Warn when proxied profiles are authorized differently.
+
+    Every token this proxy issues carries the same audience whichever profile
+    asked for it, so the audience cannot tell two seats apart. The allowlist
+    can — but only while the allowlists agree. Identical ones (one operator,
+    several clients) are the intended shape. Differing ones mean someone
+    believes these seats are isolated from each other, and they are not.
+    """
+    if len(proxied) < 2:
+        return
+    allowlists = set()
+    for name in proxied:
+        oauth = profiles[name].oauth
+        allowlists.add(frozenset(oauth.allowed_emails or ()) if oauth else frozenset())
+    if len(allowlists) > 1:
+        logger.warning(
+            "gateway: OAuth profiles %s have different allowed_emails, but one "
+            "token audience covers all of them — anyone allowed on any of these "
+            "profiles can present that token to the others. Give them the same "
+            "allowlist, or split them across gateways.",
+            sorted(proxied),
+        )
+
+
 def _build_proxy_provider(
     profiles: Mapping[str, Profile],
     proxied: list[str],
@@ -583,6 +640,37 @@ def _build_proxy_provider(
 
         #: Statically provisioned confidential clients, by client_id.
         provisioned: ClassVar[dict[str, Any]] = {}
+
+        #: Every proxied profile's RFC 8707 resource URL on this gateway.
+        #: OAuthProxy holds exactly one; this is the set `authorize` accepts.
+        gateway_resources: ClassVar[frozenset[str]] = frozenset()
+
+        async def authorize(self, client: Any, params: Any) -> str:
+            """Accept a resource indicator naming ANY profile on this gateway.
+
+            OAuthProxy stores one ``_resource_url`` and refuses every other
+            value with ``invalid_target`` (proxy.py:1141-1163). With a single
+            OAuth profile that is right. With two it is an outage: the pin goes
+            to whichever profile sorts first, and the other one's every login
+            fails — the 0.8.3 incident, and the reason this gateway ran one
+            OAuth seat until now.
+
+            So the indicator is checked here, against every proxied profile's
+            resource URL, and then cleared before delegating. Clearing is what
+            makes the base check skip; it is not a loosening, because a value
+            that is not one of ours has already been refused above. Downstream
+            the parameter is only stored on the transaction and forwarded to
+            Google, which implements no RFC 8707 and ignores it.
+
+            What this does NOT do is give each profile its own token audience.
+            The JWT stays bound to the single pinned resource (proxy.py:785), so
+            a token minted for one seat verifies at another. The boundary
+            between profiles is therefore `allowed_emails` plus the tool
+            allowlist, not the audience — which is why differing allowlists get
+            a startup warning. See RT #1502.
+            """
+            _clear_known_resource(params, self.gateway_resources)
+            return await super().authorize(client, params)
 
         def set_mcp_path(self, mcp_path: str | None) -> None:
             logger.debug(
@@ -719,13 +807,18 @@ def _build_proxy_provider(
     # /authorize with invalid_target.
     resource_profile = sorted(proxied)[0]
     resource_url = f"{base_url}/gateway/{resource_profile}/mcp"
-    if len(proxied) > 1:
-        logger.warning(
-            "gateway: OAuth proxy serves %d profiles %s but FastMCP's OAuthProxy "
-            "holds one resource URL; pinned to %s — others fail /authorize "
-            "with invalid_target",
-            len(proxied), sorted(proxied), resource_url,
-        )
+    gateway_resources = frozenset(
+        f"{base_url}/gateway/{name}/mcp" for name in proxied
+    )
+    _GatewayGoogleProvider.gateway_resources = gateway_resources
+
+    # The audience of every issued token is `resource_url`, whichever profile
+    # asked for it, so it cannot tell two seats apart. What can is the per-
+    # profile allowlist — but only while the allowlists actually differ in
+    # membership. Identical allowlists (one operator, several clients) are the
+    # intended shape; differing ones mean someone believes the seats are
+    # isolated from each other, and they are not.
+    _warn_on_divergent_allowlists(profiles, proxied)
 
     # Provisioned confidential clients are resolved by get_client ahead of the
     # DCR store, and their presence is what turns on the client_secret_post
