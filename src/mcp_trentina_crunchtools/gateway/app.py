@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from starlette.applications import Starlette
@@ -35,11 +35,12 @@ from .errors import (
     OAuthForbiddenError,
     ProfileNotFoundError,
 )
+from .google_verifier import token_digest
 from .router import JSONRPC_INTERNAL_ERROR, JSONRPC_INVALID_PARAMS, route_jsonrpc
 from .sessions import SessionRegistry, session_registry
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
 
     from starlette.requests import Request
 
@@ -56,6 +57,21 @@ timeouts (~60s) so quiet connections don't hit 504 upstream-timeout drops."""
 SSE_RETRY_MS = 15000
 """Reconnect hint (ms) sent on stream open. Standard SSE clients honour
 ``retry:`` and back off at the protocol layer, bypassing app-level retry caps."""
+
+
+@dataclass(frozen=True)
+class DelegatedAuth:
+    """One profile's delegation to an external authorization server.
+
+    In this mode Trentina is a pure resource server: it never issues a token
+    for the profile, it names ``issuer`` in the profile's RFC 9728 document,
+    and the client authenticates straight to that issuer. ``verifier`` checks
+    the token that comes back and ``scopes`` is what the document advertises.
+    """
+
+    issuer: str
+    scopes: tuple[str, ...]
+    verifier: Any
 
 
 @dataclass(frozen=True)
@@ -85,12 +101,51 @@ class OAuthContext:
     reads short names here but sees full URIs at the AS (or vice versa) can
     request a scope the AS does not recognize and fail authorization. Captured
     from the provider so the two documents never drift.
+
+    ``delegated`` names the profiles that do NOT use the proxy at all: each
+    entry carries the external issuer we advertise for that profile and the
+    verifier for tokens that issuer minted. It is a map rather than a separate
+    per-profile context because this object is threaded positionally through
+    every handler and both metadata registration sites; keeping one container
+    means both the 401 path and the metadata document read the same answer to
+    "which authorization server is authoritative here", which is the drift this
+    docstring already exists to prevent.
+
+    ``provider`` and ``issuer`` are None on a gateway where every OAuth profile
+    is delegated: there is no proxy to build, no upstream Google credentials to
+    require, and no ``/authorize`` or ``/token`` to mount.
     """
 
-    provider: Any
+    provider: Any | None
     base_url: str
-    issuer: str
+    issuer: str | None
     scopes: tuple[str, ...]
+    delegated: Mapping[str, DelegatedAuth] = field(default_factory=dict)
+
+    def verifier_for(self, profile_name: str) -> Any | None:
+        """The thing that validates a token presented to this profile.
+
+        Both modes expose ``async verify_token(token) -> AccessToken | None``
+        (fastmcp's ``OAuthProvider.verify_token`` just forwards to
+        ``load_access_token``), so the caller never branches on mode.
+        """
+        entry = self.delegated.get(profile_name)
+        if entry is not None:
+            return entry.verifier
+        return self.provider
+
+    def metadata_for(self, profile_name: str) -> tuple[str, tuple[str, ...]] | None:
+        """The (issuer, scopes) this profile's RFC 9728 document advertises.
+
+        None when the profile is proxy-mode on a gateway that has no proxy —
+        the document must 404 rather than advertise a null authorization server.
+        """
+        entry = self.delegated.get(profile_name)
+        if entry is not None:
+            return entry.issuer, entry.scopes
+        if self.issuer is None:
+            return None
+        return self.issuer, self.scopes
 
 
 async def _authorize(
@@ -115,9 +170,16 @@ async def _authorize(
         return None
 
     if profile.oauth is not None and profile.oauth.enabled:
+        # A bearer was presented if the header parses as one, whether or not it
+        # turns out to be valid. RFC 6750 §3.1 lets us say `invalid_token` only
+        # in that case -- a request carrying no credential at all must get a
+        # bare challenge, because there is nothing yet to call invalid.
+        presented = _bearer_presented(auth_header)
         try:
-            await verify_oauth(
-                auth_header, profile, oauth.provider if oauth is not None else None
+            access = await verify_oauth(
+                auth_header,
+                profile,
+                oauth.verifier_for(profile.name) if oauth is not None else None,
             )
         except OAuthForbiddenError as exc:
             logger.info(
@@ -130,12 +192,45 @@ async def _authorize(
                 "gateway: oauth challenge profile=%s reason=%s [%s]",
                 profile.name, exc, _client_desc(request),
             )
-            return _oauth_challenge(profile.name, oauth)
+            return _oauth_challenge(profile.name, oauth, invalid_token=presented)
         else:
+            _log_oauth_success(profile, access)
             return None
 
     logger.info("gateway: auth failed profile=%s", profile.name)
     return _plain(401, "Unauthorized")
+
+
+def _bearer_presented(authorization_header: str | None) -> bool:
+    """True when the request carried something shaped like a bearer token.
+
+    Separates "you sent a credential and it was refused" from "you sent no
+    credential", which is the distinction RFC 6750 §3.1 draws for whether the
+    challenge may carry an error code.
+    """
+    if not authorization_header:
+        return False
+    scheme, _, value = authorization_header.partition(" ")
+    return scheme.lower() == "bearer" and bool(value)
+
+
+def _log_oauth_success(profile: Profile, access: Any) -> None:
+    """Record who was let in, at INFO, without recording their token.
+
+    A refused request already logs a reason; an accepted one logged nothing at
+    all, so there was no way to answer "which identity used this profile" after
+    the fact. The token appears only as a digest prefix.
+    """
+    claims = getattr(access, "claims", None) or {}
+    token = getattr(access, "token", "") or ""
+    logger.info(
+        "gateway: oauth ok profile=%s sub=%s email=%s aud=%s token=%s…",
+        profile.name,
+        claims.get("sub"),
+        claims.get("email"),
+        claims.get("aud"),
+        token_digest(token)[:8] if token else "?",
+    )
 
 
 def _static_bearer_ok(authorization_header: str | None, profile: Profile) -> bool:
@@ -153,12 +248,22 @@ def _static_bearer_ok(authorization_header: str | None, profile: Profile) -> boo
     return True
 
 
-def _oauth_challenge(profile_name: str, oauth: OAuthContext | None) -> Response:
+def _oauth_challenge(
+    profile_name: str,
+    oauth: OAuthContext | None,
+    *,
+    invalid_token: bool = False,
+) -> Response:
     """401 that points an MCP client at this resource's RFC 9728 metadata.
 
     The ``resource_metadata`` URL is where the client learns which authorization
     server to use, which is how gemini.google.com bootstraps the whole flow from
     a single unauthenticated request.
+
+    ``invalid_token`` adds the RFC 6750 §3.1 error code, and ONLY when a bearer
+    was actually presented and refused. The same section says a server SHOULD
+    NOT include an error code when the request carried no authentication
+    information at all, and this function serves both cases.
     """
     headers: dict[str, str] = {}
     if oauth is not None:
@@ -166,7 +271,10 @@ def _oauth_challenge(profile_name: str, oauth: OAuthContext | None) -> Response:
             f"{oauth.base_url}/.well-known/oauth-protected-resource"
             f"/gateway/{profile_name}/mcp"
         )
-        headers["WWW-Authenticate"] = f'Bearer resource_metadata="{metadata_url}"'
+        challenge = f'Bearer resource_metadata="{metadata_url}"'
+        if invalid_token:
+            challenge += ', error="invalid_token"'
+        headers["WWW-Authenticate"] = challenge
     return Response(
         content="Unauthorized",
         media_type="text/plain",
@@ -250,18 +358,28 @@ def _resource_metadata(
         or not profile.oauth.enabled
     ):
         return _plain(404, "Not Found")
+    # Delegated profiles name their external issuer here; proxy profiles name
+    # us. Both come from one place so the 401 challenge and this document can
+    # never disagree about which AS is authoritative.
+    advertised = oauth.metadata_for(profile_name)
+    if advertised is None:
+        logger.warning(
+            "gateway: no authorization server to advertise for profile=%s",
+            profile_name,
+        )
+        return _plain(404, "Not Found")
+    issuer, scopes = advertised
     return JSONResponse({
         "resource": f"{oauth.base_url}/gateway/{profile_name}/mcp",
-        # oauth.issuer, not oauth.base_url: the AS identifier here must match the
-        # `issuer` FastMCP advertises byte-for-byte (trailing slash included), or
-        # RFC 8414 §3.3 makes a strict client reject the AS metadata — see the
-        # OAuthContext docstring.
-        "authorization_servers": [oauth.issuer],
-        # The provider's own advertised scopes (normalized to full googleapis
-        # URIs), not the shorthand — the two discovery documents must name the
-        # same scope strings or a strict client requests a scope the AS rejects.
-        # See the OAuthContext docstring.
-        "scopes_supported": list(oauth.scopes),
+        # The AS identifier must match what the client discovers byte-for-byte
+        # (trailing slash included) or RFC 8414 §3.3 makes a strict client
+        # reject it — see the OAuthContext docstring. For a delegated profile
+        # that string is the external issuer, stored verbatim.
+        "authorization_servers": [issuer],
+        # Normalized to full googleapis URIs, not the shorthand — the two
+        # discovery documents must name the same scope strings or a strict
+        # client requests a scope the AS rejects.
+        "scopes_supported": list(scopes),
         "bearer_methods_supported": ["header"],
     })
 

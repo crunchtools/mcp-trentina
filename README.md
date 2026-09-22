@@ -10,6 +10,10 @@ Trentina is a secure MCP gateway that inspects everything between your AI agents
 
 Single chokepoint between your agents and all their MCP backends. One endpoint, one bearer token, one audit log — instead of each agent connecting directly to dozens of MCP servers. Backend tools are namespaced automatically (`slack__slack_search_messages`, `github__list_issues_tool`) so there are no collisions.
 
+### [Authentication](docs/authentication.md)
+
+Four ways a client can prove who it is, chosen per profile: a static bearer token, an OAuth identity Trentina issues while proxying login to Google (with dynamic client registration or a provisioned confidential client), or a token minted by an external identity provider that Trentina only verifies — for connectors that will not authenticate against a third-party authorization server.
+
 ### [Per-Agent Profiles](docs/profiles.md)
 
 Each consumer — Claude Code, Hermes, OpenClaw, or any MCP client — gets its own profile with independent tool access, defense settings, and authentication. Your human-supervised agent can have full tool access while your autonomous agent gets a locked-down subset, all through the same gateway.
@@ -102,7 +106,8 @@ export TRENTINA_PROFILE_MYAGENT_TOKEN=your-token
 | Document | Description |
 |----------|-------------|
 | [MCP Gateway](docs/gateway.md) | Architecture, routing, namespacing |
-| [Per-Agent Profiles](docs/profiles.md) | Authentication, profile schema, multi-agent setup |
+| [Authentication](docs/authentication.md) | Static bearer, OAuth proxy, delegated issuers |
+| [Per-Agent Profiles](docs/profiles.md) | Profile schema, multi-agent setup |
 | [Tool Filtering](docs/tool-filtering.md) | Allowlists, denylists, glob patterns |
 | [Parameter Guards](docs/parameter-guards.md) | Per-tool argument validation |
 | [Defense Pipeline](docs/defense-pipeline.md) | L1/L2/L3 layers, coverage matrix |

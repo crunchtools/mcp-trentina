@@ -37,10 +37,15 @@ class _StubAccessToken:
 
 
 class _StubProvider:
-    """Fake OAuth provider whose load_access_token returns a canned result.
+    """Fake PROXY provider: verify_token forwards to load_access_token.
 
     ``token_map`` maps a presented token string to the AccessToken (or None)
     the real provider would return after swapping and re-validating upstream.
+
+    The forwarding is not a convenience — it mirrors fastmcp's
+    ``OAuthProvider.verify_token``, which is literally
+    ``return await self.load_access_token(token)``. That is what lets one
+    gateway call site serve proxy and delegated modes alike.
     """
 
     def __init__(self, token_map: dict[str, _StubAccessToken | None]) -> None:
@@ -48,6 +53,25 @@ class _StubProvider:
         self.calls: list[str] = []
 
     async def load_access_token(self, token: str) -> _StubAccessToken | None:
+        self.calls.append(token)
+        return self._token_map.get(token)
+
+    async def verify_token(self, token: str) -> _StubAccessToken | None:
+        return await self.load_access_token(token)
+
+
+class _StubVerifier:
+    """Fake DELEGATED verifier: verify_token only, no load_access_token.
+
+    Deliberately missing the proxy method, so any code path that reaches for
+    it fails loudly instead of silently working in proxy mode only.
+    """
+
+    def __init__(self, token_map: dict[str, _StubAccessToken | None]) -> None:
+        self._token_map = token_map
+        self.calls: list[str] = []
+
+    async def verify_token(self, token: str) -> _StubAccessToken | None:
         self.calls.append(token)
         return self._token_map.get(token)
 

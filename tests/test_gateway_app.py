@@ -227,6 +227,11 @@ class _StubProvider:
     async def load_access_token(self, token: str) -> _StubAccessToken | None:
         return self._token_map.get(token)
 
+    async def verify_token(self, token: str) -> _StubAccessToken | None:
+        # Mirrors fastmcp's OAuthProvider.verify_token, which forwards to
+        # load_access_token — the gateway calls only verify_token now.
+        return await self.load_access_token(token)
+
 
 OAUTH_BASE_URL = "https://mcp.example.com"
 # The AS identifier FastMCP advertises as `issuer` — a bare origin rendered
@@ -628,3 +633,158 @@ class TestProvisionedConfidentialClient:
         assert "openid" in registered
         for advertised in ctx.scopes:
             assert advertised in registered
+
+
+DELEGATED_ISSUER = "https://accounts.google.com"
+
+
+class _StubVerifier:
+    """Delegated verifier: verify_token only, no load_access_token.
+
+    Deliberately missing the proxy method, so a code path that reaches for it
+    fails loudly instead of quietly working in proxy mode alone.
+    """
+
+    def __init__(self, token_map: dict[str, _StubAccessToken | None]) -> None:
+        self._token_map = token_map
+
+    async def verify_token(self, token: str) -> _StubAccessToken | None:
+        return self._token_map.get(token)
+
+
+@pytest.fixture
+def delegated_client() -> TestClient:
+    """A gateway whose only OAuth profile delegates to Google."""
+    from mcp_trentina_crunchtools.gateway.app import DelegatedAuth
+
+    profile = Profile(
+        name="gemini-app",
+        auth=AuthConfig(bearer_token_env="A"),
+        oauth=OAuthConfig(
+            enabled=True,
+            allowed_emails=["scott@example.com"],
+            issuer=DELEGATED_ISSUER,
+            audience_env="AUD_ENV",
+        ),
+    )
+    profile.auth.bearer_token = SecretStr("static-token")
+    verifier = _StubVerifier({
+        "good": _StubAccessToken({"email": "scott@example.com", "email_verified": True}),
+        "wrong-user": _StubAccessToken({"email": "eve@evil.com", "email_verified": True}),
+    })
+    oauth = OAuthContext(
+        provider=None,
+        base_url=OAUTH_BASE_URL,
+        issuer=None,
+        scopes=(),
+        delegated={
+            "gemini-app": DelegatedAuth(
+                issuer=DELEGATED_ISSUER,
+                scopes=("openid", "email", "profile"),
+                verifier=verifier,
+            )
+        },
+    )
+    return TestClient(gateway_app({"gemini-app": profile}, oauth=oauth))
+
+
+class TestDelegatedProfile:
+    """A profile that names an external authorization server."""
+
+    def test_metadata_advertises_the_external_issuer(
+        self, delegated_client: TestClient
+    ) -> None:
+        resp = delegated_client.get(
+            "/.well-known/oauth-protected-resource/gateway/gemini-app/mcp"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["authorization_servers"] == [DELEGATED_ISSUER]
+
+    def test_advertised_issuer_has_no_trailing_slash(
+        self, delegated_client: TestClient
+    ) -> None:
+        """Google publishes the bare origin; a client compares byte-for-byte."""
+        resp = delegated_client.get(
+            "/.well-known/oauth-protected-resource/gateway/gemini-app/mcp"
+        )
+        assert not resp.json()["authorization_servers"][0].endswith("/")
+
+    def test_resource_is_still_ours(self, delegated_client: TestClient) -> None:
+        resp = delegated_client.get(
+            "/.well-known/oauth-protected-resource/gateway/gemini-app/mcp"
+        )
+        assert resp.json()["resource"] == f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp"
+
+    def test_valid_delegated_token_accepted(
+        self, delegated_client: TestClient
+    ) -> None:
+        resp = delegated_client.post(
+            "/gemini-app/mcp",
+            json={"jsonrpc": "2.0", "id": 1},
+            headers={"authorization": "Bearer good"},
+        )
+        assert resp.status_code != 401
+
+    def test_wrong_user_forbidden_403(self, delegated_client: TestClient) -> None:
+        resp = delegated_client.post(
+            "/gemini-app/mcp",
+            json={"jsonrpc": "2.0", "id": 1},
+            headers={"authorization": "Bearer wrong-user"},
+        )
+        assert resp.status_code == 403
+
+    def test_static_bearer_still_short_circuits(
+        self, delegated_client: TestClient
+    ) -> None:
+        """It is checked before any outbound verification, so a delegated
+        profile carries two independent credentials. Intended; documented."""
+        resp = delegated_client.post(
+            "/gemini-app/mcp",
+            json={"jsonrpc": "2.0", "id": 1},
+            headers={"authorization": "Bearer static-token"},
+        )
+        assert resp.status_code != 401
+
+    def test_challenge_still_points_at_our_metadata(
+        self, delegated_client: TestClient
+    ) -> None:
+        """We are still the resource, even though Google is the AS."""
+        resp = delegated_client.post("/gemini-app/mcp", json={"jsonrpc": "2.0", "id": 1})
+        assert resp.status_code == 401
+        assert OAUTH_BASE_URL in resp.headers["WWW-Authenticate"]
+
+
+class TestChallengeErrorCode:
+    """RFC 6750 §3.1 — an error code only when a credential was refused."""
+
+    def test_no_error_code_when_no_credential_is_sent(
+        self, oauth_client: TestClient
+    ) -> None:
+        """'SHOULD NOT include an error code' when the request lacks any
+        authentication information — there is nothing yet to call invalid."""
+        resp = oauth_client.post("/gemini-app/mcp", json={"jsonrpc": "2.0", "id": 1})
+        assert resp.status_code == 401
+        assert "error=" not in resp.headers["WWW-Authenticate"]
+
+    def test_invalid_token_when_a_bearer_is_refused(
+        self, oauth_client: TestClient
+    ) -> None:
+        resp = oauth_client.post(
+            "/gemini-app/mcp",
+            json={"jsonrpc": "2.0", "id": 1},
+            headers={"authorization": "Bearer nonsense"},
+        )
+        assert resp.status_code == 401
+        assert 'error="invalid_token"' in resp.headers["WWW-Authenticate"]
+
+    def test_resource_metadata_present_in_both_cases(
+        self, oauth_client: TestClient
+    ) -> None:
+        bare = oauth_client.post("/gemini-app/mcp", json={"jsonrpc": "2.0", "id": 1})
+        refused = oauth_client.post(
+            "/gemini-app/mcp",
+            json={"jsonrpc": "2.0", "id": 1},
+            headers={"authorization": "Bearer nonsense"},
+        )
+        for resp in (bare, refused):
+            assert "resource_metadata=" in resp.headers["WWW-Authenticate"]

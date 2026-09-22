@@ -10,6 +10,92 @@ under that name.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-22
+
+### Added
+- **Per-profile delegated OIDC authentication.** A profile's `oauth` block now
+  takes `issuer` and `audience_env`. With them set, Trentina stops being the
+  authorization server for that profile: it advertises the external issuer in
+  the profile's RFC 9728 document, the client authenticates directly against
+  that IdP, and Trentina verifies the token and applies `allowed_emails`.
+  Google is wired and tested; the config is generic so another issuer is a
+  verifier plus an allowlist entry. Proxy mode remains the default and is
+  unchanged.
+
+  This is the last blocker in the gemini.google.com Custom App connect flow.
+  That connector offers three fields — MCP server URL, Client ID, Client Secret
+  — and no authorization or token URL, so it read our document, found Trentina
+  named as the authorization server, and refused to token-exchange against an
+  AS it has no relationship with. Live captures showed `/authorize`, `/consent`
+  and `/auth/callback` all completing, a client code minted and redirected with
+  a verbatim `state` and byte-correct RFC 9207 `iss`, Google fetching both
+  discovery documents server-side — and `POST /token` never issued, not once.
+  Naming Google in that document instead is what unblocks it.
+
+  Trentina never receives the external client secret. It holds only the client
+  ID, to pin the token's `aud`.
+
+- **`docs/authentication.md`** — all four mechanisms (static bearer, OAuth
+  proxy with DCR, OAuth proxy with a provisioned confidential client, and
+  delegated issuer) with a decision table, the failure mode of each, and the
+  security rules. The OAuth material moves out of `docs/profiles.md`, which
+  keeps the schema, rather than being duplicated.
+
+### Fixed
+- **The RFC 8707 resource pin is computed over proxied profiles only.** It used
+  the first OAuth-enabled profile by sort order, so the moment a delegated
+  profile sorted first — `gemini-app` before `josui` — the proxy would pin its
+  resource to a profile that does not use it and fail every proxy-mode
+  `/authorize` with `invalid_target`. That is the 0.8.3 outage, re-created for
+  the profiles the change does not touch. Latent until now; a regression test
+  pins it.
+- **The 401 challenge follows RFC 6750 §3.1.** `error="invalid_token"` is sent
+  only when a bearer was presented and refused. A request carrying no
+  credential gets a bare `Bearer resource_metadata="…"`, because §3.1 says a
+  server SHOULD NOT include an error code when the request lacks any
+  authentication information — and one code path serves both cases.
+- **`oauth_route_registered` reflects whether a proxy was built,** not merely
+  whether OAuth is configured. With a delegated-only gateway the old form would
+  report true, so an operator adding a proxied profile by reload would be told
+  it applied and get a silent 401 loop.
+- **`reload_profiles` reports delegated-mode edits it cannot apply,** on both
+  the operator and agent paths — the agent path previously reported no
+  unapplied settings at all. A verifier and its advertised issuer are bound at
+  startup like `llm_providers`. `allowed_emails` still applies live.
+
+### Security
+- **Audience binding is mandatory and enforced across profiles.** A Google
+  access token verifies for *any* OAuth client unless its `aud` is pinned, so
+  an unpinned delegated profile would accept a token minted for any app an
+  allowlisted human ever authorized — carrying the same verified email the
+  allowlist checks. `issuer` requires `audience_env`; two delegated profiles
+  may not share an audience; and no audience may equal
+  `TRENTINA_OAUTH_GOOGLE_CLIENT_ID`, or the profile would accept every upstream
+  token the proxy holds.
+- **Delegated and provisioned client config are mutually exclusive.** The
+  provisioned fields register a client against our own authorization server,
+  which a delegated profile does not run. Combined, that credential would be
+  registered into the shared proxy and become a live confidential client for
+  the *other* profiles' authorization server.
+- **The token is sent to Google in a POST body, not the query string.** Google
+  documents `GET /tokeninfo?access_token=…`, but HTTP clients log request URLs
+  at INFO, so the documented form writes live bearer tokens into the journal
+  the moment anyone raises the log level. Caught by a test asserting no token
+  reaches the logs.
+- **Rejected tokens are cached briefly; unreachable-Google is never cached.**
+  Proxy mode checks a JWT signature locally before doing anything expensive;
+  delegated mode has no local pre-check, so without this any unauthenticated
+  request with any bearer string would buy an outbound call to Google — and
+  Google's tokeninfo is quota'd, so a flood could lock the real user out. Only
+  rejections Google pronounced are remembered, which cannot extend any valid
+  token's life, so revocation still takes effect on the very next request.
+  Distinguishing a refusal from an outage is why this uses its own verifier
+  rather than fastmcp's, which collapses both to `None`.
+- **Successful OAuth authorizations are logged** with profile, subject, email,
+  audience and an 8-character token digest. Refusals already logged a reason;
+  acceptances logged nothing, so there was no way to answer who had used a
+  profile. Tokens themselves never reach the logs in either case.
+
 ## [0.11.1] - 2026-09-21
 
 ### Fixed
