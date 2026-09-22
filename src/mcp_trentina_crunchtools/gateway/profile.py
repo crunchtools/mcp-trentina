@@ -316,6 +316,16 @@ class Backend(BaseModel):
             "Validated at call time before the backend is contacted."
         ),
     )
+    response_guards: dict[str, dict[str, ParameterConstraint]] = Field(
+        default_factory=dict,
+        description=(
+            "Tool name -> response field -> value constraint. Validated on "
+            "the backend's result before it is reduced, scanned or relayed. "
+            "A field is a key of structuredContent, or the reserved name "
+            "'content' for the result's concatenated text. A violation "
+            "rejects the whole response — nothing partial is delivered."
+        ),
+    )
     validate_output_schema: bool = Field(
         default=True,
         description=(

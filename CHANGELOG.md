@@ -10,6 +10,42 @@ under that name.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-22
+
+### Added
+- **Response guards (`response_guards`) — the egress half of parameter
+  guards.** Parameter guards only see what the agent sent, which is enough for
+  `send_gmail_message` and useless for a semantic tool: an agent asking a
+  memory backend for "my employer's OS roadmap" sends nothing matchable, and
+  the restricted record arrives in the *response*, which the request-side check
+  never reads. `response_guards` applies the same `ParameterConstraint` —
+  through one shared `evaluate_constraint`, so request and response really do
+  run the same evaluator — to a backend's result.
+
+  A guard addresses a key of `structuredContent`, or the reserved name
+  `content` for every text block joined together. A match rejects the whole
+  response: scrubbing the matched portion and delivering the rest would turn
+  the guard into a leak oracle an agent could query its way around. The error
+  names the field, never the content.
+
+  The check runs on the raw result, before reduction and before the perimeter
+  scan — pre-processors paraphrase, and a guard reading the reduced artifact
+  could be walked past a literal a model rewrote. It runs on internal backends
+  too, which skip reduce and scan: those skip because that content was already
+  filtered where it entered, while egress policy is about who is asking.
+
+  This is a literal glob filter, not a classifier. A paraphrase of a denied
+  term passes, and when a whole backend is off-limits for an agent, cutting its
+  tools from `tools_allow` is the cheaper and stronger control. See
+  `docs/response-guards.md`. (RT #1500)
+- **`denied_response_guard` outcome**, in the `blocked` group so a block reads
+  as policy rather than failure. Kept distinct from `denied_guard`: this is the
+  one denial that still spends the upstream call.
+
+### Changed
+- The reload tool's diff now reports `response_guards` alongside
+  `parameter_guards`, keyed by field name and never echoing a pattern.
+
 ## [0.18.0] - 2026-09-22
 
 ### Added

@@ -1,6 +1,6 @@
 [project]
 name = "mcp-trentina-crunchtools"
-version = "0.18.0"
+version = "0.19.0"
 description = "Secure MCP gateway and quarantine for AI agent traffic — three-layer defense against prompt injection"
 requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
@@ -120,6 +120,11 @@ max-complexity = 10
 # Request handler: each early return is a distinct HTTP failure response
 # (401, 404, 500, ...). Same shape as gateway/app.py above.
 "src/mcp_trentina_crunchtools/gateway/alert_ingress.py" = ["PLR0911"]
+# _route_tools_call is a chain of fail-closed gates -- backend unknown, tool not
+# allowed, parameter guard, backend error, response guard -- and each one returns
+# its own refusal. Collapsing them into a single exit would hide which gate fired,
+# which is the one thing an operator reading an audit row needs.
+"src/mcp_trentina_crunchtools/gateway/router.py" = ["PLR0911"]
 # E402: the benchmark inserts the repo root on sys.path before importing the
 # corpus and package, so those imports intentionally follow that setup.
 # PLR0915: render_markdown is a linear report builder — many append statements,

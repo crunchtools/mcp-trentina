@@ -302,6 +302,27 @@ class TestAppliedReload:
         assert guards == {"jira_delete_issue": {"parameters_added": ["key"]}}
         assert "PROD-" not in str(result)
 
+    async def test_diff_names_response_guard_fields_without_echoing_patterns(
+        self, profiles_path: Path
+    ) -> None:
+        """The egress case: a backend gains a guard on what it may return."""
+        profiles_path.write_text(
+            BASE_YAML.replace(
+                '        tools_deny: []\n',
+                '        tools_deny: []\n'
+                '        response_guards:\n'
+                '          jira_get_issue:\n'
+                '            content:\n'
+                '              deny: ["*Red Hat*"]\n',
+            ),
+            encoding="utf-8",
+        )
+        result = await _reload_as("alpha")
+
+        guards = result["changes"]["alpha"]["backends_changed"]["jira"]["response_guards"]
+        assert guards == {"jira_get_issue": {"fields_added": ["content"]}}
+        assert "Red Hat" not in str(result)
+
     async def test_added_and_removed_profiles_are_reported_and_applied(
         self, profiles_path: Path
     ) -> None:

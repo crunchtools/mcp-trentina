@@ -64,6 +64,15 @@ class Outcome(str, Enum):
     Previously not recorded at all — the router returned before auditing.
     """
 
+    DENIED_RESPONSE_GUARD = "denied_response_guard"
+    """A response guard rejected the backend's result.
+
+    The backend was contacted and answered; the answer was withheld at the
+    gateway. Distinct from ``DENIED_GUARD`` because the cost profile differs —
+    this one spends the upstream call — and from ``BLOCKED_DEFENSE`` because
+    the decision is operator-authored policy, not a model's risk verdict.
+    """
+
     BACKEND_ERROR = "backend_error"
     """Upstream failed: network, timeout, auth, malformed response."""
 
@@ -72,7 +81,12 @@ class Outcome(str, Enum):
 
 
 BLOCKED_OUTCOMES: frozenset[Outcome] = frozenset(
-    {Outcome.BLOCKED_DEFENSE, Outcome.DENIED_ALLOWLIST, Outcome.DENIED_GUARD}
+    {
+        Outcome.BLOCKED_DEFENSE,
+        Outcome.DENIED_ALLOWLIST,
+        Outcome.DENIED_GUARD,
+        Outcome.DENIED_RESPONSE_GUARD,
+    }
 )
 """Policy outcomes. The gateway did its job; nothing is broken."""
 

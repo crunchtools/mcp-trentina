@@ -100,8 +100,17 @@ Parse tool name → Backend exists? → Tool in allowlist? → Parameter guards 
 
 A rejected call returns immediately. The backend never sees the request. The error message is terse and does not include the rejected value (to avoid leaking guard configuration to the agent).
 
+## What Parameter Guards Cannot Do
+
+A parameter guard only sees what the agent sent. When a tool's retrieval is
+semantic — a memory search, a wiki query — the sensitive material is in the
+*response* and the request carries nothing to match on. That case is covered by
+[response guards](response-guards.md), which apply the same constraint to the
+result.
+
 ## Related
 
+- [Response Guards](response-guards.md) — the same evaluator, applied to what a tool returns
 - [Tool Filtering](tool-filtering.md) — controlling which tools are visible
 - [Per-Agent Profiles](profiles.md) — where parameter guards are configured
 - [Defense Pipeline](defense-pipeline.md) — content inspection after the call succeeds
