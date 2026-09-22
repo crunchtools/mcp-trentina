@@ -17,7 +17,7 @@ token in the static one.
 | **Static bearer** | You | Sending a header | Resource server with a shared secret | Agents you control — kagetora, takeda, scripts |
 | **OAuth proxy + DCR** | Trentina, proxying login to Google | Dynamic client registration | Authorization server **and** resource server | Claude Code and most MCP clients |
 | **OAuth proxy + provisioned client** | Trentina | A pasted Client ID and Secret | Authorization server + resource server | A console-configured connector willing to use our AS |
-| **Delegated issuer** | Google (or another IdP) directly | Linking to that IdP itself | Pure resource server | A connector that refuses a third-party AS — gemini.google.com Custom Apps |
+| **Delegated issuer** | Google (or another IdP) directly | Linking to that IdP itself | Pure resource server | A connector that refuses a third-party AS. Not Gemini Custom Apps — see below |
 
 Two quick tests. If the client can send an `Authorization` header you choose,
 use a static bearer and stop. If it cannot, and it can register itself, use the
@@ -76,10 +76,20 @@ persist across a restart.
 Endpoints mounted: `/authorize`, `/token`, `/register`, `/consent`,
 `/auth/callback`, and a root `/.well-known/oauth-authorization-server`.
 
+Registration is confidential when the client asks for it. A client registering
+with `token_endpoint_auth_method: client_secret_post` is issued a real secret and
+must present it at `/token`; one registering with `none` stays public, which is
+what Claude Code and most MCP clients do. `client_secret_basic` is deliberately
+not offered — the SDK reads `client_id` from the form body before the
+`Authorization` header, so the RFC 6749 §2.3.1 form that omits it would fail.
+
 **Failure mode.** A client that reports "automatic registration failed" without
 ever POSTing to `/register` is reading the discovery documents and rejecting
-them — historically an issuer that did not match byte-for-byte (0.8.1) or a CIMD
-flag the proxy advertised but did not implement (0.8.2).
+them — historically an issuer that did not match byte-for-byte (0.8.1), a CIMD
+flag the proxy advertised but did not implement (0.8.2), or an
+`token_endpoint_auth_methods_supported` that offered no way to hold a secret
+(0.13.0). In all three the flow ends before a single request reaches us, so the
+absence of a log line is the symptom, not the absence of evidence.
 
 ## OAuth proxy + provisioned confidential client
 
@@ -129,17 +139,17 @@ OAuth profile delegates, none is mounted at all and the upstream
 
 ### Why this exists
 
-gemini.google.com Custom Apps offers exactly three fields — MCP server URL,
-Client ID, Client Secret — and no authorization or token URL. It reads our
-protected-resource document, finds Trentina named as the authorization server,
-and refuses to perform a token exchange against an AS it has no relationship
-with. In live captures `/authorize`, `/consent` and `/auth/callback` all
-completed, we minted a client code and redirected with a verbatim `state` and a
-byte-correct RFC 9207 `iss`, Google fetched both discovery documents
-server-side — and `POST /token` was never issued. Not once.
+For a connector that will only authenticate against an identity provider it
+already trusts, and refuses to treat a third party as an authorization server.
 
-That is the signature of this problem: the browser half of the flow succeeds
-completely and the token exchange never happens.
+**It is not the answer for gemini.google.com Custom Apps.** That was tried:
+pointed at `https://accounts.google.com`, the connector fetched the
+protected-resource document three times, saw an authorization server that was
+not the MCP server itself, and refused with "This MCP server is not yet
+supported" without ever contacting the server. Gemini requires the MCP server to
+be its own authorization server, which is the proxy mode above. The real cause
+of that connector's failure was that our registration endpoint issued no client
+secret — see 0.13.0.
 
 ### Security rules
 

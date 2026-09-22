@@ -10,6 +10,50 @@ under that name.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-22
+
+### Fixed
+- **Dynamic client registration now issues a client secret when one is asked
+  for.** FastMCP's `OAuthProxy` discards the secret the MCP SDK mints and
+  rewrites every registration to `token_endpoint_auth_method="none"`, on the
+  reasoning that the proxy holds the upstream credentials and never checks a
+  downstream one. That reasoning stops holding for a client that *requires* a
+  confidential registration.
+
+  gemini.google.com Custom Apps is such a client: Google Account Linking
+  authenticates at the token endpoint with a client id **and** secret. A
+  registration answered with "you are public, here is no secret" does not
+  satisfy what it asked for, so Gemini reported "automatic registration failed"
+  and stopped — which is why nothing was ever logged on our side. Across two
+  days of captures Google issued GETs for both discovery documents and never a
+  single POST to `/register` or `/token`; the flow ended before it had anything
+  to send.
+
+  A registration requesting `client_secret_post` now keeps the SDK's
+  256-bit secret, and the stored client record carries it, which is what makes
+  the SDK's `ClientAuthenticator` enforce it at `/token` rather than merely
+  advertise it. A registration requesting `none` is untouched, so Claude Code
+  and every other DCR client keep the public registration they already have.
+
+  Only `client_secret_post` is honoured: the SDK reads `client_id` from the form
+  body before it looks at the `Authorization` header, so `client_secret_basic`
+  would reject the RFC 6749 §2.3.1 form that omits it, and advertising a method
+  that half works is worse than not offering it.
+
+### Changed
+- `token_endpoint_auth_methods_supported` advertises `client_secret_post`
+  unconditionally, not only when a statically provisioned client exists. A
+  client reads that document **before** it registers and uses it to decide
+  whether this server can issue the confidential registration it needs;
+  advertising only after the fact left it with nothing to go on.
+
+### Documentation
+- `docs/authentication.md`: corrected the delegated-issuer section. Delegating
+  to `https://accounts.google.com` was tried against gemini.google.com and
+  refused with "This MCP server is not yet supported" — the connector requires
+  the MCP server to be its own authorization server. The mechanism remains
+  supported for other IdPs; it is not the answer for Gemini Custom Apps.
+
 ## [0.12.0] - 2026-09-22
 
 ### Added

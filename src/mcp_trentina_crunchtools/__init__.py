@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -606,25 +606,109 @@ def _build_proxy_provider(
                 return client
             return await super().get_client(client_id)
 
+        async def register_client(self, client_info: Any) -> None:
+            """Register a client, keeping the secret when one was asked for.
+
+            OAuthProxy deliberately downgrades every DCR registration to a
+            public client: it discards the secret the SDK minted and rewrites
+            `token_endpoint_auth_method` to `"none"`, on the reasoning that the
+            proxy holds the upstream credentials and never checks a downstream
+            one. That reasoning stops holding the moment a client *requires* a
+            confidential registration.
+
+            gemini.google.com Custom Apps is such a client. Google Account
+            Linking authenticates at the token endpoint with a client id AND
+            secret, so a registration answered with "you are public, here is no
+            secret" does not satisfy what it asked for. It reports "automatic
+            registration failed" and stops — which is why nothing was ever
+            logged here: the flow ended before a single POST was sent.
+
+            So the SDK's secret is put back for a client that asked for
+            `client_secret_post`, and the stored record carries it, which is what
+            makes the SDK's ClientAuthenticator enforce it at `/token` rather
+            than merely advertise it. A client that asked for `"none"` is left
+            exactly as OAuthProxy made it — Claude Code and every other DCR
+            client keep the public registration they already have.
+
+            Only `client_secret_post` is honoured. The SDK reads `client_id`
+            from the form body before it looks at the Authorization header, so
+            `client_secret_basic` would reject the RFC 6749 §2.3.1 form that
+            omits it — advertising a method that half works is worse than not
+            offering it. See RT #1502.
+            """
+            # Captured before super(), which strips both off the object.
+            requested_method = getattr(
+                client_info, "token_endpoint_auth_method", None
+            )
+            issued_secret = getattr(client_info, "client_secret", None)
+            expires_at = getattr(client_info, "client_secret_expires_at", None)
+
+            await super().register_client(client_info)
+
+            if requested_method != _AUTH_METHOD_POST or not issued_secret:
+                return
+
+            from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
+            from pydantic import AnyUrl
+
+            confidential = ProxyDCRClient(
+                client_id=client_info.client_id,
+                client_secret=issued_secret,
+                redirect_uris=(
+                    list(client_info.redirect_uris)
+                    if client_info.redirect_uris
+                    else [AnyUrl("http://localhost")]
+                ),
+                grant_types=list(
+                    client_info.grant_types or ["authorization_code", "refresh_token"]
+                ),
+                scope=client_info.scope or self._default_scope_str,
+                token_endpoint_auth_method=_AUTH_METHOD_POST,
+                application_type=client_info.application_type,
+                allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
+                client_name=getattr(client_info, "client_name", None),
+            )
+            # Overwrites the public record super() just stored. get_client reads
+            # this store, so from here the secret is the one that is checked.
+            await self._client_store.put(
+                key=client_info.client_id, value=confidential
+            )
+
+            # The SDK serializes this same object into the DCR response after we
+            # return, so the client only learns its secret if it is put back.
+            client_info.token_endpoint_auth_method = _AUTH_METHOD_POST
+            client_info.client_secret = issued_secret
+            client_info.client_secret_expires_at = expires_at
+
+            logger.info(
+                "gateway: registered confidential OAuth client %s "
+                "(client_secret_post, %d redirect URI(s))",
+                client_info.client_id, len(client_info.redirect_uris or []),
+            )
+
         def get_routes(self, mcp_path: str | None = None) -> list[Any]:
             """Advertise the client-auth methods this proxy genuinely enforces.
 
             OAuthProxy hardcodes `token_endpoint_auth_methods_supported` to
             `["none"]` because it never enforces a downstream client secret.
-            With a provisioned client the SDK's ClientAuthenticator does enforce
-            one (hmac-compared, expiry-checked), so `client_secret_post` becomes
-            true rather than decorative — and a client holding credentials, like
-            gemini.google.com Custom Apps, needs to be told it may present them
-            or it abandons the flow before calling `/token` at all.
+            Both a provisioned client and, since RT #1502, a DCR client that
+            registered confidentially do have one enforced by the SDK's
+            ClientAuthenticator (hmac-compared, expiry-checked), so
+            `client_secret_post` is true rather than decorative.
+
+            It is advertised unconditionally, not only when a provisioned client
+            exists: a client reads this document BEFORE it registers, and uses it
+            to decide whether this server can issue it the confidential
+            registration it needs. Advertising only after the fact would leave
+            that client with nothing to go on.
 
             The metadata route is rebuilt deep inside the base `get_routes`, so
             the advertised document is patched on the way out instead of
             reimplementing that construction. See CHANGELOG 0.9.0, RT #1502.
             """
-            routes = super().get_routes(mcp_path)
-            if not self.provisioned:
-                return routes
-            return [_advertise_secret_post(route) for route in routes]
+            return [
+                _advertise_secret_post(route) for route in super().get_routes(mcp_path)
+            ]
 
     # Pin the resource to a PROXIED profile's endpoint (see
     # _GatewayGoogleProvider). OAuthProxy holds one resource, so with several
