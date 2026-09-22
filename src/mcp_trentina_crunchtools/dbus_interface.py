@@ -1,6 +1,6 @@
 """D-Bus interface for mcp-trentina-crunchtools.
 
-Exposes com.crunchtools.Airlock1 on the system bus with methods for
+Exposes com.crunchtools.Trentina1 on the system bus with methods for
 querying pipeline state and signals for live event streaming.
 
 Uses dbus-fast (pure Python, async, no C deps). Gracefully degrades
@@ -46,9 +46,9 @@ async def start_dbus() -> None:
         bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
         interface = _build_interface()
-        bus.export("/com/crunchtools/Airlock1", interface)
+        bus.export("/com/crunchtools/Trentina1", interface)
 
-        await bus.request_name("com.crunchtools.Airlock1")
+        await bus.request_name("com.crunchtools.Trentina1")
 
         from .events import get_event_bus
 
@@ -57,21 +57,21 @@ async def start_dbus() -> None:
         event_bus.subscribe("detection_occurred", interface.on_detection_occurred)
 
         _dbus_started = True
-        logger.info("D-Bus interface registered: com.crunchtools.Airlock1")
+        logger.info("D-Bus interface registered: com.crunchtools.Trentina1")
 
     except Exception:
         logger.warning("D-Bus unavailable — interface disabled", exc_info=True)
 
 
 def _build_interface() -> Any:
-    """Build the Airlock1 D-Bus interface object."""
+    """Build the Trentina1 D-Bus interface object."""
     from dbus_fast.service import ServiceInterface, method, signal
 
-    class Airlock1Interface(ServiceInterface):
-        """com.crunchtools.Airlock1 D-Bus interface."""
+    class Trentina1Interface(ServiceInterface):
+        """com.crunchtools.Trentina1 D-Bus interface."""
 
         def __init__(self) -> None:
-            super().__init__("com.crunchtools.Airlock1")
+            super().__init__("com.crunchtools.Trentina1")
 
         @method()
         def GetStats(self) -> "s":  # type: ignore[name-defined]  # noqa: N802, F821
@@ -173,7 +173,7 @@ def _build_interface() -> Any:
                 json.dumps(event_payload.get("details", {})),
             )
 
-    return Airlock1Interface()
+    return Trentina1Interface()
 
 
 def emit_request_event(

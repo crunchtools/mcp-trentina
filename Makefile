@@ -12,7 +12,7 @@ install-cockpit:
 
 install-dbus:
 	install -d $(DESTDIR)$(DBUS_DIR)
-	install -m 644 dbus/com.crunchtools.Airlock1.conf $(DESTDIR)$(DBUS_DIR)/
+	install -m 644 dbus/com.crunchtools.Trentina1.conf $(DESTDIR)$(DBUS_DIR)/
 
 install: install-cockpit install-dbus
 

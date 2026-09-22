@@ -36,5 +36,5 @@ install -m 644 dbus/com.crunchtools.Trentina1.conf %{buildroot}%{_datadir}/dbus-
 %{_datadir}/dbus-1/system.d/com.crunchtools.Trentina1.conf
 
 %changelog
-* Sat Mar 15 2026 Scott McCarty <scott@crunchtools.com> - 0.2.0-1
+* Sun Mar 15 2026 Scott McCarty <scott@crunchtools.com> - 0.2.0-1
 - Initial package: Cockpit plugin + D-Bus policy for MCP Trentina
