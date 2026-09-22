@@ -60,6 +60,31 @@ profiles:
         headers:
           Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
         tools_allow: ["*"]
+        # Response guards — the egress half of parameter_guards. The memory
+        # server is shared with supervised profiles, and recall is semantic:
+        # this agent can ask for "my employer's roadmap" without naming the
+        # employer, so nothing in the REQUEST is matchable and a parameter
+        # guard has nothing to bite on. The restricted record arrives in the
+        # response, which is where this check reads.
+        #
+        # A match rejects the whole response (never a scrubbed subset — that
+        # would make the guard a leak oracle) and audits as
+        # denied_response_guard. See docs/response-guards.md.
+        #
+        # This is a LITERAL filter: a paraphrase of a denied term passes. When
+        # the whole backend is off-limits for an agent, prefer cutting the
+        # read tools from tools_allow, or `content: {deny: ["*"]}` — neither
+        # depends on predicting vocabulary.
+        response_guards:
+          memory_search:
+            content:
+              deny: ["*Red Hat*", "*RHEL*", "*redhat*"]
+          memory_list:
+            content:
+              deny: ["*Red Hat*", "*RHEL*", "*redhat*"]
+          memory_graph:
+            content:
+              deny: ["*Red Hat*", "*RHEL*", "*redhat*"]
 
       slack:
         url: "http://mcp-slack:8005/mcp"

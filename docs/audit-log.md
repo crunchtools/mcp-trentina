@@ -36,6 +36,7 @@ blocked 34 hostile pages.
 | `blocked_defense` | blocked | L1/L2/L3 refused the content. Working as designed. |
 | `denied_allowlist` | blocked | Tool not permitted for this profile. |
 | `denied_guard` | blocked | A parameter guard rejected the arguments. |
+| `denied_response_guard` | blocked | A response guard rejected the backend's result. |
 | `tool_error` | failed | Backend completed but reported `isError`. |
 | `backend_error` | failed | Upstream failed: network, timeout, auth, 4xx/5xx. |
 | `gateway_error` | failed | Our own bug. The only outcome that should page anyone. |
@@ -100,10 +101,15 @@ defense got mistaken for a broken one.
 
 ### Denial Monitoring
 
-`denied_allowlist` and `denied_guard` rows record calls the gateway refused.
-A consumer repeatedly probing tools outside its allowlist is a signal worth
-alerting on — it can indicate a misconfigured client or a hijacked agent.
-These were previously not recorded at all.
+`denied_allowlist`, `denied_guard` and `denied_response_guard` rows record
+calls the gateway refused. A consumer repeatedly probing tools outside its
+allowlist is a signal worth alerting on — it can indicate a misconfigured
+client or a hijacked agent. These were previously not recorded at all.
+
+`denied_response_guard` is the one denial that still costs an upstream call:
+the backend answered and the answer was withheld here. A rising rate on it
+means an agent keeps asking for material its profile forbids — see
+[Response Guards](response-guards.md).
 
 ### Usage Patterns
 

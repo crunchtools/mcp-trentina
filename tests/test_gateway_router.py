@@ -455,6 +455,133 @@ class TestRouter:
             assert stats["totals"]["blocked"] == 1
         db_mod._db = None
 
+    async def test_denied_response_guard_blocks_and_skips_the_perimeter(
+        self, tmp_path: Any
+    ) -> None:
+        """A response guard withholds the result and short-circuits reduce + scan.
+
+        Reduction can paraphrase a literal out of existence, so the guard reads
+        the RAW payload and nothing downstream runs once it fires.
+        """
+        import mcp_trentina_crunchtools.database as db_mod
+
+        db_mod._db = None
+        secret = "RHEL 11 ships on a date nobody outside may read"
+
+        async def memory_call(
+            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+        ) -> BackendCall:
+            return BackendCall(
+                content=[{"type": "text", "text": f"Red Hat note: {secret}"}],
+                is_error=False,
+                structured_content=None,
+            )
+
+        p = Profile(
+            name="isolated",
+            auth=AuthConfig(bearer_token_env="TEST"),
+            backends={
+                "memory": Backend(
+                    url="http://mcp-memory:8006/mcp",
+                    tools_allow=["*"],
+                    response_guards={
+                        "memory_search": {
+                            "content": ParameterConstraint(deny=["*Red Hat*"]),
+                        }
+                    },
+                ),
+            },
+        )
+        p.auth.bearer_token = SecretStr("x")
+
+        with (
+            patch(
+                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                side_effect=memory_call,
+            ),
+            patch(
+                "mcp_trentina_crunchtools.gateway.router.reduce_response"
+            ) as mock_reduce,
+            patch(
+                "mcp_trentina_crunchtools.gateway.router.scan_tool_response"
+            ) as mock_scan,
+            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value.db_path = str(tmp_path / "denied_response.db")
+            mock_cfg.return_value.ensure_db_dir = lambda: None
+            resp = await route_jsonrpc(
+                p,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 43,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"memory{NAMESPACE_SEP}memory_search",
+                        "arguments": {"query": "my employer's OS roadmap"},
+                    },
+                },
+            )
+
+            assert "result" not in resp
+            assert resp["error"]["code"] == -32602
+            assert secret not in resp["error"]["message"]
+            mock_reduce.assert_not_called()
+            mock_scan.assert_not_called()
+
+            stats = get_gateway_call_stats("isolated", days=1)
+            assert stats["by_tool"][0]["outcomes"] == {"denied_response_guard": 1}
+            assert stats["totals"]["blocked"] == 1
+        db_mod._db = None
+
+    async def test_response_guard_passes_unmatched_content(self) -> None:
+        """A response the guard does not match is delivered as normal."""
+
+        async def memory_call(
+            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+        ) -> BackendCall:
+            return BackendCall(
+                content=[{"type": "text", "text": "the Trentino route notes"}],
+                is_error=False,
+                structured_content=None,
+            )
+
+        p = Profile(
+            name="isolated2",
+            auth=AuthConfig(bearer_token_env="TEST"),
+            backends={
+                "memory": Backend(
+                    url="http://mcp-memory:8006/mcp",
+                    tools_allow=["*"],
+                    response_guards={
+                        "memory_search": {
+                            "content": ParameterConstraint(deny=["*Red Hat*"]),
+                        }
+                    },
+                ),
+            },
+        )
+        p.auth.bearer_token = SecretStr("x")
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+            side_effect=memory_call,
+        ):
+            resp = await route_jsonrpc(
+                p,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 44,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"memory{NAMESPACE_SEP}memory_search",
+                        "arguments": {"query": "motorcycle"},
+                    },
+                },
+            )
+
+        assert "error" not in resp
+        assert "Trentino" in resp["result"]["content"][0]["text"]
+
     async def test_backend_reported_error_is_not_counted_as_ok(
         self, tmp_path: Any
     ) -> None:

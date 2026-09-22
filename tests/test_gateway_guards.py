@@ -1,18 +1,34 @@
-"""Tests for gateway/guards.py — parameter value validation."""
+"""Tests for gateway/guards.py — parameter and response value validation."""
 
 from __future__ import annotations
 
-from mcp_trentina_crunchtools.gateway.guards import check_parameter_guards
+from mcp_trentina_crunchtools.gateway.guards import (
+    check_parameter_guards,
+    check_response_guards,
+)
 from mcp_trentina_crunchtools.gateway.profile import Backend, ParameterConstraint
 
 
 def _backend(
     guards: dict[str, dict[str, ParameterConstraint]] | None = None,
+    response: dict[str, dict[str, ParameterConstraint]] | None = None,
 ) -> Backend:
     return Backend(
         url="http://x/mcp",
         tools_allow=["*"],
         parameter_guards=guards or {},
+        response_guards=response or {},
+    )
+
+
+def _text(*chunks: str) -> list[dict[str, str]]:
+    return [{"type": "text", "text": chunk} for chunk in chunks]
+
+
+def _guarded(field: str, **constraint: list[str]) -> Backend:
+    """A backend whose memory_search result is constrained on one field."""
+    return _backend(
+        response={"memory_search": {field: ParameterConstraint(**constraint)}}
     )
 
 
@@ -142,3 +158,140 @@ class TestParameterGuards:
         )
         assert result is not None
         assert secret not in result
+
+
+class TestResponseGuards:
+    """check_response_guards behaviour on content blocks and structured fields."""
+
+    def test_no_guards_configured_passes(self) -> None:
+        result = check_response_guards(
+            "memory_search", _text("Red Hat roadmap"), None, _backend()
+        )
+        assert result is None
+
+    def test_no_guard_for_this_tool_passes(self) -> None:
+        result = check_response_guards(
+            "memory_list",
+            _text("Red Hat roadmap"),
+            None,
+            _guarded("content", deny=["*Red Hat*"]),
+        )
+        assert result is None
+
+    def test_content_deny_pattern_blocks(self) -> None:
+        result = check_response_guards(
+            "memory_search",
+            _text("The Red Hat roadmap for next year"),
+            None,
+            _guarded("content", deny=["*Red Hat*"]),
+        )
+        assert result is not None
+        assert "deny" in result
+
+    def test_content_without_denied_term_passes(self) -> None:
+        result = check_response_guards(
+            "memory_search",
+            _text("The motorcycle trip to Trentino"),
+            None,
+            _guarded("content", deny=["*Red Hat*"]),
+        )
+        assert result is None
+
+    def test_deny_all_blocks_every_response(self) -> None:
+        result = check_response_guards(
+            "memory_search",
+            _text("anything at all"),
+            None,
+            _guarded("content", deny=["*"]),
+        )
+        assert result is not None
+
+    def test_deny_all_blocks_empty_response(self) -> None:
+        result = check_response_guards(
+            "memory_search",
+            [],
+            None,
+            _guarded("content", deny=["*"]),
+        )
+        assert result is not None
+
+    def test_match_spans_multiple_blocks_and_newlines(self) -> None:
+        """A memory blob arrives as several blocks; the guard reads them joined."""
+        result = check_response_guards(
+            "memory_search",
+            _text("entry one\nsecond line", "entry two mentioning Red Hat\nand more"),
+            None,
+            _guarded("content", deny=["*Red Hat*"]),
+        )
+        assert result is not None
+        assert "deny" in result
+
+    def test_embedded_resource_text_is_read(self) -> None:
+        blocks = [{"type": "resource", "resource": {"text": "Red Hat internal note"}}]
+        result = check_response_guards(
+            "memory_search",
+            blocks,
+            None,
+            _guarded("content", deny=["*Red Hat*"]),
+        )
+        assert result is not None
+
+    def test_structured_field_deny_blocks(self) -> None:
+        result = check_response_guards(
+            "memory_search",
+            _text("harmless"),
+            {"summary": "Red Hat product plans"},
+            _guarded("summary", deny=["*Red Hat*"]),
+        )
+        assert result is not None
+        assert "summary" in result
+
+    def test_missing_structured_field_passes(self) -> None:
+        result = check_response_guards(
+            "memory_search",
+            _text("harmless"),
+            {"other": "value"},
+            _guarded("summary", deny=["*Red Hat*"]),
+        )
+        assert result is None
+
+    def test_structured_field_guard_with_no_structured_content_passes(self) -> None:
+        result = check_response_guards(
+            "memory_search",
+            _text("harmless"),
+            None,
+            _guarded("summary", deny=["*Red Hat*"]),
+        )
+        assert result is None
+
+    def test_allow_list_restricts_content(self) -> None:
+        result = check_response_guards(
+            "status_tool",
+            _text("unexpected payload"),
+            None,
+            _backend(response={"status_tool": {"content": ParameterConstraint(allow=["ok"])}}),
+        )
+        assert result is not None
+        assert "not in allow list" in result
+
+    def test_image_only_response_has_no_text_to_match(self) -> None:
+        blocks = [{"type": "image", "data": "...", "mimeType": "image/png"}]
+        result = check_response_guards(
+            "memory_search",
+            blocks,
+            None,
+            _guarded("content", deny=["*Red Hat*"]),
+        )
+        assert result is None
+
+    def test_error_message_does_not_leak_content(self) -> None:
+        secret = "Red Hat RHEL 11 ship date is a secret"
+        result = check_response_guards(
+            "memory_search",
+            _text(secret),
+            None,
+            _guarded("content", deny=["*Red Hat*"]),
+        )
+        assert result is not None
+        assert secret not in result
+        assert "RHEL" not in result

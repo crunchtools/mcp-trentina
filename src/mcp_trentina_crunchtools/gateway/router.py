@@ -36,7 +36,7 @@ from .backend import call_backend_tool, list_backend_tools, on_backend_cache_evi
 from .compress import compress_tools, maybe_trigger_compression
 from .errors import BackendCallError, BackendNotInProfileError
 from .filter import filter_tools
-from .guards import check_parameter_guards
+from .guards import check_parameter_guards, check_response_guards
 from .ingress_defense import scan_tool_list, scan_tool_response
 from .internal import call_internal_tool, list_internal_tools
 from .reduce import reduce_response
@@ -408,6 +408,24 @@ async def _route_tools_call(
         return _err(req_id, JSONRPC_INTERNAL_ERROR, str(exc))
 
     duration_ms = int((time.monotonic() - t0) * 1000)
+
+    # Response guards run on the RAW result, before reduction and before the
+    # scan. Reduction summarizes and paraphrases, which can dissolve the exact
+    # literal a guard matches on; a guard that reads the reduced artifact would
+    # therefore pass content the operator forbade. Internal backends are checked
+    # too — they skip reduce and scan because the firewall already filtered
+    # where that content ENTERED, but egress policy is about who is asking, and
+    # the asker is the same either way.
+    response_err = check_response_guards(
+        tool_name, call_result.content, call_result.structured_content, backend
+    )
+    if response_err:
+        _audit(
+            profile.name, backend_name, tool_name,
+            Outcome.DENIED_RESPONSE_GUARD, duration_ms, response_err,
+        )
+        return _err(req_id, JSONRPC_INVALID_PARAMS, response_err)
+
     call_outcome = Outcome.TOOL_ERROR if call_result.is_error else Outcome.OK
     _audit(profile.name, backend_name, tool_name, call_outcome, duration_ms)
 

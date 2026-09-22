@@ -26,6 +26,10 @@ Control which tools each agent can even see. Tools not in the allowlist are stri
 
 Per-tool argument validation at the gateway level. Restrict *what values* an agent can pass, not just which tools it can call. Example: "this agent can send email, but only to `user@example.com`." The call is rejected before it reaches the backend — no tokens spent, no side effects. Deterministic enforcement that doesn't depend on LLM behavior.
 
+### [Response Guards](docs/response-guards.md)
+
+The egress half of parameter guards: the same allow/deny constraint applied to what a backend *returns*, before the result is reduced, scanned or relayed. Argument-side matching cannot cover a semantic tool — an agent asking a memory server for "my employer's roadmap" sends nothing matchable, and the restricted material arrives in the response. Deny-oriented, blocks the whole response rather than scrubbing it, and audited as policy rather than failure.
+
 ### [Three-Layer Defense Pipeline](docs/defense-pipeline.md)
 
 Every piece of untrusted content passes through three independent detection layers. Layer 1 strips structural attacks (hidden HTML, invisible Unicode, encoded payloads, exfiltration URLs). Layer 2 runs a Prompt Guard 2 86M classifier to catch instruction overrides. Layer 3 hands sanitized content to a quarantined LLM (Gemini Flash Lite) for semantic analysis — no tools, no memory, minimal blast radius. Each layer catches what the others miss.
@@ -110,6 +114,7 @@ export TRENTINA_PROFILE_MYAGENT_TOKEN=your-token
 | [Per-Agent Profiles](docs/profiles.md) | Profile schema, multi-agent setup |
 | [Tool Filtering](docs/tool-filtering.md) | Allowlists, denylists, glob patterns |
 | [Parameter Guards](docs/parameter-guards.md) | Per-tool argument validation |
+| [Response Guards](docs/response-guards.md) | Per-tool result validation (egress) |
 | [Defense Pipeline](docs/defense-pipeline.md) | L1/L2/L3 layers, coverage matrix |
 | [Description Compression](docs/compression.md) | LLM-powered context reduction |
 | [Audit Log](docs/audit-log.md) | Call recording, stats, monitoring |

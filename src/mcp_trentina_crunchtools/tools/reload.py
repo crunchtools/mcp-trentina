@@ -88,22 +88,28 @@ def _glob_delta(before: list[str], after: list[str]) -> dict[str, list[str]] | N
 
 
 def _guard_delta(
-    before: dict[str, dict[str, Any]], after: dict[str, dict[str, Any]]
+    before: dict[str, dict[str, Any]],
+    after: dict[str, dict[str, Any]],
+    noun: str = "parameters",
 ) -> dict[str, dict[str, list[str]]]:
-    """Per-tool parameter-guard delta, by parameter NAME only.
+    """Per-tool guard delta, by guarded NAME only.
 
     Guard patterns are operator-authored and not secrets, but they are also
     not what an operator needs read back — "the guard on `path` changed" is
     the fact, and the file is the authority on what it changed to.
+
+    ``noun`` names what a guard is keyed by, since both guard maps have this
+    shape but not the same subject: parameter guards key on a request
+    parameter, response guards on a result field.
     """
     delta: dict[str, dict[str, list[str]]] = {}
     for tool in sorted(set(before) | set(after)):
         old = before.get(tool, {})
         new = after.get(tool, {})
         entry = {
-            "parameters_added": sorted(set(new) - set(old)),
-            "parameters_removed": sorted(set(old) - set(new)),
-            "parameters_changed": sorted(
+            f"{noun}_added": sorted(set(new) - set(old)),
+            f"{noun}_removed": sorted(set(old) - set(new)),
+            f"{noun}_changed": sorted(
                 name for name in set(old) & set(new) if old[name] != new[name]
             ),
         }
@@ -120,10 +126,14 @@ def _backend_delta(before: Backend, after: Backend) -> dict[str, Any]:
         "parameter_guards": _guard_delta(
             before.parameter_guards, after.parameter_guards
         ),
+        "response_guards": _guard_delta(
+            before.response_guards, after.response_guards, noun="fields"
+        ),
         "fields_changed": sorted(
             name
             for name in type(before).model_fields
-            if name not in ("tools_allow", "tools_deny", "parameter_guards")
+            if name
+            not in ("tools_allow", "tools_deny", "parameter_guards", "response_guards")
             and getattr(before, name) != getattr(after, name)
         ),
     }
