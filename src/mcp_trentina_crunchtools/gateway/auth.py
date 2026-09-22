@@ -47,6 +47,12 @@ def verify_bearer(authorization_header: str | None, profile: Profile) -> None:
     if scheme.lower() != "bearer" or not presented:
         raise AuthError("malformed authorization")
 
+    # Two distinct faults, kept distinct: an OAuth-only profile never had a
+    # static token (0.15.0), while a declared one that did not resolve is a
+    # misconfiguration the loader should already have refused.
+    if profile.auth is None:
+        raise AuthError("profile has no static bearer token")
+
     if profile.auth.bearer_token is None:
         raise AuthError("profile token not resolved")
 
@@ -152,7 +158,7 @@ def resolve_profile_by_token(
     presented_bytes = presented.encode("utf-8")
     match: Profile | None = None
     for profile in registry.values():
-        if profile.auth.bearer_token is None:
+        if profile.auth is None or profile.auth.bearer_token is None:
             continue
         expected = profile.auth.bearer_token.get_secret_value().encode("utf-8")
         if hmac.compare_digest(presented_bytes, expected) and match is None:

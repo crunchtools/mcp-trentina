@@ -114,6 +114,14 @@ def _warn_deprecated_defense_keys(name: str, body: dict[str, Any]) -> None:
 
 
 def _resolve_bearer_token(name: str, profile: Profile) -> None:
+    """Resolve the profile's static bearer token, if it declares one.
+
+    An OAuth-only profile has no `auth` block at all (0.15.0), and the Profile
+    validator has already refused anything with no authentication whatsoever,
+    so a missing block here means OAuth — not a misconfiguration to fail on.
+    """
+    if profile.auth is None:
+        return
     profile.auth.bearer_token = _require_env(
         name, profile.auth.bearer_token_env, "bearer token",
     )
