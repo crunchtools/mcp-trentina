@@ -278,6 +278,31 @@ class TestStartupLogsCarryNoSecrets:
         for secret in self._secrets():
             assert secret not in caplog.text
 
+    def test_divergent_allowlist_warning_logs_no_secret(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The 0.14.0 warning path. CodeQL flags its logger call as clear-text
+        logging of a password because the `profiles` mapping — which holds
+        every bearer token and client secret — is a parameter of the function
+        that logs. Only `sorted(proxied)`, a list of profile names, is passed
+        to the logger. Pinned here so that stays true."""
+        a = _proxy_profile("claude-web")
+        b = _proxy_profile("gemini-web")
+        a.auth.bearer_token = SecretStr(self.BEARER)
+        b.auth.bearer_token = SecretStr(self.BEARER)
+        assert b.oauth is not None
+        b.oauth.allowed_emails = ["someone-else@example.com"]
+
+        with caplog.at_level("DEBUG"):
+            ctx = _build({"claude-web": a, "gemini-web": b}, self._env())
+            assert ctx is not None
+            ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
+
+        # The warning must actually have fired, or this proves nothing.
+        assert "different allowed_emails" in caplog.text
+        for secret in self._secrets():
+            assert secret not in caplog.text
+
     def test_the_guard_would_catch_a_real_leak(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
