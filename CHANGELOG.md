@@ -10,6 +10,43 @@ under that name.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-22
+
+### Security
+- **Self-registering clients may no longer name any callback they like.**
+  `/register` is unauthenticated by design, and given no allowlist FastMCP
+  accepts any https URL a client registers for itself
+  (`redirect_validation.py:451-454`). That is an authorization-code theft path
+  behind a single consent click: register a client named "Claude" pointing at
+  an attacker-controlled host, send the operator a crafted `/authorize` link,
+  and their code is delivered to the attacker — who exchanges it and holds a
+  token carrying the operator's verified identity, which satisfies
+  `allowed_emails` because it genuinely is them. Found by an adversarial
+  review; pre-existing, not introduced by a recent change.
+
+  `DEFAULT_ALLOWED_REDIRECT_URIS` now ships closed: loopback on any port (the
+  code lands on the user's own machine, so an attacker who can read it already
+  owns the host) plus the two fixed claude.ai/claude.com connector callbacks,
+  which are identical for every user of that product. `claude.ai`'s was taken
+  off the wire rather than from documentation.
+
+- **New `oauth.allowed_redirect_uris`**, for callbacks the defaults cannot
+  cover. Entries must be **exact https URLs**; a wildcard is refused at load
+  with an explanation. gemini.google.com is the worked example of why:
+  every Google user's callback lives under
+  `oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-<id>-<host>`,
+  so allowing that prefix would admit an attacker's own user-bound callback and
+  the control would be worth nothing. The operator's exact URL blocks every
+  other one on the same host. A profile's existing `client_redirect_uris` are
+  folded in automatically, so a provisioned seat needs no extra configuration.
+
+### Documentation
+- `docs/authentication.md` gains **Which callbacks a client may register** — the
+  attack in four steps, the shipped defaults and why each is safe, how to add
+  your own, and a section on why wildcards are refused that uses Gemini's
+  per-user callback to show the difference between a real control and a
+  decorative one.
+
 ## [0.15.0] - 2026-09-22
 
 ### Changed

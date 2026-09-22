@@ -814,7 +814,9 @@ class TestConfidentialDynamicRegistration:
     single POST was sent.
     """
 
-    REDIRECT = "https://oauth-redirect.googleusercontent.com/r/user_bound_x"
+    # A callback on the shipped allowlist. A DCR client registering anything
+    # else is refused now — covered by TestRegisteredRedirectUriIsRestricted.
+    REDIRECT = "https://claude.ai/api/mcp/auth_callback"
     SECRET = "0123456789abcdef" * 4
 
     def _provider(self) -> Any:
@@ -1042,3 +1044,114 @@ class TestMultiProfileResourceIndicator:
         with caplog.at_level("WARNING"):
             self._build({"claude-web": self._profile("claude-web")})
         assert "different allowed_emails" not in caplog.text
+
+
+class TestRegisteredRedirectUriIsRestricted:
+    """Self-registering clients may only use allowed callbacks (RT #1502).
+
+    `/register` is unauthenticated by design, and FastMCP accepts ANY https
+    callback when given no list (redirect_validation.py:451-454). That is an
+    authorization-code theft path behind a single consent click: register a
+    client named "Claude" pointing at your own host, send the operator a
+    crafted /authorize link, and their code arrives at you carrying their
+    verified identity, good for a year of refreshes.
+    """
+
+    ATTACKER = "https://evil.example.com/steal"
+    GEMINI = (
+        "https://oauth-redirect.googleusercontent.com/r/"
+        "user_bound_custom-mcp-114597764404176971057-mcp_crunchtools_com"
+    )
+
+    def _provider(self, **oauth_kwargs: Any) -> Any:
+        from mcp_trentina_crunchtools import _build_oauth_context
+
+        env = {
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET": "upstream-secret",
+            "TRENTINA_OAUTH_BASE_URL": OAUTH_BASE_URL,
+        }
+        profile = Profile(
+            name="claude-web",
+            oauth=OAuthConfig(
+                enabled=True,
+                allowed_emails=["scott@example.com"],
+                **oauth_kwargs,
+            ),
+        )
+        with patch.dict("os.environ", env, clear=False):
+            ctx = _build_oauth_context(GatewayConfig(profiles={"claude-web": profile}))
+        assert ctx is not None
+        return ctx.provider
+
+    def _register(
+        self, provider: Any, redirect: str, application_type: str = "web"
+    ) -> Any:
+        from mcp.shared.auth import OAuthClientInformationFull
+
+        return OAuthClientInformationFull.model_validate({
+            "client_id": "probe",
+            "client_id_issued_at": 1790000000,
+            "client_secret": None,
+            "redirect_uris": [redirect],
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none",
+            "application_type": application_type,
+        })
+
+    @pytest.mark.asyncio
+    async def test_an_attacker_callback_is_refused(self) -> None:
+        from fastmcp.server.auth.oauth_proxy.proxy import RegistrationError
+
+        provider = self._provider()
+        with pytest.raises(RegistrationError):
+            await provider.register_client(self._register(provider, self.ATTACKER))
+
+    @pytest.mark.asyncio
+    async def test_the_shipped_claude_callback_is_accepted(self) -> None:
+        provider = self._provider()
+        info = self._register(provider, "https://claude.ai/api/mcp/auth_callback")
+        await provider.register_client(info)
+        assert await provider.get_client("probe") is not None
+
+    @pytest.mark.asyncio
+    async def test_loopback_is_accepted_on_any_port(self) -> None:
+        """Desktop MCP clients bind an unpredictable port, and a code that
+        lands on the victim's own machine is not a disclosure. They register as
+        `native`; SEP-837 refuses a loopback callback for a `web` client, which
+        is a separate rule and also correct."""
+        provider = self._provider()
+        info = self._register(
+            provider, "http://127.0.0.1:49731/callback", application_type="native"
+        )
+        await provider.register_client(info)
+        assert await provider.get_client("probe") is not None
+
+    @pytest.mark.asyncio
+    async def test_gemini_is_refused_until_the_operator_lists_it(self) -> None:
+        """Not shipped by default: the callback is per-Google-account, so a
+        default entry would have to be a prefix wildcard, and that would let an
+        attacker register THEIR user-bound callback on the same host."""
+        from fastmcp.server.auth.oauth_proxy.proxy import RegistrationError
+
+        provider = self._provider()
+        with pytest.raises(RegistrationError):
+            await provider.register_client(self._register(provider, self.GEMINI))
+
+    @pytest.mark.asyncio
+    async def test_an_operator_listed_callback_is_accepted(self) -> None:
+        provider = self._provider(allowed_redirect_uris=[self.GEMINI])
+        info = self._register(provider, self.GEMINI)
+        await provider.register_client(info)
+        assert await provider.get_client("probe") is not None
+
+    @pytest.mark.asyncio
+    async def test_listing_one_gemini_url_does_not_admit_another(self) -> None:
+        """The exact-URL rule earning its keep: same host, different account."""
+        from fastmcp.server.auth.oauth_proxy.proxy import RegistrationError
+
+        other = self.GEMINI.replace("114597764404176971057", "999999999999999999999")
+        provider = self._provider(allowed_redirect_uris=[self.GEMINI])
+        with pytest.raises(RegistrationError):
+            await provider.register_client(self._register(provider, other))
