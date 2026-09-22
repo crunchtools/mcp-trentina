@@ -161,6 +161,76 @@ flag the proxy advertised but did not implement (0.8.2), or an
 (0.13.0). In all three the flow ends before a single request reaches us, so the
 absence of a log line is the symptom, not the absence of evidence.
 
+### Which callbacks a client may register
+
+`/register` is open to the internet — that is what dynamic registration means.
+Without a list of permitted callbacks, a self-registering client may name **any**
+https URL as its own, and that is an authorization-code theft path:
+
+1. The attacker registers a client, names it `Claude`, and sets its callback to
+   a server they control.
+2. They send you a link to this gateway's `/authorize` with that client id.
+3. You see a consent page titled "Claude" and approve it.
+4. Your authorization code is delivered to the attacker, who exchanges it and
+   holds a token carrying **your** verified identity — which passes
+   `allowed_emails`, because it really is you.
+
+It takes one bad click. So Trentina ships a closed list, and anything not on it
+is refused at registration.
+
+**Shipped by default** (`DEFAULT_ALLOWED_REDIRECT_URIS`, in code):
+
+```
+http://localhost:*                        desktop MCP clients
+http://127.0.0.1:*                        (unpredictable port, so a pattern)
+https://claude.ai/api/mcp/auth_callback   claude.ai custom connectors
+https://claude.com/api/mcp/auth_callback
+```
+
+Loopback is safe to allow as a pattern because the code is delivered to the
+user's own machine: an attacker who can read it already owns the host and does
+not need this. The two vendor URLs are fixed — identical for every user of the
+product — so they are URLs rather than patterns.
+
+**Added per profile**, for anything else:
+
+```yaml
+    oauth:
+      enabled: true
+      allowed_emails: [scott@example.com]
+      allowed_redirect_uris:
+        - https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-1145977644041769710-mcp_example_com
+```
+
+A profile's `client_redirect_uris` (the provisioned-client callbacks) are
+included automatically, so a seat configured that way needs nothing extra.
+
+#### Why wildcards are refused
+
+Entries must be exact https URLs. A `*` anywhere is rejected at load, and the
+reason is worth understanding because it is the difference between a real
+control and a decorative one.
+
+Take gemini.google.com. Every Google user who creates a custom app gets a
+callback on the same host:
+
+```
+https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-<google-user-id>-<host>
+```
+
+Only the account id at the end differs. Allowing the host, or the `/r/` prefix,
+would therefore admit **every Google user's callback, including an attacker's** —
+they register a client pointing at their own user-bound URL, phish one consent
+click, and receive the code at their own Gemini. The list would match, and the
+protection would be worth nothing.
+
+Your exact URL, listed in full, blocks every other one on that host. That is why
+Gemini is not in the shipped defaults and cannot be: only you know yours.
+
+The same reasoning applies to any host that hands out per-user callback paths.
+If you find yourself wanting a wildcard, what you actually want is one more exact
+entry.
+
 ## OAuth proxy + provisioned confidential client
 
 Same as above, but for a connector that will not register itself and instead

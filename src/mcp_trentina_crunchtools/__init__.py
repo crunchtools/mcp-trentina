@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.15.0"
+__version__ = "0.16.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -563,6 +563,65 @@ def _clear_known_resource(params: Any, allowed: frozenset[str]) -> None:
     params.resource = None
 
 
+#: Callbacks a self-registering client may use with no configuration: loopback,
+#: where the code lands on the victim's own machine, plus fixed vendor URLs that
+#: are identical for every user of that product. See _allowed_redirect_uris.
+DEFAULT_ALLOWED_REDIRECT_URIS: tuple[str, ...] = (
+    # Desktop MCP clients bind an unpredictable loopback port.
+    "http://localhost:*",
+    "http://127.0.0.1:*",
+    # claude.ai custom connectors. Observed on the wire 2026-09-22; fixed for
+    # every user, so it is a URL rather than a pattern.
+    "https://claude.ai/api/mcp/auth_callback",
+    "https://claude.com/api/mcp/auth_callback",
+)
+
+
+def _allowed_redirect_uris(
+    profiles: Mapping[str, Profile], proxied: list[str]
+) -> list[str]:
+    """Every callback a self-registering client may use on this gateway.
+
+    The union of the shipped defaults, each proxied profile's
+    ``oauth.allowed_redirect_uris``, and the verbatim callbacks of any
+    provisioned client. Registration happens before a client names a profile,
+    so this list is necessarily gateway-wide.
+
+    Why it exists at all
+    --------------------
+    ``/register`` is unauthenticated by design, and given no list FastMCP
+    accepts ANY https callback (``redirect_validation.py:451-454``). That is an
+    authorization-code theft path behind one consent click: register a client
+    named "Claude" pointing at your own host, send the operator a crafted
+    ``/authorize`` link, and their code arrives at you carrying their verified
+    identity — which satisfies ``allowed_emails``, because it really is them.
+
+    Why gemini.google.com is not in the defaults
+    --------------------------------------------
+    Its callback is per-user:
+    ``oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-<id>-<host>``.
+    Shipping it would mean shipping a prefix wildcard, and every Google user —
+    including an attacker — has a callback under that prefix. The operator's own
+    URL differs only in the account id, so listing it exactly blocks all the
+    others. Only the operator knows theirs, so only they can configure it.
+    """
+    allowed = list(DEFAULT_ALLOWED_REDIRECT_URIS)
+    for name in sorted(proxied):
+        oauth = profiles[name].oauth
+        if oauth is None:
+            continue
+        allowed.extend(oauth.allowed_redirect_uris)
+        allowed.extend(oauth.client_redirect_uris)
+    unique = list(dict.fromkeys(allowed))  # de-duplicate, order preserved
+    logger.info(
+        "gateway: %d callback URL(s) allowed for self-registering clients "
+        "(%d shipped by default, %d from profile config)",
+        len(unique), len(DEFAULT_ALLOWED_REDIRECT_URIS),
+        len(unique) - len(DEFAULT_ALLOWED_REDIRECT_URIS),
+    )
+    return unique
+
+
 def _warn_on_divergent_allowlists(
     profiles: Mapping[str, Profile], proxied: list[str]
 ) -> None:
@@ -837,6 +896,10 @@ def _build_proxy_provider(
         resource_base_url=resource_url,
         required_scopes=["openid", "email", "profile"],
         jwt_signing_key=signing_key,
+        # Without this FastMCP accepts any https callback a client registers,
+        # which is an authorization-code theft path behind one consent click.
+        # See DEFAULT_ALLOWED_REDIRECT_URIS.
+        allowed_client_redirect_uris=_allowed_redirect_uris(profiles, proxied),
         # CIMD off deliberately: OAuthProxy advertises client_id_metadata_
         # document_supported=true but never implements server-side CIMD. The MCP
         # spec makes clients try CIMD before DCR whenever that flag is set, so

@@ -681,6 +681,14 @@ class OAuthConfig(BaseModel):
         exclude=True,
         description="Resolved client secret (load-time only)",
     )
+    allowed_redirect_uris: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Extra callback URLs a self-registering (DCR) client may use for "
+            "this profile, on top of the gateway defaults. Exact https URLs "
+            "only -- see the validator for why wildcards are refused."
+        ),
+    )
     client_redirect_uris: list[str] = Field(
         default_factory=list,
         description=(
@@ -856,6 +864,45 @@ class OAuthConfig(BaseModel):
             )
         return self
 
+
+    @field_validator("allowed_redirect_uris")
+    @classmethod
+    def redirect_uris_are_exact_https_urls(cls, v: list[str]) -> list[str]:
+        """Refuse wildcards and anything that is not a plain https URL.
+
+        The gateway matches these with fnmatch, so a `*` anywhere is a pattern
+        rather than a URL. That is fine for the built-in loopback entries and
+        dangerous for anything else: gemini.google.com hands every Google user
+        a callback under `oauth-redirect.googleusercontent.com/r/`, so allowing
+        that prefix would let an attacker register THEIR user-bound callback and
+        receive an authorization code meant for this gateway's operator. The
+        operator's own URL differs only in the account id at the end, so an
+        exact entry blocks every other one on the same host.
+
+        http is refused outright. Loopback is already covered by the built-in
+        defaults, and a non-loopback http callback would carry the code in
+        clear text.
+        """
+        cleaned: list[str] = []
+        for raw in v:
+            uri = raw.strip()
+            if "*" in uri or "?" in uri:
+                raise ValueError(
+                    f"allowed_redirect_uris entry {uri!r} contains a wildcard; "
+                    "list the exact callback URL instead — a pattern here would "
+                    "also match a callback an attacker registered on the same host"
+                )
+            if not uri.startswith("https://"):
+                raise ValueError(
+                    f"allowed_redirect_uris entry {uri!r} must be an https URL "
+                    "(loopback clients are already allowed by default)"
+                )
+            if "#" in uri:
+                raise ValueError(
+                    f"allowed_redirect_uris entry {uri!r} must not carry a fragment"
+                )
+            cleaned.append(uri)
+        return cleaned
 
 class Profile(BaseModel):
     """One consumer profile: name, auth, backends, defense config."""
