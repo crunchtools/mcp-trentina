@@ -33,16 +33,29 @@ under that name.
   unaffected — clients that prefer DCR still get it.
 
 ### Notes
-- This does **not** fix gemini.google.com. Its Custom App connector reads our
-  protected-resource and authorization-server documents and then stops, and
-  that behaviour was invariant across five metadata configurations tested on a
-  throwaway host: issuer with and without a trailing slash (byte-matched per
-  RFC 8414 §3.3 either way), Google-branded versus plain scope names, two
-  versus four advertised client-authentication methods, and CIMD advertised
-  versus not. Cloudflare, CORS and browser-origin requests are ruled out with
-  captures. Three independent reporters on Google's own developer forum show
-  the same client failing at three further stages against servers that work
-  with Cursor, Claude, Copilot and ChatGPT. See RT #1502.
+- **Corrected after release.** This entry originally stated that
+  gemini.google.com could not connect because its Custom App connector was
+  defective, and that Cloudflare had been "ruled out with captures". Both
+  claims were wrong, and the second one inverted the actual cause.
+
+  gemini.google.com connects fine. The blocker was **Cloudflare Bot Fight
+  Mode** challenging Google's OAuth client: `GET` requests passed, so discovery
+  always succeeded, while every `POST` was scored as bot traffic and dropped at
+  the edge. A server-side OAuth client cannot solve a JavaScript challenge, and
+  the free plan exposes no firewall log, so the drops were invisible. That is
+  why `POST /register` and `POST /token` appeared never to be sent.
+
+  The mistake that sustained it: Google's OAuth client sends
+  `User-Agent: OpenAuth`, not `Google`. Log filters written against `Google`
+  matched Gemini's tool traffic but silently excluded every registration and
+  token request, which made "the client never POSTs" look like a finding
+  rather than a filtering error.
+
+  Confirmed by turning Bot Fight Mode off and re-proxying: registration,
+  callback and token exchange all complete from Cloudflare edge addresses, and
+  `gemini-web` serves tools over ordinary OAuth. Releases 0.13.0 through
+  0.16.0 fixed four real defects along the way, but none of them was this. See
+  RT #1502 for the full evidence.
 
 ## [0.16.0] - 2026-09-22
 
