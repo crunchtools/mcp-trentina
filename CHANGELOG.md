@@ -10,6 +10,27 @@ under that name.
 
 ## [Unreleased]
 
+### Fixed
+- **Finished the `com.crunchtools.Airlock1` -> `com.crunchtools.Trentina1`
+  D-Bus rename, which had been half-applied since the airlock -> trentina
+  rename.** `cockpit-trentina.spec` and `trentina.js` were moved to the new
+  name; `dbus_interface.py`, the policy file and the `Makefile` were not. Two
+  consequences, one loud and one silent:
+
+  The RPM build has failed on every release since — `%install` referenced
+  `dbus/com.crunchtools.Trentina1.conf`, which did not exist. PyPI and the
+  container images published normally, so the break was confined to the
+  `build-rpm` job and went unnoticed.
+
+  The quieter one: the Cockpit plugin asked the system bus for
+  `com.crunchtools.Trentina1` while the service owned
+  `com.crunchtools.Airlock1`, so the dashboard could never have connected.
+  Nothing had the RPM installed — it never built — so nothing depended on the
+  old name and the rename breaks no deployment.
+
+  Also corrected the spec's `%changelog` date: 15 March 2026 was a Sunday, not
+  a Saturday, which rpmbuild reported as a bogus date on every build.
+
 ## [0.19.0] - 2026-09-22
 
 ### Added
