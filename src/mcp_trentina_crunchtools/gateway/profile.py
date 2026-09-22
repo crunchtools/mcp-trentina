@@ -70,7 +70,7 @@ _DEFAULT_PROCESSORS: list[ProcessorName] = ["structured", "email", "petit"]
 # gateway.scanview._REGISTRY, and nowhere else. Declared twice on purpose:
 # this Literal is what makes pydantic reject an unknown name at YAML load,
 # and a parity test keeps the two in step.
-ScanViewName = Literal["full", "generic"]
+ScanViewName = Literal["full", "generic", "matrix"]
 
 # Fields of ScanViewConfig an AGENT may change by reloading its own profile.
 # Everything else in that block decides how much of the payload is read at
@@ -83,6 +83,12 @@ SCAN_VIEW_AGENT_FIELDS: frozenset[str] = frozenset(
 # 64 KiB of sampled openings is already ~36 L2 windows, which costs more than
 # the extraction saved. A ceiling, not a recommendation.
 _MAX_SKIP_SAMPLE_BYTES = 65536
+
+# A Megolm session per room-key; a bot in a hundred rooms holds a few hundred.
+# 4096 is generous headroom, and the ceiling keeps a typo from asking for an
+# unbounded in-memory store of decryption capabilities.
+_DEFAULT_MAX_SESSIONS = 4096
+_MAX_MAX_SESSIONS = 65536
 
 # Reduction budget, in bytes of a single tool response.
 #
@@ -522,6 +528,83 @@ class DefenseConfig(BaseModel):
         return v
 
 
+class MatrixDecryptConfig(BaseModel):
+    """Read room keys from the homeserver's backup, to scan message bodies.
+
+    Off by default, and deliberately verbose to turn on. Enabling it means
+    Trentina holds a recovery key — the private half of the room-key backup,
+    and the most valuable secret in the deployment — so the config should read
+    like a decision rather than a default.
+
+    What it does NOT do is worth stating: Trentina takes no Matrix device
+    identity, uploads nothing, and makes only GET requests. Decryption exists
+    to build a scan view. The response forwarded to the client is the
+    upstream ciphertext, untouched.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=False,
+        description="Read room keys from backup so message bodies can be scanned",
+    )
+    homeserver: str = Field(
+        default="https://matrix.org",
+        description="Homeserver base URL to read the key backup from (https only)",
+    )
+    access_token_env: str = Field(
+        ...,
+        description="Env var naming the access token used to read the backup",
+    )
+    recovery_key_env: str = Field(
+        ...,
+        description=(
+            "Env var naming the backup recovery key. Prefer the _FILE form so "
+            "it lands in a mode-0600 file rather than /proc/<pid>/environ."
+        ),
+    )
+    access_token: SecretStr | None = Field(default=None, exclude=True)
+    recovery_key: SecretStr | None = Field(default=None, exclude=True)
+
+    max_sessions: int = Field(
+        default=_DEFAULT_MAX_SESSIONS,
+        ge=1,
+        le=_MAX_MAX_SESSIONS,
+        description=(
+            "Megolm sessions held in memory. Each is a decryption capability "
+            "for its slice of history, so the cache is bounded rather than "
+            "unlimited, and nothing is written to disk."
+        ),
+    )
+    session_ttl_seconds: float = Field(default=3600.0, gt=0)
+    concurrency: int = Field(default=4, ge=1, le=32)
+    refetch_cooldown_seconds: float = Field(
+        default=60.0,
+        ge=0.0,
+        description=(
+            "Minimum gap between key fetches for one room. A rate limit, not "
+            "a cache tuning: session IDs arrive in events, so without it any "
+            "room member could turn every /sync into N homeserver round-trips "
+            "inside the request path."
+        ),
+    )
+    undecryptable_rate_warn: float = Field(default=0.10, ge=0.0, le=1.0)
+
+    @field_validator("homeserver")
+    @classmethod
+    def _https_only(cls, value: str) -> str:
+        if not value.startswith("https://"):
+            raise ValueError("homeserver must be https://")
+        return value.rstrip("/")
+
+    @field_validator("access_token_env", "recovery_key_env")
+    @classmethod
+    def _env_name(cls, value: str) -> str:
+        if not ENV_NAME_RE.match(value):
+            raise ValueError(f"{value!r} is not an env var name")
+        return value
+
+
 class ScanViewConfig(BaseModel):
     """What the defense pipeline is allowed to read, and how it reports gaps.
 
@@ -572,6 +655,19 @@ class ScanViewConfig(BaseModel):
             "forwards anyway, annotated scan_timeout."
         ),
     )
+    decrypt: MatrixDecryptConfig | None = Field(
+        default=None,
+        description="Matrix E2EE termination. Requires extractor: matrix.",
+    )
+
+    @model_validator(mode="after")
+    def _decrypt_needs_matrix(self) -> ScanViewConfig:
+        if self.decrypt is not None and self.extractor != "matrix":
+            raise ValueError(
+                "scan_view.decrypt requires extractor: matrix — the generic "
+                "extractor has nowhere to put decrypted text"
+            )
+        return self
 
 
 class MatrixIngressConfig(BaseModel):
