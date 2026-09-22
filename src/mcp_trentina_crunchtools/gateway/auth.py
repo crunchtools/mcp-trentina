@@ -58,22 +58,30 @@ def verify_bearer(authorization_header: str | None, profile: Profile) -> None:
 async def verify_oauth(
     authorization_header: str | None,
     profile: Profile,
-    oauth_provider: Any,
-) -> None:
-    """Verify a Google-backed OAuth bearer for an OAuth-enabled profile.
+    verifier: Any,
+) -> Any:
+    """Verify an OAuth bearer for an OAuth-enabled profile, and return it.
 
-    The presented token is a FastMCP-issued reference token. Validation is
-    delegated to the gateway's OAuth provider (``load_access_token``), which
+    One code path serves both modes, because both expose the same
+    ``async verify_token(token) -> AccessToken | None``. In PROXY mode the
+    presented token is a FastMCP-issued reference token and fastmcp's
+    ``OAuthProvider.verify_token`` forwards to ``load_access_token``, which
     swaps it for the stored upstream Google token and re-validates that live
-    against Google — so a revoked or expired Google session fails here, not
-    just at issue time. The provider returns the verified identity's claims,
-    from which the email is matched against the profile allowlist.
+    against Google. In DELEGATED mode the token was minted by the external
+    issuer itself and the verifier checks it there. Either way a revoked or
+    expired session fails here, not just at issue time, and the verified
+    identity's email is matched against the profile allowlist.
 
     Args:
         authorization_header: Raw ``Authorization`` header value, or None.
         profile: The OAuth-enabled profile being accessed.
-        oauth_provider: The gateway's FastMCP OAuth provider, or None if the
-            gateway came up without one (a config error for an enabled profile).
+        verifier: The thing that validates tokens for this profile — the
+            gateway's proxy provider, a delegated verifier, or None if the
+            gateway came up without either (a config error for an enabled
+            profile).
+
+    Returns:
+        The verified access token, so the caller can audit-log the identity.
 
     Raises:
         OAuthChallengeError: no provider, or no usable token — caller returns
@@ -82,8 +90,8 @@ async def verify_oauth(
         OAuthForbiddenError: token valid but the email is absent, unverified,
             or not on ``profile.oauth.allowed_emails`` — caller returns 403.
     """
-    if oauth_provider is None:
-        # An enabled profile with no provider means the gateway failed to build
+    if verifier is None:
+        # An enabled profile with no verifier means the gateway failed to build
         # one (missing client credentials). A challenge is pointless — there is
         # no authorization server to discover — but it is the safe 401 default.
         raise OAuthChallengeError("oauth provider not configured")
@@ -98,7 +106,7 @@ async def verify_oauth(
     if scheme.lower() != "bearer" or not presented:
         raise OAuthChallengeError("malformed authorization")
 
-    access = await oauth_provider.load_access_token(presented)
+    access = await verifier.verify_token(presented)
     if access is None:
         raise OAuthChallengeError("invalid or expired token")
 
@@ -109,6 +117,8 @@ async def verify_oauth(
 
     if email.strip().lower() not in profile.oauth.allowed_emails:
         raise OAuthForbiddenError("email not permitted for profile")
+
+    return access
 
 
 def resolve_profile_by_token(

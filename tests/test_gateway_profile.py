@@ -473,3 +473,113 @@ profiles:
         monkeypatch.setenv("TEST_TOK", "x")
         with pytest.raises(ProfileConfigError):
             load_profiles(cfg)
+
+
+class TestDelegatedOAuthConfig:
+    """Delegated mode config rules (RT #1502).
+
+    The audience is the security boundary, not a formality: a Google access
+    token verifies for ANY OAuth client unless its `aud` is pinned.
+    """
+
+    ISSUER = "https://accounts.google.com"
+
+    def test_issuer_and_audience_env_together_are_accepted(self) -> None:
+        cfg = OAuthConfig(
+            enabled=True,
+            allowed_emails=["scott@example.com"],
+            issuer=self.ISSUER,
+            audience_env="TRENTINA_GEMINI_GOOGLE_CLIENT_ID",
+        )
+        assert cfg.issuer == self.ISSUER
+        assert cfg.audience is None  # resolved by the loader, not the model
+
+    def test_issuer_without_audience_env_is_refused(self) -> None:
+        """An unpinned audience accepts tokens minted for any other app."""
+        with pytest.raises(ValidationError, match=r"requires oauth\.audience_env"):
+            OAuthConfig(
+                enabled=True,
+                allowed_emails=["scott@example.com"],
+                issuer=self.ISSUER,
+            )
+
+    def test_audience_env_without_issuer_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="never be consulted"):
+            OAuthConfig(
+                enabled=True,
+                allowed_emails=["scott@example.com"],
+                audience_env="TRENTINA_GEMINI_GOOGLE_CLIENT_ID",
+            )
+
+    def test_issuer_requires_oauth_enabled(self) -> None:
+        with pytest.raises(ValidationError, match=r"requires oauth\.enabled"):
+            OAuthConfig(
+                enabled=False,
+                issuer=self.ISSUER,
+                audience_env="TRENTINA_GEMINI_GOOGLE_CLIENT_ID",
+            )
+
+    def test_delegated_and_provisioned_are_mutually_exclusive(self) -> None:
+        """Combined, the provisioned client_id would be registered into the
+        gateway-wide proxy as a live client for the OTHER profiles' AS."""
+        with pytest.raises(ValidationError, match="mutually exclusive"):
+            OAuthConfig(
+                enabled=True,
+                allowed_emails=["scott@example.com"],
+                issuer=self.ISSUER,
+                audience_env="TRENTINA_GEMINI_GOOGLE_CLIENT_ID",
+                client_id="375f3fdb-c322-41bc-8dc6-c2010a095f04",
+                client_secret_env="TRENTINA_GEMINI_APP_CLIENT_SECRET",
+                client_redirect_uris=["https://example.com/cb"],
+            )
+
+    def test_issuer_is_stored_byte_for_byte(self) -> None:
+        """No trailing slash is added. Google publishes the bare origin, and a
+        client compares it byte-for-byte (RFC 8414 3.3) — normalizing here is
+        how 0.8.1 broke, in mirror image."""
+        cfg = OAuthConfig(
+            enabled=True,
+            allowed_emails=["scott@example.com"],
+            issuer=self.ISSUER,
+            audience_env="A_CLIENT_ID",
+        )
+        assert cfg.issuer == "https://accounts.google.com"
+        assert not cfg.issuer.endswith("/")
+
+    def test_surrounding_whitespace_is_stripped(self) -> None:
+        cfg = OAuthConfig(
+            enabled=True,
+            allowed_emails=["scott@example.com"],
+            issuer=f"  {self.ISSUER}  ",
+            audience_env="A_CLIENT_ID",
+        )
+        assert cfg.issuer == self.ISSUER
+
+    def test_unknown_issuer_is_refused_at_load(self) -> None:
+        """The issuer selects a verifier; there is no generic fallback, so one
+        we cannot verify must fail here rather than at request time."""
+        with pytest.raises(ValidationError, match="no verifier in this build"):
+            OAuthConfig(
+                enabled=True,
+                allowed_emails=["scott@example.com"],
+                issuer="https://login.microsoftonline.com/common/v2.0",
+                audience_env="A_CLIENT_ID",
+            )
+
+    def test_http_issuer_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="must be an https"):
+            OAuthConfig(
+                enabled=True,
+                allowed_emails=["scott@example.com"],
+                issuer="http://accounts.google.com",
+                audience_env="A_CLIENT_ID",
+            )
+
+    def test_lowercase_audience_env_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="UPPERCASE"):
+            OAuthConfig(
+                enabled=True,
+                allowed_emails=["scott@example.com"],
+                issuer=self.ISSUER,
+                audience_env="trentina_gemini_google_client_id",
+            )

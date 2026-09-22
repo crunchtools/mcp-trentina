@@ -61,8 +61,9 @@ def _build_profile(name: str, body: Any) -> Profile:
     """Validate one profile entry and resolve its secrets from the environment.
 
     Resolves the bearer token from `auth.bearer_token_env`, the provisioned
-    OAuth client secret from `oauth.client_secret_env`, and expands any
-    ${VAR} references in backend headers. All fail closed on a missing env var.
+    OAuth client secret from `oauth.client_secret_env`, the delegated-mode
+    expected audience from `oauth.audience_env`, and expands any ${VAR}
+    references in backend headers. All fail closed on a missing env var.
 
     Each `llm_keys` entry supplies its secret one of two ways: `api_key`
     inline in the YAML, or `api_key_env` naming an environment variable.
@@ -81,6 +82,7 @@ def _build_profile(name: str, body: Any) -> Profile:
     _warn_deprecated_defense_keys(name, body)
     _resolve_bearer_token(name, profile)
     _resolve_oauth_client_secret(name, profile)
+    _resolve_oauth_audience(name, profile)
     _resolve_llm_key_secrets(name, profile)
     _expand_backend_headers(name, profile)
     if profile.alert_ingress is not None:
@@ -132,6 +134,25 @@ def _resolve_oauth_client_secret(name: str, profile: Profile) -> None:
     oauth.client_secret = _require_env(
         name, oauth.client_secret_env, "OAuth client secret",
     )
+
+
+def _resolve_oauth_audience(name: str, profile: Profile) -> None:
+    """Resolve a delegated profile's expected token audience.
+
+    Fails closed on an unset var. An empty audience would leave the verifier
+    accepting a token minted for ANY OAuth client, which is the one thing
+    delegated mode must never do — better to refuse to start.
+
+    Resolved as a plain str, not SecretStr: an OAuth client ID is not a secret,
+    it is compared against the `aud` claim, and it appears in diagnostics when
+    a token is refused. Wrapping it would make every comparison fail silently.
+    """
+    oauth = profile.oauth
+    if oauth is None or oauth.audience_env is None:
+        return
+    oauth.audience = _require_env(
+        name, oauth.audience_env, "OAuth audience",
+    ).get_secret_value()
 
 
 def _resolve_llm_key_secrets(name: str, profile: Profile) -> None:

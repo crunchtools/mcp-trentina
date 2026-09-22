@@ -201,15 +201,72 @@ def _unapplied(active: ActiveConfig, new_config: GatewayConfig) -> list[str]:
             "restart with it enabled to serve it"
         )
     if not active.oauth_route_registered and any(
-        p.oauth is not None and p.oauth.enabled
-        for p in new_config.profiles.values()
+        _uses_oauth_proxy(p) for p in new_config.profiles.values()
     ):
         notes.append(
-            "oauth.enabled added but no OAuth provider was built at startup "
-            "(no profile had it, or the client credentials were unset) — "
+            "oauth.enabled added but no OAuth proxy was built at startup "
+            "(no profile used it, or the client credentials were unset) — "
             "restart to serve it"
         )
+    notes.extend(_unapplied_delegated(current, new_config))
     return notes
+
+
+def _uses_oauth_proxy(profile: Profile) -> bool:
+    """True when a profile needs the built-in proxy rather than an external IdP."""
+    oauth = profile.oauth
+    return oauth is not None and oauth.enabled and oauth.issuer is None
+
+
+def _unapplied_delegated(
+    current: GatewayConfig, new_config: GatewayConfig
+) -> list[str]:
+    """Report delegated-mode edits a reload cannot put into force.
+
+    A delegated profile's verifier and advertised issuer are built once at
+    startup and bound into the OAuthContext the route closures hold, exactly
+    like llm_providers. Editing `issuer` or `audience_env` — or adding a
+    delegated profile outright — validates cleanly and changes nothing, which
+    is the silent no-op this whole function exists to prevent.
+
+    `allowed_emails` is deliberately absent: it is read from the profile on
+    every request, so it DOES apply live. That is the one key an operator edits
+    under pressure, and it keeps working.
+    """
+    notes: list[str] = []
+    for name, profile in sorted(new_config.profiles.items()):
+        notes.extend(
+            _unapplied_delegated_for(current.profiles.get(name), profile, name)
+        )
+    return notes
+
+
+def _unapplied_delegated_for(
+    before: Profile | None, after: Profile, name: str
+) -> list[str]:
+    """The delegated-mode note for one profile, if it has one.
+
+    Shared by the operator and agent paths so the two scopes cannot disagree
+    about what a reload did and did not put into force.
+    """
+    new_oauth = after.oauth
+    if new_oauth is None or new_oauth.issuer is None:
+        return []
+    old_oauth = before.oauth if before is not None else None
+    if old_oauth is None or old_oauth.issuer is None:
+        return [(
+            f"profile {name!r} now delegates OAuth to {new_oauth.issuer} but no "
+            "verifier was built for it at startup — restart to serve it"
+        )]
+    if (old_oauth.issuer, old_oauth.audience_env) != (
+        new_oauth.issuer, new_oauth.audience_env
+    ):
+        return [(
+            f"profile {name!r} changed oauth.issuer/audience_env: the verifier "
+            "and the advertised authorization server are bound at startup — "
+            "restart to apply"
+        )]
+    return []
 
 
 AGENT_SCOPE_NOTE = (
@@ -299,6 +356,12 @@ async def _apply_own_profile(
         retrigger_compression()
     notified = await session_registry.broadcast_tools_changed(name)
 
+    # An agent can edit its own oauth block, and the delegated parts of it are
+    # bound at startup exactly as they are on the operator path. Reporting
+    # "reloaded" over a changed issuer would be the same silent no-op, just
+    # scoped to one profile — so say so here too.
+    restart_required = _unapplied_delegated_for(before, after, name)
+
     logger.warning(
         "gateway: profile %s reloaded its own section — %d field group(s) moved",
         name, len(delta),
@@ -312,14 +375,21 @@ async def _apply_own_profile(
         "sessions_notified": notified,
         "note": AGENT_SCOPE_NOTE,
     }
+    # Two different reasons an agent's own edit may not have taken effect, so
+    # they are reported under separate keys rather than one flat list: the
+    # settings only an operator may move, and the ones nobody can move without
+    # a restart because they are bound into a route closure at startup.
+    not_applied: dict[str, Any] = {}
     if held:
-        result["not_applied"] = {
-            "operator_only": held,
-            "reason": (
-                "these settings decide how much of a payload is scanned; an "
-                "operator reload or a restart applies them"
-            ),
-        }
+        not_applied["operator_only"] = held
+        not_applied["reason"] = (
+            "these settings decide how much of a payload is scanned; an "
+            "operator reload or a restart applies them"
+        )
+    if restart_required:
+        not_applied["restart_required"] = restart_required
+    if not_applied:
+        result["not_applied"] = not_applied
     return result
 
 

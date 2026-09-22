@@ -32,6 +32,22 @@ GLOB_PATTERN_RE = re.compile(r"^[a-zA-Z0-9_*][a-zA-Z0-9_*-]*$")
 GUARD_VALUE_RE = re.compile(r"^[a-zA-Z0-9_*@.\-+/ ]+$")
 ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
+GOOGLE_ISSUER = "https://accounts.google.com"
+"""Google's OIDC issuer, verbatim as Google publishes it.
+
+No trailing slash — confirmed against Google's own discovery document. A client
+compares the issuer it discovered against the one we advertise byte-for-byte
+(RFC 8414 3.3), so this string is never normalized.
+"""
+
+SUPPORTED_ISSUERS = frozenset({GOOGLE_ISSUER})
+"""Issuers this build can actually verify tokens from.
+
+The issuer selects a verifier, so the set is a hard allowlist rather than a
+hint: accepting one we have no verifier for would fail at request time instead
+of at load. Keycloak is the intended next entry.
+"""
+
 INTERNAL_SCHEME = "internal://"
 
 # What a profile may reach through the gateway's own admin tools. Two values,
@@ -605,15 +621,30 @@ class OAuthConfig(BaseModel):
     in the config the operator reads.
 
     ``client_id``/``client_secret_env``/``client_redirect_uris`` declare a
-    statically provisioned CONFIDENTIAL client: one whose credentials the
-    operator types into a third-party console rather than one that registers
-    itself through DCR. gemini.google.com Custom Apps is the motivating case —
-    its connector offers only an MCP server URL, a Client ID and a Client
-    Secret, so it discovers our authorization server from the URL and then
-    authenticates to it with those credentials. A proxy that advertises only
-    ``token_endpoint_auth_method=none`` tells such a client the credentials it
-    holds are unusable, and it abandons the flow before ever calling ``/token``.
-    See CHANGELOG 0.9.0 and RT #1502.
+    statically provisioned CONFIDENTIAL client of OUR authorization server: one
+    whose credentials the operator types into a third-party console rather than
+    one that registers itself through DCR. See CHANGELOG 0.9.0.
+
+    ``issuer``/``audience_env`` select the other mode entirely: DELEGATED. The
+    profile stops using Trentina as an authorization server and names an
+    external one, so the client authenticates straight to that IdP and hands us
+    the token it minted. We verify it and apply ``allowed_emails`` — the only
+    authorization decision this block ever really made.
+
+    gemini.google.com Custom Apps is why delegated mode exists. Its connector
+    offers an MCP server URL, a Client ID and a Client Secret and NO
+    authorization or token URL, so it reads our RFC 9728 document, finds
+    Trentina named as the authorization server, and refuses to token-exchange
+    against an AS it has no relationship with: ``/authorize``, ``/consent`` and
+    ``/auth/callback`` all complete and ``POST /token`` is never issued at all.
+    Naming Google in that document instead is what unblocks it.
+
+    The two modes are mutually exclusive — see
+    ``delegated_excludes_provisioned_client``. In delegated mode ``audience`` is
+    the security boundary, not a formality: a Google token verifies for ANY
+    OAuth client unless its ``aud`` is pinned, so without it every third-party
+    app an allowlisted human ever authorized would hold a credential for this
+    profile. See ``docs/authentication.md`` and RT #1502.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -657,6 +688,25 @@ class OAuthConfig(BaseModel):
             "verbatim — a provisioned client gets no pattern matching."
         ),
     )
+    issuer: str | None = Field(
+        default=None,
+        description=(
+            "External OIDC issuer to delegate authentication to, stored "
+            "verbatim. Requires audience_env. Absent means proxy mode."
+        ),
+    )
+    audience_env: str | None = Field(
+        default=None,
+        description=(
+            "Env var name whose value is the OAuth client ID tokens must be "
+            "issued to. This is the delegated-mode security boundary."
+        ),
+    )
+    audience: str | None = Field(
+        default=None,
+        exclude=True,
+        description="Resolved expected `aud` (load-time only)",
+    )
 
     @field_validator("client_secret_env")
     @classmethod
@@ -667,6 +717,91 @@ class OAuthConfig(BaseModel):
                 f"client_secret_env {v!r} must be an UPPERCASE env-var identifier"
             )
         return v
+
+    @field_validator("audience_env")
+    @classmethod
+    def audience_env_is_uppercase_identifier(cls, v: str | None) -> str | None:
+        """Reject lowercase, leading digits, or non-identifier characters."""
+        if v is not None and not ENV_NAME_RE.match(v):
+            raise ValueError(
+                f"audience_env {v!r} must be an UPPERCASE env-var identifier"
+            )
+        return v
+
+    @field_validator("issuer")
+    @classmethod
+    def issuer_is_a_bare_https_origin(cls, v: str | None) -> str | None:
+        """Validate the issuer without normalizing it.
+
+        The string is stored exactly as written because a client compares the
+        issuer it discovered against this one byte-for-byte (RFC 8414 3.3), and
+        Google publishes ``https://accounts.google.com`` with NO trailing
+        slash. Appending one "helpfully" is how 0.8.1 broke, in mirror image.
+
+        Only issuers we have a verifier for are accepted. The issuer selects a
+        verifier; there is no generic fallback, so an unknown one must fail at
+        load rather than resolve to nothing at request time.
+        """
+        if v is None:
+            return None
+        issuer = v.strip()
+        if not issuer.startswith("https://"):
+            raise ValueError(f"issuer {issuer!r} must be an https:// URL")
+        if "?" in issuer or "#" in issuer:
+            raise ValueError(f"issuer {issuer!r} must carry no query or fragment")
+        if issuer not in SUPPORTED_ISSUERS:
+            supported = ", ".join(sorted(SUPPORTED_ISSUERS))
+            raise ValueError(
+                f"issuer {issuer!r} has no verifier in this build — "
+                f"supported: {supported}"
+            )
+        return issuer
+
+    @model_validator(mode="after")
+    def delegated_client_is_all_or_nothing(self) -> OAuthConfig:
+        """A delegated profile needs an issuer, an audience and oauth enabled.
+
+        ``audience_env`` is required rather than optional because it IS the
+        security boundary: a Google access token verifies for any OAuth client
+        unless its ``aud`` is pinned, so an unpinned delegated profile accepts
+        a token minted for any app the allowlisted human ever authorized. The
+        allowlist does not save us — those tokens carry the same email.
+        """
+        if self.issuer is not None and self.audience_env is None:
+            raise ValueError(
+                "oauth.issuer requires oauth.audience_env — an unpinned "
+                "audience accepts tokens minted for any other OAuth client"
+            )
+        if self.audience_env is not None and self.issuer is None:
+            raise ValueError(
+                "oauth.audience_env is set without oauth.issuer, so it would "
+                "never be consulted"
+            )
+        if self.issuer is not None and not self.enabled:
+            raise ValueError(
+                "a delegated OAuth profile requires oauth.enabled — a profile "
+                "naming an external issuer while OAuth is off is a "
+                "misconfiguration, not a degraded mode"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def delegated_excludes_provisioned_client(self) -> OAuthConfig:
+        """Refuse a profile that is both delegated and a provisioned client.
+
+        The provisioned fields register a client against OUR authorization
+        server; in delegated mode we run none for this profile. Left combined
+        this is a widening rather than dead config: the gateway registers every
+        provisioned ``client_id`` into the one shared proxy, where it becomes a
+        live confidential client for the OTHER profiles' authorization server.
+        """
+        if self.issuer is not None and self.client_id is not None:
+            raise ValueError(
+                "oauth.issuer (delegated) and oauth.client_id (provisioned "
+                "client of our own authorization server) are mutually "
+                "exclusive — a delegated profile runs no authorization server"
+            )
+        return self
 
     @model_validator(mode="after")
     def provisioned_client_is_all_or_nothing(self) -> OAuthConfig:

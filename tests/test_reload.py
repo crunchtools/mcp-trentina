@@ -620,6 +620,56 @@ llm_providers:
         result = await _reload_as("alpha")
         assert result["not_applied"] == []
 
+    async def test_new_delegated_profile_is_reported_as_restart_only(
+        self, profiles_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A delegated verifier is built once at startup and bound into the
+        OAuthContext the route closures hold. Reporting success over this would
+        leave the profile 401ing while the operator believed it applied."""
+        monkeypatch.setenv("TEST_GEMINI_AUD", "client.apps.googleusercontent.com")
+        profiles_path.write_text(
+            BASE_YAML.replace(
+                "  beta:\n",
+                "  beta:\n"
+                "    oauth:\n"
+                "      enabled: true\n"
+                "      allowed_emails: [scott@example.com]\n"
+                "      issuer: https://accounts.google.com\n"
+                "      audience_env: TEST_GEMINI_AUD\n",
+            ),
+            encoding="utf-8",
+        )
+        result = await _reload_as("alpha")
+
+        assert result["reloaded"] is True
+        assert any("delegates OAuth" in note for note in result["not_applied"])
+
+    async def test_agent_scope_reports_its_own_delegated_change(
+        self, profiles_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The agent path applies only its own section, so it has to carry the
+        same warning — otherwise the note depends on who called."""
+        monkeypatch.setenv("TEST_GEMINI_AUD", "client.apps.googleusercontent.com")
+        profiles_path.write_text(
+            BASE_YAML.replace(
+                "  beta:\n",
+                "  beta:\n"
+                "    oauth:\n"
+                "      enabled: true\n"
+                "      allowed_emails: [scott@example.com]\n"
+                "      issuer: https://accounts.google.com\n"
+                "      audience_env: TEST_GEMINI_AUD\n",
+            ),
+            encoding="utf-8",
+        )
+        result = await _reload_as("beta", operator=False)
+
+        assert result["reloaded"] is True
+        assert any(
+            "delegates OAuth" in note
+            for note in result["not_applied"]["restart_required"]
+        )
+
     async def test_replacing_a_config_before_startup_is_a_programming_error(
         self, profiles_path: Path
     ) -> None:

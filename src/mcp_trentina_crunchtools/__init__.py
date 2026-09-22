@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.11.1"
+__version__ = "0.12.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -171,10 +171,12 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     )
 
     oauth_context = _build_oauth_context(gateway_config)
-    if oauth_context is not None:
-        # http_app() reads mcp_server.auth at run() time, so setting it here —
-        # before run() below — is what mounts Google's authorize/token/register
-        # and the .well-known authorization-server metadata at the root.
+    if oauth_context is not None and oauth_context.provider is not None:
+        # Mounts Google's authorize/token/register and the root
+        # authorization-server metadata; http_app() reads this at run() time.
+        # Guarded on a proxy existing: a delegated-only gateway advertising
+        # itself as an AS here, while each profile's document names an external
+        # one, hands a client two contradictory answers.
         mcp_server.auth = oauth_context.provider
 
     register_internal_server(mcp_server)
@@ -236,7 +238,14 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         profiles_path,
         gateway_config,
         llm_providers,
-        oauth_route_registered=oauth_context is not None,
+        # Whether a PROXY was built, not merely whether OAuth is configured.
+        # reload.py uses this to tell an operator that turning oauth on for a
+        # profile needs a restart; a delegated-only gateway has no proxy, so
+        # reporting True here would let a newly added proxied profile look
+        # applied while every request to it 401s.
+        oauth_route_registered=(
+            oauth_context is not None and oauth_context.provider is not None
+        ),
     )
 
     _warm_classifier()
@@ -425,55 +434,135 @@ def _provisioned_clients(
     return clients
 
 
-def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
-    """Construct the gateway's Google-backed OAuth context, or None.
+def _partition_oauth_profiles(
+    profiles: Mapping[str, Profile], enabled: list[str]
+) -> tuple[list[str], list[str]]:
+    """Split OAuth-enabled profiles into delegated and proxied.
 
-    Returns None when no profile opts into OAuth — the common case, and the
-    gateway behaves exactly as before. When at least one profile sets
-    ``oauth.enabled`` this builds one ``GoogleProvider`` for the whole gateway
-    (the human-facing authorization server that proxies login to Google) and
-    fails closed if the client credentials are absent: an enabled profile with
-    no provider is a misconfiguration, not a reason to serve it unprotected.
-
-    Env:
-        TRENTINA_OAUTH_GOOGLE_CLIENT_ID / _CLIENT_SECRET — the one Google OAuth
-            client registered for this deployment (required when any profile
-            enables OAuth).
-        TRENTINA_OAUTH_BASE_URL — public origin clients reach (default
-            https://mcp.crunchtools.com); the OAuth endpoints and the RFC 9728
-            resource metadata are advertised under it.
-        TRENTINA_OAUTH_JWT_SIGNING_KEY — optional. Pins the key that signs
-            FastMCP tokens and derives the on-disk storage location. Set it so
-            issued tokens and stored registrations survive a Google client
-            secret rotation; if unset, the key derives from the secret.
+    A delegated profile names an external authorization server and runs none of
+    ours; a proxied one is the original behaviour. The split decides whether a
+    proxy gets built at all, and which profiles the RFC 8707 resource may pin to.
     """
-    from .gateway.app import OAuthContext
-    from .gateway.errors import ProfileConfigError
-
-    profiles = gateway_config.profiles
-    enabled = [
-        name
-        for name, p in profiles.items()
-        if p.oauth is not None and p.oauth.enabled
+    delegated = [
+        name for name in enabled
+        if (oauth := profiles[name].oauth) is not None and oauth.issuer is not None
     ]
-    if not enabled:
-        return None
+    proxied = [name for name in enabled if name not in delegated]
+    return delegated, proxied
+
+
+DELEGATED_SCOPES = ("openid", "email", "profile")
+"""Scopes a delegated profile ADVERTISES in its RFC 9728 document.
+
+Advertised, not required. Requiring a scope means rejecting a token that lacks
+it, and a rejection from this layer is invisible to the client — it re-links,
+gets the same token, fails identically, forever. The real requirement is a
+verified email, which cannot be present unless the email scope was granted, so
+the check that matters enforces itself.
+"""
+
+
+def _delegated_auth(
+    profiles: Mapping[str, Profile],
+    names: list[str],
+    *,
+    proxy_client_id: str,
+) -> dict[str, Any]:
+    """Build the verifier for each profile that delegates to an external IdP.
+
+    The audience rules are enforced here rather than on ``OAuthConfig`` because
+    they are cross-profile, and a pydantic validator sees one profile at a time.
+    Same reason ``_provisioned_clients`` checks client-id collisions here.
+
+    Two profiles must not share an audience: the pin is what distinguishes one
+    profile's tokens from another's, so sharing collapses both down to their
+    allowlists. And no delegated audience may equal the gateway's own upstream
+    Google client id, because the proxy holds live upstream tokens carrying
+    exactly that ``aud`` — a delegated profile pinned to it would accept every
+    one of them.
+    """
+    from .gateway.app import DelegatedAuth
+    from .gateway.errors import ProfileConfigError
+    from .gateway.google_verifier import GoogleTokeninfoVerifier
+    from .gateway.profile import GOOGLE_ISSUER
+
+    built: dict[str, Any] = {}
+    seen: dict[str, str] = {}
+    for name in sorted(names):
+        oauth = profiles[name].oauth
+        if oauth is None or oauth.issuer is None:
+            continue
+        audience = oauth.audience
+        if not audience:
+            raise ProfileConfigError(
+                f"profile {name!r}: oauth.audience_env did not resolve — "
+                "refusing to serve a delegated profile whose audience would "
+                "never be checked"
+            )
+        if audience in seen:
+            raise ProfileConfigError(
+                f"profile {name!r}: oauth audience is already used by profile "
+                f"{seen[audience]!r} — two delegated profiles sharing an "
+                "audience accept each other's tokens"
+            )
+        if proxy_client_id and audience == proxy_client_id:
+            raise ProfileConfigError(
+                f"profile {name!r}: oauth audience equals "
+                "TRENTINA_OAUTH_GOOGLE_CLIENT_ID — the proxy holds upstream "
+                "tokens with that audience, so this profile would accept them"
+            )
+        if oauth.issuer != GOOGLE_ISSUER:
+            raise ProfileConfigError(
+                f"profile {name!r}: no verifier for issuer {oauth.issuer!r}"
+            )
+        if profiles[name].role == "operator":
+            logger.warning(
+                "gateway: profile %s delegates authentication to %s AND holds "
+                "role=operator — the gateway admin tools are reachable by "
+                "anyone on its allowlist",
+                name, oauth.issuer,
+            )
+        seen[audience] = name
+        built[name] = DelegatedAuth(
+            issuer=oauth.issuer,
+            scopes=DELEGATED_SCOPES,
+            verifier=GoogleTokeninfoVerifier(
+                audience=audience, profile_name=name,
+            ),
+        )
+    return built
+
+
+def _build_proxy_provider(
+    profiles: Mapping[str, Profile],
+    proxied: list[str],
+    *,
+    base_url: str,
+    signing_key: str | None,
+) -> tuple[Any, str, tuple[str, ...]]:
+    """Build the built-in OAuth proxy and report what it advertises.
+
+    Returns the provider, the issuer string it will advertise, and its
+    normalized scopes — the two values the gateway's own RFC 9728 document
+    must reproduce byte-for-byte. Split out from _build_oauth_context so the
+    delegated path, which builds none of this, stays readable.
+
+    The upstream Google credentials are read here rather than passed in. They
+    belong to the proxy and to nothing else: a delegated profile never uses
+    them, and keeping the secret out of the caller means it exists only in the
+    frame that hands it to the provider.
+    """
+    from .gateway.errors import ProfileConfigError
 
     client_id = os.environ.get("TRENTINA_OAUTH_GOOGLE_CLIENT_ID", "").strip()
     client_secret = os.environ.get("TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET", "").strip()
-    base_url = os.environ.get(
-        "TRENTINA_OAUTH_BASE_URL", "https://mcp.crunchtools.com"
-    ).strip().rstrip("/")
-    signing_key = os.environ.get("TRENTINA_OAUTH_JWT_SIGNING_KEY", "").strip() or None
-
     if not client_id or not client_secret:
         raise ProfileConfigError(
             "profile(s) "
-            f"{', '.join(sorted(enabled))} set oauth.enabled but "
+            f"{', '.join(sorted(proxied))} use the built-in OAuth proxy but "
             "TRENTINA_OAUTH_GOOGLE_CLIENT_ID / _CLIENT_SECRET are not set — "
             "refusing to start an OAuth seat with no provider"
         )
-
     from fastmcp.server.auth.providers.google import GoogleProvider
 
     class _GatewayGoogleProvider(GoogleProvider):
@@ -537,18 +626,21 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
                 return routes
             return [_advertise_secret_post(route) for route in routes]
 
-    # Pin the OAuth resource to the OAuth profile's gateway endpoint (see
-    # _GatewayGoogleProvider). FastMCP's OAuthProxy holds one resource per proxy,
-    # so with more than one OAuth profile only the pinned one authorizes; warn
-    # when that happens. See CHANGELOG 0.8.3.
-    resource_profile = sorted(enabled)[0]
+    # Pin the resource to a PROXIED profile's endpoint (see
+    # _GatewayGoogleProvider). OAuthProxy holds one resource, so with several
+    # proxied profiles only the pinned one authorizes. See CHANGELOG 0.8.3.
+    #
+    # Never over `enabled`: a delegated profile presents no token here, and
+    # names sort, so "gemini-app" would win over "josui" and fail every proxy
+    # /authorize with invalid_target.
+    resource_profile = sorted(proxied)[0]
     resource_url = f"{base_url}/gateway/{resource_profile}/mcp"
-    if len(enabled) > 1:
+    if len(proxied) > 1:
         logger.warning(
-            "gateway: OAuth enabled on %d profiles %s but FastMCP's OAuthProxy "
+            "gateway: OAuth proxy serves %d profiles %s but FastMCP's OAuthProxy "
             "holds one resource URL; pinned to %s — others fail /authorize "
             "with invalid_target",
-            len(enabled), sorted(enabled), resource_url,
+            len(proxied), sorted(proxied), resource_url,
         )
 
     # Provisioned confidential clients are resolved by get_client ahead of the
@@ -597,12 +689,87 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
     # protected-resource document names the identical list. See OAuthContext.
     scopes = tuple(provider.required_scopes or [])
     logger.info(
-        "gateway: Google OAuth provider built for %d profile(s): %s "
+        "gateway: Google OAuth proxy built for %d profile(s): %s "
         "(base_url=%s issuer=%s scopes=%s)",
-        len(enabled), ", ".join(sorted(enabled)), base_url, issuer, " ".join(scopes),
+        len(proxied), ", ".join(sorted(proxied)), base_url, issuer, " ".join(scopes),
+    )
+    return provider, issuer, scopes
+
+
+def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
+    """Construct the gateway's Google-backed OAuth context, or None.
+
+    Returns None when no profile opts into OAuth — the common case, and the
+    gateway behaves exactly as before. When at least one profile sets
+    ``oauth.enabled`` this builds one ``GoogleProvider`` for the whole gateway
+    (the human-facing authorization server that proxies login to Google) and
+    fails closed if the client credentials are absent: an enabled profile with
+    no provider is a misconfiguration, not a reason to serve it unprotected.
+
+    Env:
+        TRENTINA_OAUTH_GOOGLE_CLIENT_ID / _CLIENT_SECRET — the one Google OAuth
+            client registered for this deployment (required when any profile
+            enables OAuth).
+        TRENTINA_OAUTH_BASE_URL — public origin clients reach (default
+            https://mcp.crunchtools.com); the OAuth endpoints and the RFC 9728
+            resource metadata are advertised under it.
+        TRENTINA_OAUTH_JWT_SIGNING_KEY — optional. Pins the key that signs
+            FastMCP tokens and derives the on-disk storage location. Set it so
+            issued tokens and stored registrations survive a Google client
+            secret rotation; if unset, the key derives from the secret.
+    """
+    from .gateway.app import OAuthContext
+
+    profiles = gateway_config.profiles
+    enabled = [
+        name
+        for name, p in profiles.items()
+        if p.oauth is not None and p.oauth.enabled
+    ]
+    if not enabled:
+        return None
+
+    delegated_names, proxied = _partition_oauth_profiles(profiles, enabled)
+
+    # The client id only — it is not a secret, and _delegated_auth needs it to
+    # refuse an audience that would accept the proxy's own upstream tokens. The
+    # matching secret is read inside _build_proxy_provider, which is the only
+    # thing that uses it.
+    client_id = os.environ.get("TRENTINA_OAUTH_GOOGLE_CLIENT_ID", "").strip()
+    base_url = os.environ.get(
+        "TRENTINA_OAUTH_BASE_URL", "https://mcp.crunchtools.com"
+    ).strip().rstrip("/")
+    signing_key = os.environ.get("TRENTINA_OAUTH_JWT_SIGNING_KEY", "").strip() or None
+
+    delegated = _delegated_auth(profiles, delegated_names, proxy_client_id=client_id)
+
+    if not proxied:
+        # Every OAuth profile delegates, so there is no authorization server to
+        # build and no upstream Google credential to demand. Returning a context
+        # with no provider is what keeps /authorize, /token and /register
+        # unmounted — a gateway that is only a resource server must not also
+        # advertise itself as an AS.
+        logger.info(
+            "gateway: OAuth delegated for %d profile(s): %s (no proxy built)",
+            len(delegated_names), ", ".join(sorted(delegated_names)),
+        )
+        return OAuthContext(
+            provider=None,
+            base_url=base_url,
+            issuer=None,
+            scopes=(),
+            delegated=delegated,
+        )
+
+    provider, issuer, scopes = _build_proxy_provider(
+        profiles, proxied, base_url=base_url, signing_key=signing_key,
     )
     return OAuthContext(
-        provider=provider, base_url=base_url, issuer=issuer, scopes=scopes
+        provider=provider,
+        base_url=base_url,
+        issuer=issuer,
+        scopes=scopes,
+        delegated=delegated,
     )
 
 
