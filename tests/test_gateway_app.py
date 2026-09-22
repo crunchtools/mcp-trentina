@@ -599,11 +599,20 @@ class TestProvisionedConfidentialClient:
         methods: list[str] = document["token_endpoint_auth_methods_supported"]
         assert "none" in methods
 
-    def test_metadata_unchanged_without_a_provisioned_client(self) -> None:
-        """No provisioned client means nothing to enforce, so advertise nothing."""
+    def test_metadata_advertises_secret_post_without_a_provisioned_client(self) -> None:
+        """Advertised unconditionally since RT #1502's confidential DCR.
+
+        A client reads this document BEFORE it registers and uses it to decide
+        whether this server can issue the confidential registration it needs.
+        Advertising only once a provisioned client exists would leave that
+        client with nothing to go on, which is the state gemini.google.com was
+        in when it gave up without sending a request.
+        """
         ctx = self._build({"gemini-app": self._profile()})
-        document = self._metadata_document(ctx)
-        assert document["token_endpoint_auth_methods_supported"] == ["none"]
+        methods = self._metadata_document(ctx)[
+            "token_endpoint_auth_methods_supported"
+        ]
+        assert methods == ["none", "client_secret_post"]
 
     def test_other_routes_are_untouched(self) -> None:
         ctx = self._build({"gemini-app": self._provisioned_profile()})
@@ -788,3 +797,127 @@ class TestChallengeErrorCode:
         )
         for resp in (bare, refused):
             assert "resource_metadata=" in resp.headers["WWW-Authenticate"]
+
+
+class TestConfidentialDynamicRegistration:
+    """DCR that issues a real client secret (RT #1502).
+
+    FastMCP's OAuthProxy discards the secret the MCP SDK mints and rewrites
+    every registration to ``token_endpoint_auth_method="none"``, reasoning that
+    the proxy holds the upstream credentials and never checks a downstream one.
+
+    gemini.google.com Custom Apps breaks that assumption: Google Account Linking
+    authenticates at the token endpoint with a client id AND secret, so a
+    registration answered with "you are public, here is no secret" does not
+    satisfy what it asked for. It reported "automatic registration failed" and
+    stopped — leaving nothing in our logs, because the flow ended before a
+    single POST was sent.
+    """
+
+    REDIRECT = "https://oauth-redirect.googleusercontent.com/r/user_bound_x"
+    SECRET = "0123456789abcdef" * 4
+
+    def _provider(self) -> Any:
+        from mcp_trentina_crunchtools import _build_oauth_context
+
+        env = {
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET": "upstream-secret",
+            "TRENTINA_OAUTH_BASE_URL": OAUTH_BASE_URL,
+        }
+        profile = Profile(
+            name="gemini-app",
+            auth=AuthConfig(bearer_token_env="A"),
+            oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+        )
+        with patch.dict("os.environ", env, clear=False):
+            ctx = _build_oauth_context(GatewayConfig(profiles={"gemini-app": profile}))
+        assert ctx is not None
+        return ctx.provider
+
+    def _registration(self, *, method: str, secret: str | None) -> Any:
+        """Build the object the SDK's RegistrationHandler hands register_client.
+
+        The SDK defaults an omitted ``token_endpoint_auth_method`` to
+        ``client_secret_post`` and mints ``secrets.token_hex(32)`` for anything
+        that is not ``"none"``, so this is the shape that actually arrives.
+        """
+        from mcp.shared.auth import OAuthClientInformationFull
+
+        return OAuthClientInformationFull.model_validate({
+            "client_id": f"probe-{method}",
+            "client_id_issued_at": 1790000000,
+            "client_secret": secret,
+            "client_secret_expires_at": 0 if secret else None,
+            "redirect_uris": [self.REDIRECT],
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": method,
+            "application_type": "web",
+            "client_name": "probe",
+        })
+
+    @pytest.mark.asyncio
+    async def test_the_secret_survives_registration(self) -> None:
+        """The whole bug: this used to come back None."""
+        provider = self._provider()
+        info = self._registration(method="client_secret_post", secret=self.SECRET)
+        await provider.register_client(info)
+        assert info.client_secret == self.SECRET
+        assert info.token_endpoint_auth_method == "client_secret_post"
+
+    @pytest.mark.asyncio
+    async def test_the_stored_client_is_the_confidential_one(self) -> None:
+        """Advertising a secret we do not store would leave /token accepting
+        anything — the record get_client returns is what the SDK's
+        ClientAuthenticator actually compares against."""
+        provider = self._provider()
+        info = self._registration(method="client_secret_post", secret=self.SECRET)
+        await provider.register_client(info)
+        stored = await provider.get_client(info.client_id)
+        assert stored is not None
+        assert stored.client_secret == self.SECRET
+        assert stored.token_endpoint_auth_method == "client_secret_post"
+
+    @pytest.mark.asyncio
+    async def test_a_public_registration_stays_public(self) -> None:
+        """Claude Code and every other DCR client register with "none" and must
+        keep the public client they already have."""
+        provider = self._provider()
+        info = self._registration(method="none", secret=None)
+        await provider.register_client(info)
+        assert info.client_secret is None
+        assert info.token_endpoint_auth_method == "none"
+        stored = await provider.get_client(info.client_id)
+        assert stored.client_secret is None
+        assert stored.token_endpoint_auth_method == "none"
+
+    @pytest.mark.asyncio
+    async def test_a_confidential_request_with_no_secret_is_not_upgraded(self) -> None:
+        """Defensive: registering client_secret_post with nothing to compare
+        against would enforce a secret of None, which is no enforcement."""
+        provider = self._provider()
+        info = self._registration(method="client_secret_post", secret=None)
+        await provider.register_client(info)
+        stored = await provider.get_client(info.client_id)
+        assert stored.token_endpoint_auth_method == "none"
+        assert stored.client_secret is None
+
+    @pytest.mark.asyncio
+    async def test_the_redirect_uri_survives(self) -> None:
+        provider = self._provider()
+        info = self._registration(method="client_secret_post", secret=self.SECRET)
+        await provider.register_client(info)
+        stored = await provider.get_client(info.client_id)
+        assert [str(u) for u in stored.redirect_uris] == [self.REDIRECT]
+
+    @pytest.mark.asyncio
+    async def test_the_client_carries_a_scope(self) -> None:
+        """A client registered without one has every /authorize refused as
+        invalid_scope before consent — the 0.9.0 regression, in the DCR path."""
+        provider = self._provider()
+        info = self._registration(method="client_secret_post", secret=self.SECRET)
+        info.scope = None
+        await provider.register_client(info)
+        stored = await provider.get_client(info.client_id)
+        assert stored.scope
