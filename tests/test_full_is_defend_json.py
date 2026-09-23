@@ -28,7 +28,7 @@ timing.
 from __future__ import annotations
 
 import json
-from dataclasses import fields
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -45,16 +45,13 @@ if TYPE_CHECKING:
 CTX = ScanViewContext(source="test", profile_name="p", path="/x")
 
 
-def _stat_tuples(stats: PipelineStats) -> dict[str, dict[str, Any]]:
-    """Every counter in the stats tree, flattened for comparison."""
-    out: dict[str, dict[str, Any]] = {}
-    for group in fields(stats):
-        sub = getattr(stats, group.name)
-        if hasattr(sub, "__dataclass_fields__"):
-            out[group.name] = {f.name: getattr(sub, f.name) for f in fields(sub)}
-        else:
-            out[group.name] = {"value": sub}
-    return out
+def _stat_tuples(stats: PipelineStats) -> dict[str, Any]:
+    """Every counter in the stats tree, as plain data.
+
+    ``asdict`` recurses the nested stat groups for us, which is both shorter
+    than walking ``fields()`` by hand and avoids dynamic attribute lookup.
+    """
+    return asdict(stats)
 
 
 # Shapes that exercise the walk's disagreement modes: keys as leaves, nesting,

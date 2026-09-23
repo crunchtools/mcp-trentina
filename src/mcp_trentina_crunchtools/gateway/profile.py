@@ -709,7 +709,7 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
 
     @model_validator(mode="before")
     @classmethod
-    def _accept_the_old_extractor_spelling(cls, data: Any) -> Any:
+    def _accept_the_old_extractor_spelling(cls, block: Any) -> Any:
         """Load a pre-0.21.0 ``extractor:`` block as a ``processors:`` list.
 
         An alias cannot do this one: the shape changes from a scalar to a
@@ -718,11 +718,11 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
         is fatal, so a deployed config carrying the old spelling would take
         the gateway down on upgrade rather than warn.
         """
-        if not isinstance(data, dict) or "extractor" not in data:
-            return data
-        data = dict(data)
-        old = data.pop("extractor")
-        if "processors" in data:
+        if not isinstance(block, dict) or "extractor" not in block:
+            return block
+        block = dict(block)
+        old = block.pop("extractor")
+        if "processors" in block:
             raise ValueError(
                 "set either 'processors' or the old 'extractor', not both"
             )
@@ -732,10 +732,10 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
             old,
             [] if old == "full" else [_EXTRACTOR_RENAMES.get(old, old)],
         )
-        data["processors"] = (
+        block["processors"] = (
             [] if old == "full" else [_EXTRACTOR_RENAMES.get(old, old)]
         )
-        return data
+        return block
 
     @model_validator(mode="after")
     def _decrypt_needs_the_matrix_processor(self) -> MatrixPreProcessConfig:

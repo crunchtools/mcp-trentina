@@ -62,10 +62,6 @@ _STRUCTURED = StructuredProcessor()
 _EMAIL = EmailProcessor()
 _SUMMARIZE = SummarizeProcessor()
 
-def _make_select(cfg: ProcessorChainConfig, _keys: Any) -> SelectProcessor:
-    return SelectProcessor(skip_sample_bytes=cfg.skip_sample_bytes)
-
-
 def _make_matrix(cfg: ProcessorChainConfig, keys: Any) -> MatrixProcessor:
     """Decryption on top of selection: decrypted text goes through the same
     rules as anything else, so it gets its own SelectProcessor rather than a
@@ -81,7 +77,9 @@ PREPROCESSORS: dict[str, Callable[[ProcessorChainConfig, Any], Any]] = {
     "structured": lambda _cfg, _keys: _STRUCTURED,
     "email": lambda _cfg, _keys: _EMAIL,
     "summarize": lambda _cfg, _keys: _SUMMARIZE,
-    "select": _make_select,
+    "select": lambda cfg, _keys: SelectProcessor(
+        skip_sample_bytes=cfg.skip_sample_bytes
+    ),
     "matrix": _make_matrix,
 }
 

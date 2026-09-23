@@ -54,10 +54,6 @@ from mcp_trentina_crunchtools.gateway.profile import (
 from mcp_trentina_crunchtools.preprocess import Cost
 
 
-def _all(cfg: Any, channel: Channel) -> list[Any]:
-    return build_preprocessors(cfg, channel=channel)
-
-
 class TestRegistryAndConfigAgree:
     def test_every_registered_processor_is_configurable(self) -> None:
         assert set(PREPROCESSORS) == set(get_args(ProcessorName))
@@ -69,7 +65,7 @@ class TestRegistryAndConfigAgree:
     def test_defaults_are_all_free_text(self) -> None:
         """A METERED default would spend LLM money for every profile that
         merely switched transformation on; a DOCUMENT default would not run."""
-        built = _all(PreProcessConfig(), Channel.TOOL)
+        built = build_preprocessors(PreProcessConfig(), channel=Channel.TOOL)
         assert all(p.cost is Cost.FREE for p in built)
         assert all(p.kind is Kind.TEXT for p in built)
 
@@ -107,7 +103,8 @@ def _buildable(name: str, channel: Channel) -> bool:
 class TestChannelAndKindLocks:
     def test_text_processors_resolve_in_configured_order(self) -> None:
         cfg = PreProcessConfig(processors=["petit", "email"])
-        assert [p.name for p in _all(cfg, Channel.TOOL)] == ["petit", "email"]
+        built = build_preprocessors(cfg, channel=Channel.TOOL)
+        assert [p.name for p in built] == ["petit", "email"]
 
     def test_document_processor_refused_on_a_text_channel(self) -> None:
         """`select` reads parsed JSON; the tool channel hands it a string."""
@@ -156,8 +153,8 @@ class TestChannelAndKindLocks:
 
     def test_empty_chain_is_the_no_op(self) -> None:
         """No `full` processor: reading everything is what naming nothing means."""
-        assert _all(MatrixPreProcessConfig(), Channel.MATRIX) == []
-        assert _all(PreProcessConfig(processors=[]), Channel.TOOL) == []
+        assert build_preprocessors(MatrixPreProcessConfig(), channel=Channel.MATRIX) == []
+        assert build_preprocessors(PreProcessConfig(processors=[]), channel=Channel.TOOL) == []
 
     def test_unknown_name_fails_closed(self) -> None:
         cfg = PreProcessConfig.model_construct(processors=["nope"])
