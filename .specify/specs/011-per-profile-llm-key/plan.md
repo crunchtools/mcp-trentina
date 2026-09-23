@@ -18,7 +18,7 @@ bearer token, resolve the profile, and inject that profile's provider key
 ### Request Flow
 
 ```
-Agent (Kagetora/Takeda)
+Agent (agent1/agent3)
     │  POST /llm/gemini/v1beta/models/...:generateContent
     │  Authorization: Bearer <profile gateway token>
     ▼
@@ -68,7 +68,7 @@ upstream provider (Gemini / OpenAI / Anthropic)
 - [ ] `__init__.py`: pass `gateway_config.profiles` into `register_llm_routes`.
 
 ### Phase 5: Docs & Examples
-- [ ] `examples/profiles-kagetora.yaml`: add `llm_keys` block.
+- [ ] `examples/profiles-agent1.yaml`: add `llm_keys` block.
 - [ ] `docs/llm-proxying.md`: document required auth + per-profile keys + 401/502.
 
 ### Phase 6: Tests
@@ -102,7 +102,7 @@ upstream provider (Gemini / OpenAI / Anthropic)
 | `gateway/auth.py` | `resolve_profile_by_token` |
 | `gateway/llm_proxy.py` | Authenticated proxy + profile key injection + strip Authorization + cross-check |
 | `__init__.py` | Pass profiles to `register_llm_routes` |
-| `examples/profiles-kagetora.yaml` | `llm_keys` example |
+| `examples/profiles-agent1.yaml` | `llm_keys` example |
 | `docs/llm-proxying.md` | Auth + per-profile key docs |
 | `tests/test_gateway_profile.py`, `tests/test_gateway_auth.py`, `tests/test_llm_proxy.py` | New coverage |
 

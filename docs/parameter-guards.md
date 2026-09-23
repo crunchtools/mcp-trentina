@@ -15,7 +15,7 @@ Parameter guards are configured per-backend, per-tool in the profile YAML:
 ```yaml
 backends:
   gws-personal:
-    url: "http://gws-personal:8011/mcp"
+    url: "http://gws-personal:8000/mcp"
     tools_allow: ["*"]
     parameter_guards:
       send_gmail_message:
@@ -45,7 +45,7 @@ Values are matched using `fnmatch.fnmatchcase()` — shell-style globs with supp
 | Pattern | Matches |
 |---------|---------|
 | `user@example.com` | Exact match |
-| `*@company.com` | Any Red Hat email address |
+| `*@company.com` | Any address at that company |
 | `*@gmail.com` | Any Gmail address |
 | `https://api.example.com/*` | Any URL under a specific domain |
 

@@ -68,7 +68,7 @@ def _clear_profiles() -> Iterator[None]:
     ("url", "expected"),
     [
         ("http://mcp-postiz:5000/api/mcp/token-a", "http://mcp-postiz:5000"),
-        ("http://mcp-rotv:8080/mcp?token=secret", "http://mcp-rotv:8080"),
+        ("http://mcp-rotv:8000/mcp?token=secret", "http://mcp-rotv:8000"),
         ("https://example.com", "https://example.com"),
         ("internal://web", "internal://web"),
         ("garbage-no-scheme", "(redacted)"),
@@ -88,7 +88,7 @@ class TestReconnectBackend:
     async def test_reset_closes_open_circuit_and_rewarms_cache(self) -> None:
         """An open circuit is forced closed and the tool cache is re-warmed."""
         set_profiles(
-            {"josui": _profile("josui", {"postiz": Backend(url=POSTIZ_URL)})}
+            {"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})}
         )
         for _ in range(3):
             breaker.record_failure(POSTIZ_URL)
@@ -113,7 +113,7 @@ class TestReconnectBackend:
     async def test_unknown_backend_reports_available(self) -> None:
         """A name in no profile returns reconnected False with the known names."""
         set_profiles(
-            {"josui": _profile("josui", {"postiz": Backend(url=POSTIZ_URL)})}
+            {"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})}
         )
         result = await reconnect_backend("nope")
 
@@ -124,7 +124,7 @@ class TestReconnectBackend:
     async def test_failing_backend_reports_failure(self) -> None:
         """A backend that still can't be reached reports reconnected False."""
         set_profiles(
-            {"josui": _profile("josui", {"postiz": Backend(url=POSTIZ_URL)})}
+            {"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})}
         )
 
         async def boom(_url: str, _headers: Any) -> Any:
@@ -142,7 +142,7 @@ class TestReconnectBackend:
     async def test_internal_backend_is_noop(self) -> None:
         """An internal:// backend needs no transport reconnect."""
         set_profiles(
-            {"josui": _profile("josui", {"web": Backend(url="internal://web")})}
+            {"agent2": _profile("agent2", {"web": Backend(url="internal://web")})}
         )
         result = await reconnect_backend("web")
 
@@ -154,8 +154,8 @@ class TestReconnectBackend:
         url_b = "http://mcp-postiz:5000/api/mcp/token-b"
         set_profiles(
             {
-                "josui": _profile("josui", {"postiz": Backend(url=POSTIZ_URL)}),
-                "takeda": _profile("takeda", {"postiz": Backend(url=url_b)}),
+                "agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)}),
+                "agent3": _profile("agent3", {"postiz": Backend(url=url_b)}),
             }
         )
 
@@ -170,16 +170,16 @@ class TestReconnectBackend:
         assert result["reconnected"] is True
         assert len(result["targets"]) == 2
         profiles_seen = {frozenset(t["profiles"]) for t in result["targets"]}
-        assert profiles_seen == {frozenset({"josui"}), frozenset({"takeda"})}
+        assert profiles_seen == {frozenset({"agent2"}), frozenset({"agent3"})}
         assert "token-" not in str(result)
 
     async def test_reconnect_invalidates_stale_profile_cache(self) -> None:
         """A profile aggregate that omitted the backend is dropped on reconnect."""
         set_profiles(
-            {"josui": _profile("josui", {"postiz": Backend(url=POSTIZ_URL)})}
+            {"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})}
         )
-        _profile_tools_cache["josui"] = [{"name": "other__tool"}]
-        _profile_backend_urls["josui"] = {POSTIZ_URL}
+        _profile_tools_cache["agent2"] = [{"name": "other__tool"}]
+        _profile_backend_urls["agent2"] = {POSTIZ_URL}
 
         async def ok(_url: str, _headers: Any) -> ListToolsResult:
             return _tools_result(["integrationList"])
@@ -189,7 +189,7 @@ class TestReconnectBackend:
         ):
             await reconnect_backend("postiz")
 
-        assert "josui" not in _profile_tools_cache
+        assert "agent2" not in _profile_tools_cache
 
     async def test_gateway_not_initialized(self) -> None:
         """With no profiles loaded, reconnect reports the gateway is down."""
@@ -215,11 +215,11 @@ class TestAgentScope:
         self, tmp_path: Any
     ) -> None:
         """Reconnecting what you cannot call is not yours to do."""
-        josui = _profile("josui", {"postiz": Backend(url=POSTIZ_URL)})
-        takeda = _profile("takeda", {"wiki": Backend(url="http://wiki:1/mcp")})
-        self._live({"josui": josui, "takeda": takeda}, tmp_path)
+        agent2 = _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})
+        agent3 = _profile("agent3", {"wiki": Backend(url="http://wiki:1/mcp")})
+        self._live({"agent2": agent2, "agent3": agent3}, tmp_path)
 
-        with profile_context(takeda):
+        with profile_context(agent3):
             result = await reconnect_backend("postiz")
 
         assert result["reconnected"] is False
@@ -230,11 +230,11 @@ class TestAgentScope:
         self, tmp_path: Any
     ) -> None:
         """The directory of every profile's backends used to come back here."""
-        josui = _profile("josui", {"postiz": Backend(url=POSTIZ_URL)})
-        takeda = _profile("takeda", {"wiki": Backend(url="http://wiki:1/mcp")})
-        self._live({"josui": josui, "takeda": takeda}, tmp_path)
+        agent2 = _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})
+        agent3 = _profile("agent3", {"wiki": Backend(url="http://wiki:1/mcp")})
+        self._live({"agent2": agent2, "agent3": agent3}, tmp_path)
 
-        with profile_context(takeda):
+        with profile_context(agent3):
             result = await reconnect_backend("nope")
 
         assert result["available"] == ["wiki"]
@@ -244,16 +244,16 @@ class TestAgentScope:
         self, tmp_path: Any
     ) -> None:
         """A shared backend's raw surface is somebody else's view of it."""
-        takeda = _profile(
-            "takeda",
+        agent3 = _profile(
+            "agent3",
             {"postiz": Backend(url=POSTIZ_URL, tools_allow=["integrationList"])},
         )
-        self._live({"takeda": takeda}, tmp_path)
+        self._live({"agent3": agent3}, tmp_path)
 
         async def ok(_url: str, _headers: Any) -> ListToolsResult:
             return _tools_result(["integrationList", "deletePostTool"])
 
-        with profile_context(takeda), patch(
+        with profile_context(agent3), patch(
             "mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok
         ):
             result = await reconnect_backend("postiz")
@@ -264,8 +264,8 @@ class TestAgentScope:
     async def test_no_bound_caller_on_a_live_gateway_is_refused(
         self, tmp_path: Any
     ) -> None:
-        josui = _profile("josui", {"postiz": Backend(url=POSTIZ_URL)})
-        self._live({"josui": josui}, tmp_path)
+        agent2 = _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})
+        self._live({"agent2": agent2}, tmp_path)
 
         result = await reconnect_backend("postiz")
 

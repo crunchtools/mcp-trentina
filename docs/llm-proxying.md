@@ -77,18 +77,18 @@ Each **profile** then declares the key it wants the proxy to inject, under `llm_
 
 ```yaml
 profiles:
-  kagetora:
+  agent1:
     auth:
-      bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_AGENT1_TOKEN
     llm_keys:
       gemini:
-        api_key_env: KAGETORA_GEMINI_API_KEY
-  takeda:
+        api_key_env: AGENT1_GEMINI_API_KEY
+  agent3:
     auth:
-      bearer_token_env: TRENTINA_PROFILE_TAKEDA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_AGENT3_TOKEN
     llm_keys:
       gemini:
-        api_key_env: TAKEDA_GEMINI_API_KEY
+        api_key_env: AGENT3_GEMINI_API_KEY
 ```
 
 The provider name under `llm_keys` must match a configured `llm_providers` entry — a dangling reference fails the server closed at startup.

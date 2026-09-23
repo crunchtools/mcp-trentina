@@ -22,7 +22,7 @@ from mcp_trentina_crunchtools.gateway.transform import resolve, transform_respon
 # petit is built for.
 LOGGY = "\n".join(
     f"2026-09-17T10:{i // 60:02d}:{i % 60:02d}Z host sshd[{1000 + i}]: "
-    f"Accepted publickey for scott from 10.0.0.{i % 250} port {2000 + i}"
+    f"Accepted publickey for alice from 10.0.0.{i % 250} port {2000 + i}"
     for i in range(400)
 )
 

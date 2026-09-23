@@ -3,7 +3,7 @@
 > **Spec ID:** 003-tier3-layer2-classifier
 > **Status:** Draft
 > **Version:** 0.3.0
-> **Author:** Scott McCarty / Josui
+> **Author:** Scott McCarty
 > **Date:** 2026-03-10
 
 ## Overview
@@ -49,7 +49,7 @@ No sidecar container, no HTTP overhead, no network failure modes.
 **Resource impact on the mcp-trentina container:**
 - Additional disk: ~100-150MB (ONNX model + runtime)
 - Additional memory: ~200-300MB RSS (model loaded in memory)
-- Inference latency: ~30-80ms per classification on CPU (4 vCPU lotor)
+- Inference latency: ~30-80ms per classification on CPU (4 vCPU host01)
 
 **Model loading:**
 - Lazy-loaded on first classification call (not at server startup)

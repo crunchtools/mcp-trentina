@@ -12,7 +12,7 @@ The LLM reverse proxy (`/llm/{provider}/{path}`) currently injects a single
 global provider key for every caller, so all agents share one rate-limit bucket
 and their token spend is indistinguishable. This feature authenticates each
 proxy request against the caller's existing gateway bearer token and injects
-**that profile's** provider key, giving each consumer (Kagetora, Takeda) its own
+**that profile's** provider key, giving each consumer (agent1, agent3) its own
 key, its own rate-limit quota, and per-consumer token accounting via the
 provider's own dashboard. Closes #53.
 
@@ -95,7 +95,7 @@ continues to use the global `GEMINI_API_KEY`.
 | `gateway/auth.py` | Add `resolve_profile_by_token(auth_header, registry)` |
 | `gateway/llm_proxy.py` | `register_llm_routes`/`_proxy_llm` take `profiles`; authenticate, select profile key, strip `Authorization`; startup cross-check |
 | `__init__.py` | Pass `gateway_config.profiles` to `register_llm_routes` |
-| `examples/profiles-kagetora.yaml` | Add `llm_keys` example |
+| `examples/profiles-agent1.yaml` | Add `llm_keys` example |
 | `docs/llm-proxying.md` | Document auth requirement + per-profile keys + 401/502 semantics |
 
 ---
@@ -137,9 +137,9 @@ were resolved during planning.
 
 ## Deployment Notes (outside this repo)
 
-- Provision `KAGETORA_GEMINI_API_KEY` / `TAKEDA_GEMINI_API_KEY` on lotor and add
+- Provision `AGENT1_GEMINI_API_KEY` / `AGENT3_GEMINI_API_KEY` on host01 and add
   `llm_keys` blocks to the production `profiles.yaml`.
-- Takeda currently connects direct to `/mcp` with no gateway profile; it needs a
+- agent3 currently connects direct to `/mcp` with no gateway profile; it needs a
   profile + bearer token, and its Gemini client must send that token to `/llm/`.
 - Each agent's LLM client must present its profile bearer token on `/llm/`
   requests.

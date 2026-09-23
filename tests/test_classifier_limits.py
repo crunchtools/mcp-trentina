@@ -276,7 +276,7 @@ class TestWindowGeometry:
     Overlap is what stops an injection that straddles a window boundary from
     being split across two segments and judged benign in both. It was set to
     256 tokens -- a 50% overlap, which ran the model over every token twice
-    and made a /sync scan cost ~47 s of duplicate work on lotor. Cutting it
+    and made a /sync scan cost ~47 s of duplicate work on host01. Cutting it
     is a real speedup and a real risk if taken too far, so pin both ends.
     """
 

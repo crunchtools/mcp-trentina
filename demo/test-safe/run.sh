@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-TRENTINA_URL="${TRENTINA_URL:-https://trentina.crunchtools.com/gateway/josui/mcp}"
+TRENTINA_URL="${TRENTINA_URL:-https://trentina.crunchtools.com/gateway/agent2/mcp}"
 WORKDIR=$(mktemp -d /tmp/wic-research.XXXXXX)
 
 if [ -z "${TRENTINA_TOKEN:-}" ]; then

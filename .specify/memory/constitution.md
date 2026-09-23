@@ -1,9 +1,9 @@
 # mcp-trentina-crunchtools Constitution
 
-> **Version:** 1.1.0
-> **Ratified:** 2026-03-10
+> **Version:** 1.1.1
+> **Ratified:** 2026-09-22
 > **Status:** Active
-> **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.1.0
+> **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.16.0
 > **Profile:** MCP Server
 
 This constitution establishes the core principles, constraints, and workflows that govern all development on mcp-trentina-crunchtools.
@@ -292,3 +292,4 @@ Container CI workflows MUST use two separate jobs:
 | 1.0.2 | 2026-03-16 | Add Section VI (Container Conventions); renumber VI-VIII → VII-IX |
 | 1.0.3 | 2026-09-20 | Python floor 3.10+ → 3.11+ (3.10 was uninstallable, issue #100); record httpx2 as the MCP transport client alongside httpx |
 | 1.1.0 | 2026-09-20 | Add Section III "Python version coverage": full matrix from floor to newest, single-version jobs pinned to newest (production's version) |
+| 1.1.1 | 2026-09-22 | Inherit crunchtools/constitution v1.16.0 (XVII: no real-world names, PII or private deployment topology); examples, tests and docs moved to its fictional roster (RT #1504) |

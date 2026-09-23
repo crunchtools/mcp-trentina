@@ -25,7 +25,7 @@ from mcp_trentina_crunchtools.gateway.profile import Backend
 
 
 def _backend(
-    url: str = "http://mcp-rotv:8080/mcp",
+    url: str = "http://mcp-rotv:8000/mcp",
     timeout: float = 30.0,
     list_timeout: float = 30.0,
 ) -> Backend:
@@ -53,7 +53,7 @@ def _call_result() -> CallToolResult:
     )
 
 
-URL = "http://mcp-rotv:8080/mcp"
+URL = "http://mcp-rotv:8000/mcp"
 
 
 @pytest.mark.asyncio

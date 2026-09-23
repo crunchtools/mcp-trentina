@@ -88,59 +88,59 @@ class TestVerifyOAuth:
     """OAuth path: provider validation plus the profile email allowlist."""
 
     async def test_allowed_email_passes(self) -> None:
-        profile = _oauth_profile("scott@example.com")
+        profile = _oauth_profile("alice@example.com")
         provider = _StubProvider(
-            {"tok": _StubAccessToken({"email": "scott@example.com", "email_verified": True})}
+            {"tok": _StubAccessToken({"email": "alice@example.com", "email_verified": True})}
         )
         await verify_oauth("Bearer tok", profile, provider)
         assert provider.calls == ["tok"]
 
     async def test_email_match_case_insensitive(self) -> None:
-        profile = _oauth_profile("scott@example.com")
+        profile = _oauth_profile("alice@example.com")
         provider = _StubProvider(
-            {"tok": _StubAccessToken({"email": "Scott@Example.com", "email_verified": "true"})}
+            {"tok": _StubAccessToken({"email": "Alice@Example.com", "email_verified": "true"})}
         )
         await verify_oauth("Bearer tok", profile, provider)
 
     async def test_no_provider_is_challenge(self) -> None:
-        profile = _oauth_profile("scott@example.com")
+        profile = _oauth_profile("alice@example.com")
         with pytest.raises(OAuthChallengeError, match="provider not configured"):
             await verify_oauth("Bearer tok", profile, None)
 
     async def test_missing_header_is_challenge(self) -> None:
-        profile = _oauth_profile("scott@example.com")
+        profile = _oauth_profile("alice@example.com")
         provider = _StubProvider({})
         with pytest.raises(OAuthChallengeError, match="missing"):
             await verify_oauth(None, profile, provider)
 
     async def test_malformed_header_is_challenge(self) -> None:
-        profile = _oauth_profile("scott@example.com")
+        profile = _oauth_profile("alice@example.com")
         provider = _StubProvider({})
         with pytest.raises(OAuthChallengeError, match="malformed"):
             await verify_oauth("Basic tok", profile, provider)
 
     async def test_invalid_token_is_challenge(self) -> None:
-        profile = _oauth_profile("scott@example.com")
+        profile = _oauth_profile("alice@example.com")
         provider = _StubProvider({"tok": None})
         with pytest.raises(OAuthChallengeError, match="invalid or expired"):
             await verify_oauth("Bearer tok", profile, provider)
 
     async def test_unverified_email_is_forbidden(self) -> None:
-        profile = _oauth_profile("scott@example.com")
+        profile = _oauth_profile("alice@example.com")
         provider = _StubProvider(
-            {"tok": _StubAccessToken({"email": "scott@example.com", "email_verified": False})}
+            {"tok": _StubAccessToken({"email": "alice@example.com", "email_verified": False})}
         )
         with pytest.raises(OAuthForbiddenError, match="verified email"):
             await verify_oauth("Bearer tok", profile, provider)
 
     async def test_missing_email_is_forbidden(self) -> None:
-        profile = _oauth_profile("scott@example.com")
+        profile = _oauth_profile("alice@example.com")
         provider = _StubProvider({"tok": _StubAccessToken({"email_verified": True})})
         with pytest.raises(OAuthForbiddenError, match="verified email"):
             await verify_oauth("Bearer tok", profile, provider)
 
     async def test_email_not_on_allowlist_is_forbidden(self) -> None:
-        profile = _oauth_profile("scott@example.com")
+        profile = _oauth_profile("alice@example.com")
         provider = _StubProvider(
             {"tok": _StubAccessToken({"email": "eve@evil.com", "email_verified": True})}
         )
@@ -205,15 +205,15 @@ class TestResolveProfileByToken:
 
     def _registry(self) -> dict[str, Profile]:
         return {
-            "kagetora": _profile_with_token("kagetora-token", "kagetora"),
-            "takeda": _profile_with_token("takeda-token", "takeda"),
+            "agent1": _profile_with_token("agent1-token", "agent1"),
+            "agent3": _profile_with_token("agent3-token", "agent3"),
         }
 
     def test_matching_token_resolves_profile(self) -> None:
         registry = self._registry()
-        result = resolve_profile_by_token("Bearer takeda-token", registry)
+        result = resolve_profile_by_token("Bearer agent3-token", registry)
         assert result is not None
-        assert result.name == "takeda"
+        assert result.name == "agent3"
 
     def test_unknown_token_returns_none(self) -> None:
         assert resolve_profile_by_token("Bearer nope", self._registry()) is None
@@ -224,15 +224,15 @@ class TestResolveProfileByToken:
 
     def test_malformed_header_returns_none(self) -> None:
         registry = self._registry()
-        assert resolve_profile_by_token("kagetora-token", registry) is None
-        assert resolve_profile_by_token("Basic kagetora-token", registry) is None
+        assert resolve_profile_by_token("agent1-token", registry) is None
+        assert resolve_profile_by_token("Basic agent1-token", registry) is None
         assert resolve_profile_by_token("Bearer ", registry) is None
 
     def test_case_insensitive_scheme(self) -> None:
         registry = self._registry()
-        result = resolve_profile_by_token("bearer kagetora-token", registry)
+        result = resolve_profile_by_token("bearer agent1-token", registry)
         assert result is not None
-        assert result.name == "kagetora"
+        assert result.name == "agent1"
 
     def test_unresolved_token_profiles_skipped(self) -> None:
         """A profile whose token was never resolved must never match."""

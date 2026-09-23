@@ -186,23 +186,23 @@ class TestValidateProfileLlmKeys:
 
     def test_valid_reference_passes(self) -> None:
         providers = {"gemini": _gemini_provider()}
-        profiles = {"kagetora": _profile("kagetora", "tok", {"gemini": "k-key"})}
+        profiles = {"agent1": _profile("agent1", "tok", {"gemini": "k-key"})}
         validate_profile_llm_keys(providers, profiles)  # no raise
 
     def test_dangling_reference_fails_closed(self) -> None:
         providers = {"gemini": _gemini_provider()}
-        profiles = {"kagetora": _profile("kagetora", "tok", {"openai": "k-key"})}
+        profiles = {"agent1": _profile("agent1", "tok", {"openai": "k-key"})}
         with pytest.raises(ProfileConfigError, match="not a configured"):
             validate_profile_llm_keys(providers, profiles)
 
     def test_profile_without_llm_keys_passes(self) -> None:
         providers = {"gemini": _gemini_provider()}
-        profiles = {"josui": _profile("josui", "tok", {})}
+        profiles = {"agent2": _profile("agent2", "tok", {})}
         validate_profile_llm_keys(providers, profiles)  # no raise
 
     def test_dangling_reference_with_no_providers_fails_closed(self) -> None:
         """llm_keys referencing a provider is a misconfig even when none are enabled."""
-        profiles = {"kagetora": _profile("kagetora", "tok", {"gemini": "k-key"})}
+        profiles = {"agent1": _profile("agent1", "tok", {"gemini": "k-key"})}
         with pytest.raises(ProfileConfigError, match="not a configured"):
             validate_profile_llm_keys({}, profiles)
 
@@ -266,16 +266,16 @@ class TestProxyLlm:
     def _fixtures(self) -> tuple[dict[str, LlmProvider], dict[str, Profile]]:
         providers = {"gemini": _gemini_provider()}
         profiles = {
-            "kagetora": _profile("kagetora", "kagetora-tok", {"gemini": "kagetora-key"}),
-            "takeda": _profile("takeda", "takeda-tok", {"gemini": "takeda-key"}),
-            "josui": _profile("josui", "josui-tok", {}),
+            "agent1": _profile("agent1", "agent1-tok", {"gemini": "agent1-key"}),
+            "agent3": _profile("agent3", "agent3-tok", {"gemini": "agent3-key"}),
+            "agent2": _profile("agent2", "agent2-tok", {}),
         }
         return providers, profiles
 
     def test_unknown_provider_404(self) -> None:
         providers, profiles = self._fixtures()
         client = self._client(providers, profiles)
-        resp = client.post("/llm/nonesuch/v1/x", headers={"authorization": "Bearer kagetora-tok"})
+        resp = client.post("/llm/nonesuch/v1/x", headers={"authorization": "Bearer agent1-tok"})
         assert resp.status_code == 404
 
     def test_missing_token_401(self) -> None:
@@ -293,7 +293,7 @@ class TestProxyLlm:
     def test_profile_without_key_502(self) -> None:
         providers, profiles = self._fixtures()
         client = self._client(providers, profiles)
-        resp = client.post("/llm/gemini/v1/x", headers={"authorization": "Bearer josui-tok"})
+        resp = client.post("/llm/gemini/v1/x", headers={"authorization": "Bearer agent2-tok"})
         assert resp.status_code == 502
 
     def test_success_injects_profile_key_and_strips_auth(
@@ -306,11 +306,11 @@ class TestProxyLlm:
 
         resp = client.post(
             "/llm/gemini/v1beta/models/gemini-2.5-flash:generateContent",
-            headers={"authorization": "Bearer kagetora-tok"},
+            headers={"authorization": "Bearer agent1-tok"},
             content=b'{"contents": []}',
         )
         assert resp.status_code == 200
-        assert fake.captured_headers.get("x-goog-api-key") == "kagetora-key"
+        assert fake.captured_headers.get("x-goog-api-key") == "agent1-key"
         assert not any(k.lower() == "authorization" for k in fake.captured_headers)
 
     def test_success_selects_correct_profile_key(
@@ -323,16 +323,16 @@ class TestProxyLlm:
 
         client.post(
             "/llm/gemini/v1/x",
-            headers={"authorization": "Bearer takeda-tok"},
+            headers={"authorization": "Bearer agent3-tok"},
             content=b"{}",
         )
-        assert fake.captured_headers.get("x-goog-api-key") == "takeda-key"
+        assert fake.captured_headers.get("x-goog-api-key") == "agent3-key"
 
     def test_path_traversal_rejected(self) -> None:
         providers, profiles = self._fixtures()
         client = self._client(providers, profiles)
         resp = client.post(
             "/llm/gemini/v1/..%2fadmin",
-            headers={"authorization": "Bearer kagetora-tok"},
+            headers={"authorization": "Bearer agent1-tok"},
         )
         assert resp.status_code == 400

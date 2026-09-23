@@ -3,7 +3,7 @@
 > **Spec ID:** 002-tier2-model-upgrades
 > **Status:** Draft
 > **Version:** 0.1.0
-> **Author:** Scott McCarty / Josui
+> **Author:** Scott McCarty
 > **Date:** 2026-03-10
 
 ## Overview

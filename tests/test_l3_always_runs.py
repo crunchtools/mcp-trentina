@@ -223,7 +223,7 @@ class TestDeprecatedKeyIsAnnounced:
         cfg = tmp_path / "profiles.yaml"
         cfg.write_text(
             "profiles:\n"
-            "  josui:\n"
+            "  agent2:\n"
             "    auth:\n"
             "      bearer_token_env: TEST_TOK\n"
             "    defense:\n"
@@ -246,7 +246,7 @@ class TestDeprecatedKeyIsAnnounced:
         cfg = tmp_path / "profiles.yaml"
         cfg.write_text(
             "profiles:\n"
-            "  josui:\n"
+            "  agent2:\n"
             "    auth:\n"
             "      bearer_token_env: TEST_TOK\n"
             "    backends: {}\n",

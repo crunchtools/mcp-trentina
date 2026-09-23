@@ -13,7 +13,7 @@ Each gateway call writes one row to the `gateway_calls` table:
 | Column | Type | Example |
 |--------|------|---------|
 | `timestamp` | datetime | `2026-06-23T10:42:11Z` |
-| `profile` | text | `josui` |
+| `profile` | text | `agent2` |
 | `backend` | text | `github` |
 | `tool` | text | `list_issues_tool` |
 | `success` | boolean | `true` (derived from `outcome`) |
@@ -78,7 +78,7 @@ The top-N breakdown shows which tools get the most use and which have the highes
 After running with `tools_allow: ["*"]` for a week, check the audit log to see which tools are actually used. Build an explicit allowlist from the data:
 
 ```
-Top 10 tools for kagetora (last 7 days):
+Top 10 tools for agent1 (last 7 days):
 1. ashigaru__status (1559 calls)
 2. github__get_pull_request_checks_tool (195 calls)
 3. web__quarantine_fetch_tool (157 calls)

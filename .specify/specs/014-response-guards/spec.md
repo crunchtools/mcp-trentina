@@ -14,11 +14,11 @@ and can remove a tool from a profile entirely (`tools_allow` / `tools_deny`).
 It has nothing in between: no way to say "this agent may use this tool, but
 may not receive these results."
 
-That gap is load-bearing in the live deployment. `kagetora` and `takeda` are
+That gap is load-bearing in the live deployment. `agent1` and `agent3` are
 internet-isolated Hermes agents; both reach the shared memory backend with
 `memory: tools_allow: ["*"]`, which is full read of a corpus that is entirely
 work-covered and private. Work IT security policy says that data must not
-flow to those agents. `josui` must keep full access to the same backend.
+flow to those agents. `agent2` must keep full access to the same backend.
 
 RT #1500 originally proposed solving this with parameter guards. That cannot
 work, and the reason generalizes past this one backend. `check_parameter_guards`
@@ -79,7 +79,7 @@ the shared evaluator*:
 A missing structured field is skipped, symmetric to the request side's
 `value is None: continue`. `content` is always present — the empty string when
 a result has no text — so `deny: ["*"]` blocks an empty or purely binary
-result too. `fnmatchcase` matches across newlines, so `*Red Hat*` catches the
+result too. `fnmatchcase` matches across newlines, so `*NIGHTJAR*` catches the
 term anywhere inside a multi-line blob.
 
 ### 3. Call site — after the call, before everything else
@@ -129,10 +129,10 @@ memory:
   tools_allow: ["*"]
   response_guards:
     memory_search:
-      content: { deny: ["*Red Hat*", "*RHEL*", "*redhat*"] }
+      content: { deny: ["*NIGHTJAR*", "*Nightjar*", "*nightjar*"] }
 ```
 
-on the `kagetora` and `takeda` memory backends; `josui` is untouched and keeps
+on the `agent1` and `agent3` memory backends; `agent2` is untouched and keeps
 full access.
 
 **The honest caveat, recorded here because it shapes the choice:** if every
@@ -154,7 +154,7 @@ allowlist — not because it is the cheapest way to close this one hole.
 | `tools/reload.py` | `_guard_delta` reports response guards, keyed by field |
 | `docs/response-guards.md` | New capability page |
 | `docs/parameter-guards.md`, `docs/audit-log.md`, `README.md` | Cross-links, outcome table, capability entry |
-| `examples/profiles-kagetora.yaml` | Worked example on the memory backend |
+| `examples/profiles-agent1.yaml` | Worked example on the memory backend |
 | `tests/test_gateway_guards.py` | Response-guard unit cases |
 | `tests/test_gateway_router.py` | Block short-circuits reduce and scan; audit row; pass-through |
 | `tests/test_reload.py` | Delta names fields without echoing patterns |

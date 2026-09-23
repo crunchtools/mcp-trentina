@@ -37,7 +37,7 @@ def _make_profile(name: str = "alice", token: str = TEST_TOKEN) -> Profile:
     profile = Profile(
         name=name,
         auth=AuthConfig(bearer_token_env="A"),
-        backends={"mcp-slack": Backend(url="http://mcp-slack:8005/mcp")},
+        backends={"mcp-slack": Backend(url="http://mcp-slack:8000/mcp")},
     )
     profile.auth.bearer_token = SecretStr(token)
     return profile
@@ -470,7 +470,7 @@ class TestCircuitToSSEDelivery:
 
     @pytest.mark.asyncio
     async def test_circuit_open_delivers_listchanged(self) -> None:
-        backend_url = "http://mcp-slack:8005/mcp"
+        backend_url = "http://mcp-slack:8000/mcp"
         profile = _make_profile()
         profiles = {"alice": profile}
         sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
@@ -495,7 +495,7 @@ class TestCircuitToSSEDelivery:
 
     @pytest.mark.asyncio
     async def test_unaffected_profile_not_notified(self) -> None:
-        profile = _make_profile()  # backend http://mcp-slack:8005/mcp
+        profile = _make_profile()  # backend http://mcp-slack:8000/mcp
         profiles = {"alice": profile}
         sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
         cb = CircuitBreaker(failure_threshold=2, cooldown_seconds=0.01)

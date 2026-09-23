@@ -313,7 +313,7 @@ class TestAppliedReload:
                 '        response_guards:\n'
                 '          jira_get_issue:\n'
                 '            content:\n'
-                '              deny: ["*Red Hat*"]\n',
+                '              deny: ["*NIGHTJAR*"]\n',
             ),
             encoding="utf-8",
         )
@@ -321,7 +321,7 @@ class TestAppliedReload:
 
         guards = result["changes"]["alpha"]["backends_changed"]["jira"]["response_guards"]
         assert guards == {"jira_get_issue": {"fields_added": ["content"]}}
-        assert "Red Hat" not in str(result)
+        assert "NIGHTJAR" not in str(result)
 
     async def test_added_and_removed_profiles_are_reported_and_applied(
         self, profiles_path: Path
@@ -654,7 +654,7 @@ llm_providers:
                 "  beta:\n"
                 "    oauth:\n"
                 "      enabled: true\n"
-                "      allowed_emails: [scott@example.com]\n"
+                "      allowed_emails: [alice@example.com]\n"
                 "      issuer: https://accounts.google.com\n"
                 "      audience_env: TEST_GEMINI_AUD\n",
             ),
@@ -677,7 +677,7 @@ llm_providers:
                 "  beta:\n"
                 "    oauth:\n"
                 "      enabled: true\n"
-                "      allowed_emails: [scott@example.com]\n"
+                "      allowed_emails: [alice@example.com]\n"
                 "      issuer: https://accounts.google.com\n"
                 "      audience_env: TEST_GEMINI_AUD\n",
             ),

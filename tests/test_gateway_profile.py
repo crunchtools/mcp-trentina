@@ -29,13 +29,13 @@ class TestOAuthConfig:
         assert cfg.allowed_emails == []
 
     def test_enabled_with_allowlist_valid(self) -> None:
-        cfg = OAuthConfig(enabled=True, allowed_emails=["scott@example.com"])
+        cfg = OAuthConfig(enabled=True, allowed_emails=["alice@example.com"])
         assert cfg.enabled is True
-        assert cfg.allowed_emails == ["scott@example.com"]
+        assert cfg.allowed_emails == ["alice@example.com"]
 
     def test_emails_lowercased(self) -> None:
-        cfg = OAuthConfig(enabled=True, allowed_emails=["  Scott@Example.COM "])
-        assert cfg.allowed_emails == ["scott@example.com"]
+        cfg = OAuthConfig(enabled=True, allowed_emails=["  Alice@Example.COM "])
+        assert cfg.allowed_emails == ["alice@example.com"]
 
     def test_enabled_without_allowlist_rejected(self) -> None:
         with pytest.raises(ValidationError, match="allowed_emails is empty"):
@@ -52,7 +52,7 @@ class TestOAuthConfig:
 
     @pytest.mark.parametrize(
         "bad",
-        ["notanemail", "@example.com", "scott@", "scott@localhost", ""],
+        ["notanemail", "@example.com", "alice@", "alice@localhost", ""],
     )
     def test_malformed_email_rejected(self, bad: str) -> None:
         with pytest.raises(ValidationError, match="not an email"):
@@ -70,7 +70,7 @@ class TestOAuthConfig:
         p = Profile(
             name="gemini-app",
             auth=AuthConfig(bearer_token_env="X"),
-            oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+            oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
         )
         assert p.oauth is not None
         assert p.oauth.enabled is True
@@ -81,23 +81,23 @@ class TestProfileModel:
 
     def test_minimal_profile_valid(self) -> None:
         p = Profile(
-            name="josui",
-            auth=AuthConfig(bearer_token_env="TRENTINA_PROFILE_JOSUI_TOKEN"),
+            name="agent2",
+            auth=AuthConfig(bearer_token_env="TRENTINA_PROFILE_AGENT2_TOKEN"),
         )
-        assert p.name == "josui"
-        assert p.auth.bearer_token_env == "TRENTINA_PROFILE_JOSUI_TOKEN"
+        assert p.name == "agent2"
+        assert p.auth.bearer_token_env == "TRENTINA_PROFILE_AGENT2_TOKEN"
         assert p.backends == {}
         assert p.defense.enforcement == "annotate"
         assert p.defense.audit is True
 
     def test_profile_with_backends(self) -> None:
         p = Profile(
-            name="kagetora",
-            auth=AuthConfig(bearer_token_env="TRENTINA_PROFILE_KAGETORA_TOKEN"),
+            name="agent1",
+            auth=AuthConfig(bearer_token_env="TRENTINA_PROFILE_AGENT1_TOKEN"),
             backends={
-                "mcp-slack": Backend(url="http://mcp-slack:8005/mcp"),
+                "mcp-slack": Backend(url="http://mcp-slack:8000/mcp"),
                 "mcp-atlassian": Backend(
-                    url="http://mcp-atlassian:8021/mcp",
+                    url="http://mcp-atlassian:8000/mcp",
                     tools_deny=["jira_delete_issue"],
                 ),
             },
@@ -171,13 +171,13 @@ class TestProfileModel:
             url="http://x/mcp",
             parameter_guards={
                 "send_gmail_message": {
-                    "to": ParameterConstraint(allow=["scott@gmail.com"]),
-                    "cc": ParameterConstraint(allow=["scott@gmail.com"], deny=["banned@x.com"]),
+                    "to": ParameterConstraint(allow=["alice@example.com"]),
+                    "cc": ParameterConstraint(allow=["alice@example.com"], deny=["banned@x.com"]),
                 }
             },
         )
         assert "send_gmail_message" in b.parameter_guards
-        assert b.parameter_guards["send_gmail_message"]["to"].allow == ["scott@gmail.com"]
+        assert b.parameter_guards["send_gmail_message"]["to"].allow == ["alice@example.com"]
         assert b.parameter_guards["send_gmail_message"]["cc"].deny == ["banned@x.com"]
 
     def test_parameter_guard_invalid_value_rejected(self) -> None:
@@ -191,7 +191,7 @@ class TestProfileModel:
             )
 
     def test_parameter_guard_valid_patterns(self) -> None:
-        c = ParameterConstraint(allow=["*@redhat.com", "you@example.com", "*"])
+        c = ParameterConstraint(allow=["*@corp.example.com", "you@example.com", "*"])
         assert len(c.allow) == 3
 
     def test_list_timeout_defaults(self) -> None:
@@ -243,7 +243,7 @@ class TestProfileModel:
         cfg.write_text(
             """
 profiles:
-  josui:
+  agent2:
     auth:
       bearer_token_env: TEST_TOK
     defense:
@@ -252,7 +252,7 @@ profiles:
         )
         monkeypatch.setenv("TEST_TOK", "x")
         gateway_cfg = load_profiles(cfg)
-        assert gateway_cfg.profiles["josui"].defense.provider == "anthropic"
+        assert gateway_cfg.profiles["agent2"].defense.provider == "anthropic"
 
     def test_defense_provider_omitted_in_yaml(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -261,22 +261,22 @@ profiles:
         cfg.write_text(
             """
 profiles:
-  takeda:
+  agent3:
     auth:
       bearer_token_env: TEST_TOK
 """
         )
         monkeypatch.setenv("TEST_TOK", "x")
         gateway_cfg = load_profiles(cfg)
-        assert gateway_cfg.profiles["takeda"].defense.provider is None
+        assert gateway_cfg.profiles["agent3"].defense.provider is None
 
 
 class TestLlmKeys:
     """Per-profile LLM proxy key overrides."""
 
     def test_llm_key_override_valid(self) -> None:
-        override = LlmKeyOverride(api_key_env="KAGETORA_GEMINI_API_KEY")
-        assert override.api_key_env == "KAGETORA_GEMINI_API_KEY"
+        override = LlmKeyOverride(api_key_env="AGENT1_GEMINI_API_KEY")
+        assert override.api_key_env == "AGENT1_GEMINI_API_KEY"
         assert override.api_key.get_secret_value() == ""
 
     def test_llm_key_override_bad_env_name(self) -> None:
@@ -289,11 +289,11 @@ class TestLlmKeys:
 
     def test_profile_with_llm_keys(self) -> None:
         p = Profile(
-            name="kagetora",
-            auth=AuthConfig(bearer_token_env="TRENTINA_PROFILE_KAGETORA_TOKEN"),
-            llm_keys={"gemini": LlmKeyOverride(api_key_env="KAGETORA_GEMINI_API_KEY")},
+            name="agent1",
+            auth=AuthConfig(bearer_token_env="TRENTINA_PROFILE_AGENT1_TOKEN"),
+            llm_keys={"gemini": LlmKeyOverride(api_key_env="AGENT1_GEMINI_API_KEY")},
         )
-        assert p.llm_keys["gemini"].api_key_env == "KAGETORA_GEMINI_API_KEY"
+        assert p.llm_keys["gemini"].api_key_env == "AGENT1_GEMINI_API_KEY"
 
     def test_profile_llm_keys_default_empty(self) -> None:
         p = Profile(name="t", auth=AuthConfig(bearer_token_env="TEST"))
@@ -314,18 +314,18 @@ class TestLlmKeys:
         cfg.write_text(
             """
 profiles:
-  kagetora:
+  agent1:
     auth:
-      bearer_token_env: KAGETORA_TOK
+      bearer_token_env: AGENT1_TOK
     llm_keys:
       gemini:
-        api_key_env: KAGETORA_GEMINI_API_KEY
+        api_key_env: AGENT1_GEMINI_API_KEY
 """
         )
-        monkeypatch.setenv("KAGETORA_TOK", "tok")
-        monkeypatch.setenv("KAGETORA_GEMINI_API_KEY", "gm-secret")
+        monkeypatch.setenv("AGENT1_TOK", "tok")
+        monkeypatch.setenv("AGENT1_GEMINI_API_KEY", "gm-secret")
         gateway_cfg = load_profiles(cfg)
-        key = gateway_cfg.profiles["kagetora"].llm_keys["gemini"].api_key
+        key = gateway_cfg.profiles["agent1"].llm_keys["gemini"].api_key
         assert key.get_secret_value() == "gm-secret"
 
     def test_llm_key_env_missing_fails_closed(
@@ -335,17 +335,17 @@ profiles:
         cfg.write_text(
             """
 profiles:
-  kagetora:
+  agent1:
     auth:
-      bearer_token_env: KAGETORA_TOK
+      bearer_token_env: AGENT1_TOK
     llm_keys:
       gemini:
-        api_key_env: KAGETORA_GEMINI_API_KEY
+        api_key_env: AGENT1_GEMINI_API_KEY
 """
         )
-        monkeypatch.setenv("KAGETORA_TOK", "tok")
-        monkeypatch.delenv("KAGETORA_GEMINI_API_KEY", raising=False)
-        with pytest.raises(ProfileConfigError, match="KAGETORA_GEMINI_API_KEY"):
+        monkeypatch.setenv("AGENT1_TOK", "tok")
+        monkeypatch.delenv("AGENT1_GEMINI_API_KEY", raising=False)
+        with pytest.raises(ProfileConfigError, match="AGENT1_GEMINI_API_KEY"):
             load_profiles(cfg)
 
 
@@ -357,22 +357,22 @@ class TestLoader:
         cfg.write_text(
             """
 profiles:
-  josui:
+  agent2:
     auth:
-      bearer_token_env: TRENTINA_PROFILE_JOSUI_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_AGENT2_TOKEN
     backends:
       mcp-slack:
-        url: http://mcp-slack:8005/mcp
+        url: http://mcp-slack:8000/mcp
         tools_allow: ["*"]
         tools_deny: ["slack_destructive_*"]
 """
         )
-        monkeypatch.setenv("TRENTINA_PROFILE_JOSUI_TOKEN", "tok-josui")
+        monkeypatch.setenv("TRENTINA_PROFILE_AGENT2_TOKEN", "tok-agent2")
         gateway_cfg = load_profiles(cfg)
-        assert set(gateway_cfg.profiles) == {"josui"}
-        token = gateway_cfg.profiles["josui"].auth.bearer_token
+        assert set(gateway_cfg.profiles) == {"agent2"}
+        token = gateway_cfg.profiles["agent2"].auth.bearer_token
         assert token is not None
-        assert token.get_secret_value() == "tok-josui"
+        assert token.get_secret_value() == "tok-agent2"
 
     def test_missing_file(self, tmp_path: Path) -> None:
         with pytest.raises(ProfileConfigError, match="not found"):
@@ -403,9 +403,9 @@ profiles:
         cfg.write_text(
             """
 profiles:
-  kagetora:
+  agent1:
     auth:
-      bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_AGENT1_TOKEN
     backends:
       memory:
         url: http://mcp-memory:8765/mcp
@@ -413,11 +413,11 @@ profiles:
           Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
 """
         )
-        monkeypatch.setenv("TRENTINA_PROFILE_KAGETORA_TOKEN", "tok")
+        monkeypatch.setenv("TRENTINA_PROFILE_AGENT1_TOKEN", "tok")
         monkeypatch.setenv("MCP_MEMORY_API_KEY", "memsecret")
         gateway_cfg = load_profiles(cfg)
         assert (
-            gateway_cfg.profiles["kagetora"].backends["memory"].headers["Authorization"]
+            gateway_cfg.profiles["agent1"].backends["memory"].headers["Authorization"]
             == "Bearer memsecret"
         )
 
@@ -428,9 +428,9 @@ profiles:
         cfg.write_text(
             """
 profiles:
-  kagetora:
+  agent1:
     auth:
-      bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_AGENT1_TOKEN
     backends:
       memory:
         url: http://mcp-memory:8765/mcp
@@ -438,7 +438,7 @@ profiles:
           Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
 """
         )
-        monkeypatch.setenv("TRENTINA_PROFILE_KAGETORA_TOKEN", "tok")
+        monkeypatch.setenv("TRENTINA_PROFILE_AGENT1_TOKEN", "tok")
         monkeypatch.delenv("MCP_MEMORY_API_KEY", raising=False)
         with pytest.raises(ProfileConfigError, match="MCP_MEMORY_API_KEY"):
             load_profiles(cfg)
@@ -487,7 +487,7 @@ class TestDelegatedOAuthConfig:
     def test_issuer_and_audience_env_together_are_accepted(self) -> None:
         cfg = OAuthConfig(
             enabled=True,
-            allowed_emails=["scott@example.com"],
+            allowed_emails=["alice@example.com"],
             issuer=self.ISSUER,
             audience_env="TRENTINA_GEMINI_GOOGLE_CLIENT_ID",
         )
@@ -499,7 +499,7 @@ class TestDelegatedOAuthConfig:
         with pytest.raises(ValidationError, match=r"requires oauth\.audience_env"):
             OAuthConfig(
                 enabled=True,
-                allowed_emails=["scott@example.com"],
+                allowed_emails=["alice@example.com"],
                 issuer=self.ISSUER,
             )
 
@@ -507,7 +507,7 @@ class TestDelegatedOAuthConfig:
         with pytest.raises(ValidationError, match="never be consulted"):
             OAuthConfig(
                 enabled=True,
-                allowed_emails=["scott@example.com"],
+                allowed_emails=["alice@example.com"],
                 audience_env="TRENTINA_GEMINI_GOOGLE_CLIENT_ID",
             )
 
@@ -525,7 +525,7 @@ class TestDelegatedOAuthConfig:
         with pytest.raises(ValidationError, match="mutually exclusive"):
             OAuthConfig(
                 enabled=True,
-                allowed_emails=["scott@example.com"],
+                allowed_emails=["alice@example.com"],
                 issuer=self.ISSUER,
                 audience_env="TRENTINA_GEMINI_GOOGLE_CLIENT_ID",
                 client_id="375f3fdb-c322-41bc-8dc6-c2010a095f04",
@@ -539,7 +539,7 @@ class TestDelegatedOAuthConfig:
         how 0.8.1 broke, in mirror image."""
         cfg = OAuthConfig(
             enabled=True,
-            allowed_emails=["scott@example.com"],
+            allowed_emails=["alice@example.com"],
             issuer=self.ISSUER,
             audience_env="A_CLIENT_ID",
         )
@@ -549,7 +549,7 @@ class TestDelegatedOAuthConfig:
     def test_surrounding_whitespace_is_stripped(self) -> None:
         cfg = OAuthConfig(
             enabled=True,
-            allowed_emails=["scott@example.com"],
+            allowed_emails=["alice@example.com"],
             issuer=f"  {self.ISSUER}  ",
             audience_env="A_CLIENT_ID",
         )
@@ -561,7 +561,7 @@ class TestDelegatedOAuthConfig:
         with pytest.raises(ValidationError, match="no verifier in this build"):
             OAuthConfig(
                 enabled=True,
-                allowed_emails=["scott@example.com"],
+                allowed_emails=["alice@example.com"],
                 issuer="https://login.microsoftonline.com/common/v2.0",
                 audience_env="A_CLIENT_ID",
             )
@@ -570,7 +570,7 @@ class TestDelegatedOAuthConfig:
         with pytest.raises(ValidationError, match="must be an https"):
             OAuthConfig(
                 enabled=True,
-                allowed_emails=["scott@example.com"],
+                allowed_emails=["alice@example.com"],
                 issuer="http://accounts.google.com",
                 audience_env="A_CLIENT_ID",
             )
@@ -579,7 +579,7 @@ class TestDelegatedOAuthConfig:
         with pytest.raises(ValidationError, match="UPPERCASE"):
             OAuthConfig(
                 enabled=True,
-                allowed_emails=["scott@example.com"],
+                allowed_emails=["alice@example.com"],
                 issuer=self.ISSUER,
                 audience_env="trentina_gemini_google_client_id",
             )
@@ -594,7 +594,7 @@ class TestProfileNeedsAnAuthenticationMethod:
     bearer is checked first, that credential bypassed the OAuth entirely.
     """
 
-    OAUTH = OAuthConfig(enabled=True, allowed_emails=["scott@example.com"])
+    OAUTH = OAuthConfig(enabled=True, allowed_emails=["alice@example.com"])
 
     def test_oauth_only_profile_is_valid(self) -> None:
         """The shape that was impossible to express before."""
@@ -603,7 +603,7 @@ class TestProfileNeedsAnAuthenticationMethod:
         assert profile.oauth is not None and profile.oauth.enabled
 
     def test_bearer_only_profile_is_valid(self) -> None:
-        profile = Profile(name="kagetora", auth=AuthConfig(bearer_token_env="TOK"))
+        profile = Profile(name="agent1", auth=AuthConfig(bearer_token_env="TOK"))
         assert profile.oauth is None
 
     def test_both_together_is_valid(self) -> None:
@@ -637,7 +637,7 @@ class TestBearerPathWithNoStaticToken:
 
     OAUTH_ONLY = Profile(
         name="claude-web",
-        oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+        oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
     )
 
     def test_verify_bearer_refuses_and_says_why(self) -> None:
@@ -658,7 +658,7 @@ class TestBearerPathWithNoStaticToken:
 
         profile = Profile(
             name="claude-web",
-            oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+            oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
         )
         _resolve_bearer_token("claude-web", profile)  # must not raise
         assert profile.auth is None

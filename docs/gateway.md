@@ -51,7 +51,7 @@ Trentina supports two backend URL schemes:
 
 | Scheme | Description | Example |
 |--------|-------------|---------|
-| `http://` | Remote MCP server on the container network | `http://mcp-slack:8005/mcp` |
+| `http://` | Remote MCP server on the container network | `http://mcp-slack:8000/mcp` |
 | `internal://` | Trentina's own tools (web quarantine, search, scan) | `internal://web` |
 
 Both return identical wire shapes to the agent. The `internal://web` backend is how Trentina's original quarantine tools are exposed through the gateway — they're just another backend.
@@ -83,10 +83,10 @@ profiles:
         url: "internal://web"
         tools_allow: ["*"]
       slack:
-        url: "http://mcp-slack:8005/mcp"
+        url: "http://mcp-slack:8000/mcp"
         tools_allow: ["*"]
       github:
-        url: "http://mcp-github:8016/mcp"
+        url: "http://mcp-github:8000/mcp"
         tools_allow: ["*"]
 ```
 
@@ -98,7 +98,7 @@ whole file. See [Roles](profiles.md#roles) and
 
 ### Real-World Scale
 
-The CrunchTools deployment proxies 21 backends through Trentina, serving three agent profiles (Josui, Kagetora, Takeda) with 440+ tools total. The gateway has processed 5,700+ calls in the last 30 days with sub-5ms routing overhead on `tools/list` responses.
+The CrunchTools deployment proxies 21 backends through Trentina, serving three agent profiles (agent2, agent1, agent3) with 440+ tools total. The gateway has processed 5,700+ calls in the last 30 days with sub-5ms routing overhead on `tools/list` responses.
 
 ## Related
 

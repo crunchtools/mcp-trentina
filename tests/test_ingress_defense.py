@@ -396,7 +396,7 @@ class TestEnforcement:
     def _block_profile(self) -> Profile:
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
-        p = _profile("kagetora")
+        p = _profile("agent1")
         p.defense = DefenseConfig(enforcement="block")
         return p
 
@@ -472,7 +472,7 @@ class TestEnforcement:
     async def test_extract_fails_closed_until_implemented(self) -> None:
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
-        p = _profile("josui")
+        p = _profile("agent2")
         p.defense = DefenseConfig(enforcement="extract")
         decision = await scan_tool_response(
             profile=p,
@@ -538,7 +538,7 @@ class TestAdversarialReviewFixes:
     def _block_profile(self) -> Profile:
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
-        p = _profile("kagetora")
+        p = _profile("agent1")
         p.defense = DefenseConfig(enforcement="block")
         return p
 

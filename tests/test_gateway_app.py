@@ -30,7 +30,7 @@ def client() -> TestClient:
     profile = Profile(
         name="alice",
         auth=AuthConfig(bearer_token_env="A"),
-        backends={"mcp-slack": Backend(url="http://mcp-slack:8005/mcp")},
+        backends={"mcp-slack": Backend(url="http://mcp-slack:8000/mcp")},
     )
     profile.auth.bearer_token = SecretStr("alice-token")
     return TestClient(gateway_app({"alice": profile}))
@@ -207,7 +207,7 @@ def client_with_profile(name: str) -> TestClient:
     profile = Profile(
         name=name,
         auth=AuthConfig(bearer_token_env="A"),
-        backends={"mcp-slack": Backend(url="http://mcp-slack:8005/mcp")},
+        backends={"mcp-slack": Backend(url="http://mcp-slack:8000/mcp")},
     )
     profile.auth.bearer_token = SecretStr("token")
     return TestClient(gateway_app({name: profile}))
@@ -256,11 +256,11 @@ def oauth_client() -> TestClient:
     profile = Profile(
         name="gemini-app",
         auth=AuthConfig(bearer_token_env="A"),
-        oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+        oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
     )
     profile.auth.bearer_token = SecretStr("static-token")
     provider = _StubProvider({
-        "good": _StubAccessToken({"email": "scott@example.com", "email_verified": True}),
+        "good": _StubAccessToken({"email": "alice@example.com", "email_verified": True}),
         "wrong-user": _StubAccessToken({"email": "eve@evil.com", "email_verified": True}),
     })
     oauth = OAuthContext(
@@ -400,7 +400,7 @@ class TestOAuthResourcePin:
         return Profile(
             name=name,
             auth=AuthConfig(bearer_token_env="A"),
-            oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+            oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
         )
 
     def test_resource_url_is_the_gateway_endpoint(self) -> None:
@@ -458,7 +458,7 @@ class TestProvisionedConfidentialClient:
             auth=AuthConfig(bearer_token_env="A"),
             oauth=OAuthConfig(
                 enabled=True,
-                allowed_emails=["scott@example.com"],
+                allowed_emails=["alice@example.com"],
                 **oauth_kwargs,
             ),
         )
@@ -539,7 +539,7 @@ class TestProvisionedConfidentialClient:
         with pytest.raises(ValidationError, match="client_secret_env"):
             OAuthConfig(
                 enabled=True,
-                allowed_emails=["scott@example.com"],
+                allowed_emails=["alice@example.com"],
                 client_id=self.CLIENT_ID,
                 client_redirect_uris=[self.REDIRECT],
             )
@@ -557,7 +557,7 @@ class TestProvisionedConfidentialClient:
         with pytest.raises(ValidationError, match="UPPERCASE"):
             OAuthConfig(
                 enabled=True,
-                allowed_emails=["scott@example.com"],
+                allowed_emails=["alice@example.com"],
                 client_id=self.CLIENT_ID,
                 client_secret_env="gemini_app_secret",
                 client_redirect_uris=[self.REDIRECT],
@@ -693,14 +693,14 @@ def delegated_client() -> TestClient:
         auth=AuthConfig(bearer_token_env="A"),
         oauth=OAuthConfig(
             enabled=True,
-            allowed_emails=["scott@example.com"],
+            allowed_emails=["alice@example.com"],
             issuer=DELEGATED_ISSUER,
             audience_env="AUD_ENV",
         ),
     )
     profile.auth.bearer_token = SecretStr("static-token")
     verifier = _StubVerifier({
-        "good": _StubAccessToken({"email": "scott@example.com", "email_verified": True}),
+        "good": _StubAccessToken({"email": "alice@example.com", "email_verified": True}),
         "wrong-user": _StubAccessToken({"email": "eve@evil.com", "email_verified": True}),
     })
     oauth = OAuthContext(
@@ -852,7 +852,7 @@ class TestConfidentialDynamicRegistration:
         profile = Profile(
             name="gemini-app",
             auth=AuthConfig(bearer_token_env="A"),
-            oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+            oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
         )
         with patch.dict("os.environ", env, clear=False):
             ctx = _build_oauth_context(GatewayConfig(profiles={"gemini-app": profile}))
@@ -971,7 +971,7 @@ class TestMultiProfileResourceIndicator:
             name=name,
             auth=AuthConfig(bearer_token_env="A"),
             oauth=OAuthConfig(
-                enabled=True, allowed_emails=emails or ["scott@example.com"]
+                enabled=True, allowed_emails=emails or ["alice@example.com"]
             ),
         )
 
@@ -1034,7 +1034,7 @@ class TestMultiProfileResourceIndicator:
         from mcp_trentina_crunchtools import _clear_known_resource
 
         ctx = self._both()
-        params = self._Params(f"{self.BASE}/gateway/kagetora/mcp")
+        params = self._Params(f"{self.BASE}/gateway/agent1/mcp")
         with pytest.raises(AuthorizeError):
             _clear_known_resource(params, ctx.provider.gateway_resources)
 
@@ -1057,7 +1057,7 @@ class TestMultiProfileResourceIndicator:
         boundary the operator thinks exists and does not."""
         with caplog.at_level("WARNING"):
             self._build({
-                "claude-web": self._profile("claude-web", ["scott@example.com"]),
+                "claude-web": self._profile("claude-web", ["alice@example.com"]),
                 "gemini-web": self._profile("gemini-web", ["someone@example.com"]),
             })
         assert "different allowed_emails" in caplog.text
@@ -1097,7 +1097,7 @@ class TestRegisteredRedirectUriIsRestricted:
             name="claude-web",
             oauth=OAuthConfig(
                 enabled=True,
-                allowed_emails=["scott@example.com"],
+                allowed_emails=["alice@example.com"],
                 **oauth_kwargs,
             ),
         )

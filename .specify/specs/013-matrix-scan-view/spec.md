@@ -12,7 +12,7 @@ The defense pipeline reads every string in a structured payload. On proxied
 Matrix traffic that is both very slow and almost entirely pointless, and the
 slowness has crossed from cost into a correctness problem.
 
-Measured against a live initial sync for the `takeda` profile:
+Measured against a live initial sync for the `agent3` profile:
 
 | what | chars | share |
 |---|---|---|
@@ -123,7 +123,7 @@ Decided by the product owner: **L3 analyzes all data.**
 
 `_should_run_l3` (`defense.py:148`) fires L3 on model-output provenance, on any
 suspicious L1 detection, when there is no L2 opinion, and otherwise when the
-L2 score clears `l3_threshold`. Deployed, `takeda` and `kagetora` run
+L2 score clears `l3_threshold`. Deployed, `agent3` and `agent1` run
 `l2_threshold: 0.3` / `l3_threshold: 0.7`, so clean traffic makes no L3 call
 and there is a 0.3–0.7 band that L2 flags but L3 never reviews. Opening it
 fully is `l3_threshold: 0.0` — a config change, not code, because the design
@@ -145,8 +145,8 @@ Two consequences, recorded so neither is a surprise later:
 ## Encryption posture
 
 Both agent rooms are `m.megolm.v1.aes-sha2` and every member is one of the
-owner's own matrix.org identities — `@fatherlinux`, `@takeda-crunchtools-bot`,
-`@kagetora-crunchtools-bot`, `@ashigaru-crunchtools-bot`. No third-party
+owner's own matrix.org identities — `@alice`, `@agent3-crunchtools-bot`,
+`@agent1-crunchtools-bot`, `@ashigaru-crunchtools-bot`. No third-party
 humans, no remote homeservers. The only party that would gain read access if
 E2EE were disabled is matrix.org itself, which would then see run status,
 hostnames and alert text in the clear.
@@ -177,7 +177,7 @@ proposed here.
 0. `_FILE` secret support. No behaviour change. **Shipped.**
 1. Shared warning builder, `truncated` fix, per-request deadline. **Shipped.**
 2. `scanview/` with `full` + `generic`, registry, channel lock, RBAC.
-   Behaviour-identical on merge. **Shipped.** Unblocks Takeda: 17.6x measured.
+   Behaviour-identical on merge. **Shipped.** Unblocks agent3: 17.6x measured.
 3. `vodozemac`, `KeyBackupProvider`, `matrix` extractor. Coverage, not speed.
    **Blocked on the recovery key**, which is not stored on disk — OpenClaw
    shows it once at bootstrap, so it requires

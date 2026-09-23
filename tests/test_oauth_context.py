@@ -36,11 +36,11 @@ PROXY_ENV = {
 BARE_ENV = {"TRENTINA_OAUTH_BASE_URL": BASE_URL}
 
 
-def _proxy_profile(name: str = "josui") -> Profile:
+def _proxy_profile(name: str = "agent2") -> Profile:
     return Profile(
         name=name,
         auth=AuthConfig(bearer_token_env="A"),
-        oauth=OAuthConfig(enabled=True, allowed_emails=["scott@example.com"]),
+        oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
     )
 
 
@@ -50,7 +50,7 @@ def _delegated_profile(name: str = "gemini-app", audience: str = GEMINI_AUD) -> 
         auth=AuthConfig(bearer_token_env="A"),
         oauth=OAuthConfig(
             enabled=True,
-            allowed_emails=["scott@example.com"],
+            allowed_emails=["alice@example.com"],
             issuer=GOOGLE,
             audience_env="AUD_ENV",
         ),
@@ -103,13 +103,13 @@ class TestDelegatedOnly:
 class TestProxyStillRequiresCredentials:
     def test_proxy_profile_without_credentials_still_raises(self) -> None:
         with pytest.raises(ProfileConfigError, match="CLIENT_ID"):
-            _build({"josui": _proxy_profile()}, BARE_ENV)
+            _build({"agent2": _proxy_profile()}, BARE_ENV)
 
     def test_mixed_mode_without_credentials_still_raises(self) -> None:
         """One proxied profile is enough to need the upstream credentials."""
         with pytest.raises(ProfileConfigError, match="CLIENT_ID"):
             _build(
-                {"josui": _proxy_profile(), "gemini-app": _delegated_profile()},
+                {"agent2": _proxy_profile(), "gemini-app": _delegated_profile()},
                 BARE_ENV,
             )
 
@@ -118,17 +118,17 @@ class TestResourcePin:
     """The RFC 8707 pin is computed over PROXIED profiles only."""
 
     def test_delegated_profile_never_wins_the_pin(self) -> None:
-        """'gemini-app' sorts before 'josui'. Pinning the proxy's resource to a
+        """'gemini-app' sorts before 'agent2'. Pinning the proxy's resource to a
         delegated profile would fail every proxy /authorize with
         invalid_target — the 0.8.3 outage, re-created for the profiles this
         change does not touch."""
         ctx = _build(
-            {"josui": _proxy_profile(), "gemini-app": _delegated_profile()},
+            {"agent2": _proxy_profile(), "gemini-app": _delegated_profile()},
             PROXY_ENV,
         )
         assert ctx is not None
         ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
-        assert str(ctx.provider._resource_url) == f"{BASE_URL}/gateway/josui/mcp"
+        assert str(ctx.provider._resource_url) == f"{BASE_URL}/gateway/agent2/mcp"
 
 
 class TestAudienceUniqueness:
@@ -162,7 +162,7 @@ class TestAudienceUniqueness:
         with pytest.raises(ProfileConfigError, match="TRENTINA_OAUTH_GOOGLE_CLIENT_ID"):
             _build(
                 {
-                    "josui": _proxy_profile(),
+                    "agent2": _proxy_profile(),
                     "gemini-app": _delegated_profile("gemini-app", PROXY_CLIENT_ID),
                 },
                 PROXY_ENV,
@@ -181,12 +181,12 @@ class TestMixedMode:
     def test_each_profile_advertises_its_own_authorization_server(self) -> None:
         """The whole point of the per-profile map."""
         ctx = _build(
-            {"josui": _proxy_profile(), "gemini-app": _delegated_profile()},
+            {"agent2": _proxy_profile(), "gemini-app": _delegated_profile()},
             PROXY_ENV,
         )
         assert ctx is not None
         delegated = ctx.metadata_for("gemini-app")
-        proxied = ctx.metadata_for("josui")
+        proxied = ctx.metadata_for("agent2")
         assert delegated is not None and proxied is not None
         assert delegated[0] == GOOGLE
         assert proxied[0].startswith(BASE_URL)
@@ -194,16 +194,16 @@ class TestMixedMode:
 
     def test_each_profile_gets_its_own_verifier(self) -> None:
         ctx = _build(
-            {"josui": _proxy_profile(), "gemini-app": _delegated_profile()},
+            {"agent2": _proxy_profile(), "gemini-app": _delegated_profile()},
             PROXY_ENV,
         )
         assert ctx is not None
         assert ctx.verifier_for("gemini-app") is not ctx.provider
-        assert ctx.verifier_for("josui") is ctx.provider
+        assert ctx.verifier_for("agent2") is ctx.provider
 
     def test_provisioned_clients_skip_delegated_profiles(self) -> None:
         ctx = _build(
-            {"josui": _proxy_profile(), "gemini-app": _delegated_profile()},
+            {"agent2": _proxy_profile(), "gemini-app": _delegated_profile()},
             PROXY_ENV,
         )
         assert ctx is not None
@@ -243,7 +243,7 @@ class TestStartupLogsCarryNoSecrets:
         profile = _proxy_profile()
         profile.auth.bearer_token = SecretStr(self.BEARER)
         with caplog.at_level("DEBUG"):
-            ctx = _build({"josui": profile}, self._env())
+            ctx = _build({"agent2": profile}, self._env())
             assert ctx is not None
             ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
         for secret in self._secrets():
@@ -263,14 +263,14 @@ class TestStartupLogsCarryNoSecrets:
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Exercises the multi-proxy warning and the operator-role warning too."""
-        proxy_a = _proxy_profile("josui")
-        proxy_b = _proxy_profile("kagetora")
+        proxy_a = _proxy_profile("agent2")
+        proxy_b = _proxy_profile("agent1")
         delegated = _delegated_profile()
         for p in (proxy_a, proxy_b, delegated):
             p.auth.bearer_token = SecretStr(self.BEARER)
         with caplog.at_level("DEBUG"):
             ctx = _build(
-                {"josui": proxy_a, "kagetora": proxy_b, "gemini-app": delegated},
+                {"agent2": proxy_a, "agent1": proxy_b, "gemini-app": delegated},
                 self._env(),
             )
             assert ctx is not None

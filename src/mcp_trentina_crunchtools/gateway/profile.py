@@ -488,9 +488,9 @@ class DefenseConfig(BaseModel):
         description=(
             "What a flagged tool response becomes. annotate: delivered "
             "intact with a _trentina_warning (the calibration mode). "
-            "block: refused outright — autonomous agents (kagetora, "
-            "takeda). extract: replaced by a Q-Agent extraction — "
-            "interactive profiles (josui). "
+            "block: refused outright — autonomous agents (agent1, "
+            "agent3). extract: replaced by a Q-Agent extraction — "
+            "interactive profiles (agent2). "
             "TRENTINA_ENFORCEMENT_OVERRIDE=annotate is the kill switch: it "
             "forces annotate everywhere for the night block misfires."
         ),

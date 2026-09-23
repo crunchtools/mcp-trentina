@@ -48,7 +48,7 @@ class TestMatrixPathTraversal:
 
 
 def _matrix_profile(
-    name: str = "kagetora",
+    name: str = "agent1",
     token: str = _FIXTURE_ACCESS,
     scan_view: object = None,
 ) -> Profile:
@@ -128,7 +128,7 @@ class TestMatrixAuth:
     def test_unknown_token_is_401(self) -> None:
         from starlette.testclient import TestClient
 
-        client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
+        client = TestClient(_matrix_app({"agent1": _matrix_profile()}))
         resp = client.get("/matrix/wrongtoken/_matrix/client/v3/sync")
         assert resp.status_code == 401
 
@@ -137,7 +137,7 @@ class TestMatrixAuth:
         the open relay cannot be reached by accident."""
         from starlette.testclient import TestClient
 
-        client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
+        client = TestClient(_matrix_app({"agent1": _matrix_profile()}))
         resp = client.get("/matrix/_matrix/client/v3/sync")
         assert resp.status_code == 401
 
@@ -149,7 +149,7 @@ class TestMatrixAuth:
         upstream = _FakeUpstream(json.dumps({"rooms": {}}).encode())
         monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
 
-        client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
+        client = TestClient(_matrix_app({"agent1": _matrix_profile()}))
         resp = client.get("/matrix/sekrit/_matrix/client/v3/sync")
         assert resp.status_code == 200
         # The token prefix never reaches the homeserver.
@@ -190,7 +190,7 @@ class TestMatrixSyncScanning:
         upstream = _FakeUpstream(json.dumps(self.HOSTILE_SYNC).encode())
         monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
 
-        client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
+        client = TestClient(_matrix_app({"agent1": _matrix_profile()}))
         resp = client.get("/matrix/sekrit/_matrix/client/v3/sync")
         body = resp.json()
 
@@ -219,7 +219,7 @@ class TestMatrixSyncScanning:
         upstream = _FakeUpstream(json.dumps(clean).encode())
         monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
 
-        client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
+        client = TestClient(_matrix_app({"agent1": _matrix_profile()}))
         body = client.get("/matrix/sekrit/_matrix/client/v3/sync").json()
 
         warning = body.pop("_trentina_warning", None)
@@ -242,7 +242,7 @@ class TestMatrixSyncScanning:
         monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
         monkeypatch.setattr(matrix_proxy, "build_warning", lambda verdict, **kw: None)
 
-        client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
+        client = TestClient(_matrix_app({"agent1": _matrix_profile()}))
         resp = client.get("/matrix/sekrit/_matrix/client/v3/sync")
         assert resp.content == raw
 
@@ -266,7 +266,7 @@ class TestMatrixSyncScanning:
         monkeypatch.setattr(matrix_proxy, "defend_scan_view", _hang)
 
         profile = _matrix_profile(scan_view=ScanViewConfig(deadline_seconds=0.05))
-        client = TestClient(_matrix_app({"kagetora": profile}))
+        client = TestClient(_matrix_app({"agent1": profile}))
         resp = client.get("/matrix/sekrit/_matrix/client/v3/sync")
 
         assert resp.status_code == 200
@@ -286,7 +286,7 @@ class TestMatrixSyncScanning:
         upstream = _FakeUpstream(json.dumps({"versions": ["v1.11"]}).encode())
         monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
 
-        client = TestClient(_matrix_app({"kagetora": _matrix_profile()}))
+        client = TestClient(_matrix_app({"agent1": _matrix_profile()}))
         resp = client.get("/matrix/sekrit/_matrix/client/versions")
         assert resp.status_code == 200
         assert resp.json() == {"versions": ["v1.11"]}

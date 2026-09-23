@@ -23,9 +23,9 @@ pytestmark = pytest.mark.asyncio
 def _thread(depth: int = 6, body_lines: int = 12) -> str:
     """A reply chain: each message quotes the whole one before it."""
     lines = [
-        "From: scott@example.com",
+        "From: alice@example.com",
         "To: team@example.com",
-        "Subject: Re: RHEL 11 planning",
+        "Subject: Re: NIGHTJAR planning",
         "Date: Fri, 19 Sep 2026 10:00:00 -0400",
         "",
         "Agreed, let us go with the second option.",
@@ -63,15 +63,15 @@ class TestEmailReduction:
     async def test_strips_signature(self) -> None:
         payload = "\n".join(
             [
-                "From: scott@example.com",
+                "From: alice@example.com",
                 "Subject: Hello",
                 "",
                 "The actual message.",
                 "",
                 "-- ",
-                "Scott McCarty",
-                "Senior Principal Product Manager",
-                "Red Hat",
+                "Alice Example",
+                "Product Manager",
+                "Example Corp",
                 "mobile: 555-0100",
             ]
             + [f"Legal disclaimer line {i}" for i in range(12)]

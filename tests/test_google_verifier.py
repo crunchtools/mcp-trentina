@@ -30,7 +30,7 @@ def _tokeninfo_body(**overrides: Any) -> dict[str, Any]:
     body: dict[str, Any] = {
         "aud": AUDIENCE,
         "sub": "114597764404176971057",
-        "email": "scott@example.com",
+        "email": "alice@example.com",
         # Google returns this as a STRING, not a bool. Pinned deliberately.
         "email_verified": "true",
         "expires_in": 3599,
@@ -86,7 +86,7 @@ class TestAudiencePin:
         verifier, _ = _verifier(_ok())
         access = await verifier.verify_token("good-token")
         assert access is not None
-        assert access.claims["email"] == "scott@example.com"
+        assert access.claims["email"] == "alice@example.com"
         assert access.claims["aud"] == AUDIENCE
 
     async def test_other_apps_token_is_refused_despite_a_good_email(self) -> None:

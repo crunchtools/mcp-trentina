@@ -23,7 +23,7 @@ from mcp_trentina_crunchtools.gateway.loader import (
 
 PROFILE_YAML = """\
 profiles:
-  josui:
+  agent2:
     auth:
       bearer_token_env: TEST_BEARER
     backends: {}
@@ -183,6 +183,6 @@ class TestConsumersRouteThroughIt:
         monkeypatch.setenv("TEST_BEARER_FILE", str(secret))
 
         loaded = load_profiles(cfg)
-        token = loaded.profiles["josui"].auth.bearer_token
+        token = loaded.profiles["agent2"].auth.bearer_token
         assert token is not None
         assert token.get_secret_value() == "tok-from-file"

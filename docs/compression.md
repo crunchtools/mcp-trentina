@@ -40,10 +40,10 @@ The in-memory cache makes the hot path a dict lookup — no model calls, no data
 ```yaml
 backends:
   gws-personal:
-    url: "http://gws-personal:8011/mcp"
+    url: "http://gws-personal:8000/mcp"
     compress_descriptions: true   # enable compression for this backend
   slack:
-    url: "http://mcp-slack:8005/mcp"
+    url: "http://mcp-slack:8000/mcp"
     # compress_descriptions: false  (default — leave verbose)
 ```
 

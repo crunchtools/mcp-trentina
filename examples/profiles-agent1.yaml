@@ -1,0 +1,114 @@
+# agent1 — an autonomous agent's gateway profile
+#
+# Illustrative, not a copy of any real deployment: backend names, hosts and
+# ports are placeholders. The pattern it shows is ["*"] for small backends and
+# an explicit allowlist for heavy ones; the gateway_calls audit table then
+# shows which allowlisted tools are never called, for later tightening.
+
+profiles:
+  agent1:
+    # role: agent is the default and the right one for an autonomous agent —
+    # the gateway's admin tools then reach this profile's own slice and no
+    # further. See docs/profiles.md#roles.
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_AGENT1_TOKEN
+
+    # Defense POLICY. All three layers always run — there are no per-layer
+    # off switches. An autonomous agent gets `block` once thresholds are
+    # calibrated from annotate-mode data; until then annotate delivers
+    # flagged content with a warning and records every score.
+    defense:
+      enforcement: annotate   # flip to `block` after calibration
+      l2_threshold: 0.3       # stricter classifier gate for an autonomous agent
+
+    # Payload transformation on tool responses. Runs OUTSIDE the perimeter
+    # and never replaces it: the gateway transforms, then scans the result,
+    # then delivers that same result (preprocess/base.py invariant 2).
+    #
+    # petit only. It is deterministic, costs nothing, and keeps the input's
+    # provenance. Adding `summarize` spends an LLM call AND forces the output
+    # to MODEL_OUTPUT provenance, which draws unconditional L3 — two model
+    # calls per response. Enable it per tool, after measuring, not fleet-wide.
+    preprocess:
+      enabled: true
+      strategy: auto
+      processors: [petit]
+      target_bytes: 20000
+      min_bytes: 4096
+
+    # Per-profile LLM API keys isolate this profile's rate-limit quota and
+    # token spend. Use api_key_env (an environment variable) or api_key (a
+    # direct key in a bind-mounted config file) — one per provider.
+    llm_keys:
+      gemini:
+        api_key_env: AGENT1_GEMINI_API_KEY
+
+    backends:
+      # ── Internal (trentina's own tools) ──────────────────────────
+      web:
+        url: "internal://web"
+        tools_allow: ["*"]
+
+      # ── Small backends — keep all ───────────────────────────────
+      memory:
+        url: "http://mcp-memory:8000/mcp"
+        headers:
+          Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
+        tools_allow: ["*"]
+        # Response guards — the egress half of parameter_guards. The memory
+        # server is shared with supervised profiles, and recall is semantic:
+        # this agent can ask for "the codename project's roadmap" without
+        # naming it, so nothing in the REQUEST is matchable and a parameter
+        # guard has nothing to bite on. The restricted record arrives in the
+        # response, which is where this check reads.
+        #
+        # A match rejects the whole response (never a scrubbed subset — that
+        # would make the guard a leak oracle) and audits as
+        # denied_response_guard. See docs/response-guards.md.
+        #
+        # This is a LITERAL, case-sensitive filter: a paraphrase of a denied
+        # term passes, which is why each casing is listed. When the whole
+        # backend is off-limits for an agent, prefer cutting the read tools
+        # from tools_allow, or `content: {deny: ["*"]}` — neither depends on
+        # predicting vocabulary.
+        response_guards:
+          memory_search:
+            content:
+              deny: ["*NIGHTJAR*", "*Nightjar*", "*nightjar*"]
+          memory_list:
+            content:
+              deny: ["*NIGHTJAR*", "*Nightjar*", "*nightjar*"]
+
+      tickets:
+        url: "http://mcp-tickets:8000/mcp"
+        tools_allow: ["*"]
+
+      # ── Heavy backend — explicit allowlist ──────────────────────
+      github:
+        url: "http://mcp-github:8000/mcp"
+        tools_allow:
+          - list_pull_requests_tool
+          - get_pull_request_tool
+          - get_pull_request_diff_tool
+          - list_issues_tool
+          - get_issue_tool
+          - create_issue_comment_tool
+          - search_code_tool
+
+      # ── Write-capable backend — parameter guards on sends ───────
+      mail:
+        url: "http://mcp-mail:8000/mcp"
+        tools_allow:
+          - search_gmail_messages
+          - get_gmail_message_content
+          - get_gmail_thread_content
+          - draft_gmail_message
+          - send_gmail_message
+        parameter_guards:
+          send_gmail_message:
+            to:
+              allow: ["alice@example.com"]
+            cc:
+              allow: ["alice@example.com"]
+            bcc:
+              allow: ["alice@example.com"]

@@ -27,7 +27,7 @@ covering both web fetches *and* MCP-server tool outputs.
 
 Trentina's mission has always been the **trusted boundary between untrusted content
 and the LLM**. Web-fetch happens to be the only surface currently implemented because
-the LLM platforms Scott uses (Claude, Gemini) ship web search/fetch as native tools
+the LLM platforms the maintainer uses (Claude, Gemini) ship web search/fetch as native tools
 and don't route them through MCP — so trentina had to provide replacement tools.
 
 Every MCP server that returns content is the same threat: a wiki page, an RT ticket
@@ -47,11 +47,11 @@ Three problems converge:
    Gmail MCP — every one of those reaches the LLM unfiltered today. Trentina is
    the right boundary for this content but has no current path to it.
 
-2. **Per-consumer policy lives in two places.** Josui's deny list lives in
-   `~/.claude/settings.json`. Kagetora's deny list lives in Hermes's
+2. **Per-consumer policy lives in two places.** agent2's deny list lives in
+   `~/.claude/settings.json`. agent1's deny list lives in Hermes's
    `config.yaml`. The patterns are identical (`delete_*`, `send_gmail_message`,
    `wordpress_delete_*`, etc.) but expressed differently, maintained
-   separately, and the next consumer (Takeda/OpenClaw) would make it a third
+   separately, and the next consumer (agent3/OpenClaw) would make it a third
    place to update. The policy plane wants centralization.
 
 3. **Tool-definition context pollution.** The MCP fleet exposes ~575 tools,
@@ -85,7 +85,7 @@ Each request to the gateway endpoint:
 2. **Resolves** the consumer's profile (tool allowlist + defense config).
 3. **Dispatches** the MCP call by backend URL scheme: `http(s)://` proxies to a
    remote MCP server via the `crunchtools` podman network (container DNS lookup
-   — already how Kagetora reaches the fleet today); `internal://<label>`
+   — already how agent1 reaches the fleet today); `internal://<label>`
    dispatches in-process to trentina's own FastMCP tool registry. Both paths
    return identical wire shapes to the consumer.
 4. **On `tools/list` response:** drops tool definitions not in the profile's
@@ -115,29 +115,29 @@ looks applied, and changes nothing.
 
 ```yaml
 profiles:
-  josui:
+  agent2:
     role: operator                      # default: agent — see docs/profiles.md#roles
     auth:
-      bearer_token_env: TRENTINA_GATEWAY_JOSUI_TOKEN
+      bearer_token_env: TRENTINA_GATEWAY_AGENT2_TOKEN
     backends:
       web:                              # trentina's own tools, in-process
         url: internal://web
         tools_allow: ["*"]
         tools_deny: []
       mcp-slack:
-        url: http://mcp-slack:8005/mcp
+        url: http://mcp-slack:8000/mcp
         tools_allow: ["*"]
         tools_deny: []
       mcp-mediawiki:
-        url: http://mcp-mediawiki:8016/mcp
+        url: http://mcp-mediawiki:8000/mcp
         tools_allow: ["*"]
         tools_deny: []
       mcp-atlassian:
-        url: http://mcp-atlassian:8021/mcp
+        url: http://mcp-atlassian:8000/mcp
         tools_allow: ["*"]
         tools_deny: ["jira_delete_issue"]
       mcp-wordpress-crunchtools:
-        url: http://mcp-wordpress-crunchtools:8002/mcp
+        url: http://mcp-wordpress-crunchtools:8000/mcp
         tools_allow: ["*"]
         tools_deny:
           - "wordpress_delete_post"
@@ -151,7 +151,7 @@ profiles:
           - "send_gmail_message"
           - "delete*"
           - "batch_delete*"
-      # ... rest of Josui's backends
+      # ... rest of agent2's backends
     defense:
       sanitize: true                # L1 — always cheap, default on
       classify: true                # L2 — Prompt Guard 2 inference
@@ -160,9 +160,9 @@ profiles:
       quarantine_threshold: 0.7
       audit: true
 
-  kagetora:
+  agent1:
     auth:
-      bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_AGENT1_TOKEN
     backends:
       memory:
         url: http://mcp-memory:8765/mcp
@@ -171,7 +171,7 @@ profiles:
         headers:
           Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
       mcp-gemini:
-        url: http://mcp-gemini:8006/mcp
+        url: http://mcp-gemini:8000/mcp
         tools_allow: ["*"]
         tools_deny: ["gemini_delete_cache_tool"]
       google-workspace-personal:
@@ -229,7 +229,7 @@ re-extraction. Two controls:
 
 2. **Cockpit runtime override**: a global "L3 enabled" switch in the Cockpit
    backend, persisted to trentina's SQLite settings table, takes precedence over
-   per-profile config. Lets Scott kill L3 fleet-wide during a Gemini outage or
+   per-profile config. Lets the operator kill L3 fleet-wide during a Gemini outage or
    when chasing a quota issue without redeploying.
 
 When L3 is disabled (either path), the response still carries the L1/L2
@@ -293,7 +293,7 @@ Parameter guards are configured per-backend, per-tool in the profile YAML:
 ```yaml
 backends:
   gws-personal:
-    url: "http://gws-personal:8011/mcp"
+    url: "http://gws-personal:8000/mcp"
     tools_allow: ["*"]
     parameter_guards:
       send_gmail_message:
@@ -314,7 +314,7 @@ constraint has two fields:
 | `deny` | `[]` | Value glob patterns to deny (wins over allow) |
 
 Values use `fnmatch.fnmatchcase()` for matching, supporting shell-style globs
-(e.g., `*@redhat.com`). A more permissive character set than tool-name globs is
+(e.g., `*@corp.example.com`). A more permissive character set than tool-name globs is
 allowed — values can contain `@`, `.`, `+`, `/`, and spaces.
 
 ### Semantics
@@ -348,7 +348,7 @@ Every gateway passthrough writes one row to trentina's SQLite audit table:
 | Column | Type | Example |
 |---|---|---|
 | ts | datetime | 2026-06-13T10:42:11Z |
-| profile | text | josui |
+| profile | text | agent2 |
 | backend | text | mcp-atlassian |
 | tool | text | jira_search |
 | op | text | tools/call \| tools/list |
@@ -376,8 +376,8 @@ update SQLite and the YAML file with locking.
 Option C is a **hard cut on the trentina side** (the gateway is the only surface),
 with consumers migrating at their own pace. Each consumer collapses its many MCP
 entries — including the old direct trentina `/mcp` entry — into a single
-gateway entry behind one bearer token. **Kagetora cuts over first** (smaller
-blast radius, autonomous agent), then Josui.
+gateway entry behind one bearer token. **agent1 cuts over first** (smaller
+blast radius, autonomous agent), then agent2.
 
 **An autonomous-agent consumer (small blast radius) — first:**
 1. Add its profile to trentina config: the `web` (`internal://web`)
@@ -403,7 +403,7 @@ blast radius, autonomous agent), then Josui.
    (`mcp-slack__slack_list_channels`) returns results — both via the same token,
    single endpoint.
 
-Estimated context savings for Kagetora when narrowed to (web, memory,
+Estimated context savings for agent1 when narrowed to (web, memory,
 mcp-gemini, google-workspace-personal): ~575 tools → ~150 tools, ~146K → <50K
 prompt tokens.
 
@@ -512,7 +512,7 @@ they arrive, applying L1 incrementally; L2/L3 buffer until the stream completes
 3. **Long-lived sessions**: streamable-http supports session resumption. Should
    trentina proxy session IDs transparently, or terminate at the gateway?
 4. **P-Agent backend blocklist semantics**: if mcp-atlassian keeps tripping L2
-   for a Josui profile, does the P-Agent blocklist apply per-profile or
+   for a agent2 profile, does the P-Agent blocklist apply per-profile or
    globally?
 5. **Profile inheritance**: should profiles be able to inherit from a `default`
    profile to share common deny patterns?
@@ -528,7 +528,7 @@ they arrive, applying L1 incrementally; L2/L3 buffer until the stream completes
 | 2 | L1 + L2 on tool-call responses; L3 with profile + Cockpit master switch | ~half session |
 | 3 | Audit log integration + Cockpit Gateway tab (read-only) | ~half session |
 | 4 | Cockpit profile editor + token rotation UI | ~half session |
-| 5 | Migration: Josui + Kagetora cut over to gateway endpoints | ~one session |
+| 5 | Migration: agent2 + agent1 cut over to gateway endpoints | ~one session |
 
 Each phase is independently mergeable behind a feature flag (`TRENTINA_GATEWAY_ENABLED=true`).
 

@@ -203,10 +203,10 @@ comfortable margin.
 
 This was stride=256 -- a 256-token guard band, which meant a 50% overlap
 and ran the model over every token TWICE. On a 32,768-token scan that is
-128 passes instead of 74, and at the measured 872 ms per pass on lotor it
+128 passes instead of 74, and at the measured 872 ms per pass on host01 it
 cost roughly 47 seconds of pure duplicate work per scan. The Matrix proxy
-scans every /sync response, so Kagetora paid it on every message and
-Takeda could not finish an initial sync inside its 30 s budget at all
+scans every /sync response, so agent1 paid it on every message and
+agent3 could not finish an initial sync inside its 30 s budget at all
 (RT #1460).
 """
 
