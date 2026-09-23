@@ -192,7 +192,7 @@ async def clean_search(
         }
 
     resolved_sources = await resolve_grounding_urls(raw.get("sources", []))
-    text_result, scanned_sources, _total_l1, _l1_stats = _run_l1_on_l0_output(
+    text_result, scanned_sources, _total_l1, l1_stats = _run_l1_on_l0_output(
         raw["text"], resolved_sources
     )
     l1_text = text_result.content
@@ -227,24 +227,30 @@ async def clean_search(
             f"--- Instruction ---\n{prompt}"
         )
         extraction = await quarantine_extract(l3_input, prompt)
+        disposition = Disposition.EXTRACTED
     else:
+        # No key, so the Q-Agent never ran and this is L1's text, not an
+        # extraction. Saying `extracted` here is the same lie the old
+        # `trust.level` told, and the other three clean_* tools already
+        # report their fallback as `delivered`.
         extraction = {
             "content": {"extracted_text": l1_text},
             "usage": {},
         }
+        disposition = Disposition.DELIVERED
 
     emit_request_event(
         tool="clean_search",
         source=f"search:{query}",
-        disposition=Disposition.EXTRACTED.value,
-        risk_level="low",
+        disposition=disposition.value,
+        risk_level=l1_stats.risk_level(),
         l1_detections=_total_l1,
-        l1_suspicious=0,
+        l1_suspicious=l1_stats.suspicious_detections(),
         l2_label=classification.label if classification else None,
         l2_score=classification.score if classification else None,
         input_size=len(raw.get("text", "")),
         output_size=len(l1_text),
-        stats={"total_detections": _total_l1},
+        stats=l1_stats.to_flat_dict(),
         start_time=start_time,
     )
 
@@ -254,8 +260,10 @@ async def clean_search(
         "extraction": extraction.get("content", {}),
         "query": query,
         "scan": build_report(
-            verdict, disposition=Disposition.EXTRACTED, kind="search", ref=query,
-            extracted_by=config.model,
+            verdict, disposition=disposition, kind="search", ref=query,
+            extracted_by=(
+                config.model if disposition is Disposition.EXTRACTED else None
+            ),
         ),
         "pipeline": "L0 → resolve → L1 → L2 → L3",
         "l0_usage": raw.get("usage", {}),

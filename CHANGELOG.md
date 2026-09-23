@@ -10,6 +10,23 @@ under that name.
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-09-23
+
+### Fixed
+- **`clean_search` reported an extraction that never happened.** With no
+  `GEMINI_API_KEY` the Q-Agent is skipped and L1's text is returned, but the
+  response hardcoded `disposition: extracted` and named a model in
+  `extracted_by` regardless. The other three `clean_*` tools already reported
+  that fallback as `delivered`; search was the one that did not, and a test
+  was pinning the wrong behaviour. Found reading the code to answer "what
+  layer actually cleans it?".
+- **`clean_search` recorded every search as clean.** Its D-Bus event
+  hardcoded `risk_level="low"` and `l1_suspicious=0` while discarding the
+  merged `PipelineStats` it had just computed one line earlier. A search
+  whose L0 output carried directive patterns or hidden markup was audited as
+  finding nothing. Now reports what L1 actually found, including the full
+  flat stats rather than a single total.
+
 ## [0.30.0] - 2026-09-23
 
 ### Changed
