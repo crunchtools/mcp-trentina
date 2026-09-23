@@ -10,6 +10,16 @@ under that name.
 
 ## [Unreleased]
 
+## [0.27.3] - 2026-09-23
+
+### Fixed
+- **The OAuth store sweeper announces itself at WARNING, not INFO.** 0.27.2
+  put the rate-limit summary at WARNING precisely because production runs at
+  `TRENTINA_LOG_LEVEL=WARNING`, then logged the sweeper's start at INFO — so
+  the one line answering "is anything actually removing these records?" was
+  discarded on the only box where the question gets asked. Found while
+  verifying the 0.27.2 deploy on lotor, where there was no other way to tell.
+
 ## [0.27.2] - 2026-09-23
 
 ### Security
