@@ -135,3 +135,63 @@ class TestPatchTargetsResolve:
                 f"call time, so nothing else tells you."
             )
             obj = getattr(obj, attr)
+
+
+class TestContainerfileAgreesWithPyproject:
+    """The petit package name is written in two files and must match.
+
+    `pyproject.toml` declares the dependency; the Containerfile holds it out
+    of the hashed export by name (`--no-emit-package`) and installs it
+    separately from a hashed source archive, because pip refuses a VCS
+    requirement under hash checking.
+
+    A stale name in the Containerfile does not warn. `--no-emit-package`
+    silently matches nothing, the package lands in the hashed export as a git
+    URL, and the build dies with *"can't verify hashes for version control
+    repositories"* — an error about hashing that says nothing about the name.
+    That happened in 0.22.0, when the distribution turned out to have been
+    renamed from `petit-log` to `petit-log-crunchtools`.
+
+    Offline on purpose. The SHA pin also has to stay in step with the tag in
+    `[tool.uv.sources]`, but checking that needs the network, and a test that
+    reaches GitHub is a test that fails on a train.
+    """
+
+    @staticmethod
+    def _petit_requirement() -> str:
+        data = tomllib.loads(
+            (REPO / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        for dep in data["project"]["dependencies"]:
+            if "petit" in dep:
+                # Strip the version specifier: "petit-log-x>=3.2.0" -> name.
+                return dep.split(">")[0].split("=")[0].split("<")[0].strip()
+        raise AssertionError("no petit dependency found in pyproject.toml")
+
+    def test_the_containerfile_holds_out_the_right_package(self) -> None:
+        name = self._petit_requirement()
+        containerfile = (REPO / "Containerfile").read_text(encoding="utf-8")
+        assert f"--no-emit-package {name} " in containerfile, (
+            f"pyproject.toml depends on {name!r} but the Containerfile does "
+            f"not hold that name out of the hashed export. The build will "
+            f"fail with a hashing error that does not mention the name."
+        )
+
+    def test_the_containerfile_installs_the_right_package(self) -> None:
+        name = self._petit_requirement()
+        containerfile = (REPO / "Containerfile").read_text(encoding="utf-8")
+        assert f'"{name} @ https://' in containerfile, (
+            f"the Containerfile's separate hashed install does not name "
+            f"{name!r}, so pip would install nothing under that requirement."
+        )
+
+    def test_the_uv_source_names_the_same_package(self) -> None:
+        name = self._petit_requirement()
+        data = tomllib.loads(
+            (REPO / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+        assert name in sources, (
+            f"[tool.uv.sources] does not pin {name!r}; a key under the old "
+            f"name resolves nothing and uv falls back to PyPI."
+        )

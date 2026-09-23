@@ -180,17 +180,46 @@ class TestPetitLibraryContract:
         assert result.applied
         assert needle in result.content, "sshd word rules would have eaten this"
 
-    async def test_letters_next_to_numbers_are_not_collapsed(self) -> None:
-        """petit's packaged hash.stopwords carries `[a-f]+#`, which eats the
-        letter next to a scrubbed number and merges "bob0" with "boa0". We
-        supply our own patterns so distinct words stay distinct."""
+    async def test_a_digit_inside_a_word_is_left_alone(self) -> None:
+        r"""petit's strict.stopwords will not touch a digit adjacent to a word.
+
+        Its `<N>` rule is `(?<![\w-])\d+(?![\w-])`, so `bob0` keeps its
+        digit and every username stays its own group. That is stricter than
+        the patterns Trentina used to pass in, which normalized a bare `\d+`
+        anywhere and therefore merged `bob0` with `bob1`.
+
+        The stricter reading is the right one and it is why `strict.stopwords`
+        exists: `web01` and `web02` are different hosts, `PROJ-1234` and
+        `PROJ-1235` are different tickets, and petit's OTHER packaged filter
+        (`hash.stopwords`, with its `[a-f]+#` rule) merges all of them. The
+        cost is real — a payload whose only repetition is numbered usernames
+        no longer reduces at all — and it is the correct trade for a security
+        perimeter, where two distinct identifiers collapsing into one is a
+        loss of evidence.
+        """
         payload = "\n".join(
             [f"user bob{i} logged in" for i in range(30)]
             + [f"user boa{i} logged in" for i in range(30)]
         )
         result = await PetitProcessor().run(payload, PreProcessContext())
-        assert result.applied
-        assert result.details["groups_collapsed"] == 2, "bob and boa are not the same"
+        assert not result.applied
+        assert result.details["declined"] == "nothing_repetitive"
+
+    async def test_an_isolated_number_still_normalizes(self) -> None:
+        """The flip side: the boundary rule must not disable `<N>` entirely.
+
+        A number that is its own token — a PID in brackets, a port, a byte
+        count — is format, not meaning, and still has to collapse or petit
+        reduces nothing on real log output.
+        """
+        payload = "\n".join(
+            f"Sep 13 04:{i % 60:02d}:00 host01 sshd[{1000 + i}]: "
+            f"connection closed after {i} bytes"
+            for i in range(40)
+        )
+        result = await PetitProcessor().run(payload, PreProcessContext())
+        assert result.applied, "isolated numbers must still normalize away"
+        assert result.details["groups_collapsed"] >= 1
 
     async def test_fingerprints_name_what_they_normalized(self) -> None:
         """A summary that says "#" three times tells the reader less than
@@ -441,3 +470,93 @@ class TestDeclinesCarryTheirEvidence:
         result = await PetitProcessor().run(_syslog(500), PreProcessContext())
         assert result.applied
         assert "would_be_ratio" not in result.details
+
+
+@pytest.mark.asyncio
+class TestDetectionCannotBeSteered:
+    """Unpinning the driver hands an attacker a lever. Bound it.
+
+    Until 0.22.0 `preprocess/petit.py` passed `driver="RawEntry"`, which meant
+    petit never ran format detection and every payload got the same neutral
+    normalization. Dropping that pin is the point of #95 — it is how Trentina
+    finally gets petit's format knowledge — but it opens something the pin had
+    closed:
+
+    petit picks its driver by sampling the buffer. An attacker who controls
+    PART of a tool response therefore has a say in which driver wins, and the
+    winning driver's generalization table is applied to the WHOLE payload.
+    Splice sshd-shaped lines into a Jira comment and `SecureLogHash`'s rules
+    could be applied to content they were never designed for.
+
+    Three things bound it, and none of them should be weakened without
+    replacing this test: `SecureLogEntry.tally_logic` demands unanimity across
+    the sample rather than a plurality; `sample_indices` spreads its sample
+    evenly, so a contiguous injected block cannot dominate unless it is most
+    of the payload; and the chosen driver rides in the sidecar, so a
+    surprising reduction is attributable after the fact.
+
+    Note what is NOT claimed. An attacker who supplies most of the payload
+    does get the driver they want — at which point they are reducing their own
+    content, and what they can achieve is deletion of it. The risk this guards
+    is the minority-splice: a few lines steering the treatment of someone
+    else's data.
+    """
+
+    @staticmethod
+    def _jira_shaped(count: int) -> list[str]:
+        return [
+            f"PROJ-{1000 + i} | In Progress | Fix the retry backoff | alice"
+            for i in range(count)
+        ]
+
+    @staticmethod
+    def _sshd_shaped(count: int) -> list[str]:
+        return [
+            f"Sep 13 04:{i % 60:02d}:00 host01 sshd[{2000 + i}]: "
+            f"Accepted publickey for svc from 10.0.0.{i % 250} port {3000 + i}"
+            for i in range(count)
+        ]
+
+    async def test_a_minority_splice_does_not_win_the_vote(self) -> None:
+        """Ten sshd lines in ninety of someone else's must not pick the driver."""
+        payload = "\n".join(self._jira_shaped(90) + self._sshd_shaped(10))
+        result = await PetitProcessor().run(payload, PreProcessContext())
+        assert result.details.get("petit_driver") != "SecureLogEntry", (
+            "a 10% splice steered detection; check SecureLogEntry.tally_logic "
+            "still demands unanimity across the sample"
+        )
+
+    async def test_a_contiguous_block_does_not_win_either(self) -> None:
+        """The splice is adjacent rather than interleaved.
+
+        Sampling evenly is what defeats this. A sampler that read the first N
+        lines, or a random one that happened to land in the block, would pick
+        the attacker's driver from a payload that is 90% something else.
+        """
+        payload = "\n".join(self._sshd_shaped(10) + self._jira_shaped(90))
+        result = await PetitProcessor().run(payload, PreProcessContext())
+        assert result.details.get("petit_driver") != "SecureLogEntry"
+
+    async def test_the_chosen_driver_is_reported(self) -> None:
+        """Whatever petit picks, an operator can see it.
+
+        This is the mitigation that survives the others being wrong: a
+        surprising reduction is attributable to a named driver in the audit
+        row rather than being a mystery.
+        """
+        result = await PetitProcessor().run(
+            "\n".join(self._sshd_shaped(60)), PreProcessContext()
+        )
+        assert result.details["petit_driver"]
+        assert result.details["petit_degraded"] is False
+
+    async def test_a_degraded_analysis_is_not_declined(self) -> None:
+        """Degrading falls back to RawEntry, which is LESS aggressive.
+
+        Refusing to reduce on `degraded` would turn petit's safe direction
+        into a reduction outage on exactly the mixed-shape payloads that are
+        our normal case.
+        """
+        mixed = self._sshd_shaped(30) + ["not a log line at all"] * 30
+        result = await PetitProcessor().run("\n".join(mixed), PreProcessContext())
+        assert result.details.get("declined") != "petit_error"

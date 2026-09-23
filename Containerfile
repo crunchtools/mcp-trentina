@@ -88,25 +88,37 @@ COPY src/ ./src/
 # `uv export` emits hashes, so this is also a verified install. The project
 # itself goes in second with --no-deps so pip cannot re-resolve around the lock.
 #
-# petit-log is held out of the hashed export and installed separately,
-# because it is resolved from a pin until 3.0.0 reaches PyPI (issue #96) and
-# pip refuses a VCS requirement under hash checking. --no-emit-package keeps
-# every other dependency hash-verified rather than dropping --require-hashes
-# wholesale for the one package that cannot satisfy it.
+# petit-log-crunchtools is held out of the hashed export and installed
+# separately, because it is resolved from a pin until it reaches PyPI (issue
+# #96) and pip refuses a VCS requirement under hash checking.
+# --no-emit-package keeps every other dependency hash-verified rather than
+# dropping --require-hashes wholesale for the one package that cannot satisfy
+# it.
+#
+# THE PACKAGE NAME MUST MATCH pyproject.toml EXACTLY. It has been renamed
+# twice — `crunchtools`, then `petit-log`, then `petit-log-crunchtools` for a
+# PyPI trusted-publisher rule — while the IMPORT stayed `petit`. A stale name
+# here does not warn: --no-emit-package silently matches nothing, the package
+# lands in the hashed export as a git URL, and the build fails with "can't
+# verify hashes for version control repositories", which points at hashing
+# rather than at the name.
 #
 # It comes from the source archive rather than git+https for two reasons: the
 # builder image has no git, and an archive HAS a hash, so this install is
-# verified like all the others. The URL is an immutable commit SHA, not the
-# v3.0.0 tag, because a tag can be moved and this is the artifact that runs
-# in production. If GitHub ever re-rolls the archive the hash check fails the
-# build loudly instead of installing something unexpected.
+# verified like all the others. The URL is an immutable commit SHA, not a tag,
+# because a tag can be moved and this is the artifact that runs in production.
+# If GitHub ever re-rolls the archive the hash check fails the build loudly
+# instead of installing something unexpected.
 #
-# Delete this block and drop --no-emit-package once 3.0.0 is on PyPI.
+# The SHA below is v3.2.0, which is where a petit hash driver declares its own
+# normalization. Keep it in step with [tool.uv.sources] in pyproject.toml.
+#
+# Delete this block and drop --no-emit-package once it is on PyPI.
 RUN pip install --no-cache-dir uv \
- && uv export --frozen --no-dev --extra matrix --no-emit-project --no-emit-package petit-log \
+ && uv export --frozen --no-dev --extra matrix --no-emit-project --no-emit-package petit-log-crunchtools \
       --format requirements-txt -o /tmp/requirements.txt \
  && pip install --no-cache-dir --prefix=/usr -r /tmp/requirements.txt \
- && printf '%s\n' "petit-log @ https://github.com/crunchtools/petit/archive/e74f8e2cc6aa2484463511534ca3b1cef747c00b.tar.gz --hash=sha256:105645a4fb495c2ef4ebea6f19b70cca5991f24ba5101e9e9355ad2263ef4372" > /tmp/petit-log.txt \
+ && printf '%s\n' "petit-log-crunchtools @ https://github.com/crunchtools/petit/archive/360768a38ce82102caeb07759120a5f67ecf3094.tar.gz --hash=sha256:98e72578169a8649a35e0308cb0f6e3ff0ff83a77862a8726cc99dd718c49ba0" > /tmp/petit-log.txt \
  && pip install --no-cache-dir --prefix=/usr --no-deps --require-hashes -r /tmp/petit-log.txt \
  && pip install --no-cache-dir --prefix=/usr --no-deps '.[matrix]'
 

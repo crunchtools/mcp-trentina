@@ -10,6 +10,64 @@ under that name.
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-23
+
+### Changed
+- **`preprocess/petit.py` stops pinning petit's driver and stopword list.**
+  It passed `driver="RawEntry"` and `stopwords=VOLATILE`, which switched off
+  both layers of format knowledge petit has — the entire point of #95. That was
+  not a mistake at the time: the "never words" rule was Trentina's to enforce
+  and petit handed the stopword knob to the caller. petit 3.2.0 inverts it —
+  a hash driver declares its own `DEFAULT_FILTER` and its own generalizations,
+  so the policy lives with the format that needs it, is tested once, and is
+  shared with every consumer (crunchtools/petit#31 §1).
+
+  The rule was also mis-justified. It argued that keeping a buried payload
+  distinct meant it "reaches the perimeter scan" — but a payload that collides
+  into a group is DELETED, so it reaches nobody, the scanner included. It never
+  prevented smuggling. What it bought was an attack not being quietly dropped
+  before anyone judged or recorded it, which is measurable.
+
+- **The dependency is `petit-log-crunchtools`, not `petit-log`.** The
+  distribution has been renamed twice (3.0.0, then 3.1.1 for a PyPI
+  trusted-publisher rule) while the import stayed `petit`. Pinned to 3.x
+  deliberately: 4.0.0 adds multi-line record framing, which is the next phase.
+
+- **`PERIMETER_VERSION` is `"2"`.** petit choosing its own driver changes which
+  lines survive reduction and therefore which bytes reach L1/L2/L3. A cached
+  verdict from before is a verdict about a different document.
+
+### Added
+- **`TestPreProcessorsDoNotSuppressAttacks` — the measurement that replaces the
+  rule.** Every adversarial case is buried in three carriers that look like real
+  tool output (200 lines of repetitive syslog, a 40-element JSON array, an
+  8-message quoted mail thread) and run through the shipped processor chain;
+  the payload has to still be there afterwards. A case that legitimately does
+  not survive becomes `survives_preprocessing=False` with a written reason —
+  a visible edit to the corpus, not a skip, because "we measured this and
+  accepted it" and "nobody noticed" must not look the same. The list is empty.
+- **`TestDetectionCannotBeSteered`.** Unpinning hands an attacker a lever:
+  petit picks its driver by sampling, so someone who controls part of a tool
+  response has a say in which generalization table is applied to the whole of
+  it. Ten sshd-shaped lines spliced into ninety Jira-shaped ones must not win
+  the vote, interleaved or contiguous. What is NOT claimed: an attacker who
+  supplies most of the payload does get the driver they want, at which point
+  they are reducing their own content.
+- The sidecar records `petit_driver` and `petit_degraded`. Detection is
+  load-bearing now, so a surprising reduction is attributable to a named
+  driver in the audit row.
+
+### Note
+- **petit's `strict.stopwords` is more conservative than the patterns it
+  replaces**, and on one shape that means less reduction. Its `<N>` rule is
+  `(?<![\w-])\d+(?![\w-])`, so a digit inside a word is left alone: `bob0`
+  and `bob1` stay distinct where Trentina's old bare `\d+` merged them. That is
+  the right trade for a security perimeter — `web01`/`web02` are different
+  hosts and `PROJ-1234`/`PROJ-1235` are different tickets — but a payload whose
+  only repetition is numbered identifiers no longer reduces. Isolated numbers
+  (PIDs, ports, byte counts) still normalize, so real log output is unaffected;
+  both behaviours are pinned by tests.
+
 ## [0.21.0] - 2026-09-22
 
 Structural. No behaviour change, and the tests are arranged to prove that.
