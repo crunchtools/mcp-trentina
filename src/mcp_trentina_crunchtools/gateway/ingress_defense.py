@@ -8,7 +8,7 @@ functions are the missing wall:
 * ``scan_tool_response`` — every ``tools/call`` result from a REMOTE
   backend: text content blocks, resource text, and every string leaf of
   ``structuredContent``, judged as one document. Internal backends are
-  deliberately exempt: their tools (safe_fetch and friends) run the
+  deliberately exempt: their tools (block_fetch and friends) run the
   pipeline at their own ingress — the firewall filters where content
   ENTERS, and scanning the same bytes twice on the way through is cost,
   not defense.
@@ -145,7 +145,7 @@ def reset_verdict_cache() -> None:
 
 def _cache_key(profile: Profile, kind: str, text: str) -> str:
     d = profile.defense
-    cfg = f"{d.l2_threshold}:{d.l3_threshold}"
+    cfg = f"{d.l2_threshold}"
     return hashlib.sha256(f"{kind}:{cfg}:{text}".encode()).hexdigest()
 
 

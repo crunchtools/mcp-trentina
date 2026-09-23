@@ -1,4 +1,4 @@
-"""Read tools — quarantine_read and safe_read."""
+"""Read tools — block_read, warn_read and clean_read."""
 
 from __future__ import annotations
 
@@ -156,12 +156,7 @@ async def warn_read(path: str) -> dict[str, Any]:
     return await _read_judged(path, mode="warn")
 
 
-async def safe_read(path: str) -> dict[str, Any]:
-    """Deprecated spelling of `block_read`. Removed in 0.29.0."""
-    return await block_read(path)
-
-
-async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
+async def clean_read(path: str, prompt: str) -> dict[str, Any]:
     """Read local file with Layer 1 + Layer 2 (Q-Agent) extraction."""
     start_time = time.time()
     config = get_config()
@@ -202,7 +197,7 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
 
     def _emit(trust_level: str) -> None:
         emit_request_event(
-            tool="quarantine_read",
+            tool="clean_read",
             source=resolved,
             trust_level=trust_level,
             risk_level=pipeline_result.stats.risk_level(),
@@ -265,8 +260,3 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
         "blocklist_warning": blocklist_warning,
         "classifier_warning": classifier_warning,
     }
-
-
-async def clean_read(path: str, prompt: str) -> dict[str, Any]:
-    """Hand back a Q-Agent extraction rather than the bytes on disk."""
-    return await quarantine_read(path, prompt)

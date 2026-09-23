@@ -75,7 +75,7 @@ class TestBuildScanResult:
 
 
 class TestDeepScanVsStandardScan:
-    """Verify deep_quarantine_scan sends raw content, standard sends sanitized."""
+    """Verify deep_quarantine_scan sends raw content, standard sends the L2 input."""
 
     @pytest.mark.asyncio
     async def test_deep_scan_passes_raw_content(self) -> None:
@@ -85,7 +85,7 @@ class TestDeepScanVsStandardScan:
                 "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_trentina_crunchtools.tools.scan.run_l1") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.run_l1") as mock_l1,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
@@ -95,17 +95,17 @@ class TestDeepScanVsStandardScan:
             patch("mcp_trentina_crunchtools.defense.get_config") as defense_config,
         ):
             defense_config.return_value.has_api_key = True
-            raw = "RAW UNSANITIZED CONTENT"
+            raw = "RAW CONTENT"
             mock_fetch.return_value = (raw, "file", "/tmp/test.txt")
 
             mock_pipeline = MagicMock()
-            mock_pipeline.content = "SANITIZED CONTENT"
-            mock_pipeline.l2_input = "SANITIZED CONTENT"
+            mock_pipeline.content = "L2 INPUT"
+            mock_pipeline.l2_input = "L2 INPUT"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0
             mock_pipeline.stats.suspicious_detections.return_value = 0
-            mock_sanitize.return_value = mock_pipeline
+            mock_l1.return_value = mock_pipeline
 
             mock_config.return_value.has_api_key = True
             mock_config.return_value.max_content = 100000
@@ -123,14 +123,14 @@ class TestDeepScanVsStandardScan:
             assert result["scan_mode"] == "deep"
 
     @pytest.mark.asyncio
-    async def test_standard_scan_passes_sanitized_content(self) -> None:
+    async def test_standard_scan_passes_the_l2_input(self) -> None:
         with (
             patch("mcp_trentina_crunchtools.tools.scan.get_config") as mock_config,
             patch(
                 "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_trentina_crunchtools.tools.scan.run_l1") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.run_l1") as mock_l1,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
@@ -140,17 +140,17 @@ class TestDeepScanVsStandardScan:
             patch("mcp_trentina_crunchtools.defense.get_config") as defense_config,
         ):
             defense_config.return_value.has_api_key = True
-            raw = "RAW UNSANITIZED CONTENT"
+            raw = "RAW CONTENT"
             mock_fetch.return_value = (raw, "file", "/tmp/test.txt")
 
             mock_pipeline = MagicMock()
-            mock_pipeline.content = "SANITIZED CONTENT"
-            mock_pipeline.l2_input = "SANITIZED CONTENT"
+            mock_pipeline.content = "L2 INPUT"
+            mock_pipeline.l2_input = "L2 INPUT"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0
             mock_pipeline.stats.suspicious_detections.return_value = 0
-            mock_sanitize.return_value = mock_pipeline
+            mock_l1.return_value = mock_pipeline
 
             mock_config.return_value.has_api_key = True
             mock_config.return_value.max_content = 100000
@@ -164,7 +164,7 @@ class TestDeepScanVsStandardScan:
             result = await quarantine_scan(path="/tmp/test.txt")
 
             detect_content = mock_detect.call_args[0][0]
-            assert detect_content == "SANITIZED CONTENT"
+            assert detect_content == "L2 INPUT"
             assert result["scan_mode"] == "standard"
 
     @pytest.mark.asyncio
@@ -175,7 +175,7 @@ class TestDeepScanVsStandardScan:
                 "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_trentina_crunchtools.tools.scan.run_l1") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.run_l1") as mock_l1,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
@@ -188,13 +188,13 @@ class TestDeepScanVsStandardScan:
             mock_fetch.return_value = ("content", "file", "/tmp/test.txt")
 
             mock_pipeline = MagicMock()
-            mock_pipeline.content = "sanitized"
-            mock_pipeline.l2_input = "sanitized"
+            mock_pipeline.content = "l2 input"
+            mock_pipeline.l2_input = "l2 input"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0
             mock_pipeline.stats.suspicious_detections.return_value = 0
-            mock_sanitize.return_value = mock_pipeline
+            mock_l1.return_value = mock_pipeline
 
             mock_config.return_value.has_api_key = False
             mock_config.return_value.max_content = 100000

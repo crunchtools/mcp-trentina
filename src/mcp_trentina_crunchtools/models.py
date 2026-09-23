@@ -55,7 +55,7 @@ ALLOWED_TEXT_EXTENSIONS = frozenset(
 
 
 class FetchInput(BaseModel, extra="forbid"):
-    """Input for quarantine_fetch and safe_fetch."""
+    """Input for clean_fetch and block_fetch."""
 
     url: str = Field(..., min_length=1, max_length=MAX_URL_LENGTH)
     prompt: str = Field(
@@ -73,7 +73,7 @@ class FetchInput(BaseModel, extra="forbid"):
 
 
 class ReadInput(BaseModel, extra="forbid"):
-    """Input for quarantine_read and safe_read."""
+    """Input for clean_read and block_read."""
 
     path: str = Field(..., min_length=1, max_length=MAX_PATH_LENGTH)
     prompt: str = Field(

@@ -556,21 +556,20 @@ class TestPerimeterIsOperatorOnly:
         assert result["reloaded"] is True
         assert _registry()["beta"].matrix_ingress.preprocess.processors == ["select"]
 
-    async def test_the_pre_0_21_spelling_still_loads(
+    async def test_the_pre_0_21_spelling_is_refused(
         self, profiles_path: Path
     ) -> None:
-        """A deployed config must survive the upgrade.
+        """The old `scan_view.extractor` block is gone as of 0.29.0.
 
-        Every profile model is `extra="forbid"` and a load failure is fatal,
-        so the old `l2_input.extractor` spelling has to keep working until
-        0.25.0 removes it. `full` maps to the empty list, which is why an
-        alias could not do this and a before-validator does.
+        It was migrated with a warning for eight minor releases. Every
+        profile model is `extra="forbid()`, so a config still carrying it now
+        fails the reload rather than loading as something the operator did
+        not write — which is the outcome a removal is FOR.
         """
         profiles_path.write_text(BETA_MATRIX_OLD_SPELLING_YAML, encoding="utf-8")
         result = await _reload_as("alpha")
 
-        assert result["reloaded"] is True
-        assert _registry()["beta"].matrix_ingress.preprocess.processors == []
+        assert result["reloaded"] is False
 
 
 class TestUnknownCaller:

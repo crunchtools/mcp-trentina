@@ -1,10 +1,10 @@
-"""Search tools — safe_search and quarantine_search.
+"""Search tools — block_search, warn_search and clean_search.
 
 Pipeline: L0 → resolve → L1 → L2 [→ L3]
 
 L0 searches via Gemini grounding (plain text + groundingMetadata).
 Redirect URLs are resolved. L1 reads text + titles. L2 classifies.
-For quarantine_search, L3 (clean Q-Agent with structured JSON) structures
+For clean_search, L3 (clean Q-Agent with structured JSON) structures
 what L1 produced into actionable results.
 """
 
@@ -88,7 +88,7 @@ async def _search_judged(
     )
     l1_text = text_result.content
 
-    # safe_search blocks on an L1 COUNT, not a risk level — a fifth distinct
+    # block_search blocks on an L1 COUNT, not a risk level — a fifth distinct
     # L1 policy across the tools. Policy stays with the caller by design; only
     # the mechanics move to the pipeline.
     if total_l1 >= 3:
@@ -172,12 +172,7 @@ async def warn_search(query: str, num_results: int = 5) -> dict[str, Any]:
     return await _search_judged(query, num_results, mode="warn")
 
 
-async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
-    """Deprecated spelling of `block_search`. Removed in 0.29.0."""
-    return await block_search(query, num_results)
-
-
-async def quarantine_search(
+async def clean_search(
     query: str, prompt: str, num_results: int = 5,
 ) -> dict[str, Any]:
     """L0 → resolve → L1 → L2 → L3."""
@@ -238,7 +233,7 @@ async def quarantine_search(
         }
 
     emit_request_event(
-        tool="quarantine_search",
+        tool="clean_search",
         source=f"search:{query}",
         trust_level="quarantined",
         risk_level="low",
@@ -270,10 +265,3 @@ async def quarantine_search(
             "classifier_output_warning"
         ),
     }
-
-
-async def clean_search(
-    query: str, prompt: str, num_results: int = 5
-) -> dict[str, Any]:
-    """Hand back a Q-Agent extraction of the grounded answer."""
-    return await quarantine_search(query, prompt, num_results)

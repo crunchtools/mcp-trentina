@@ -197,8 +197,8 @@ to avoid collisions — including trentina's own tools under the `internal://`
 backend's name (conventionally `web`):
 
 ```
-web__safe_fetch_tool
-web__quarantine_fetch_tool
+web__block_fetch_tool
+web__clean_fetch_tool
 mcp-slack__slack_list_channels
 mcp-atlassian__jira_search
 google-workspace-personal__get_gmail_message_content
@@ -381,7 +381,7 @@ blast radius, autonomous agent), then agent2.
    `${TRENTINA_GATEWAY_<PROFILE>_TOKEN}`).
 3. Restart it; verify a call exercises both an http backend
    (`mcp-gemini__gemini_query_tool`) and the internal backend
-   (`web__safe_fetch_tool`); confirm the prompt-token count drops from ~146K
+   (`web__block_fetch_tool`); confirm the prompt-token count drops from ~146K
    toward the <50K target.
 
 **An interactive-session consumer — second:**

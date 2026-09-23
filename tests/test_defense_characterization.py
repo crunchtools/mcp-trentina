@@ -10,7 +10,7 @@ Two kinds of test live in this file, and the difference matters:
    extraction, the refactor broke something.
 
 2. Tests that pin behaviour we intend to CHANGE — the divergences between the
-   five copies (`safe_content` hardcoding untrusted, `alert_ingress` ignoring
+   five copies (`block_content` hardcoding untrusted, `alert_ingress` ignoring
    `profile.defense`, L3 gated on an API key rather than a threshold). These
    are marked DIVERGENCE. They are here so the change is deliberate: the test
    fails, someone reads why, and updates it on purpose. That is the whole
@@ -73,7 +73,7 @@ def _enter_fetch_patches(
     detection: dict[str, Any] | None = None,
     content: str = "<p>Hello</p>",
 ) -> Any:
-    """Patch every seam safe_fetch/quarantine_fetch reaches out through.
+    """Patch every seam block_fetch/clean_fetch reaches out through.
 
     Post-extraction these straddle two modules: the IO and trust decisions
     still belong to the tool, while the pipeline's own seams (L2, L3, the
@@ -106,16 +106,16 @@ def _enter_fetch_patches(
 
 
 class TestSafeFetchBlockMatrix:
-    """safe_fetch fails closed. Which layer fires, and when does trust excuse it."""
+    """block_fetch fails closed. Which layer fires, and when does trust excuse it."""
 
     async def _run(self, **kw: Any) -> Any:
-        from mcp_trentina_crunchtools.tools.fetch import safe_fetch
+        from mcp_trentina_crunchtools.tools.fetch import block_fetch
 
         with ExitStack() as stack:
             _enter_fetch_patches(stack, **kw)
             rec = stack.enter_context(patch(f"{_DEFENSE}.record_detection"))
             try:
-                result = await safe_fetch("https://example.com")
+                result = await block_fetch("https://example.com")
             except BlockedSourceError:
                 return ("blocked", None, rec)
             else:
@@ -204,13 +204,13 @@ class TestSafeFetchBlockMatrix:
 
 class TestQuarantineFetchWarnsInsteadOfBlocking:
     async def test_malicious_warns_and_returns(self) -> None:
-        from mcp_trentina_crunchtools.tools.fetch import quarantine_fetch
+        from mcp_trentina_crunchtools.tools.fetch import clean_fetch
 
         with ExitStack() as stack:
             _enter_fetch_patches(
                 stack, classification=MALICIOUS, trusted=False, has_api_key=False
             )
-            result = await quarantine_fetch(
+            result = await clean_fetch(
                 "https://example.com", "Extract the main content."
             )
 
@@ -221,8 +221,8 @@ class TestQuarantineFetchWarnsInsteadOfBlocking:
         assert "MALICIOUS" in result["classifier_warning"]
 
     async def test_blocklisted_source_warns_rather_than_raising(self) -> None:
-        """safe_fetch raises on a blocklisted URL; quarantine_fetch proceeds."""
-        from mcp_trentina_crunchtools.tools.fetch import quarantine_fetch
+        """block_fetch raises on a blocklisted URL; clean_fetch proceeds."""
+        from mcp_trentina_crunchtools.tools.fetch import clean_fetch
 
         with (
             patch("mcp_trentina_crunchtools.tools.fetch.fetch_url",
@@ -237,7 +237,7 @@ class TestQuarantineFetchWarnsInsteadOfBlocking:
             cfg.return_value.is_trusted_domain.return_value = True
             cfg.return_value.has_api_key = False
             cfg.return_value.fallback = "warn"
-            result = await quarantine_fetch(
+            result = await clean_fetch(
                 "https://known-bad.example.com", "Extract the main content."
             )
 
@@ -246,14 +246,14 @@ class TestQuarantineFetchWarnsInsteadOfBlocking:
 
 class TestSafeContentAlwaysUntrusted:
     async def test_content_is_never_trusted(self) -> None:
-        """DIVERGENCE: safe_content hardcodes is_trusted=False.
+        """DIVERGENCE: block_content hardcodes is_trusted=False.
 
         fetch consults the domain, read consults the path, content trusts
         nothing. Inline content has no provenance to appeal to, so this is
         defensible — but it is a fourth policy in a fourth file, and defend()
         has to take it as a parameter rather than rediscover it.
         """
-        from mcp_trentina_crunchtools.tools.content import safe_content
+        from mcp_trentina_crunchtools.tools.content import block_content
 
         with (
             patch("mcp_trentina_crunchtools.tools.content.is_blocked",
@@ -268,7 +268,7 @@ class TestSafeContentAlwaysUntrusted:
             cfg.return_value.max_content = 100_000
             dcfg.return_value.has_api_key = False
             with pytest.raises(BlockedSourceError):
-                await safe_content("some text", "text/plain")
+                await block_content("some text", "text/plain")
 
 
 class TestAlertIngressNowHonoursTheProfile:

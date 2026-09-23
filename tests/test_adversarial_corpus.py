@@ -6,7 +6,7 @@ These tests make NO API calls. They prove two things about
 1. The corpus is well-formed (unique ids, valid risk levels, coherent
    attack/benign split).
 2. Each case reaches the layer it claims to. Semantic attacks must survive
-   Layer 1 (deterministic sanitization) untouched — otherwise they would never
+   Layer 1 (deterministic detection) untouched — otherwise they would never
    reach the Q-Agent and the provider benchmark would be measuring nothing.
    Structural attacks and the quoted-attack trap must be stripped by Layer 1,
    as annotated.

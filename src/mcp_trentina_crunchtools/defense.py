@@ -133,10 +133,10 @@ def _should_run_l3(*, defense: DefenseConfig | None, l3_gate: bool) -> bool:
     """L3 runs on everything the gateway scans. There is no score gate.
 
     This used to escalate to L3 only on model-output provenance, on a
-    suspicious L1 detection, or on an L2 score at or above ``l3_threshold``.
+    suspicious L1 detection, or on an L2 score at or above a configured gate.
     Clean traffic therefore never reached the judge at all — and because L2
     FLAGS at ``l2_threshold`` (0.3 in production) while escalation needed
-    ``l3_threshold`` (0.7), there was a band that L2 flagged and L3 never
+    that gate (0.7), there was a band that L2 flagged and L3 never
     reviewed.
 
     Gating the semantic judge on the pattern classifier agreeing there is
@@ -158,7 +158,7 @@ def _should_run_l3(*, defense: DefenseConfig | None, l3_gate: bool) -> bool:
     it can never read as a clean scan.
 
     ``l3_gate=False`` is not a policy switch either. Two callers set it,
-    ``advise()`` and ``safe_search``, and both spend L3 on *extraction*
+    ``advise()`` and ``block_search``, and both spend L3 on *extraction*
     rather than detection — the layer still runs, in a different mode.
     """
     # has_api_key is Gemini's; a profile that overrides defense.provider

@@ -147,9 +147,8 @@ What a profile controls is a threshold and a consequence:
   `_trentina_warning` (the calibration mode) and `block` refuses it outright.
   `TRENTINA_ENFORCEMENT_OVERRIDE=warn` is the kill switch.
 
-`l3_threshold` is accepted and ignored. It used to gate whether L3 ran at all, which meant clean
 traffic never reached the judge — and since L2 flagged at `l2_threshold` while escalation needed
-`l3_threshold`, there was a band L2 flagged that L3 never reviewed. L1, L2 and L3 now run on
+a score gate, there was a band L2 flagged that L3 never reviewed. L1, L2 and L3 now run on
 every input to the gateway.
 
 A layer that is genuinely unavailable at runtime — no ONNX model, provider down — is a degraded

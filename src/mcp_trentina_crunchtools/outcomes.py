@@ -1,8 +1,8 @@
 """Outcome taxonomy for gateway audit rows.
 
 A single ``success`` boolean cannot describe what happened to a tool call, and
-reading one as a health signal actively misleads. ``safe_fetch`` and
-``safe_read`` fail closed by design: when the defense pipeline blocks content
+reading one as a health signal actively misleads. ``block_fetch`` and
+``block_read`` fail closed by design: when the defense pipeline blocks content
 the tool *raises*, which under a boolean schema is indistinguishable from the
 backend being down. An operator reading "2 ok / 34 errors" concludes the tool
 is broken when the truth may be that it blocked 34 hostile pages.

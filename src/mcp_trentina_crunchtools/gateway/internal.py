@@ -1,6 +1,6 @@
 """Internal-tool backend: trentina's own FastMCP tools as a gateway backend.
 
-Option C folds trentina's native tool surface (safe_fetch, quarantine_*, scan,
+Option C folds trentina's native tool surface (block_fetch, clean_*, scan,
 stats, …) into the gateway alongside the remote http(s) MCP backends. A profile
 backend whose URL uses the ``internal://<label>`` scheme routes here instead of
 opening a streamable-http session: the whole trentina tool surface becomes one

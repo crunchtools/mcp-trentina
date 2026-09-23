@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from starlette.responses import Response
 
 
-class TestSanitizeProxyPath:
+class TestProxyPathNormalization:
     """Path traversal prevention for proxy endpoints."""
 
     def test_clean_path_passes(self) -> None:

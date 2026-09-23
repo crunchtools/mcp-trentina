@@ -1,4 +1,4 @@
-"""Fetch tools — quarantine_fetch and safe_fetch."""
+"""Fetch tools — clean_fetch and block_fetch."""
 
 from __future__ import annotations
 
@@ -289,12 +289,7 @@ async def warn_fetch(url: str) -> dict[str, Any]:
     return await _fetch_judged(url, mode="warn")
 
 
-async def safe_fetch(url: str) -> dict[str, Any]:
-    """Deprecated spelling of `block_fetch`. Removed in 0.29.0."""
-    return await block_fetch(url)
-
-
-async def quarantine_fetch(url: str, prompt: str) -> dict[str, Any]:
+async def clean_fetch(url: str, prompt: str) -> dict[str, Any]:
     """Fetch URL with Layer 1 + Layer 2 (Q-Agent) extraction.
 
     Warns but proceeds if source is in blocklist.
@@ -340,7 +335,7 @@ async def quarantine_fetch(url: str, prompt: str) -> dict[str, Any]:
 
     def _emit(trust_level: str) -> None:
         emit_request_event(
-            tool="quarantine_fetch",
+            tool="clean_fetch",
             source=url,
             trust_level=trust_level,
             risk_level=pipeline_result.stats.risk_level(),
@@ -404,8 +399,3 @@ async def quarantine_fetch(url: str, prompt: str) -> dict[str, Any]:
         "blocklist_warning": blocklist_warning,
         "classifier_warning": classifier_warning,
     }
-
-
-async def clean_fetch(url: str, prompt: str) -> dict[str, Any]:
-    """Hand back a Q-Agent extraction rather than the bytes that arrived."""
-    return await quarantine_fetch(url, prompt)

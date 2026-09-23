@@ -20,18 +20,10 @@ from .tools import (
     deep_quarantine_scan,
     deep_scan_content,
     get_trentina_stats,
-    quarantine_content,
-    quarantine_fetch,
-    quarantine_read,
     quarantine_scan,
     quarantine_scan_dir,
-    quarantine_search,
     reconnect_backend,
     reload_profiles,
-    safe_content,
-    safe_fetch,
-    safe_read,
-    safe_search,
     scan_content,
     warn_content,
     warn_fetch,
@@ -48,58 +40,15 @@ mcp = FastMCP(
     instructions=(
         "Quarantined web content extraction with three-layer prompt injection defense. "
         "Layer 1: deterministic detection. Layer 2: Prompt Guard 2 classifier. "
-        "Layer 3: quarantined Gemini Q-Agent. "
+        "Layer 3: quarantined Gemini judge. "
         "Three modes, picked per call by NAME: block_* refuses flagged content, "
         "warn_* delivers exactly what arrived with the verdict attached, "
         "clean_* returns a Q-Agent extraction instead of the original. "
         "Prefer warn_* when you need the real bytes and can weigh a caution; "
         "block_* when acting unsupervised. quarantine_scan is pre-flight "
-        "assessment. safe_*/quarantine_* are the deprecated spellings of "
-        "block_*/clean_* and are removed in 0.29.0."
+        "assessment."
     ),
 )
-
-
-@mcp.tool()
-async def safe_fetch_tool(url: str) -> dict[str, Any]:
-    """DEPRECATED — use `block_fetch`. Removed in 0.29.0.
-
-    Identical behaviour; the name now says what the mode DOES.
-    """
-    return await safe_fetch(url)
-
-
-@mcp.tool()
-async def quarantine_fetch_tool(
-    url: str,
-    prompt: str = "Extract the main content from this page.",
-) -> dict[str, Any]:
-    """DEPRECATED — use `clean_fetch`. Removed in 0.29.0.
-
-    Identical behaviour; the name now says what the mode DOES.
-    """
-    return await quarantine_fetch(url, prompt)
-
-
-@mcp.tool()
-async def safe_read_tool(path: str) -> dict[str, Any]:
-    """DEPRECATED — use `block_read`. Removed in 0.29.0.
-
-    Identical behaviour; the name now says what the mode DOES.
-    """
-    return await safe_read(path)
-
-
-@mcp.tool()
-async def quarantine_read_tool(
-    path: str,
-    prompt: str = "Extract the main content from this file.",
-) -> dict[str, Any]:
-    """DEPRECATED — use `clean_read`. Removed in 0.29.0.
-
-    Identical behaviour; the name now says what the mode DOES.
-    """
-    return await quarantine_read(path, prompt)
 
 
 @mcp.tool()
@@ -160,31 +109,6 @@ async def quarantine_scan_dir_tool(directory: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def safe_content_tool(
-    content: str,
-    content_type: str = "text/plain",
-) -> dict[str, Any]:
-    """DEPRECATED — use `block_content`. Removed in 0.29.0.
-
-    Identical behaviour; the name now says what the mode DOES.
-    """
-    return await safe_content(content, content_type)
-
-
-@mcp.tool()
-async def quarantine_content_tool(
-    content: str,
-    prompt: str = "Extract the main content.",
-    content_type: str = "text/plain",
-) -> dict[str, Any]:
-    """DEPRECATED — use `clean_content`. Removed in 0.29.0.
-
-    Identical behaviour; the name now says what the mode DOES.
-    """
-    return await quarantine_content(content, prompt, content_type)
-
-
-@mcp.tool()
 async def scan_content_tool(
     content: str,
     content_type: str = "text/plain",
@@ -219,31 +143,6 @@ async def deep_scan_content_tool(
         content_type: MIME type — text/plain (default), text/html, or text/markdown
     """
     return await deep_scan_content(content, content_type)
-
-
-@mcp.tool()
-async def safe_search_tool(
-    query: str,
-    num_results: int = 5,
-) -> dict[str, Any]:
-    """DEPRECATED — use `block_search`. Removed in 0.29.0.
-
-    Identical behaviour; the name now says what the mode DOES.
-    """
-    return await safe_search(query, num_results)
-
-
-@mcp.tool()
-async def quarantine_search_tool(
-    query: str,
-    prompt: str = "Summarize the search results.",
-    num_results: int = 5,
-) -> dict[str, Any]:
-    """DEPRECATED — use `clean_search`. Removed in 0.29.0.
-
-    Identical behaviour; the name now says what the mode DOES.
-    """
-    return await quarantine_search(query, prompt, num_results)
 
 
 # The three modes as tool names, so the AGENT picks per call and the profile's

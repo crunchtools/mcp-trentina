@@ -59,7 +59,7 @@ class BlockedSourceError(TrentinaError):
     def __init__(self, source: str, detected_at: str) -> None:
         super().__init__(
             f"Source blocked: {source} (detected at {detected_at}). "
-            "Use quarantine_fetch to bypass blocklist."
+            "Use clean_fetch to bypass blocklist."
         )
 
 

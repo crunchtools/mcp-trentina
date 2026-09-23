@@ -99,7 +99,7 @@ class TestL3RunsOnCleanTraffic:
         """0.7 was the old escalation point. Nothing below it reached L3."""
         cls = ClassifierResult(label="BENIGN", score=score, latency_ms=1.0)
         _, mocks = await _defend(
-            classification=cls, defense=DefenseConfig(l3_threshold=0.7)
+            classification=cls, defense=DefenseConfig()
         )
         mocks["quarantine_detect"].assert_called_once()
 
@@ -112,7 +112,7 @@ class TestL3RunsOnCleanTraffic:
         """
         _, mocks = await _defend(
             classification=BENIGN_MID,
-            defense=DefenseConfig(l2_threshold=0.3, l3_threshold=0.7),
+            defense=DefenseConfig(l2_threshold=0.3),
         )
         mocks["quarantine_detect"].assert_called_once()
 
@@ -123,16 +123,19 @@ class TestL3RunsOnCleanTraffic:
 
 
 class TestThresholdCannotSuppressL3:
-    """`l3_threshold` is deprecated and ignored. Prove it, do not trust it."""
+    """`l3_threshold` no longer exists, so nothing can be set to suppress L3.
 
-    @pytest.mark.parametrize("threshold", [0.0, 0.5, 0.7, 0.99, 1.0])
-    async def test_no_threshold_value_prevents_l3(self, threshold: float) -> None:
-        """Including 1.0, which under the old gate meant 'effectively never'."""
-        _, mocks = await _defend(
-            classification=BENIGN_ZERO,
-            defense=DefenseConfig(l3_threshold=threshold),
-        )
-        mocks["quarantine_detect"].assert_called_once()
+    Until 0.29.0 the key was accepted and ignored, and these tests had to
+    prove the ignoring actually happened for every value including 1.0 —
+    which under the old gate meant "effectively never". The key is now
+    rejected at load, so the guarantee is structural rather than tested.
+    """
+
+    def test_the_key_is_rejected_rather_than_ignored(self) -> None:
+        import pydantic
+
+        with pytest.raises(pydantic.ValidationError):
+            DefenseConfig(l3_threshold=1.0)
 
     async def test_gate_helper_ignores_the_threshold_entirely(self) -> None:
         """Belt and braces: the decision function takes no score at all now,
@@ -197,7 +200,7 @@ class TestTheOnlyPermittedSkips:
         mocks["quarantine_detect"].assert_called_once()
 
     async def test_advise_still_opts_out_of_detection_mode(self) -> None:
-        """`advise()` and safe_search spend L3 on EXTRACTION instead.
+        """`advise()` and block_search spend L3 on EXTRACTION instead.
 
         This is not a coverage hole and not a policy switch: the layer still
         runs for those callers, in a different mode. Pinned so that if the
@@ -210,13 +213,18 @@ class TestTheOnlyPermittedSkips:
             mocks["quarantine_detect"].assert_not_called()
 
 
-class TestDeprecatedKeyIsAnnounced:
-    async def test_setting_l3_threshold_warns_at_load(
+class TestDeprecatedKeyIsRejected:
+    async def test_a_profile_setting_l3_threshold_fails_to_load(
         self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
-        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """A key that silently stopped mattering is worse than one that is
-        rejected. Tell the operator."""
+        """Announced as ignored since 0.12.0, removed in 0.29.0.
+
+        ``extra="forbid"`` now refuses it, which is the point: a key that
+        silently stopped mattering is worse than one that fails loudly, and
+        an operator who still sets it is reasoning about a gate that has not
+        existed for seventeen minor releases.
+        """
+        from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
         from mcp_trentina_crunchtools.gateway.loader import load_profiles
 
         monkeypatch.setenv("TEST_TOK", "x")
@@ -231,27 +239,5 @@ class TestDeprecatedKeyIsAnnounced:
             "    backends: {}\n",
             encoding="utf-8",
         )
-        with caplog.at_level("WARNING"):
+        with pytest.raises((ProfileConfigError, ValueError)):
             load_profiles(cfg)
-        assert "l3_threshold" in caplog.text
-        assert "ignored" in caplog.text
-
-    async def test_no_warning_when_the_key_is_absent(
-        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
-        caplog: pytest.LogCaptureFixture,
-    ) -> None:
-        from mcp_trentina_crunchtools.gateway.loader import load_profiles
-
-        monkeypatch.setenv("TEST_TOK", "x")
-        cfg = tmp_path / "profiles.yaml"
-        cfg.write_text(
-            "profiles:\n"
-            "  agent2:\n"
-            "    auth:\n"
-            "      bearer_token_env: TEST_TOK\n"
-            "    backends: {}\n",
-            encoding="utf-8",
-        )
-        with caplog.at_level("WARNING"):
-            load_profiles(cfg)
-        assert "l3_threshold" not in caplog.text

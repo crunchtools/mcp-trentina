@@ -274,11 +274,11 @@ class TestRuntimeChecks:
         assert _enforce_quarantine(body) is None
 
 
-class TestPostExtractionSanitization:
+class TestPostExtractionL1:
     """Verify post-extraction Layer 1 pass on Q-Agent output."""
 
     @pytest.mark.asyncio
-    async def test_sanitize_text_called_on_extraction(self) -> None:
+    async def test_l1_runs_on_the_extraction(self) -> None:
         extraction_json = {
             "extracted_text": "Some extracted content.",
             "confidence": "high",
@@ -289,16 +289,16 @@ class TestPostExtractionSanitization:
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
-            patch("mcp_trentina_crunchtools.quarantine.agent.run_l1") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.quarantine.agent.run_l1") as mock_l1,
         ):
             mock_config.return_value.fallback = "layer1"
             mock_result = MagicMock()
-            mock_result.content = "Sanitized content."
-            mock_sanitize.return_value = mock_result
+            mock_result.content = "Extracted content."
+            mock_l1.return_value = mock_result
 
             resp = await quarantine_extract("page", "Extract")
-            mock_sanitize.assert_called_once_with("Some extracted content.")
-            assert resp["content"]["extracted_text"] == "Sanitized content."
+            mock_l1.assert_called_once_with("Some extracted content.")
+            assert resp["content"]["extracted_text"] == "Extracted content."
 
     @pytest.mark.asyncio
     async def test_clean_text_passes_through(self) -> None:
@@ -319,7 +319,7 @@ class TestPostExtractionSanitization:
             assert resp["content"]["extracted_text"] == "Clean content with no issues."
 
     @pytest.mark.asyncio
-    async def test_empty_extracted_text_skips_sanitize(self) -> None:
+    async def test_empty_extracted_text_skips_l1(self) -> None:
         extraction_json = {
             "extracted_text": "",
             "confidence": "low",
@@ -330,13 +330,13 @@ class TestPostExtractionSanitization:
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
-            patch("mcp_trentina_crunchtools.quarantine.agent.run_l1") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.quarantine.agent.run_l1") as mock_l1,
         ):
             mock_config.return_value.fallback = "layer1"
 
             resp = await quarantine_extract("page", "Extract")
             assert resp["content"]["extracted_text"] == ""
-            mock_sanitize.assert_not_called()
+            mock_l1.assert_not_called()
 
 
 class TestLayer1ContextInDetection:

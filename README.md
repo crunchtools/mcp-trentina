@@ -48,7 +48,7 @@ When Trentina detects prompt injection in a source, it records the source in a S
 
 ### [Web Content Quarantine Tools](docs/quarantine-tools.md)
 
-Trentina's original capability: safe web fetching, file reading, and web search with prompt injection defense. `safe_fetch` fails on injection. `quarantine_fetch` warns but proceeds, extracting content through the Q-Agent. `quarantine_search` chains Gemini grounding with the full defense pipeline. `quarantine_scan` does pre-flight detection without returning content.
+Trentina's original capability: safe web fetching, file reading, and web search with prompt injection defense. `block_fetch` fails on injection. `clean_fetch` warns but proceeds, extracting content through the Q-Agent. `clean_search` chains Gemini grounding with the full defense pipeline. `quarantine_scan` does pre-flight detection without returning content.
 
 ### [LLM Key Proxying](docs/llm-proxying.md)
 

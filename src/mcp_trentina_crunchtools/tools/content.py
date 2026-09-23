@@ -1,4 +1,4 @@
-"""Content tools — safe_content, quarantine_content, scan_content, deep_scan_content."""
+"""Content tools — block_content, clean_content, scan_content, deep_scan_content."""
 
 from __future__ import annotations
 
@@ -124,14 +124,7 @@ async def warn_content(
     return await _content_judged(content, content_type, mode="warn")
 
 
-async def safe_content(
-    content: str, content_type: str = "text/plain"
-) -> dict[str, Any]:
-    """Deprecated spelling of `block_content`. Removed in 0.29.0."""
-    return await block_content(content, content_type)
-
-
-async def quarantine_content(
+async def clean_content(
     content: str,
     prompt: str = "Extract the main content.",
     content_type: str = "text/plain",
@@ -183,7 +176,7 @@ async def quarantine_content(
 
     def _emit(trust_level: str) -> None:
         emit_request_event(
-            tool="quarantine_content",
+            tool="clean_content",
             source=chash,
             trust_level=trust_level,
             risk_level=pipeline_result.stats.risk_level(),
@@ -251,7 +244,7 @@ async def scan_content(
     chash = _content_hash(content)
 
     # Published tool surface, discarded explicitly: L1 is format-agnostic and
-    # `content_type` selects nothing (#172). See `quarantine_content`.
+    # `content_type` selects nothing (#172). See `clean_content`.
     del content_type
 
     l1 = run_l1(content)
@@ -320,7 +313,7 @@ async def deep_scan_content(
     chash = _content_hash(content)
 
     # Published tool surface, discarded explicitly: L1 is format-agnostic and
-    # `content_type` selects nothing (#172). See `quarantine_content`.
+    # `content_type` selects nothing (#172). See `clean_content`.
     del content_type
 
     l1 = run_l1(content)
@@ -378,12 +371,3 @@ async def deep_scan_content(
     )
 
     return result
-
-
-async def clean_content(
-    content: str,
-    prompt: str = "Extract the main content.",
-    content_type: str = "text/plain",
-) -> dict[str, Any]:
-    """Hand back a Q-Agent extraction rather than the content as given."""
-    return await quarantine_content(content, prompt, content_type)

@@ -387,11 +387,11 @@ class TestPipelineIntegration:
     """Test classifier integration in fetch/read/scan pipelines."""
 
     @pytest.mark.asyncio
-    async def test_safe_fetch_blocks_on_classifier_malicious(self) -> None:
-        """safe_fetch should raise BlockedSourceError when classifier says MALICIOUS."""
+    async def test_block_fetch_blocks_on_classifier_malicious(self) -> None:
+        """block_fetch should raise BlockedSourceError when classifier says MALICIOUS."""
         from mcp_trentina_crunchtools.errors import BlockedSourceError
         from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-        from mcp_trentina_crunchtools.tools.fetch import safe_fetch
+        from mcp_trentina_crunchtools.tools.fetch import block_fetch
 
         malicious_result = ClassifierResult(label="MALICIOUS", score=0.95, latency_ms=50.0)
 
@@ -419,15 +419,15 @@ class TestPipelineIntegration:
             mock_config.return_value.has_api_key = False
 
             with pytest.raises(BlockedSourceError):
-                await safe_fetch("https://evil.example.com")
+                await block_fetch("https://evil.example.com")
 
             mock_record.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_quarantine_fetch_warns_on_classifier_malicious(self) -> None:
-        """quarantine_fetch should add classifier_warning, not block."""
+    async def test_clean_fetch_warns_on_classifier_malicious(self) -> None:
+        """clean_fetch should add classifier_warning, not block."""
         from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-        from mcp_trentina_crunchtools.tools.fetch import quarantine_fetch
+        from mcp_trentina_crunchtools.tools.fetch import clean_fetch
 
         malicious_result = ClassifierResult(label="MALICIOUS", score=0.95, latency_ms=50.0)
 
@@ -460,7 +460,7 @@ class TestPipelineIntegration:
             mock_config.return_value.max_content = 100_000
             mock_config.return_value.model = "gemini-2.5-flash-lite"
 
-            result = await quarantine_fetch("https://example.com", "summarize")
+            result = await clean_fetch("https://example.com", "summarize")
 
             assert result["classifier_warning"] is not None
             assert "MALICIOUS" in result["classifier_warning"]

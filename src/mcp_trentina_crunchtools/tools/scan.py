@@ -25,9 +25,9 @@ from .read import _validate_file
 _RISK_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
 _RECOMMENDATIONS = {
-    "low": "Source appears clean. Safe to use safe_fetch/safe_read.",
-    "medium": "Minor vectors detected. Consider quarantine_fetch/quarantine_read.",
-    "high": "Significant injection vectors. Use quarantine_fetch/quarantine_read.",
+    "low": "Source appears clean. Safe to use block_fetch/block_read.",
+    "medium": "Minor vectors detected. Consider clean_fetch/clean_read.",
+    "high": "Significant injection vectors. Use clean_fetch/clean_read.",
     "critical": "Multiple injection vectors detected. Exercise extreme caution.",
 }
 

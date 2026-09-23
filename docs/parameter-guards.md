@@ -74,7 +74,7 @@ parameter_guards:
 
 ```yaml
 parameter_guards:
-  safe_read_tool:
+  block_read_tool:
     path:
       allow: ["/data/*", "/tmp/*"]
       deny: ["/etc/shadow", "/etc/passwd", "*.key"]
@@ -84,7 +84,7 @@ parameter_guards:
 
 ```yaml
 parameter_guards:
-  safe_fetch_tool:
+  block_fetch_tool:
     url:
       allow: ["https://*"]
       deny: ["*://evil.com/*", "*://localhost*"]

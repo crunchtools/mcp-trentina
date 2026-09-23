@@ -24,7 +24,7 @@ Each gateway call writes one row to the `gateway_calls` table:
 ### Outcomes
 
 `success` alone cannot describe what happened, and reading it as a health
-signal actively misleads. `safe_fetch` and `safe_read` **fail closed**: when
+signal actively misleads. `block_fetch` and `block_read` **fail closed**: when
 the defense blocks content the tool raises, which under a boolean is
 indistinguishable from the backend being down. An operator reading
 `2 ok / 34 errors` concludes the tool is broken when the truth may be that it
@@ -61,7 +61,7 @@ The `quarantine_stats` tool exposes audit data through the gateway itself:
     "by_tool": [
       {"backend": "ashigaru", "tool": "status", "calls": 1559,
        "ok": 1553, "blocked": 0, "failed": 6, "outcomes": {"ok": 1553, "backend_error": 6}},
-      {"backend": "web", "tool": "safe_read_tool", "calls": 36,
+      {"backend": "web", "tool": "block_read_tool", "calls": 36,
        "ok": 2, "blocked": 34, "failed": 0, "outcomes": {"ok": 2, "blocked_defense": 34}}
     ],
     "totals": {"ok": 1555, "blocked": 34, "failed": 6, "unknown": 0}
@@ -81,7 +81,7 @@ After running with `tools_allow: ["*"]` for a week, check the audit log to see w
 Top 10 tools for agent1 (last 7 days):
 1. ashigaru__status (1559 calls)
 2. github__get_pull_request_checks_tool (195 calls)
-3. web__quarantine_fetch_tool (157 calls)
+3. web__clean_fetch_tool (157 calls)
 ...
 ```
 
@@ -91,8 +91,8 @@ Read the **`failed`** column, never `calls - ok`. A high `failed` rate points
 at connectivity, auth, or backend bugs:
 
 ```
-web__quarantine_fetch_tool: 157 calls, 133 ok,  0 blocked, 24 failed
-web__safe_read_tool:         36 calls,   2 ok, 34 blocked,  0 failed
+web__clean_fetch_tool: 157 calls, 133 ok,  0 blocked, 24 failed
+web__block_read_tool:         36 calls,   2 ok, 34 blocked,  0 failed
 ```
 
 The second row is a healthy tool doing its job. Under the old single-`errors`

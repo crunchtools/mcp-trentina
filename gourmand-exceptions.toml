@@ -375,6 +375,12 @@ classification = "by_design"
 # gourmand matches on structure, not meaning.
 
 [[exceptions]]
+check = "dead_code_markers"
+path = "tests/test_deprecation_deadlines.py"
+justification = "The word DEPRECATED appears inside a sample STRING that exercises the notice regex, not as a tombstone over removed code. This file's whole job is to detect deprecation notices whose named release has already shipped, so it has to contain examples of how they are spelled -- including the capitalised form, whose absence from the pattern hid eight live notices until 0.29.0."
+classification = "by_design"
+
+[[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/l1/hidden.py"
 justification = "style_has_same_color is reported as identical to _safe_endpoint in tools/reconnect.py, and normalize_color as identical to _validate_file in tools/read.py. These pairs share a guard-then-return statement shape and nothing else -- one detects hidden text, the others validate an endpoint and a file path. Structural collision, not duplication. (Was l1/html.py until #172 split conversion out to preprocess/html.py.)"

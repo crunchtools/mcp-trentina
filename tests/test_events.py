@@ -92,13 +92,13 @@ class TestRingBuffer:
 
     def test_event_structure(self) -> None:
         bus = EventBus()
-        bus.emit("request_processed", {"tool": "safe_fetch"})
+        bus.emit("request_processed", {"tool": "block_fetch"})
 
         events = bus.recent_events()
         assert len(events) == 1
         assert events[0]["event"] == "request_processed"
         assert "timestamp" in events[0]
-        assert events[0]["data"]["tool"] == "safe_fetch"
+        assert events[0]["data"]["tool"] == "block_fetch"
 
 
 class TestThreadSafety:

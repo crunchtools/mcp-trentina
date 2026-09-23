@@ -26,16 +26,18 @@ Which modes a given profile is offered is the existing `tools_allow` filter. No 
 - Need the real bytes and can weigh a caution — a CVE advisory, a log excerpt, anything that legitimately discusses attacks in the words attacks use → `warn_*`.
 - Want the information and not the page → `clean_*`.
 
-### Deprecated spellings
+### Removed spellings
 
-`safe_*` and `quarantine_*` still work and are removed in **0.29.0**.
+`safe_*` and `quarantine_*` were removed in **0.29.0**, having been deprecated since 0.26.0. There is no alias; a call to one now fails with "unknown tool".
 
-| old | new |
+| removed | use |
 |---|---|
-| `safe_fetch` / `safe_read` / `safe_content` / `safe_search` | `block_*` |
-| `quarantine_fetch` / `quarantine_read` / `quarantine_content` / `quarantine_search` | `clean_*` |
+| `block_fetch` / `block_read` / `block_content` / `block_search` | `block_*` |
+| `clean_fetch` / `clean_read` / `clean_content` / `clean_search` | `clean_*` |
 
 The old names described a *trust model* ("safe", "quarantine") while actually encoding a disposition, and both families always ran all three layers — so the "Layers" column this table used to carry was decoration. The new names say what the mode does.
+
+Note that `quarantine_scan`, `deep_quarantine_scan` and `quarantine_stats` are NOT affected: they are diagnostics, they carry no mode prefix because they report rather than deliver, and they keep their names.
 
 ## Diagnostic tools
 
@@ -86,7 +88,7 @@ Configure via `QUARANTINE_TRUST_CONFIG` environment variable pointing to a JSON 
 
 ## Gateway Integration
 
-Through the gateway, quarantine tools appear as `web__safe_fetch_tool`, `web__quarantine_search_tool`, etc. They're just another backend — the agent calls them the same way it calls any other tool, and the gateway handles namespacing and audit logging.
+Through the gateway, quarantine tools appear as `web__block_fetch_tool`, `web__clean_search_tool`, etc. They're just another backend — the agent calls them the same way it calls any other tool, and the gateway handles namespacing and audit logging.
 
 ## Related
 
