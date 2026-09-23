@@ -344,3 +344,91 @@ class TestHandleAlertHmacSignature:
         assert sent_body != original_body
         bad_sig = "sha256=" + hmac.new(b"shh", original_body, hashlib.sha256).hexdigest()
         assert sig_header != bad_sig
+
+
+class TestAlertIngressEnforcement:
+    """Who picks the mode on a path with no agent to ask.
+
+    Before 0.25.0 this path forwarded flagged payloads and there was no way
+    to say otherwise — `defense.enforcement` was read only on the tool path,
+    so the one path with an agent to ask was the only configurable one. The
+    module docstring meanwhile claimed "the enforcement mode (not this
+    function) decides disposition", which was false in the only way that
+    matters: no enforcement mode was consulted anywhere here.
+    """
+
+    @staticmethod
+    def _flagged(
+        monkeypatch: pytest.MonkeyPatch, profile: Profile,
+    ) -> tuple[Any, dict[str, Any]]:
+        calls = _mock_forward_http(monkeypatch)
+        client = TestClient(_alert_app({"alpha": profile}))
+        return client, calls
+
+    def test_warn_forwards_the_page_with_the_caution_attached(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The default, and the reason it is the default: silently dropping a
+        real incident on a classifier false positive is worse than forwarding
+        a flagged one."""
+        profile = _make_profile("alpha", alert_token="tok")
+        assert profile.alert_ingress is not None
+        assert profile.alert_ingress.enforcement == "warn"
+        client, calls = self._flagged(monkeypatch, profile)
+
+        with patch(
+            "mcp_trentina_crunchtools.defense.classify_async",
+            new_callable=AsyncMock,
+        ) as mock_classify:
+            mock_classify.return_value = ClassifierResult(
+                label="MALICIOUS", score=0.97, latency_ms=5.0,
+            )
+            resp = client.post("/alert/tok", json={"host": "web1", "output": "page"})
+
+        assert resp.status_code == 200
+        forwarded = json.loads(calls["content"])
+        assert forwarded["output"] == "page", "warn never modifies the payload"
+        assert forwarded["_trentina_warning"]["l2_label"] == "MALICIOUS"
+
+    def test_block_refuses_and_forwards_nothing(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The behaviour that did not exist before the setting did."""
+        profile = _make_profile("alpha", alert_token="tok")
+        assert profile.alert_ingress is not None
+        profile.alert_ingress.enforcement = "block"
+        client, calls = self._flagged(monkeypatch, profile)
+
+        with patch(
+            "mcp_trentina_crunchtools.defense.classify_async",
+            new_callable=AsyncMock,
+        ) as mock_classify:
+            mock_classify.return_value = ClassifierResult(
+                label="MALICIOUS", score=0.97, latency_ms=5.0,
+            )
+            resp = client.post("/alert/tok", json={"host": "web1", "output": "page"})
+
+        assert resp.status_code == 403
+        assert "request" not in calls, "a refused page must not reach the agent"
+
+    def test_block_still_forwards_a_clean_page(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Enforcement applies to FLAGGED payloads. A stricter ingress must
+        not become an outage for every page the monitoring system sends."""
+        profile = _make_profile("alpha", alert_token="tok")
+        assert profile.alert_ingress is not None
+        profile.alert_ingress.enforcement = "block"
+        client, calls = self._flagged(monkeypatch, profile)
+
+        with patch(
+            "mcp_trentina_crunchtools.defense.classify_async",
+            new_callable=AsyncMock,
+        ) as mock_classify:
+            mock_classify.return_value = ClassifierResult(
+                label="BENIGN", score=0.01, latency_ms=5.0,
+            )
+            resp = client.post("/alert/tok", json={"host": "web1", "output": "disk ok"})
+
+        assert resp.status_code == 200
+        assert json.loads(calls["content"])["output"] == "disk ok"

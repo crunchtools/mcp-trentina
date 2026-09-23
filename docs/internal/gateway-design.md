@@ -153,7 +153,7 @@ profiles:
           - "batch_delete*"
       # ... rest of agent2's backends
     defense:
-      enforcement: extract          # interactive: flagged content is Q-Agent-extracted
+      enforcement: clean            # interactive: flagged content is Q-Agent-extracted
       l2_threshold: 0.5             # how suspicious L2 must be before it flags
 
   agent1:

@@ -1,4 +1,4 @@
-"""Tests for the MCP ingress perimeter (plan step 5, annotate mode).
+"""Tests for the MCP ingress perimeter (plan step 5, warn mode).
 
 Real L1 runs in these, and the hostile fixture is multi-line and
 pattern-dense enough to cross the L1 blocking threshold on its own, so no
@@ -143,8 +143,8 @@ class TestScanToolResponse:
         assert warning is not None
         assert warning["flagged_by"] == "L1"
         assert warning["risk_level"] in ("high", "critical")
-        assert not decision.blocked, "default enforcement is annotate"
-        assert blocks[0]["text"] == HOSTILE, "annotate mode never touches content"
+        assert not decision.blocked, "default enforcement is warn"
+        assert blocks[0]["text"] == HOSTILE, "warn mode never touches content"
 
     async def test_structured_content_leaves_are_judged(self) -> None:
         decision = await scan_tool_response(
@@ -218,7 +218,7 @@ class TestScanToolList:
         result = await scan_tool_list(_profile(), "jira", tools, tools)
         assert [
             {k: v for k, v in t.items() if k != "_trentina_warning"} for t in result
-        ] == tools, "annotate mode never touches content"
+        ] == tools, "warn mode never touches content"
         assert _only_l3_unavailable(result[0].get("_trentina_warning"))
 
     async def test_poisoned_description_is_annotated(self) -> None:
@@ -229,7 +229,7 @@ class TestScanToolList:
         result = await scan_tool_list(_profile(), "jira", tools, tools)
         assert _only_l3_unavailable(result[0].get("_trentina_warning"))
         assert result[1]["_trentina_warning"]["flagged_by"] == "L1"
-        assert result[1]["description"] == HOSTILE, "annotate mode never touches content"
+        assert result[1]["description"] == HOSTILE, "warn mode never touches content"
 
     async def test_input_schema_poisoning_is_caught(self) -> None:
         tools = [{
@@ -390,7 +390,7 @@ class TestRouterIntegration:
 
 class TestEnforcement:
     """The step-8 mechanism, landed ahead of the flip. Everything defaults
-    to annotate; block/extract exist so the flip is a config edit, not a
+    to warn; block/clean exist so the flip is a config edit, not a
     deploy."""
 
     def _block_profile(self) -> Profile:
@@ -440,12 +440,12 @@ class TestEnforcement:
         assert decision.warning is not None
         assert decision.warning["l3_unavailable"] is True
 
-    async def test_kill_switch_forces_annotate(
+    async def test_kill_switch_forces_warn(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """TRENTINA_ENFORCEMENT_OVERRIDE=annotate is the 3am lever: flagged
+        """TRENTINA_ENFORCEMENT_OVERRIDE=warn is the 3am lever: flagged
         content flows again, warnings intact, no deploy."""
-        monkeypatch.setenv("TRENTINA_ENFORCEMENT_OVERRIDE", "annotate")
+        monkeypatch.setenv("TRENTINA_ENFORCEMENT_OVERRIDE", "warn")
         decision = await scan_tool_response(
             profile=self._block_profile(),
             backend_name="jira",
@@ -469,11 +469,11 @@ class TestEnforcement:
         )
         assert decision.blocked, "an unknown override must not weaken block"
 
-    async def test_extract_fails_closed_until_implemented(self) -> None:
+    async def test_clean_fails_closed_until_implemented(self) -> None:
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
         p = _profile("agent2")
-        p.defense = DefenseConfig(enforcement="extract")
+        p.defense = DefenseConfig(enforcement="clean")
         decision = await scan_tool_response(
             profile=p,
             backend_name="jira",
@@ -482,7 +482,7 @@ class TestEnforcement:
             structured_content=None,
         )
         assert decision.blocked, (
-            "extract without an extraction contract must refuse, not deliver"
+            "clean without an extraction contract must refuse, not deliver"
         )
 
     def test_layer_toggles_no_longer_exist(self) -> None:

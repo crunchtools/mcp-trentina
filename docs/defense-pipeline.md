@@ -42,7 +42,9 @@ Everything entering through the gateway is judged at its ingress — the firewal
 - **LLM completions** through the proxy, judged post-stream (`llm_completion`).
 - **Alert webhooks** (`alert`), and the standalone web tools (`safe_*`, `quarantine_*`).
 
-**Enforcement is per profile** (`defense.enforcement`): `annotate` (default — content delivered intact with a `_trentina_warning`, every flag recorded for calibration), `block` (flagged responses refused; for autonomous agents), `extract` (Q-Agent rewrite; for interactive profiles). `TRENTINA_ENFORCEMENT_OVERRIDE=annotate` is the kill switch.
+**Enforcement is per profile** (`defense.enforcement`): `warn` (default — content delivered intact with a `_trentina_warning`, every flag recorded for calibration), `block` (flagged responses refused; for autonomous agents), `clean` (Q-Agent rewrite; for interactive profiles — not yet implemented, currently fails closed to `block`). `TRENTINA_ENFORCEMENT_OVERRIDE=warn` is the kill switch.
+
+The PUSH paths set it themselves, because no agent is waiting to be asked: `alert_ingress.enforcement` defaults to `warn`, so a Nagios page forwards with the caution attached. The Matrix path has no setting on purpose — refusing a streamed `/sync` response breaks the client's sync loop rather than dropping a message.
 
 **Content is never silently modified.** L1 detects; it does not censor. What the agent receives is byte-identical to what entered the perimeter, or (under `block`) nothing plus the warning. The one transformation that remains is HTML→Markdown extraction in the fetch tools, which is their product, not a security edit.
 
@@ -119,7 +121,7 @@ profiles:
     auth:
       bearer_token_env: TRENTINA_PROFILE_MYAGENT_TOKEN
     defense:
-      enforcement: annotate    # what a flag COSTS — annotate | extract | block
+      enforcement: warn        # what a flag COSTS — warn | clean | block
       l2_threshold: 0.5        # how suspicious L2 must be before it flags
 ```
 
@@ -134,9 +136,9 @@ What a profile controls is a threshold and a consequence:
 
 - **`l2_threshold`** — how suspicious L2 must be before it FLAGS. A flag is a consequence, not
   an execution: L2 runs either way.
-- **`enforcement`** — what a flag costs. `annotate` delivers the content with a
-  `_trentina_warning` (the calibration mode), `block` refuses it outright, `extract` replaces it
-  with a Q-Agent extraction. `TRENTINA_ENFORCEMENT_OVERRIDE=annotate` is the kill switch.
+- **`enforcement`** — what a flag costs. `warn` delivers the content with a
+  `_trentina_warning` (the calibration mode), `block` refuses it outright, `clean` replaces it
+  with a Q-Agent extraction. `TRENTINA_ENFORCEMENT_OVERRIDE=warn` is the kill switch.
 
 `l3_threshold` is accepted and ignored. It used to gate whether L3 ran at all, which meant clean
 traffic never reached the judge — and since L2 flagged at `l2_threshold` while escalation needed
