@@ -68,6 +68,7 @@ import asyncio
 import json
 from typing import Any
 
+from ..channels import Channel
 from .base import Cost, PreProcessContext, PreProcessResult
 from .volatile import normalize
 
@@ -208,6 +209,7 @@ class StructuredProcessor:
 
     name = "structured"
     cost = Cost.FREE
+    channels = frozenset({Channel.TOOL})
 
     async def run(self, payload: str, _ctx: PreProcessContext) -> PreProcessResult:
         # Reduction is driven by the payload's shape; it reads no job context.

@@ -439,7 +439,7 @@ classification = "gourmand_bug"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "tests/test_gateway_reduce.py"
+path = "tests/test_gateway_transform.py"
 justification = "Not single-use: called from 4 distinct test functions (test_disabled_by_default_leaves_response_untouched, test_min_bytes_floor_skips_small_payloads, test_processor_failure_delivers_content_unchanged, test_perimeter_scans_the_reduced_artifact), verified by grep. Same single_use_helpers undercount as the test_gateway_router.py _profile exception -- reflagging as a linter bug (gourmand_bug) rather than an architectural tradeoff."
 classification = "gourmand_bug"
 

@@ -17,8 +17,11 @@ from typing import Any
 import yaml
 from pydantic import SecretStr, ValidationError
 
+from ..channels import Channel
+from .drivers import build_extractor, build_preprocessors
 from .errors import ProfileConfigError
 from .profile import AlertIngressConfig, MatrixIngressConfig, Profile
+from .transform import resolve
 
 
 @dataclass(frozen=True)
@@ -85,6 +88,7 @@ def _build_profile(name: str, body: Any) -> Profile:
     _resolve_oauth_audience(name, profile)
     _resolve_llm_key_secrets(name, profile)
     _expand_backend_headers(name, profile)
+    _check_drivers(name, profile)
     if profile.alert_ingress is not None:
         _resolve_alert_ingress_secrets(name, profile.alert_ingress)
 
@@ -92,6 +96,37 @@ def _build_profile(name: str, body: Any) -> Profile:
         _resolve_matrix_ingress_secrets(name, profile.matrix_ingress)
 
     return profile
+
+
+def _check_drivers(name: str, profile: Profile) -> None:
+    """Resolve every driver the profile names, and discard the result.
+
+    Building them here is the whole point: ``build_preprocessors`` and
+    ``build_extractor`` are the only places the channel lock lives, and a
+    lock that fires on the first request that happens to use the driver is
+    not a lock, it is a latent outage. This makes both roles fail at startup,
+    which is where ``gateway/drivers.py`` claims they fail.
+
+    The extractor is built without its key provider — that needs the network
+    and belongs on the request path. What is being checked is the name and
+    the channel, and neither depends on the keys.
+    """
+    build_preprocessors(profile.preprocess, channel=Channel.TOOL, profile_name=name)
+    for backend_name, backend in profile.backends.items():
+        for tool_name, override in backend.preprocess_tools.items():
+            if override.processors is None:
+                continue
+            build_preprocessors(
+                resolve(profile, backend, tool_name),
+                channel=Channel.TOOL,
+                profile_name=f"{name}:{backend_name}:{tool_name}",
+            )
+    if profile.matrix_ingress is not None:
+        build_extractor(
+            profile.matrix_ingress.scan_view,
+            channel=Channel.MATRIX,
+            profile_name=name,
+        )
 
 
 def _warn_deprecated_defense_keys(name: str, body: dict[str, Any]) -> None:

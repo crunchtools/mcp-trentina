@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, get_args
+from typing import Any
 
 import pytest
 from pydantic import SecretStr
@@ -15,7 +15,7 @@ from mcp_trentina_crunchtools.gateway.profile import (
     Profile,
     ToolPreProcess,
 )
-from mcp_trentina_crunchtools.gateway.reduce import reduce_response, resolve
+from mcp_trentina_crunchtools.gateway.transform import resolve, transform_response
 
 # Log-shaped and repetitive: exactly what petit collapses. Distinct IPs and
 # timestamps per line so only the volatile tokens differ, which is the case
@@ -52,7 +52,7 @@ def _blocks(text: str) -> list[dict[str, Any]]:
 
 
 async def _run(profile: Profile, tool: str = "syslog_tail_tool", text: str = LOGGY):
-    return await reduce_response(
+    return await transform_response(
         profile=profile,
         backend=profile.backends["syslog"],
         backend_name="syslog",
@@ -140,7 +140,7 @@ class TestReduction:
             {"type": "image", "data": "abc"},
             {"type": "text", "text": LOGGY},
         ]
-        out = await reduce_response(
+        out = await transform_response(
             profile=p,
             backend=p.backends["syslog"],
             backend_name="syslog",
@@ -151,12 +151,12 @@ class TestReduction:
 
     async def test_processor_failure_delivers_content_unchanged(self, monkeypatch) -> None:
         """A reducer that breaks must never cost you the response."""
-        import mcp_trentina_crunchtools.gateway.reduce as reduce_mod
+        import mcp_trentina_crunchtools.gateway.transform as transform_mod
 
         async def boom(*_a: object, **_kw: object) -> object:
             raise RuntimeError("processor exploded")
 
-        monkeypatch.setattr(reduce_mod, "run_preprocessors", boom)
+        monkeypatch.setattr(transform_mod, "run_preprocessors", boom)
         out = await _run(_profile(PreProcessConfig(enabled=True)))
         assert out.applied is False
         assert out.content_blocks == _blocks(LOGGY)
@@ -202,47 +202,12 @@ class TestRouterOrdering:
         assert result["content"][0]["text"] == scanned, "delivered != scanned"
 
 
-class TestRegistryAndConfigAgree:
-    """The registry and the config Literal are two halves of one list.
-
-    Adding a processor to `gateway.reduce._REGISTRY` without adding it to
-    `ProcessorName` produces a reducer that exists, is wired in, passes its
-    own tests — and that no profile can ever name, because Pydantic rejects
-    the string. It is dead on arrival and nothing fails to say so.
-    """
-
-    def test_every_registered_processor_is_configurable(self) -> None:
-        from mcp_trentina_crunchtools.gateway.profile import ProcessorName
-        from mcp_trentina_crunchtools.gateway.reduce import _REGISTRY
-
-        assert set(_REGISTRY) == set(get_args(ProcessorName))
-
-    def test_every_default_processor_is_registered(self) -> None:
-        from mcp_trentina_crunchtools.gateway.profile import (
-            _DEFAULT_PROCESSORS,
-            PreProcessConfig,
-        )
-        from mcp_trentina_crunchtools.gateway.reduce import _REGISTRY
-
-        assert set(_DEFAULT_PROCESSORS) <= set(_REGISTRY)
-        assert set(PreProcessConfig().processors) <= set(_REGISTRY)
-
-    def test_defaults_are_all_free(self) -> None:
-        """A METERED processor in the defaults would spend LLM money for
-        every profile that merely switched reduction on."""
-        from mcp_trentina_crunchtools.gateway.profile import _DEFAULT_PROCESSORS
-        from mcp_trentina_crunchtools.gateway.reduce import _REGISTRY
-        from mcp_trentina_crunchtools.preprocess import Cost
-
-        assert all(_REGISTRY[n].cost is Cost.FREE for n in _DEFAULT_PROCESSORS)
-
-
 class TestDeclineLogLine:
     """The sidecar line is what a human reads at 2am. It has to say what
     happened, and stay greppable by reason string."""
 
     def test_not_smaller_decline_shows_the_ratio_it_reached(self) -> None:
-        from mcp_trentina_crunchtools.gateway.reduce import _describe_decline
+        from mcp_trentina_crunchtools.gateway.transform import _describe_decline
         from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
 
         result = PreProcessResult.declined(
@@ -254,7 +219,7 @@ class TestDeclineLogLine:
         assert "would_be=104%" in line
 
     def test_shape_decline_shows_lines_and_bytes(self) -> None:
-        from mcp_trentina_crunchtools.gateway.reduce import _describe_decline
+        from mcp_trentina_crunchtools.gateway.transform import _describe_decline
         from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
 
         result = PreProcessResult.declined(
@@ -266,7 +231,7 @@ class TestDeclineLogLine:
         assert "lines=1" in line and "bytes=1645600" in line
 
     def test_bare_decline_stays_terse(self) -> None:
-        from mcp_trentina_crunchtools.gateway.reduce import _describe_decline
+        from mcp_trentina_crunchtools.gateway.transform import _describe_decline
         from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
 
         result = PreProcessResult.declined(

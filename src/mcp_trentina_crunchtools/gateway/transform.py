@@ -3,18 +3,21 @@
 This module is the call site the ``preprocess`` package was built for. It owns
 two things and nothing else: resolving which transformation policy applies to
 a given (profile, backend, tool), and rewriting the response's text blocks
-with whatever came back.
+with whatever came back. Which processors exist, and whether one may run on
+this channel, is ``gateway/drivers.py``'s question.
 
-It does NOT scan, judge, or block. Per ``preprocess/base.py`` invariant 2 the
-caller transforms first and then scans the TRANSFORMED artifact — so the
-router calls ``reduce_response`` before ``scan_tool_response``, and what the
-perimeter judges is exactly what the agent will receive. Transforming before
-the wall is the whole point: what a processor dropped never reaches the agent,
-and never reaches the scanner either, so there is nothing to smuggle through.
+It does NOT scan, judge, or block — it is not a guard. Per
+``preprocess/base.py`` invariant 2 the caller transforms first and then scans
+the TRANSFORMED artifact, so the router calls ``transform_response`` before
+``scan_tool_response``, and what the perimeter judges is exactly what the
+agent will receive. Transforming before the wall is the whole point: what a
+processor dropped never reaches the agent, and never reaches the scanner
+either, so there is nothing to smuggle through.
 
-The name says "reduce" because reduction is what every processor wired here
-does today. The contract is wider — see ``preprocess/base.py`` invariant 1,
-subtract but never absolve.
+This file was ``reduce.py`` until issue #160. Reduction is what every
+processor wired here does today; the contract is transformation generally
+(``preprocess/base.py``), and the narrower name was part of how the two roles
+got muddled in the first place.
 
 Two-level resolution, profile then tool:
 
@@ -34,35 +37,22 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from ..channels import Channel
 from ..defense import Provenance
-from ..preprocess import (
-    EmailProcessor,
-    PetitProcessor,
-    PreProcessContext,
-    PreProcessor,
-    StructuredProcessor,
-    SummarizeProcessor,
-    run_preprocessors,
-)
+from ..preprocess import PreProcessContext, PreProcessor, run_preprocessors
+from .drivers import build_preprocessors
+from .errors import ProfileConfigError
 from .profile import Backend, PreProcessConfig, Profile, ToolPreProcess
 
 logger = logging.getLogger(__name__)
 
-# Stateless by contract (``PreProcessor`` protocol), so one instance each.
-_REGISTRY: dict[str, PreProcessor] = {
-    "email": EmailProcessor(),
-    "petit": PetitProcessor(),
-    "structured": StructuredProcessor(),
-    "summarize": SummarizeProcessor(),
-}
-
 
 @dataclass(frozen=True)
-class ReduceOutcome:
+class TransformOutcome:
     """What the router needs to finish the response.
 
     ``content_blocks`` is always delivered — on a no-op it is the input
-    unchanged, so the caller never branches on whether reduction ran.
+    unchanged, so the caller never branches on whether transformation ran.
     """
 
     content_blocks: list[Any] | None
@@ -144,14 +134,38 @@ def _describe_decline(outcome: Any) -> str:
     return f"{outcome.name}:{detail.get('declined', '?')}{suffix}"
 
 
-async def reduce_response(
+def _processors_for(
+    cfg: PreProcessConfig, profile_name: str, backend_name: str, tool_name: str
+) -> list[PreProcessor]:
+    """Resolve the configured processors, or none at all.
+
+    ``build_preprocessors`` fails closed, which is right at config load —
+    ``loader._check_drivers`` builds every driver a profile names so an
+    unusable one is a refused start — and wrong here. If one reaches this far
+    anyway, it should cost the profile its transformation, not its tool call.
+    That is the place that refuses; this is the place that copes.
+    """
+    try:
+        return build_preprocessors(
+            cfg, channel=Channel.TOOL, profile_name=profile_name
+        )
+    except ProfileConfigError:
+        logger.exception(
+            "transform: unusable processor config for %s:%s; delivering unchanged",
+            backend_name,
+            tool_name,
+        )
+        return []
+
+
+async def transform_response(
     *,
     profile: Profile,
     backend: Backend,
     backend_name: str,
     tool_name: str,
     content_blocks: list[Any] | None,
-) -> ReduceOutcome:
+) -> TransformOutcome:
     """Transform a tool response's text blocks. Never raises, never judges.
 
     Any failure returns the input unchanged — a processor that cannot improve
@@ -166,19 +180,19 @@ async def reduce_response(
     """
     cfg = resolve(profile, backend, tool_name)
     if not cfg.enabled or cfg.strategy == "none" or not cfg.processors:
-        return ReduceOutcome(content_blocks=content_blocks)
+        return TransformOutcome(content_blocks=content_blocks)
 
     targets = _text_blocks(content_blocks)
     if not targets:
-        return ReduceOutcome(content_blocks=content_blocks)
+        return TransformOutcome(content_blocks=content_blocks)
 
     total = sum(len(t.encode("utf-8")) for _, t in targets)
     if total < cfg.min_bytes:
-        return ReduceOutcome(content_blocks=content_blocks)
+        return TransformOutcome(content_blocks=content_blocks)
 
-    processors = [_REGISTRY[n] for n in cfg.processors if n in _REGISTRY]
+    processors = _processors_for(cfg, profile.name, backend_name, tool_name)
     if not processors:
-        return ReduceOutcome(content_blocks=content_blocks)
+        return TransformOutcome(content_blocks=content_blocks)
 
     # Per block rather than on the joined text: blocks are a structure the
     # backend chose, and a reducer that welds them into one loses it.
@@ -205,7 +219,7 @@ async def reduce_response(
             )
         except Exception:
             logger.exception(
-                "reduce: preprocessing failed for %s:%s; delivering block unchanged",
+                "transform: preprocessing failed for %s:%s; delivering block unchanged",
                 backend_name,
                 tool_name,
             )
@@ -233,7 +247,7 @@ async def reduce_response(
     # because a candidate has already cleared min_bytes.
     declines = ",".join(_describe_decline(r) for r in results if not r.applied)
     logger.warning(
-        "reduce: %s:%s:%s %d -> %d bytes (%d%%) applied=%s metered=%s%s",
+        "transform: %s:%s:%s %d -> %d bytes (%d%%) applied=%s metered=%s%s",
         profile.name,
         backend_name,
         tool_name,
@@ -246,7 +260,7 @@ async def reduce_response(
     )
 
     if not applied:
-        return ReduceOutcome(content_blocks=content_blocks)
+        return TransformOutcome(content_blocks=content_blocks)
 
     # An LLM rewrote the payload, so the artifact is model output and the
     # perimeter owes it unconditional L3 — see preprocess/compose.py's
@@ -272,7 +286,7 @@ async def reduce_response(
         ],
     }
 
-    return ReduceOutcome(
+    return TransformOutcome(
         content_blocks=new_blocks,
         applied=True,
         provenance=provenance,

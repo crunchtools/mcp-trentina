@@ -57,7 +57,9 @@ INTERNAL_SCHEME = "internal://"
 ProfileRole = Literal["agent", "operator"]
 
 # Registered pre-processors. Adding one means adding it here, to
-# gateway.reduce._REGISTRY, and nowhere else.
+# gateway.drivers.PREPROCESSORS, and nowhere else. Declared twice on purpose:
+# this Literal is what makes pydantic reject an unknown name at YAML load,
+# and the parity test in tests/test_gateway_drivers.py keeps the two in step.
 ProcessorName = Literal["petit", "structured", "email", "summarize"]
 # FREE only, and ordered by how cheaply each one can decline: structured
 # and email reject a payload of the wrong shape on their first check, so
@@ -66,10 +68,9 @@ ProcessorName = Literal["petit", "structured", "email", "summarize"]
 # draws unconditional L3, so it costs two model calls.
 _DEFAULT_PROCESSORS: list[ProcessorName] = ["structured", "email", "petit"]
 
-# Registered scan-view extractors. Adding one means adding it here, to
-# gateway.scanview._REGISTRY, and nowhere else. Declared twice on purpose:
-# this Literal is what makes pydantic reject an unknown name at YAML load,
-# and a parity test keeps the two in step.
+# Registered guard read policies. Adding one means adding it here, to
+# gateway.drivers.SCAN_POLICIES, and nowhere else. Same two-halves-of-one-list
+# arrangement as ProcessorName above, and the same parity test covers both.
 ScanViewName = Literal["full", "generic", "matrix"]
 
 # Fields of ScanViewConfig an AGENT may change by reloading its own profile.

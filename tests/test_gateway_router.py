@@ -458,7 +458,7 @@ class TestRouter:
     async def test_denied_response_guard_blocks_and_skips_the_perimeter(
         self, tmp_path: Any
     ) -> None:
-        """A response guard withholds the result and short-circuits reduce + scan.
+        """A response guard withholds the result and short-circuits transform + scan.
 
         Reduction can paraphrase a literal out of existence, so the guard reads
         the RAW payload and nothing downstream runs once it fires.
@@ -500,8 +500,8 @@ class TestRouter:
                 side_effect=memory_call,
             ),
             patch(
-                "mcp_trentina_crunchtools.gateway.router.reduce_response"
-            ) as mock_reduce,
+                "mcp_trentina_crunchtools.gateway.router.transform_response"
+            ) as mock_transform,
             patch(
                 "mcp_trentina_crunchtools.gateway.router.scan_tool_response"
             ) as mock_scan,
@@ -525,7 +525,7 @@ class TestRouter:
             assert "result" not in resp
             assert resp["error"]["code"] == -32602
             assert secret not in resp["error"]["message"]
-            mock_reduce.assert_not_called()
+            mock_transform.assert_not_called()
             mock_scan.assert_not_called()
 
             stats = get_gateway_call_stats("isolated", days=1)
