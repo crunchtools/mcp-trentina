@@ -10,6 +10,66 @@ under that name.
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-09-23
+
+### Changed
+- **`trust` is replaced by `scan`, because there was never any trust to
+  report.** Every content tool returned a `trust` object whose `level`
+  collapsed four unrelated questions into one enum: `advisory` and
+  `quarantined` described what was PRODUCED, `l1-only` and `layer1-fallback`
+  what RAN, `trusted-l1` who VOUCHED, and `blocked` what was DECIDED. Nothing
+  in the codebase ever branched on any of them — the value reached one
+  cockpit table cell, rendered as a text label hardcoded to the "low" risk
+  style, so not even the UI read it.
+
+  The reason it cannot simply be renamed is that the property does not exist.
+  Content that crossed the perimeter is untrusted, permanently, because the
+  layers are DETECTORS: a detector finding nothing has not made anything
+  safe, it has failed to find something. The gap between those claims is the
+  false-negative rate, and ours is documented — L2 misses social engineering
+  40% of the time and exfiltration intent 20%, and L3 on the default model
+  catches 86% of attacks written to evade L1 and L2, **dropping to 33% on
+  attacks aimed at the detector itself**. A label reading `l3_trusted` would
+  therefore be wrong two times out of three precisely where it matters most,
+  and it would travel into the agent's context telling it to relax. That
+  turns "the attacker got through" into "the attacker got promoted".
+
+  Three independent facts instead, built in one place (`report.py`):
+
+  ```json
+  "scan": {
+    "layers":      {"l1": "complete", "l2": "complete", "l3": "unavailable"},
+    "disposition": "annotated",
+    "origin":      {"kind": "url", "ref": "https://…", "allowlisted": false}
+  }
+  ```
+
+  `layers` is what ran and whether it finished (`complete`, `partial`,
+  `unavailable`, `not_applicable`) — the same rule `warning.py` already
+  enforces for findings, applied to coverage. `disposition` is what was done
+  (`delivered`, `annotated`, `extracted`, `refused`, `reported`). `origin` is
+  where the bytes came from. What was FOUND stays in `_trentina_warning`;
+  duplicating it would give two answers that can disagree.
+
+- **The D-Bus `RequestEvent` field `trust_level` is now `disposition`**, and
+  carries a disposition rather than a trust grade. `cockpit-trentina` updated
+  in the same commit.
+
+### Fixed
+- **`clean_*` against an allowlisted source silently returned un-extracted
+  content.** The `if is_trusted:` branch skips the Q-Agent entirely and hands
+  back the original L1 text as `extracted_text`. That was reported only as
+  `trust.level: "trusted-l1"` — a field nothing read — so an agent that asked
+  for an extraction got the raw page with no way to tell. It is now
+  `disposition: "delivered"` rather than `"extracted"`, which says it
+  outright. The behaviour is unchanged and deliberate: you vouched for the
+  source, so the extraction is not worth the model call.
+- **Allowlisting is no longer reported as though it skipped layers.**
+  `is_trusted` suppresses FLAGS — see `defense._decide` and the `l2_flagged`
+  computation — while L1, L2 and L3 all still run. The layer states say
+  `complete` for an allowlisted source, and `origin.allowlisted` is what
+  explains why a detection did not become a refusal.
+
 ## [0.29.0] - 2026-09-23
 
 Two cleanups that had to land together: the vocabulary release, and the

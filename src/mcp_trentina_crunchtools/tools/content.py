@@ -20,6 +20,7 @@ from ..quarantine.classifier import (
     join_warnings,
     truncation_warning,
 )
+from ..report import Disposition, build_report
 from ..warning import build_warning
 from .scan import _build_layer1_context, _build_scan_result, _classifier_result
 
@@ -79,10 +80,15 @@ async def _content_judged(
     pipeline_result = verdict.pipeline
     classification = verdict.classification
 
+    warning = build_warning(verdict)
+    disposition = (
+        Disposition.ANNOTATED if warning is not None else Disposition.DELIVERED
+    )
+
     emit_request_event(
         tool=f"{mode}_content",
         source=chash,
-        trust_level="l1-only",
+        disposition=disposition.value,
         risk_level=pipeline_result.stats.risk_level(),
         l1_detections=pipeline_result.stats.total_detections(),
         l1_suspicious=pipeline_result.stats.suspicious_detections(),
@@ -96,11 +102,9 @@ async def _content_judged(
 
     result: dict[str, Any] = {
         "content": pipeline_result.content,
-        "trust": {
-            "level": "l1-only",
-            "source": "layer1",
-            "content_hash": chash,
-        },
+        "scan": build_report(
+            verdict, disposition=disposition, kind="content", ref=chash,
+        ),
         "l1": _build_l1_metadata(pipeline_result),
     }
 
@@ -174,11 +178,11 @@ async def clean_content(
         classifier_warning, truncation_warning(classification)
     )
 
-    def _emit(trust_level: str) -> None:
+    def _emit(disposition: str) -> None:
         emit_request_event(
             tool="clean_content",
             source=chash,
-            trust_level=trust_level,
+            disposition=disposition,
             risk_level=pipeline_result.stats.risk_level(),
             l1_detections=pipeline_result.stats.total_detections(),
             l1_suspicious=pipeline_result.stats.suspicious_detections(),
@@ -195,14 +199,13 @@ async def clean_content(
             from ..errors import ConfigError
 
             raise ConfigError("GEMINI_API_KEY required and QUARANTINE_FALLBACK=fail")
-        _emit("l1-only")
+        _emit(Disposition.DELIVERED.value)
         return {
             "content": {"extracted_text": pipeline_result.content},
-            "trust": {
-                "level": "l1-only",
-                "source": "layer1-fallback",
-                "content_hash": chash,
-            },
+            "scan": build_report(
+                verdict, disposition=Disposition.DELIVERED, kind="content",
+                ref=chash,
+            ),
             "l1": _build_l1_metadata(pipeline_result),
             "blocklist_warning": blocklist_warning,
             "classifier_warning": classifier_warning,
@@ -212,15 +215,13 @@ async def clean_content(
 
     extraction = await quarantine_extract(truncated, prompt)
 
-    _emit("quarantined")
+    _emit(Disposition.EXTRACTED.value)
     return {
         "content": extraction.get("content", {}),
-        "trust": {
-            "level": "quarantined",
-            "source": "q-agent",
-            "model": config.model,
-            "content_hash": chash,
-        },
+        "scan": build_report(
+            verdict, disposition=Disposition.EXTRACTED, kind="content", ref=chash,
+            extracted_by=config.model,
+        ),
         "l1": _build_l1_metadata(pipeline_result),
         "usage": extraction.get("usage", {}),
         "blocklist_warning": blocklist_warning,
@@ -281,7 +282,7 @@ async def scan_content(
     emit_request_event(
         tool="scan_content",
         source=chash,
-        trust_level="scan",
+        disposition="scan",
         risk_level=result["risk_level"],
         l1_detections=layer1_detections,
         l1_suspicious=0,
@@ -358,7 +359,7 @@ async def deep_scan_content(
     emit_request_event(
         tool="deep_scan_content",
         source=chash,
-        trust_level="scan",
+        disposition="scan",
         risk_level=result["risk_level"],
         l1_detections=layer1_detections,
         l1_suspicious=0,

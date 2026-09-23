@@ -136,7 +136,7 @@ def _build_interface() -> Any:
             self,
             tool: "s",  # type: ignore[name-defined]  # noqa: F821
             source: "s",  # type: ignore[name-defined]  # noqa: F821
-            trust_level: "s",  # type: ignore[name-defined]  # noqa: F821
+            disposition: "s",  # type: ignore[name-defined]  # noqa: F821
             risk_level: "s",  # type: ignore[name-defined]  # noqa: F821
             duration_ms: "u",  # type: ignore[name-defined]  # noqa: F821
             stats_json: "s",  # type: ignore[name-defined]  # noqa: F821
@@ -158,7 +158,7 @@ def _build_interface() -> Any:
             self.RequestProcessed(
                 event_payload.get("tool", ""),
                 event_payload.get("source", ""),
-                event_payload.get("trust_level", ""),
+                event_payload.get("disposition", ""),
                 event_payload.get("risk_level", ""),
                 int(event_payload.get("duration_ms", 0)),
                 json.dumps(event_payload.get("stats", {})),
@@ -179,7 +179,7 @@ def _build_interface() -> Any:
 def emit_request_event(
     tool: str,
     source: str,
-    trust_level: str,
+    disposition: str,
     risk_level: str,
     l1_detections: int,
     l1_suspicious: int,
@@ -198,7 +198,7 @@ def emit_request_event(
     get_event_bus().emit("request_processed", {
         "tool": tool,
         "source": source,
-        "trust_level": trust_level,
+        "disposition": disposition,
         "risk_level": risk_level,
         "duration_ms": duration_ms,
         "l1_detections": l1_detections,

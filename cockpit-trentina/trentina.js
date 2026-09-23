@@ -90,7 +90,7 @@
             '<div class="pf-v6-c-card__body">' +
             '<table class="pf-v6-c-table pf-m-compact pf-m-grid-md" id="events-table">' +
             '<thead><tr>' +
-            '<th>Time</th><th>Tool</th><th>Source</th><th>Trust</th><th>Risk</th><th>L1</th><th>L2</th>' +
+            '<th>Time</th><th>Tool</th><th>Source</th><th>Disposition</th><th>Risk</th><th>L1</th><th>L2</th>' +
             '</tr></thead>' +
             '<tbody id="events-tbody"></tbody>' +
             '</table></div></div></div>' +
@@ -161,7 +161,7 @@
             '<td class="pf-v6-c-table__td">' + formatTime(ev.timestamp) + '</td>' +
             '<td class="pf-v6-c-table__td"><code>' + escapeHtml(d.tool) + '</code></td>' +
             '<td class="pf-v6-c-table__td" title="' + escapeHtml(d.source) + '">' + escapeHtml(truncateSource(d.source || "")) + '</td>' +
-            '<td class="pf-v6-c-table__td"><span class="pf-v6-c-label pf-m-compact ' + riskClass("low") + '"><span class="pf-v6-c-label__content">' + escapeHtml(d.trust_level) + '</span></span></td>' +
+            '<td class="pf-v6-c-table__td"><span class="pf-v6-c-label pf-m-compact ' + riskClass("low") + '"><span class="pf-v6-c-label__content">' + escapeHtml(d.disposition) + '</span></span></td>' +
             '<td class="pf-v6-c-table__td"><span class="pf-v6-c-label pf-m-compact ' + riskClass(d.risk_level) + '"><span class="pf-v6-c-label__content">' + escapeHtml((d.risk_level || "").toUpperCase()) + '</span></span></td>' +
             '<td class="pf-v6-c-table__td">' + (d.l1_detections || 0) + '</td>' +
             '<td class="pf-v6-c-table__td">' + escapeHtml(d.l2_label || "—") + (d.l2_score !== null && d.l2_score !== undefined ? ' (' + (d.l2_score * 100).toFixed(1) + '%)' : '') + '</td>';
@@ -248,7 +248,7 @@
                     data: {
                         tool: args[0],
                         source: args[1],
-                        trust_level: args[2],
+                        disposition: args[2],
                         risk_level: args[3],
                         duration_ms: args[4],
                         stats: JSON.parse(args[5] || "{}"),

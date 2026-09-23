@@ -18,6 +18,7 @@ from ..quarantine.classifier import (
     join_warnings,
     truncation_warning,
 )
+from ..report import Disposition, build_report
 from ..warning import build_warning
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -114,11 +115,9 @@ def _build_advisory(
     return {
         "content": None,
         "security_advisory": advisory,
-        "trust": {
-            "level": "advisory",
-            "source": "trentina",
-            "source_url": url,
-        },
+        "scan": build_report(
+            None, disposition=Disposition.REFUSED, kind="url", ref=url,
+        ),
     }
 
 
@@ -235,15 +234,18 @@ async def _fetch_judged(url: str, *, mode: str) -> dict[str, Any]:
 
     pipeline_result = verdict.pipeline
     classification = verdict.classification
-    trust_level = "trusted-l1" if is_trusted else "l1-only"
-
+    warning = build_warning(verdict)
     result: dict[str, Any] = {
         "content": pipeline_result.content,
-        "trust": {
-            "level": trust_level,
-            "source": "layer1",
-            "source_url": url,
-        },
+        "scan": build_report(
+            verdict,
+            disposition=(
+                Disposition.ANNOTATED if warning is not None else Disposition.DELIVERED
+            ),
+            kind="url",
+            ref=url,
+            allowlisted=is_trusted,
+        ),
         "l1": _build_l1_metadata(pipeline_result),
     }
 
@@ -251,14 +253,13 @@ async def _fetch_judged(url: str, *, mode: str) -> dict[str, Any]:
     # Attached even when nothing was flagged but something could not be READ:
     # a scan that did not fully happen must never look like a scan that found
     # nothing, which is the whole rule `warning.py` encodes.
-    warning = build_warning(verdict)
     if warning is not None:
         result["_trentina_warning"] = warning
 
     emit_request_event(
         tool=f"{mode}_fetch",
         source=url,
-        trust_level=trust_level,
+        disposition=result["scan"]["disposition"],
         risk_level=pipeline_result.stats.risk_level(),
         l1_detections=pipeline_result.stats.total_detections(),
         l1_suspicious=pipeline_result.stats.suspicious_detections(),
@@ -333,11 +334,11 @@ async def clean_fetch(url: str, prompt: str) -> dict[str, Any]:
         classifier_warning, truncation_warning(classification)
     )
 
-    def _emit(trust_level: str) -> None:
+    def _emit(disposition: str) -> None:
         emit_request_event(
             tool="clean_fetch",
             source=url,
-            trust_level=trust_level,
+            disposition=disposition,
             risk_level=pipeline_result.stats.risk_level(),
             l1_detections=pipeline_result.stats.total_detections(),
             l1_suspicious=pipeline_result.stats.suspicious_detections(),
@@ -350,14 +351,15 @@ async def clean_fetch(url: str, prompt: str) -> dict[str, Any]:
         )
 
     if is_trusted:
-        _emit("trusted-l1")
+        # No extraction happened: an allowlisted source skips the Q-Agent
+        # entirely, so this is the original text and says so.
+        _emit(Disposition.DELIVERED.value)
         return {
             "content": {"extracted_text": pipeline_result.content},
-            "trust": {
-                "level": "trusted-l1",
-                "source": "layer1",
-                "source_url": url,
-            },
+            "scan": build_report(
+                verdict, disposition=Disposition.DELIVERED, kind="url", ref=url,
+                allowlisted=True,
+            ),
             "l1": _build_l1_metadata(pipeline_result),
             "blocklist_warning": blocklist_warning,
             "classifier_warning": classifier_warning,
@@ -368,14 +370,13 @@ async def clean_fetch(url: str, prompt: str) -> dict[str, Any]:
             from ..errors import ConfigError
 
             raise ConfigError("GEMINI_API_KEY required and QUARANTINE_FALLBACK=fail")
-        _emit("l1-only")
+        _emit(Disposition.DELIVERED.value)
         return {
             "content": {"extracted_text": pipeline_result.content},
-            "trust": {
-                "level": "l1-only",
-                "source": "layer1-fallback",
-                "source_url": url,
-            },
+            "scan": build_report(
+                verdict, disposition=Disposition.DELIVERED, kind="url", ref=url,
+                allowlisted=is_trusted,
+            ),
             "l1": _build_l1_metadata(pipeline_result),
             "blocklist_warning": blocklist_warning,
             "classifier_warning": classifier_warning,
@@ -385,15 +386,13 @@ async def clean_fetch(url: str, prompt: str) -> dict[str, Any]:
 
     extraction = await quarantine_extract(truncated, prompt)
 
-    _emit("quarantined")
+    _emit(Disposition.EXTRACTED.value)
     return {
         "content": extraction.get("content", {}),
-        "trust": {
-            "level": "quarantined",
-            "source": "q-agent",
-            "model": config.model,
-            "source_url": url,
-        },
+        "scan": build_report(
+            verdict, disposition=Disposition.EXTRACTED, kind="url", ref=url,
+            allowlisted=is_trusted, extracted_by=config.model,
+        ),
         "l1": _build_l1_metadata(pipeline_result),
         "usage": extraction.get("usage", {}),
         "blocklist_warning": blocklist_warning,

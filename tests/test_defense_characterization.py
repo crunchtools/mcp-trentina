@@ -135,7 +135,10 @@ class TestSafeFetchBlockMatrix:
             classification=MALICIOUS, trusted=True, has_api_key=False
         )
         assert outcome == "ok"
-        assert result["trust"]["level"] == "trusted-l1"
+        assert result["scan"]["origin"]["allowlisted"] is True
+        assert result["scan"]["layers"]["l2"] == "complete", (
+            "allowlisting suppresses the FLAG; L2 still ran"
+        )
         rec.assert_not_called()
 
     async def test_l3_injection_untrusted_blocks(self) -> None:

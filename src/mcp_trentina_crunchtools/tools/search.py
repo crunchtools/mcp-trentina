@@ -27,6 +27,7 @@ from ..quarantine.classifier import (
     join_warnings,
     truncation_warning,
 )
+from ..report import Disposition, build_report
 from ..warning import build_warning
 
 
@@ -129,7 +130,7 @@ async def _search_judged(
     emit_request_event(
         tool=f"{mode}_search",
         source=f"search:{query}",
-        trust_level="l1-only",
+        disposition="l1-only",
         risk_level="low",
         l1_detections=total_l1,
         l1_suspicious=0,
@@ -235,7 +236,7 @@ async def clean_search(
     emit_request_event(
         tool="clean_search",
         source=f"search:{query}",
-        trust_level="quarantined",
+        disposition=Disposition.EXTRACTED.value,
         risk_level="low",
         l1_detections=_total_l1,
         l1_suspicious=0,
@@ -252,12 +253,11 @@ async def clean_search(
         "sources": scanned_sources,
         "extraction": extraction.get("content", {}),
         "query": query,
-        "trust": {
-            "level": "quarantined",
-            "source": "l0-grounded → l3-clean",
-            "model": config.model,
-            "pipeline": "L0 → resolve → L1 → L2 → L3",
-        },
+        "scan": build_report(
+            verdict, disposition=Disposition.EXTRACTED, kind="search", ref=query,
+            extracted_by=config.model,
+        ),
+        "pipeline": "L0 → resolve → L1 → L2 → L3",
         "l0_usage": raw.get("usage", {}),
         "l3_usage": extraction.get("usage", {}),
         "classifier_warning": classifier_warning,

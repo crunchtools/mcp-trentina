@@ -30,7 +30,7 @@ class TestEmitRequestEvent:
         emit_request_event(
             tool="block_fetch",
             source="https://example.com",
-            trust_level="trusted-l1",
+            disposition="trusted-l1",
             risk_level="low",
             l1_detections=0,
             l1_suspicious=0,
@@ -44,7 +44,7 @@ class TestEmitRequestEvent:
         assert len(received) == 1
         assert received[0]["tool"] == "block_fetch"
         assert received[0]["source"] == "https://example.com"
-        assert received[0]["trust_level"] == "trusted-l1"
+        assert received[0]["disposition"] == "trusted-l1"
         assert received[0]["risk_level"] == "low"
         assert received[0]["l2_label"] == "BENIGN"
         assert received[0]["l2_score"] == 0.02
@@ -63,7 +63,7 @@ class TestEmitRequestEvent:
         emit_request_event(
             tool="clean_fetch",
             source="https://evil.com",
-            trust_level="quarantined",
+            disposition="quarantined",
             risk_level="high",
             l1_detections=3,
             l1_suspicious=1,
@@ -132,7 +132,7 @@ class TestDbusInterfaceMethods:
         emit_request_event(
             tool="block_read",
             source="/tmp/test.txt",
-            trust_level="l1-only",
+            disposition="l1-only",
             risk_level="low",
             l1_detections=0,
             l1_suspicious=0,
@@ -200,7 +200,7 @@ class TestEventDataShapes:
         emit_request_event(
             tool="clean_search",
             source="query:test",
-            trust_level="quarantined",
+            disposition="quarantined",
             risk_level="low",
             l1_detections=1,
             l1_suspicious=0,
@@ -213,7 +213,7 @@ class TestEventDataShapes:
 
         d = events_captured[0]
         expected_keys = {
-            "tool", "source", "trust_level", "risk_level", "duration_ms",
+            "tool", "source", "disposition", "risk_level", "duration_ms",
             "l1_detections", "l1_suspicious", "l2_label", "l2_score",
             "input_size", "output_size", "stats",
         }

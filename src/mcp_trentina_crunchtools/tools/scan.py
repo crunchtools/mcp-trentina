@@ -17,6 +17,7 @@ from ..l1.pipeline import (
     run_l1,
 )
 from ..l1.shadows import detect_module_shadows
+from ..report import Disposition
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..quarantine.classifier import ClassifierResult
@@ -191,7 +192,7 @@ async def quarantine_scan(
     emit_request_event(
         tool="quarantine_scan",
         source=source,
-        trust_level="scan",
+        disposition=Disposition.REPORTED.value,
         risk_level=result["risk_level"],
         l1_detections=layer1_detections,
         l1_suspicious=0,
@@ -273,7 +274,7 @@ async def deep_quarantine_scan(
     emit_request_event(
         tool="deep_quarantine_scan",
         source=source,
-        trust_level="scan",
+        disposition=Disposition.REPORTED.value,
         risk_level=result["risk_level"],
         l1_detections=layer1_detections,
         l1_suspicious=0,
