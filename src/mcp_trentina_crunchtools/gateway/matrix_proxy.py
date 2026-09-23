@@ -42,15 +42,15 @@ from starlette.responses import Response, StreamingResponse
 from ..channels import Channel
 from ..defense import defend, defend_scan_view
 from ..matrix.keybackup import KeyBackupProvider
-from ..scanview import ScanViewContext
-from .drivers import build_extractor
+from ..preprocess import ScanViewContext
+from .drivers import build_preprocessors
 from .proxy_utils import (
     PLAIN_TEXT,
     filter_response_headers,
     forward_request_headers,
     sanitize_proxy_path,
 )
-from .scanview import build_scan_view, describe
+from .selection import build_scan_view, describe
 from .warning import build_warning
 
 if TYPE_CHECKING:
@@ -271,7 +271,7 @@ async def _provider_for(profile: Profile) -> Any:
     the Matrix proxy down with it.
     """
     ingress = profile.matrix_ingress
-    cfg = ingress.scan_view.decrypt if ingress is not None else None
+    cfg = ingress.preprocess.decrypt if ingress is not None else None
     if cfg is None or not cfg.enabled:
         return None
     if profile.name in _PROVIDERS:
@@ -319,30 +319,33 @@ async def _provider_for(profile: Profile) -> Any:
 
 
 async def _extractor_for(profile: Profile) -> Any:
-    """The profile's extractor, built once, with its key provider attached.
+    """The profile's document processor, built once, with its keys attached.
 
-    Cached because the Matrix extractor holds a session cache, and rebuilding
-    it per request would throw that away on the path where it matters most.
-    Async because the provider it depends on verifies the backup over the
-    network the first time it is needed.
+    ``None`` when the profile names no processor, which is the default and
+    means read every leaf — ``build_scan_view`` handles it.
+
+    Cached because the Matrix processor holds a Megolm session cache, and
+    rebuilding it per request would throw that away on the path where it
+    matters most. Async because the provider it depends on verifies the backup
+    over the network the first time it is needed.
     """
     ingress = profile.matrix_ingress
-    cfg = ingress.scan_view if ingress is not None else None
+    if ingress is None or not ingress.preprocess.processors:
+        return None
+    cfg = ingress.preprocess
     # Keyed on every input the factory reads, not just the name: two
     # profiles, or one profile across a reload, must not share an instance
     # built from different settings.
-    key = (
-        f"{profile.name}:{cfg.extractor if cfg else 'full'}"
-        f":{cfg.skip_sample_bytes if cfg else 0}"
-    )
+    key = f"{profile.name}:{','.join(cfg.processors)}:{cfg.skip_sample_bytes}"
     cached = _EXTRACTORS.get(key)
     if cached is None:
-        cached = build_extractor(
+        # The channel takes at most one, enforced in build_preprocessors.
+        cached = build_preprocessors(
             cfg,
             channel=Channel.MATRIX,
             profile_name=profile.name,
             keys=await _provider_for(profile),
-        )
+        )[0]
         _EXTRACTORS[key] = cached
     return cached
 
@@ -402,7 +405,7 @@ async def _scan_and_forward(
     body = b"".join(chunks)
 
     ingress = profile.matrix_ingress
-    cfg = ingress.scan_view if ingress is not None else None
+    cfg = ingress.preprocess if ingress is not None else None
     deadline = cfg.deadline_seconds if cfg else _FALLBACK_SCAN_DEADLINE_SECONDS
 
     payload: Any = None

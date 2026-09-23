@@ -57,8 +57,8 @@ def _matrix_profile(
     from mcp_trentina_crunchtools.gateway.profile import (
         AuthConfig,
         MatrixIngressConfig,
+        MatrixPreProcessConfig,
         Profile,
-        ScanViewConfig,
     )
 
     p = Profile(
@@ -66,7 +66,7 @@ def _matrix_profile(
         auth=AuthConfig(bearer_token_env="TEST"),
         matrix_ingress=MatrixIngressConfig(
             token_env="MTOK",
-            scan_view=scan_view or ScanViewConfig(),
+            scan_view=scan_view or MatrixPreProcessConfig(),
         ),
     )
     p.auth.bearer_token = SecretStr("x")
@@ -258,14 +258,14 @@ class TestMatrixSyncScanning:
         clean = {"rooms": {}, "next_batch": "s1"}
         upstream = _FakeUpstream(json.dumps(clean).encode())
         monkeypatch.setattr(matrix_proxy, "_get_matrix_client", lambda: upstream)
-        from mcp_trentina_crunchtools.gateway.profile import ScanViewConfig
+        from mcp_trentina_crunchtools.gateway.profile import MatrixPreProcessConfig
 
         async def _hang(*_args: object, **_kwargs: object) -> None:
             await asyncio.sleep(30)
 
         monkeypatch.setattr(matrix_proxy, "defend_scan_view", _hang)
 
-        profile = _matrix_profile(scan_view=ScanViewConfig(deadline_seconds=0.05))
+        profile = _matrix_profile(scan_view=MatrixPreProcessConfig(deadline_seconds=0.05))
         client = TestClient(_matrix_app({"agent1": profile}))
         resp = client.get("/matrix/sekrit/_matrix/client/v3/sync")
 

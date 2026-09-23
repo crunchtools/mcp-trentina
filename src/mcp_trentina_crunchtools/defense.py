@@ -67,7 +67,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .gateway.profile import DefenseConfig
-    from .scanview import ScanView
+    from .preprocess import ScanView
 
 
 class Layer(str, Enum):

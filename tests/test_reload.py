@@ -86,15 +86,22 @@ BETA_MATRIX_YAML = BASE_YAML.replace(
     "  beta:\n    auth:\n      bearer_token_env: TEST_BETA_TOKEN\n"
     "    matrix_ingress:\n"
     "      token_env: TEST_BETA_TOKEN\n"
-    "      scan_view:\n"
-    "        extractor: full\n"
+    "      preprocess:\n"
+    "        processors: []\n"
     "        deadline_seconds: 20.0\n",
 )
 
 # The same, with BOTH an operator-only field and an agent-settable one moved.
 BETA_MATRIX_NARROWED_YAML = BETA_MATRIX_YAML.replace(
-    "        extractor: full\n        deadline_seconds: 20.0\n",
-    "        extractor: generic\n        deadline_seconds: 5.0\n",
+    "        processors: []\n        deadline_seconds: 20.0\n",
+    "        processors: [select]\n        deadline_seconds: 5.0\n",
+)
+
+# The pre-0.21.0 spelling, which still has to load. `extractor: generic` is
+# `processors: [select]`; `extractor: full` is the empty list.
+BETA_MATRIX_OLD_SPELLING_YAML = BETA_MATRIX_YAML.replace(
+    "      preprocess:\n        processors: []\n",
+    "      scan_view:\n        extractor: full\n",
 )
 
 # alpha alone: the tail of the file, from "  beta:" on, cut off.
@@ -530,14 +537,14 @@ class TestPerimeterIsOperatorOnly:
 
         assert result["reloaded"] is True
         ingress = _registry()["beta"].matrix_ingress
-        assert ingress.scan_view.extractor == "full", (
+        assert ingress.preprocess.processors == [], (
             "an agent reload must not reshape its own perimeter"
         )
-        assert ingress.scan_view.deadline_seconds == 5.0, (
+        assert ingress.preprocess.deadline_seconds == 5.0, (
             "but it may still retune its own performance"
         )
         held = result["not_applied"]["operator_only"]
-        assert "matrix_ingress.scan_view.extractor" in held
+        assert "matrix_ingress.preprocess.processors" in held
 
     async def test_operator_reload_applies_it(self, profiles_path: Path) -> None:
         profiles_path.write_text(BETA_MATRIX_YAML, encoding="utf-8")
@@ -547,7 +554,23 @@ class TestPerimeterIsOperatorOnly:
         result = await _reload_as("alpha")
 
         assert result["reloaded"] is True
-        assert _registry()["beta"].matrix_ingress.scan_view.extractor == "generic"
+        assert _registry()["beta"].matrix_ingress.preprocess.processors == ["select"]
+
+    async def test_the_pre_0_21_spelling_still_loads(
+        self, profiles_path: Path
+    ) -> None:
+        """A deployed config must survive the upgrade.
+
+        Every profile model is `extra="forbid"` and a load failure is fatal,
+        so the old `scan_view.extractor` spelling has to keep working until
+        0.25.0 removes it. `full` maps to the empty list, which is why an
+        alias could not do this and a before-validator does.
+        """
+        profiles_path.write_text(BETA_MATRIX_OLD_SPELLING_YAML, encoding="utf-8")
+        result = await _reload_as("alpha")
+
+        assert result["reloaded"] is True
+        assert _registry()["beta"].matrix_ingress.preprocess.processors == []
 
 
 class TestUnknownCaller:

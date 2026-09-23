@@ -17,10 +17,10 @@ import pytest
 
 from mcp_trentina_crunchtools.matrix.keybackup import KeyBackupProvider
 from mcp_trentina_crunchtools.matrix.megolm import megolm_available
-from mcp_trentina_crunchtools.scanview import (
-    GenericExtractor,
-    MatrixExtractor,
+from mcp_trentina_crunchtools.preprocess import (
+    MatrixProcessor,
     ScanViewContext,
+    SelectProcessor,
     SkipReason,
 )
 
@@ -50,8 +50,8 @@ async def _provider(v: Vectors) -> KeyBackupProvider:
     return p
 
 
-def _extractor(keys: Any) -> MatrixExtractor:
-    return MatrixExtractor(generic=GenericExtractor(), keys=keys)
+def _extractor(keys: Any) -> MatrixProcessor:
+    return MatrixProcessor(select=SelectProcessor(), keys=keys)
 
 
 class TestTheCoverageChange:

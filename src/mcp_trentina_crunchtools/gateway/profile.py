@@ -11,10 +11,12 @@ profile YAML are a hard error at load time.
 
 from __future__ import annotations
 
+import logging
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -24,6 +26,8 @@ from pydantic import (
 )
 
 from ..config import SUPPORTED_PROVIDERS
+
+logger = logging.getLogger(__name__)
 
 PROFILE_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 BACKEND_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
@@ -56,11 +60,26 @@ INTERNAL_SCHEME = "internal://"
 # the box. See gateway/scope.py, which is the only place this is interpreted.
 ProfileRole = Literal["agent", "operator"]
 
+# Pre-0.21.0 scan_view.extractor names. 'full' is not here: it maps to an
+# empty processor list rather than to a name.
+_EXTRACTOR_RENAMES: dict[str, str] = {"generic": "select"}
+
 # Registered pre-processors. Adding one means adding it here, to
 # gateway.drivers.PREPROCESSORS, and nowhere else. Declared twice on purpose:
 # this Literal is what makes pydantic reject an unknown name at YAML load,
 # and the parity test in tests/test_gateway_drivers.py keeps the two in step.
-ProcessorName = Literal["petit", "structured", "email", "summarize"]
+ProcessorName = Literal[
+    # TEXT — str in, str out. Valid on the tool channel.
+    "petit",
+    "structured",
+    "email",
+    "summarize",
+    # DOCUMENT — parsed JSON in, the strings worth reading out. Valid on the
+    # matrix channel. `select` alone reads any JSON; `matrix` decrypts first.
+    # There is no "full": reading everything is what naming nothing means.
+    "select",
+    "matrix",
+]
 # FREE only, and ordered by how cheaply each one can decline: structured
 # and email reject a payload of the wrong shape on their first check, so
 # petit — which has to group every line before it knows — goes last.
@@ -68,16 +87,12 @@ ProcessorName = Literal["petit", "structured", "email", "summarize"]
 # draws unconditional L3, so it costs two model calls.
 _DEFAULT_PROCESSORS: list[ProcessorName] = ["structured", "email", "petit"]
 
-# Registered guard read policies. Adding one means adding it here, to
-# gateway.drivers.SCAN_POLICIES, and nowhere else. Same two-halves-of-one-list
-# arrangement as ProcessorName above, and the same parity test covers both.
-ScanViewName = Literal["full", "generic", "matrix"]
-
-# Fields of ScanViewConfig an AGENT may change by reloading its own profile.
+# Fields of MatrixPreProcessConfig an AGENT may change by reloading its own
+# profile.
 # Everything else in that block decides how much of the payload is read at
 # all -- an agent may retune its own performance, it may not reshape its own
 # perimeter. Enforced in tools/reload.py.
-SCAN_VIEW_AGENT_FIELDS: frozenset[str] = frozenset(
+PREPROCESS_AGENT_FIELDS: frozenset[str] = frozenset(
     {"skip_sample_bytes", "min_coverage", "deadline_seconds"}
 )
 
@@ -203,7 +218,38 @@ class ParameterConstraint(BaseModel):
         return v
 
 
-class PreProcessConfig(BaseModel):
+class ProcessorChainConfig(BaseModel):
+    """What every channel's pre-processing has in common: which, and how much.
+
+    Two channels configure pre-processing and they want different knobs
+    around the same chain — the tool channel has a size budget, the matrix
+    channel has a coverage floor and a deadline. Rather than one model whose
+    fields are half-meaningless wherever you look, both inherit this.
+
+    ``gateway/drivers.py`` types against this base, so it is exactly the
+    surface the registry needs and nothing else.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    processors: list[ProcessorName] = Field(
+        default_factory=list,
+        description="Which processors run, in order. Empty is the no-op.",
+    )
+    skip_sample_bytes: int = Field(
+        default=1024,
+        ge=0,
+        le=_MAX_SKIP_SAMPLE_BYTES,
+        description=(
+            "Budget for sampling the opening of skipped strings, so a payload "
+            "hidden in a declined field still reaches L1/L2. Zero disables "
+            "the backstop -- do that only with a reason. Read by 'select' "
+            "and 'matrix'; ignored by the text processors."
+        ),
+    )
+
+
+class PreProcessConfig(ProcessorChainConfig):
     """Transformation applied to tool responses before the perimeter scan.
 
     Transformation is not defense (see ``preprocess/base.py``, invariant 1: a
@@ -220,8 +266,6 @@ class PreProcessConfig(BaseModel):
     field it leaves unset inherits. Profile answers "how aggressive is this
     agent"; tool answers "is this payload shape worth it".
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     enabled: bool = Field(
         default=False,
@@ -242,7 +286,8 @@ class PreProcessConfig(BaseModel):
             "Which processors may run, in order. 'summarize' is METERED: it "
             "spends an LLM call AND forces its output to MODEL_OUTPUT "
             "provenance, which draws unconditional L3 — two model calls per "
-            "response, not one. Default is the FREE set."
+            "response, not one. Default is the FREE set. 'select' and "
+            "'matrix' are document processors and are refused here."
         ),
     )
     target_bytes: int = Field(
@@ -620,37 +665,24 @@ class MatrixDecryptConfig(BaseModel):
         return value
 
 
-class ScanViewConfig(BaseModel):
-    """What the defense pipeline is allowed to read, and how it reports gaps.
+class MatrixPreProcessConfig(ProcessorChainConfig):
+    """Pre-processing on the matrix channel, and how coverage gaps are reported.
 
-    The default is ``full`` -- scan every string leaf, which is what shipped
-    before extractors existed. That default is load-bearing: merging this
-    changes no deployment's behaviour until an operator opts in, and a
-    defense change whose default narrows the perimeter is one that lands by
-    accident.
+    The default is an empty chain -- read every string leaf, which is what
+    shipped before any selection existed. That default is load-bearing:
+    merging this changes no deployment's behaviour until an operator opts in,
+    and a defense change whose default narrows the perimeter is one that lands
+    by accident.
+
+    This was ``ScanViewConfig`` with an ``extractor:`` field naming one of
+    full/generic/matrix. ``extractor: full`` is now an empty ``processors``
+    list, because reading everything is what naming nothing means; ``generic``
+    is ``select``. Old spellings still load -- see the validator below -- and
+    are removed in 0.25.0.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    extractor: ScanViewName = Field(
-        default="full",
-        description=(
-            "Which extractor selects the scanned subset. full: every leaf, "
-            "no selection. generic: skip only what is structurally incapable "
-            "of carrying language -- ciphertext, identifiers, enum "
-            "constants, numbers, and exact duplicates."
-        ),
-    )
-    skip_sample_bytes: int = Field(
-        default=1024,
-        ge=0,
-        le=_MAX_SKIP_SAMPLE_BYTES,
-        description=(
-            "Budget for sampling the opening of skipped strings, so a "
-            "payload hidden in a declined field still reaches L1/L2. Zero "
-            "disables the backstop -- do that only with a reason."
-        ),
-    )
     min_coverage: float = Field(
         default=0.02,
         ge=0.0,
@@ -666,21 +698,51 @@ class ScanViewConfig(BaseModel):
         gt=0.0,
         le=120.0,
         description=(
-            "How long extraction plus judgement may take before the response "
-            "forwards anyway, annotated scan_timeout."
+            "How long pre-processing plus judgement may take before the "
+            "response forwards anyway, annotated scan_timeout."
         ),
     )
     decrypt: MatrixDecryptConfig | None = Field(
         default=None,
-        description="Matrix E2EE termination. Requires extractor: matrix.",
+        description="Matrix E2EE termination. Requires the 'matrix' processor.",
     )
 
-    @model_validator(mode="after")
-    def _decrypt_needs_matrix(self) -> ScanViewConfig:
-        if self.decrypt is not None and self.extractor != "matrix":
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_the_old_extractor_spelling(cls, data: Any) -> Any:
+        """Load a pre-0.21.0 ``extractor:`` block as a ``processors:`` list.
+
+        An alias cannot do this one: the shape changes from a scalar to a
+        list, and ``full`` maps to the EMPTY list rather than to a name. Every
+        profile model is ``extra="forbid"`` and a profile that fails to load
+        is fatal, so a deployed config carrying the old spelling would take
+        the gateway down on upgrade rather than warn.
+        """
+        if not isinstance(data, dict) or "extractor" not in data:
+            return data
+        data = dict(data)
+        old = data.pop("extractor")
+        if "processors" in data:
             raise ValueError(
-                "scan_view.decrypt requires extractor: matrix — the generic "
-                "extractor has nowhere to put decrypted text"
+                "set either 'processors' or the old 'extractor', not both"
+            )
+        logger.warning(
+            "matrix_ingress.scan_view.extractor: %r is deprecated and is "
+            "removed in 0.25.0; write processors: %s",
+            old,
+            [] if old == "full" else [_EXTRACTOR_RENAMES.get(old, old)],
+        )
+        data["processors"] = (
+            [] if old == "full" else [_EXTRACTOR_RENAMES.get(old, old)]
+        )
+        return data
+
+    @model_validator(mode="after")
+    def _decrypt_needs_the_matrix_processor(self) -> MatrixPreProcessConfig:
+        if self.decrypt is not None and "matrix" not in self.processors:
+            raise ValueError(
+                "scan_view.decrypt requires processors: [matrix] — the "
+                "'select' processor has nowhere to put decrypted text"
             )
         return self
 
@@ -705,8 +767,9 @@ class MatrixIngressConfig(BaseModel):
     token: SecretStr | None = Field(
         default=None, exclude=True, description="Resolved token (load-time only)",
     )
-    scan_view: ScanViewConfig = Field(
-        default_factory=ScanViewConfig,
+    preprocess: MatrixPreProcessConfig = Field(
+        default_factory=MatrixPreProcessConfig,
+        validation_alias=AliasChoices("preprocess", "scan_view"),
         description=(
             "How much of a Matrix response the defense pipeline reads. "
             "Defaults to scanning everything, so adopting this is an "

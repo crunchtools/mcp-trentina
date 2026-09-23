@@ -10,6 +10,69 @@ under that name.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-22
+
+Structural. No behaviour change, and the tests are arranged to prove that.
+
+### Changed
+- **One driver role, not two.** 0.20.0 ruled that a pre-processor may never
+  open a gap between what is scanned and what is delivered, and used that to
+  make `scanview/` a separate kind of driver — "guard machinery". The rule does
+  not survive contact with L1: `sanitize/pipeline.py` has always normalized a
+  COPY for L2 to read while delivering the original untouched, because a Nagios
+  alert or a CVE ticket discusses attacks in the words attacks use. Scanning
+  something different from what you deliver is how L1 works, not a violation.
+
+  What was actually happening is narrower and is not a driver category. The
+  Matrix proxy forwards upstream ciphertext because the agent must decrypt for
+  itself (#162), so that one call site cannot deliver what it read. 0.20.0
+  turned a call site's limitation into a permanent Protocol.
+
+  `scanview/` is gone. `generic` is now `select` and `matrix` is
+  `MatrixProcessor`, both in `preprocess/`, both ordinary pre-processors that
+  happen to take parsed JSON rather than a string. Invariant 2 now says where
+  the line really falls: everything a processor emits is scanned, and what
+  reaches the wire is the CALL SITE's decision.
+
+- **`full` is deleted.** Reading everything is what naming no processor
+  already means. It was not dead weight — the fail-open path constructed it,
+  and that path's failure mode is "scanned nothing, looked clean" — so
+  `tests/test_full_is_defend_json.py` landed first, proving `full` and
+  `defend_json` reach the same verdict across every shape and the whole
+  adversarial corpus. Only then was the degrade path rewritten and the class
+  removed.
+
+- **One JSON walk.** `scanview/walk.py` and `defense.sanitize_json_value` were
+  separate hand-written copies of the same traversal. `walk.py`'s own docstring
+  warned they must not diverge and then left both in place. Now `jsonwalk.py`.
+
+- **One registry.** `PREPROCESSORS` in `gateway/drivers.py` is the only table.
+  The two-registry split is how the text-processor table ended up with no
+  channel lock at all — it was written once, in the half nobody copied it out
+  of.
+
+### Added
+- **A kind lock.** A channel hands its processors a string or a parsed
+  document, never both, and the registry refuses the mismatch at load. Without
+  it the mismatch is an `AttributeError` deep inside a request.
+- **`tests/test_config_references_resolve.py`** — two classes of reference that
+  break silently when a file moves and that no type checker sees:
+  `gourmand-exceptions.toml` is path-keyed, so a move lapses its suppression;
+  and `patch("dotted.path")` is resolved by mock at call time. This release
+  moved fourteen files, which is how both were noticed.
+
+### Migration
+- `matrix_ingress.scan_view` is now `matrix_ingress.preprocess`, and
+  `extractor: <name>` is `processors: [<name>]` — with `generic` spelled
+  `select`, and `full` spelled as the empty list. **The old spelling still
+  loads**, with a warning, until 0.25.0. An alias could not do it alone: the
+  shape changes from a scalar to a list and `full` maps to the empty list, so
+  there is a before-validator. Every profile model is `extra="forbid"` and a
+  load failure is fatal, so a deployed config had to keep working.
+- `_trentina_warning`'s `scan_extractor` is now `scan_processor`. The composite
+  `"<name>->full"` value is gone: the name plus the existing `scan_degraded`
+  flag says the same thing without a client parsing a string.
+
 ## [0.20.2] - 2026-09-22
 
 ### Fixed

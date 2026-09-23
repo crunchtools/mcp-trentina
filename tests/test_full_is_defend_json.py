@@ -1,6 +1,6 @@
 """`full` and `defend_json` are the same scan, and this proves it before we delete one.
 
-`FullExtractor` selects every string leaf and hands them to `defend_scan_view`.
+`read_everything` selects every string leaf and hands them to `defend_scan_view`.
 `defend_json` walks every string leaf and judges them itself. Two walks,
 written twice, reaching the same verdict — `jsonwalk.py`'s predecessor docstring
 says so and warns that "if the two walks ever disagree about what counts as a
@@ -8,7 +8,7 @@ leaf, the accounting in S3 stops meaning anything."
 
 `full` is being deleted, because under one driver role "scan everything" is
 what an empty processor chain already means. But `full` is not dead weight:
-``gateway/scanview.py``'s S5 degrade path CONSTRUCTS it, and that path is the
+the degrade path in ``gateway/selection.py`` uses it, and that path is the
 one whose failure mode is "scanned nothing, looked clean". Deleting it means
 rewriting the fail-open path, so the order is not negotiable:
 
@@ -34,7 +34,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from mcp_trentina_crunchtools.defense import defend_json, defend_scan_view
-from mcp_trentina_crunchtools.scanview import FullExtractor, ScanViewContext
+from mcp_trentina_crunchtools.gateway.selection import read_everything
+from mcp_trentina_crunchtools.preprocess import ScanViewContext
 
 from .adversarial_corpus import CORPUS
 
@@ -78,7 +79,7 @@ class TestFullScanEqualsJsonScan:
     )
     async def test_same_leaves_stats_and_risk(self, payload: Any) -> None:
         via_json = await defend_json(payload, source="s", source_type="tool_response")
-        view = await FullExtractor().extract(payload, CTX)
+        view = read_everything(payload, extractor="none", why="")
         via_view = await defend_scan_view(
             view, source="s", source_type="tool_response"
         )
@@ -110,7 +111,7 @@ class TestFullScanEqualsJsonScan:
             via_json = await defend_json(
                 payload, source="s", source_type="tool_response"
             )
-            view = await FullExtractor().extract(payload, CTX)
+            view = read_everything(payload, extractor="none", why="")
             via_view = await defend_scan_view(
                 view, source="s", source_type="tool_response"
             )

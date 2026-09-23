@@ -6,7 +6,18 @@ They are served by two mechanisms in two places, deliberately:
 * Pre-processors (this package) TRANSFORM payloads. They run outside the
   perimeter, their output is exactly as untrusted as their input, and
   everything they emit crosses the defense pipeline on its way in.
-* The defense pipeline (``defense.py``) makes verdicts. It never transforms.
+* The guards make verdicts. Parameter guards, response guards, and the
+  three-layer scanner (``defense.py``). Guards decide; nothing else does.
+  They never transform what is delivered.
+
+Two roles, and everything in a request path is one of them. There is no
+third.
+
+Two INPUT SHAPES, not two roles. Most processors here are ``str -> str``
+(``PreProcessor``, below). ``select`` and ``matrix`` take parsed JSON and
+return the strings worth reading out of it (``DocumentProcessor`` in
+``view.py``), because ``m.room.encrypted`` is a structure rather than a
+substring. They were a separate package with a separate contract until #167.
 
 Reduction is the most common transformation, not the only one, and the
 package has never been reduction-only. ``volatile.normalize()`` rewrites
@@ -22,39 +33,39 @@ Three invariants, none negotiable:
    always safe, because a byte that is deleted reaches no one. What is
    forbidden is the other direction: never mark content clean, never shorten
    or skip ``defend()``, and never let output be trusted more than input.
-2. A pre-processor never bypasses ``defend()``, and never opens a gap
-   between what is SCANNED and what is DELIVERED. The composition layer hands
-   back one artifact; the caller scans THAT artifact and delivers THAT
-   artifact. What a processor dropped never reaches the agent at all, which
-   is what makes fingerprint-collision games pointless — colliding your
-   payload into a collapsed group deletes it.
+2. A pre-processor never bypasses ``defend()``. Everything it emits is
+   scanned. What a processor DROPPED never reaches the agent at all, which is
+   what makes fingerprint-collision games pointless — colliding your payload
+   into a collapsed group deletes it, and a line that is never delivered
+   injects nothing.
 
-   That argument is about DELETION specifically, not about getting smaller.
-   A processor that rearranges rather than deletes does not inherit it: its
+   That argument is about DELETION specifically, not about getting smaller. A
+   processor that rearranges rather than deletes does not inherit it: its
    bytes are still delivered, so it must carry its own reasoning for why
    reshaping them is safe.
 
-   The second half of the invariant settles a question the two-role model
-   has to answer: a driver that scans LESS than it delivers is not a
-   pre-processor and cannot be made into one. Such a driver is not
-   hypothetical — reading less is the only lever that keeps the Matrix
-   perimeter inside its readiness budget at all (``scanview/``) — so it is
-   not forbidden outright; it is placed on the other side of the line. It is
-   a GUARD choosing what to read, because deciding how thoroughly to judge
-   is a judgement, and judgements belong to guards. Concretely:
+   Whether the DELIVERED bytes are this processor's output or the untouched
+   original is the CALL SITE's decision, not the driver's.
+   ``gateway/transform.py`` delivers what the chain returned;
+   ``gateway/matrix_proxy.py`` forwards the upstream ciphertext, because the
+   agent must decrypt for itself (issue #162). Where the two differ, the call
+   site accounts for the gap — coverage, a skip histogram by reason, and
+   ``low_scan_coverage`` below the floor.
 
-     * scan == deliver  -> pre-processor. It owns the bytes; the scan view
-       is whatever it hands back.
-     * scan <  deliver  -> guard read policy (``scanview/base.py``, S1-S5).
-       It owns nothing on the wire; it must account for every byte it
-       declined and low coverage is itself a finding.
+   Scan-differs-from-deliver is not an anomaly to be designed out. It is what
+   L1 has always done: ``sanitize/pipeline.py`` normalizes a COPY for L2 to
+   read and delivers the original untouched, because a Nagios alert or a CVE
+   ticket discusses attacks in the words attacks use, and amputating those
+   lines destroys exactly the content an ops agent exists to read.
 
-   Nothing legitimate needs both, and a Protocol that carried both would let
-   the wrong one be configured in the wrong place. This is why ``scanview/``
-   exists as guard machinery rather than as a second driver framework —
-   growing it as a peer of this package was the wrong turn that issue #160
-   was filed to undo.
-3. Every pre-processor accounts for itself. The sidecar (bytes in/out, ratio,
+   A previous revision of this file (#163) ruled the opposite — that a
+   pre-processor may never open a gap between what is scanned and what is
+   delivered — and used that to split this package in two. The rule did not
+   survive contact with L1, and the split it justified is undone. It is
+   recorded here because the reasoning was plausible and someone will
+   reconstruct it.
+
+3. Every pre-processor accounts for itself, and FAILS OPEN. The sidecar (bytes in/out, ratio,
    what was collapsed) reaches L3's briefing, because "this artifact is the
    3% that survived transformation" is context a judge should have. Routing
    it to the audit log as token-mandate evidence is intended and not yet
@@ -75,6 +86,13 @@ fails OPEN by design (``compose.py`` swallows processor errors and passes the
 original through), so a filter that raised would deliver exactly what it
 exists to remove. That needs fail-closed handling first.
 
+FAILING OPEN MEANS HIDING NOTHING, and which direction that points depends on
+what the processor owns. A text processor that raises delivers and scans the
+ORIGINAL — ``compose.py`` swallows the error and passes the payload through. A
+document processor that raises causes its caller to read EVERYTHING
+(``gateway/selection.py``). Both are the same rule: on failure, do the thing
+that hides nothing. No failure mode may result in "read nothing, looked clean".
+
 Pre-processors parse hostile bytes. Regexes here must be linear-time and
 fingerprinting must cap the bytes it reads per line — an attacker choosing
 the input must not be able to buy quadratic work.
@@ -87,7 +105,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from ..channels import Channel
+    from ..channels import Channel, Kind
 
 
 class Cost(str, Enum):
@@ -186,9 +204,9 @@ class PreProcessor(Protocol):
 
     name: str
     cost: Cost
+    kind: Kind
     # Which ingresses this processor understands. Enforced once, in
-    # gateway/drivers.py, by the same mechanism that locks a guard's read
-    # policy to its channel — a processor tuned for one payload shape and
+    # gateway/drivers.py — a processor tuned for one payload shape and
     # pointed at another declines forever and looks like it is working.
     channels: frozenset[Channel]
 

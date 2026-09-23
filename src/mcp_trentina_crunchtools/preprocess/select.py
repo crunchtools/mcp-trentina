@@ -1,32 +1,64 @@
-"""Shape-based selection for any JSON payload.
+"""Read what could be language; account for everything else.
 
-Three mechanisms, in order of how much they save on a real Matrix sync:
+The reducer for structured payloads. Where ``petit`` collapses repeated lines
+and ``structured`` collapses repeated array elements, this one drops the
+strings that cannot carry an instruction at all — ciphertext, identifiers,
+enum constants, numbers, exact duplicates.
+
+Why it exists: a measured Matrix initial sync was 68,092 characters reaching
+the classifier, of which 45,552 were Megolm ciphertext, 13,352 were JSON key
+names, 7,617 were key-backup material, and 245 were human-readable prose. The
+scan took 46 seconds to read base64 it held no key for. Reading less is not a
+shortcut here; it is the difference between a perimeter that runs and one that
+times out and is skipped entirely. Takeda measured 17.6x.
+
+Three mechanisms, in order of what they save on that sync:
 
 1. STRUCTURAL SKIPPING (``shapes.classify_skip``) removes ciphertext,
    identifiers, enum constants and numbers — 53 KB of the measured 68 KB.
-2. DEDUPLICATION removes repeats. 1,289 key names in that sync are about
-   forty distinct strings; every distinct one is still scanned exactly once.
-   A classifier learns nothing from the second ``"origin_server_ts"``, and
+2. DEDUPLICATION removes repeats. 1,289 key names in that sync are about forty
+   distinct strings; every distinct one is still read exactly once. A
+   classifier learns nothing from the second ``"origin_server_ts"``, and
    nothing can hide in a duplicate, because hiding requires the string to be
    absent and it is not — it is right there, the first time.
 3. SKIP SAMPLING puts the opening of every skipped string into one extra
    segment, so a payload hidden in a field the rules declined still gets its
    first bytes in front of L1 and L2. This is the backstop for the residual
-   hole in ``shapes``: it does not depend on any of the shape rules being
-   right, which is exactly what a backstop should not do.
+   hole in ``shapes``, and it does not depend on any shape rule being right —
+   which is exactly what a backstop should not do.
 
 The sample is deterministic — first N by document order, never random — so an
 incident is reproducible from the payload alone.
+
+Two rules bind this processor specifically, and they are the reason it is safe
+to skip bytes at all:
+
+SKIPPING IS STRUCTURAL, NEVER SEMANTIC. A string may be skipped only on a
+   property of its own shape: charset, length, absence of whitespace, a match
+   against an identifier grammar. Never on its meaning, its sender, its room,
+   or a classifier's opinion of it. The predicate is a pure function of the
+   string. There is no trusted-sender list and there never will be, because
+   the sender is the thing an attacker controls most cheaply.
+
+SKIPPING IS ACCOUNTED, AND LOW COVERAGE IS ITSELF A FINDING. Every skipped
+   byte is counted by reason. The histogram rides into the audit record and
+   into L3's briefing, because "this is the 4% that survived selection" is
+   context a judge should have. A scan that read 2% of a document must not
+   look like a scan that read all of it.
+
+``tests/test_adversarial_corpus.py`` is what earns the right to skip: for every
+case in the corpus, no leaf is skipped, planted as a value, as a key, and
+nested in an array.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..channels import Channel
+from ..channels import Channel, Kind
 from ..jsonwalk import iter_leaves
-from .base import ScanView, ScanViewContext, SkipReason
 from .shapes import MIN_SKIP_LEN, classify_skip
+from .view import ScanView, ScanViewContext, SkipReason
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -38,11 +70,17 @@ _SAMPLE_HEAD_CHARS = 64
 """How much of each skipped string the sample carries."""
 
 
-class GenericExtractor:
-    """Scan what could be language; account for everything else."""
+class SelectProcessor:
+    """Read what could be language; account for everything else."""
 
-    name = "generic"
-    channels = frozenset({Channel.MATRIX, Channel.ALERT, Channel.TOOL})
+    name = "select"
+    kind = Kind.DOCUMENT
+    # MATRIX only, because that is the only channel wired to hand a
+    # processor a parsed document. It claimed all three as an extractor,
+    # which was aspirational: the alert ingress defends structured payloads
+    # but has never resolved a processor by name, and the tool channel
+    # supplies strings.
+    channels = frozenset({Channel.MATRIX})
 
     def __init__(self, *, skip_sample_bytes: int = DEFAULT_SKIP_SAMPLE_BYTES) -> None:
         self.skip_sample_bytes = skip_sample_bytes
