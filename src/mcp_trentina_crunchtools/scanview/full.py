@@ -12,8 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 from ..channels import Channel
+from ..jsonwalk import iter_leaves
 from .base import ScanView, ScanViewContext
-from .walk import iter_leaves
 
 
 class FullExtractor:

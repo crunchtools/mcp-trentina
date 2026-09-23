@@ -6,6 +6,7 @@ prohibition, and ``channels.py`` for the two roles.
 """
 
 from ..channels import Channel
+from ..jsonwalk import iter_leaves
 from .base import (
     ScanView,
     ScanViewContext,
@@ -16,7 +17,6 @@ from .base import (
 from .full import FullExtractor
 from .generic import DEFAULT_SKIP_SAMPLE_BYTES, GenericExtractor
 from .matrix import MatrixExtractor
-from .walk import iter_leaves
 
 __all__ = [
     "DEFAULT_SKIP_SAMPLE_BYTES",

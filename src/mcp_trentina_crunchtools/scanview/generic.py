@@ -24,9 +24,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..channels import Channel
+from ..jsonwalk import iter_leaves
 from .base import ScanView, ScanViewContext, SkipReason
 from .shapes import MIN_SKIP_LEN, classify_skip
-from .walk import iter_leaves
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

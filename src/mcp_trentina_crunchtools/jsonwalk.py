@@ -1,11 +1,19 @@
-"""The one JSON walk both extractors share.
+"""The one JSON walk. There used to be two.
+
+Every place that asks "what strings are in this document?" comes here. That
+was not true until issue #167: this walk and ``defense.sanitize_json_value``
+were separate implementations of the same traversal, maintained by hand,
+and the old docstring here said so — it warned that "if the two walks ever
+disagree about what counts as a leaf, the accounting stops meaning anything"
+and then left both copies in place.
+
+They agreed. ``tests/test_full_is_defend_json.py`` proves it across the whole
+adversarial corpus, and that test is what made it safe to delete one. It is
+kept, because the property it checks is the reason this module exists.
 
 Iterative, not recursive: a 4KB "[[[[..." depth bomb against a recursive walk
-is an attacker-triggerable RecursionError, and an exception inside an
-extractor becomes a degraded scan. The same reasoning is written out at
-``defense.sanitize_json_value``, which this mirrors on purpose — if the two
-walks ever disagree about what counts as a leaf, the accounting in S3 stops
-meaning anything.
+is an attacker-triggerable RecursionError, and an exception raised mid-scan
+is a fail-open.
 """
 
 from __future__ import annotations

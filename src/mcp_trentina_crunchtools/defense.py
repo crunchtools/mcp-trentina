@@ -52,6 +52,7 @@ from .config import get_config
 from .database import record_detection
 from .dbus_interface import emit_detection_event
 from .errors import BlockedSourceError
+from .jsonwalk import iter_leaves
 from .quarantine.agent import quarantine_detect
 from .quarantine.classifier import ClassifierResult, classify_async, classify_guarded
 from .sanitize.pipeline import (
@@ -468,37 +469,26 @@ def sanitize_json_value(
     a `structuredContent` dict on exactly the same terms, so this belongs in
     the pipeline rather than in one endpoint.
 
-    Since L1 stopped modifying content there is no rebuild at all — the
-    input object is returned as-is, and the walk is ITERATIVE, because a
-    4KB "[[[[..." depth bomb against a recursive walk was an
-    attacker-triggerable RecursionError, and the except around the scan
-    turned that into a fail-open. What this walk produces
-    is the accounting: merged stats across every leaf, the original leaf texts
-    (``texts``) joined for L3, and the normalized leaf texts (``scan_views``)
-    joined for L2. Leaves are inspected individually but judged as one
-    document — a classifier shown one field at a time cannot see an
-    instruction split across two of them.
+    Since L1 stopped modifying content there is no rebuild at all — the input
+    object is returned as-is. What this produces is the accounting: merged
+    stats across every leaf, the original leaf texts (``texts``) joined for
+    L3, and the normalized leaf texts (``scan_views``) joined for L2. Leaves
+    are inspected individually but judged as ONE document — a classifier shown
+    one field at a time cannot see an instruction split across two of them.
+
+    The traversal itself lives in ``jsonwalk.iter_leaves``. It used to be
+    written out here as well, a second hand-maintained copy of the same walk;
+    ``tests/test_full_is_defend_json.py`` proved the two agreed, which is what
+    made it safe to keep one. That walk is iterative on purpose — a 4KB
+    "[[[[..." depth bomb against a recursive one is an attacker-triggerable
+    RecursionError, and an exception mid-scan is a fail-open.
     """
-    stack: list[Any] = [value]
-    while stack:
-        node = stack.pop()
-        if isinstance(node, str):
-            if not node:
-                continue
-            leaf = sanitize_text(node)
-            merge_stats(stats, leaf.stats)
-            texts.append(leaf.content)
-            if scan_views is not None:
-                scan_views.append(leaf.scan_view)
-        elif isinstance(node, dict):
-            # Keys too: a model reads {"IGNORE ALL PREVIOUS ...": true} the
-            # same way it reads a value, and keys used to be a scan-free
-            # channel. Reversed so the joined document keeps source order.
-            for k, v in reversed(list(node.items())):
-                stack.append(v)
-                stack.append(k)
-        elif isinstance(node, list):
-            stack.extend(reversed(node))
+    for text in iter_leaves(value):
+        leaf = sanitize_text(text)
+        merge_stats(stats, leaf.stats)
+        texts.append(leaf.content)
+        if scan_views is not None:
+            scan_views.append(leaf.scan_view)
     return value
 
 
