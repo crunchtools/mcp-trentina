@@ -1,4 +1,9 @@
-"""The normalization policy every reducer in this package shares.
+"""The normalization policy every pre-processor in this package shares.
+
+The package's purest transformation: it rewrites tokens rather than removing
+them, its size effect is incidental and runs both ways (``<TS>`` shrinks a
+timestamp, ``<N>`` grows a digit), and its output is never delivered — it
+feeds fingerprints. Reduction vocabulary has never described it.
 
 One definition, because it is a security boundary and not a convenience.
 The load-bearing rule: **normalize only tokens that cannot carry meaning to
@@ -8,11 +13,11 @@ Two artifacts that differ in a single word therefore have different
 fingerprints and both survive, so a semantic payload buried in boilerplate
 cannot be normalized into the boilerplate's group: it stays distinct and
 reaches the perimeter scan. An attacker who crafts a payload to collide
-with a boilerplate group achieves only its deletion — what a reducer drops
-is never delivered, and a line that is never delivered injects nothing.
+with a boilerplate group achieves only its deletion — what a pre-processor
+drops is never delivered, and a line that is never delivered injects nothing.
 
 A second copy of these patterns, drifting from this one, would mean one
-reducer quietly enforcing a weaker rule than the other. Import, never
+pre-processor quietly enforcing a weaker rule than the other. Import, never
 duplicate.
 
 Every pattern is linear-time: character classes and bounded repetition, no

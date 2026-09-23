@@ -1,25 +1,57 @@
-"""Pre-processor contract — token reduction OUTSIDE the security perimeter.
+"""Pre-processor contract — payload TRANSFORMATION outside the perimeter.
 
 Trentina has two mandates: defend the primary model, and save it tokens.
 They are served by two mechanisms in two places, deliberately:
 
-* Pre-processors (this package) make payloads SMALLER. They run outside the
+* Pre-processors (this package) TRANSFORM payloads. They run outside the
   perimeter, their output is exactly as untrusted as their input, and
   everything they emit crosses the defense pipeline on its way in.
-* The defense pipeline (``defense.py``) makes verdicts. It never shrinks.
+* The defense pipeline (``defense.py``) makes verdicts. It never transforms.
+
+Reduction is the most common transformation, not the only one, and the
+package has never been reduction-only. ``volatile.normalize()`` rewrites
+timestamps and identifiers into placeholders — the fingerprinting policy
+invariant 2 rests on, whose size effect is incidental and goes both ways.
+``structured.py`` re-serializes with indentation. Normalizing, restructuring
+and filtering are all in scope.
 
 Three invariants, none negotiable:
 
-1. A pre-processor never makes a security decision. It only reduces.
+1. A pre-processor may SUBTRACT, never ABSOLVE. Dropping, collapsing,
+   normalizing and restructuring are all permitted — deleting content is
+   always safe, because a byte that is deleted reaches no one. What is
+   forbidden is the other direction: never mark content clean, never shorten
+   or skip ``defend()``, and never let output be trusted more than input.
 2. A pre-processor never bypasses ``defend()``. The composition layer hands
-   back a reduced artifact; the caller scans THAT artifact and delivers THAT
-   artifact. What reduction dropped never reaches the agent at all, which is
-   what makes fingerprint-collision games pointless — colliding your payload
-   into a collapsed group deletes it.
+   back a transformed artifact; the caller scans THAT artifact and delivers
+   THAT artifact. What a processor dropped never reaches the agent at all,
+   which is what makes fingerprint-collision games pointless — colliding your
+   payload into a collapsed group deletes it.
+
+   That argument is about DELETION specifically, not about getting smaller.
+   A processor that rearranges rather than deletes does not inherit it: its
+   bytes are still delivered, so it must carry its own reasoning for why
+   reshaping them is safe.
 3. Every pre-processor accounts for itself. The sidecar (bytes in/out, ratio,
-   what was collapsed) travels two places: the audit log, as evidence for the
-   token mandate, and L3's briefing, because "this artifact is the 3% that
-   survived reduction" is context a judge should have.
+   what was collapsed) reaches L3's briefing, because "this artifact is the
+   3% that survived transformation" is context a judge should have. Routing
+   it to the audit log as token-mandate evidence is intended and not yet
+   built — ``router.py`` reads the sidecar only for the briefing, and
+   ``PreProcessOutcome.sidecar()`` has no caller in ``src/``.
+
+COMPOSITION IS STILL SIZE-DRIVEN, even though this contract is not. A
+transformation that does not shrink runs under ``chain`` and keeps its output,
+runs under ``auto`` if FREE, and loses under ``best_of`` to any processor that
+shrank more. Below ``min_bytes`` nothing runs at all, and every FREE processor
+here self-declines on ``bytes_out >= bytes_in``. Read ``compose.py`` before
+assuming a reshaping processor will survive the strategy you configured.
+
+A FILTERING processor — one that drops records a policy names — is permitted
+by invariant 1 and would be a better fit than a whole-response guard for
+per-record cases. It is not safe to build on this framework yet: composition
+fails OPEN by design (``compose.py`` swallows processor errors and passes the
+original through), so a filter that raised would deliver exactly what it
+exists to remove. That needs fail-closed handling first.
 
 Pre-processors parse hostile bytes. Regexes here must be linear-time and
 fingerprinting must cap the bytes it reads per line — an attacker choosing
@@ -54,7 +86,8 @@ class PreProcessContext:
     source: str = ""
     # The size the caller is trying to get under, in bytes. None means
     # "smaller is better but nothing binds". auto-composition escalates to
-    # METERED processors only while this is exceeded.
+    # METERED processors only while this is exceeded. A transformation whose
+    # purpose is not size ignores this; it is a budget, not a mandate.
     target_bytes: int | None = None
 
 
@@ -65,6 +98,9 @@ class PreProcessResult:
     ``applied`` is False when the processor looked and declined (content not
     log-shaped, reduction below its floor). Its ``content`` then echoes the
     input and downstream composition treats it as a no-op.
+
+    ``applied``, not a size comparison, is the signal that something happened:
+    a transformation can reshape a payload without changing its length.
     """
 
     name: str
@@ -80,7 +116,13 @@ class PreProcessResult:
 
     @property
     def ratio(self) -> float:
-        """Output bytes per input byte. 1.0 means nothing happened."""
+        """Output bytes per input byte.
+
+        1.0 means the size did not change, which is NOT the same as nothing
+        happening — check ``applied`` for that. Currently unread: the ``ratio``
+        that ships in the sidecar is computed at the composition and gateway
+        layers instead.
+        """
         if self.bytes_in == 0:
             return 1.0
         return self.bytes_out / self.bytes_in
@@ -121,6 +163,6 @@ class PreProcessor(Protocol):
     cost: Cost
 
     async def run(self, payload: str, ctx: PreProcessContext) -> PreProcessResult:
-        """Reduce the payload. Must return the input unchanged (applied=False)
-        rather than raise on content it cannot improve."""
+        """Transform the payload. Must return the input unchanged
+        (applied=False) rather than raise on content it cannot improve."""
         ...

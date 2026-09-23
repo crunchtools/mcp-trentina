@@ -62,14 +62,14 @@ Matching uses `fnmatch.fnmatchcase()`, which matches across newlines — so `*Re
 ## Pipeline Position
 
 ```
-Tool in allowlist? → Parameter guards → Backend call → Response guards → Reduce → Defense scan → Agent
+Tool in allowlist? → Parameter guards → Backend call → Response guards → Pre-process → Defense scan → Agent
 ```
 
 Two properties of that position are deliberate:
 
-**Before reduction.** [Pre-processors](compression.md) summarize and paraphrase. A guard reading the reduced artifact would be matching text a model rewrote, and a literal the operator forbade could be dissolved on the way past. The guard reads the bytes the backend actually sent.
+**Before pre-processing.** [Pre-processors](token-routing.md#defense-pipeline-interaction) collapse, summarize and paraphrase. A guard reading the transformed artifact would be matching text a model rewrote, and a literal the operator forbade could be dissolved on the way past. The guard reads the bytes the backend actually sent.
 
-**On internal backends too.** Internal (`internal://`) backends skip reduction and the defense scan, because the firewall already filtered that content where it *entered*. Egress policy is a different question — it is about who is asking, and the asker is the same either way — so response guards run regardless.
+**On internal backends too.** Internal (`internal://`) backends skip pre-processing and the defense scan, because the firewall already filtered that content where it *entered*. Egress policy is a different question — it is about who is asking, and the asker is the same either way — so response guards run regardless.
 
 The backend was contacted and did spend its call. That is unavoidable: the restricted material is only identifiable once it exists. What the guard controls is whether it is relayed.
 

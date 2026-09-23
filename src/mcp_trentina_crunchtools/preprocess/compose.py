@@ -5,6 +5,14 @@ summarize the result; or run both and keep whichever came out smaller; or
 run FREE ones always and spend LLM money only when the payload is still over
 budget. New processors join the registry and every strategy can use them.
 
+Every strategy here selects on SIZE, which is narrower than the contract in
+``base.py``: transformation, not reduction. ``best_of`` picks the smallest
+applied result, so a processor that reshapes without shrinking loses to any
+that shrank; ``auto`` escalates to METERED only while over ``target_bytes``.
+``chain`` is the strategy that carries a non-shrinking transformation through
+unconditionally. This gap is known and deliberate — widening selection wants a
+second non-reducing processor to design against.
+
 Whatever the strategy, the caller receives ONE artifact plus its accounting,
 scans that artifact through ``defend()``, and delivers that artifact. The
 composition layer itself never touches the defense pipeline — the perimeter
@@ -28,7 +36,7 @@ Strategy = Literal["none", "chain", "best_of", "auto"]
 
 @dataclass(frozen=True)
 class PreProcessOutcome:
-    """The reduced artifact and everything the perimeter should know about it."""
+    """The transformed artifact and all the perimeter should know about it."""
 
     content: str
     results: list[PreProcessResult] = field(default_factory=list)
@@ -43,7 +51,7 @@ class PreProcessOutcome:
     def provenance(self, input_provenance: Provenance = Provenance.EXTERNAL) -> Provenance:
         """What the perimeter should treat the artifact as.
 
-        Deterministic reduction preserves the input's provenance — petit
+        Deterministic transformation preserves the input's provenance — petit
         deleting lines cannot compose a payload. An LLM rewriting the
         payload makes it model output, and model output gets unconditional
         L3 regardless of how innocent it scores.
@@ -53,7 +61,11 @@ class PreProcessOutcome:
         return input_provenance
 
     def sidecar(self) -> dict[str, object]:
-        """Accounting for the audit log — the token-mandate evidence."""
+        """Accounting for the token mandate.
+
+        Intended for the audit log; today only ``describe_for_l3`` reaches the
+        wire, and this method has no caller outside the tests.
+        """
         return {
             "bytes_in": self.bytes_in,
             "bytes_out": self.bytes_out,
@@ -74,7 +86,7 @@ class PreProcessOutcome:
     def describe_for_l3(self) -> str | None:
         """The sidecar as a briefing line for the Q-Agent's context.
 
-        A judge should know it is reading a reduced artifact: an anomalous
+        A judge should know it is reading a transformed artifact: an anomalous
         compression ratio, or a summarizer having rewritten the text, changes
         what suspicion looks like.
         """
@@ -88,9 +100,9 @@ class PreProcessOutcome:
             for r in applied
         )
         return (
-            "This payload was reduced by pre-processing before reaching you: "
-            f"{steps}. You are judging the reduced artifact, which is exactly "
-            "what will be delivered if it passes."
+            "This payload was transformed by pre-processing before reaching "
+            f"you: {steps}. You are judging the transformed artifact, which is "
+            "exactly what will be delivered if it passes."
         )
 
 
@@ -101,7 +113,7 @@ async def run_preprocessors(
     strategy: Strategy = "chain",
     ctx: PreProcessContext | None = None,
 ) -> PreProcessOutcome:
-    """Reduce ``content`` per ``strategy``. Never raises on hostile input —
+    """Transform ``content`` per ``strategy``. Never raises on hostile input —
     a processor that fails is logged, skipped, and recorded as not applied."""
     ctx = ctx or PreProcessContext()
     bytes_in = len(content.encode("utf-8"))

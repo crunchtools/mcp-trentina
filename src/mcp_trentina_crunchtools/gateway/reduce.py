@@ -1,16 +1,20 @@
 """Wire the pre-processors into the tool-response path.
 
 This module is the call site the ``preprocess`` package was built for. It owns
-two things and nothing else: resolving which reduction policy applies to a
-given (profile, backend, tool), and rewriting the response's text blocks with
-whatever came back.
+two things and nothing else: resolving which transformation policy applies to
+a given (profile, backend, tool), and rewriting the response's text blocks
+with whatever came back.
 
 It does NOT scan, judge, or block. Per ``preprocess/base.py`` invariant 2 the
-caller reduces first and then scans the REDUCED artifact — so the router calls
-``reduce_response`` before ``scan_tool_response``, and what the perimeter
-judges is exactly what the agent will receive. Reduction happening before the
-wall is the whole point: what reduction dropped never reaches the agent, and
-never reaches the scanner either, so there is nothing to smuggle through.
+caller transforms first and then scans the TRANSFORMED artifact — so the
+router calls ``reduce_response`` before ``scan_tool_response``, and what the
+perimeter judges is exactly what the agent will receive. Transforming before
+the wall is the whole point: what a processor dropped never reaches the agent,
+and never reaches the scanner either, so there is nothing to smuggle through.
+
+The name says "reduce" because reduction is what every processor wired here
+does today. The contract is wider — see ``preprocess/base.py`` invariant 1,
+subtract but never absolve.
 
 Two-level resolution, profile then tool:
 
@@ -148,12 +152,17 @@ async def reduce_response(
     tool_name: str,
     content_blocks: list[Any] | None,
 ) -> ReduceOutcome:
-    """Shrink a tool response's text blocks. Never raises, never judges.
+    """Transform a tool response's text blocks. Never raises, never judges.
 
-    Any failure returns the input unchanged — a reducer that cannot reduce
-    must not be able to cost you the response. ``run_preprocessors`` already
-    fails open per processor; this adds the same guarantee around config
-    resolution and block rewriting.
+    Any failure returns the input unchanged — a processor that cannot improve
+    a payload must not be able to cost you the response. ``run_preprocessors``
+    already fails open per processor; this adds the same guarantee around
+    config resolution and block rewriting.
+
+    That fail-open behaviour is correct for a token mandate and disqualifying
+    for an enforcement one: a filtering processor that raised would deliver
+    exactly the content it exists to remove. Nothing security-load-bearing may
+    be wired through here until that is addressed.
     """
     cfg = resolve(profile, backend, tool_name)
     if not cfg.enabled or cfg.strategy == "none" or not cfg.processors:
