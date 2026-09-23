@@ -42,6 +42,8 @@ _PREFIX_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+_HARD_LINE_BREAK = re.compile(r"[ \t]{2,}\n|\\\n")
+
 
 @dataclass
 class DirectiveStats:
@@ -56,10 +58,20 @@ def strip_directives(text: str) -> tuple[str, DirectiveStats]:
     One detection per line, however many patterns hit it — the unit of
     suspicion is the hostile line, and counting each pattern would let a
     single line inflate the risk score on its own.
+
+    Markdown's hard line break (two-plus trailing spaces, or a trailing
+    backslash, before a newline) is markdownify's rendering of an HTML
+    `<br>`: one continuous instruction wrapped onto two raw-text lines, not
+    two independent lines. Scanning per raw line let `ignore<br>previous
+    instructions` evade every multi-word pattern here purely by virtue of
+    the tag. Collapsing it back to a single line before splitting closes
+    that without touching genuine paragraph breaks (blank lines), which
+    stay independent scanning units.
     """
     stats = DirectiveStats()
+    scan_text = _HARD_LINE_BREAK.sub(" ", text)
 
-    for line in text.split("\n"):
+    for line in scan_text.split("\n"):
         if _PREFIX_PATTERNS.search(line):
             stats.directives_detected += 1
             continue
