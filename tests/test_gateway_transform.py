@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, get_args
+from typing import Any
 
 import pytest
 from pydantic import SecretStr
