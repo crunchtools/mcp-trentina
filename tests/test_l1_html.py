@@ -58,6 +58,62 @@ class TestHtmlSanitization:
         _, stats = strip_hidden_html(html)
         assert stats.same_color_text == 1
 
+    def test_strips_display_none_via_style_block_class(self) -> None:
+        """A `.h{display:none}` rule hides an element just as well as an inline style.
+
+        `_is_hidden` used to look only at the "style" attribute, so a class
+        defined in a <style> block (removed separately, but only after
+        classification runs) sailed through undetected and its text was
+        delivered in full.
+        """
+        html = '<style>.h{display:none}</style><div class="h">hidden injection</div><p>visible</p>'
+        markdown, stats = strip_hidden_html(html)
+        assert stats.hidden_elements == 1
+        assert "hidden injection" not in markdown
+        assert "visible" in markdown
+
+    def test_strips_visibility_hidden_via_style_block_multiple_classes(self) -> None:
+        """A comma-separated selector list and a multi-class element both resolve."""
+        html = (
+            "<style>.a, .b { visibility: hidden }</style>"
+            '<div class="b extra">hidden</div><p>visible</p>'
+        )
+        _, stats = strip_hidden_html(html)
+        assert stats.hidden_elements == 1
+
+    def test_strips_off_screen_via_style_block_class(self) -> None:
+        html = (
+            "<style>.gone{position:absolute;left:-9999px}</style>"
+            '<div class="gone">off screen</div><p>visible</p>'
+        )
+        _, stats = strip_hidden_html(html)
+        assert stats.off_screen_elements == 1
+
+    def test_strips_same_color_via_style_block_class(self) -> None:
+        html = (
+            "<style>.stealth{color:white;background:white}</style>"
+            '<div class="stealth">invisible</div>'
+        )
+        _, stats = strip_hidden_html(html)
+        assert stats.same_color_text == 1
+
+    def test_style_block_class_ignores_comments(self) -> None:
+        """A rule mentioned only inside a CSS comment must not be treated as real."""
+        html = (
+            "<style>/* .h{display:none} */</style>"
+            '<div class="h">still visible on the page</div>'
+        )
+        markdown, stats = strip_hidden_html(html)
+        assert stats.hidden_elements == 0
+        assert "still visible on the page" in markdown
+
+    def test_unmatched_class_is_not_hidden(self) -> None:
+        """A class with no corresponding rule (or no <style> block at all) is inert."""
+        html = '<div class="not-a-rule">visible text</div>'
+        markdown, stats = strip_hidden_html(html)
+        assert stats.hidden_elements == 0
+        assert "visible text" in markdown
+
     def test_strips_script_tags(self) -> None:
         html = "<p>text</p><script>alert(1)</script>"
         markdown, stats = strip_hidden_html(html)

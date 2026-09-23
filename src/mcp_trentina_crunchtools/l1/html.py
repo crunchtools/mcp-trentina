@@ -119,25 +119,74 @@ def _normalize_color(value: str) -> str | None:
     return None
 
 
-def _get_style_lower(tag: Tag) -> str | None:
-    """Extract lowercased style attribute, or None if missing/invalid."""
+_STYLE_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_STYLE_RULE_RE = re.compile(r"\.([A-Za-z0-9_-]+(?:\s*,\s*\.[A-Za-z0-9_-]+)*)\s*\{([^}]*)\}")
+
+
+def _extract_class_styles(soup: BeautifulSoup) -> dict[str, str]:
+    """Map class name -> lowercased declarations from every <style> block.
+
+    A `<div class="h">` hidden by a separate `.h{display:none}` rule carries
+    no inline "style" attribute, so the checks below -- which used to look
+    only at that attribute -- saw nothing and let the element (and whatever
+    it hid) straight through to delivery. This is a best-effort match on
+    flat `.name { ... }` rules (including comma-separated selector lists),
+    run before `<style>` tags are stripped. It does not model the cascade,
+    specificity, combinators, id selectors or `!important` -- like the
+    inline-style checks it feeds, it only asks "does a hiding declaration
+    appear here at all," and a false positive (removing text that turns out
+    to be visible) is far cheaper than a false negative here.
+    """
+    class_styles: dict[str, list[str]] = {}
+    for style_tag in soup.find_all("style"):
+        css_text = _STYLE_COMMENT_RE.sub("", style_tag.get_text())
+        for selectors, decls in _STYLE_RULE_RE.findall(css_text):
+            decls_lower = decls.strip().lower()
+            if not decls_lower:
+                continue
+            for selector in selectors.split(","):
+                name = selector.strip().lstrip(".")
+                if name:
+                    class_styles.setdefault(name, []).append(decls_lower)
+    return {name: "; ".join(parts) for name, parts in class_styles.items()}
+
+
+def _get_style_lower(tag: Tag, class_styles: dict[str, str] | None = None) -> str | None:
+    """Extract the effective lowercased style for a tag.
+
+    Combines the inline "style" attribute with any declarations from
+    `<style>`-block classes the tag references, so a hiding rule defined by
+    class is visible to the same substring checks as an inline one.
+    """
+    parts: list[str] = []
+    if class_styles:
+        raw_classes: str | list[str] = tag.get("class") or []
+        classes = raw_classes.split() if isinstance(raw_classes, str) else raw_classes
+        for cls in classes:
+            css = class_styles.get(cls)
+            if css:
+                parts.append(css)
+
     style = tag.get("style", "")
-    if not isinstance(style, str) or not style:
+    if isinstance(style, str) and style:
+        parts.append(style)
+
+    if not parts:
         return None
-    return style.lower()
+    return "; ".join(parts).lower()
 
 
-def _is_hidden(tag: Tag) -> bool:
-    """Check if an element has inline styles that hide it."""
-    style_lower = _get_style_lower(tag)
+def _is_hidden(tag: Tag, class_styles: dict[str, str] | None = None) -> bool:
+    """Check if an element has styles (inline or class-based) that hide it."""
+    style_lower = _get_style_lower(tag, class_styles)
     if style_lower and any(p in style_lower for p in _HIDDEN_STYLE_PATTERNS):
         return True
     return tag.get("hidden") is not None
 
 
-def _is_off_screen(tag: Tag) -> bool:
+def _is_off_screen(tag: Tag, class_styles: dict[str, str] | None = None) -> bool:
     """Check if an element is positioned off-screen."""
-    style_lower = _get_style_lower(tag)
+    style_lower = _get_style_lower(tag, class_styles)
     if not style_lower:
         return False
 
@@ -152,18 +201,14 @@ def _is_off_screen(tag: Tag) -> bool:
     return any(p in style_lower for p in _OFFSCREEN_PATTERNS)
 
 
-def _has_same_color_text(tag: Tag) -> bool:
+def _has_same_color_text(tag: Tag, class_styles: dict[str, str] | None = None) -> bool:
     """Check if foreground color matches background color."""
-    style = tag.get("style", "")
-    if not isinstance(style, str):
+    style = _get_style_lower(tag, class_styles)
+    if not style:
         return False
 
-    color_match = re.search(r"(?:^|;)\s*color\s*:\s*([^;!]+)", style, re.IGNORECASE)
-    bg_match = re.search(
-        r"(?:^|;)\s*background(?:-color)?\s*:\s*([^;!]+)",
-        style,
-        re.IGNORECASE,
-    )
+    color_match = re.search(r"(?:^|;)\s*color\s*:\s*([^;!]+)", style)
+    bg_match = re.search(r"(?:^|;)\s*background(?:-color)?\s*:\s*([^;!]+)", style)
 
     if color_match and bg_match:
         fg = _normalize_color(color_match.group(1))
@@ -182,13 +227,14 @@ _CHECK_FUNCTIONS = {
 
 def _classify_and_remove(soup: BeautifulSoup, stats: HtmlStats) -> None:
     """Classify and remove hidden/off-screen/same-color elements."""
+    class_styles = _extract_class_styles(soup)
     for tag in list(soup.find_all(True)):
         if not isinstance(tag, Tag):
             continue
         if tag.attrs is None:
             continue
         for stat_attr, check_fn in _CHECK_FUNCTIONS.items():
-            if check_fn(tag):
+            if check_fn(tag, class_styles):
                 setattr(stats, stat_attr, getattr(stats, stat_attr) + 1)
                 tag.decompose()
                 break
