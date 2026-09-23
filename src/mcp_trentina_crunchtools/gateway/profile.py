@@ -62,13 +62,67 @@ ProfileRole = Literal["agent", "operator"]
 
 #: The three things a flagged payload can become, named for what the reading
 #: agent is told rather than for the mechanism that tells it. `warn` forwards
-#: the original bytes with the caution attached, `clean` substitutes a Q-Agent
-#: extraction, `block` refuses. Spelled `annotate`/`extract`/`block` before
-#: 0.25.0.
-EnforcementMode = Literal["warn", "clean", "block"]
+#: the original bytes with the caution attached, `block` refuses. Spelled
+#: `annotate`/`block` before 0.25.0. `clean` is deliberately absent — see
+#: `_normalize_enforcement`.
+EnforcementMode = Literal["warn", "block"]
 
-#: Pre-0.25.0 enforcement values, accepted with a warning until 0.27.0.
-_ENFORCEMENT_RENAMES: dict[str, str] = {"annotate": "warn", "extract": "clean"}
+#: Pre-0.25.0 enforcement values, accepted with a warning until 0.28.0.
+#:
+#: `extract` maps to `block`, not to `clean`. That is not a downgrade: the
+#: gateway has always failed closed on `extract`, so `block` is a faithful
+#: description of what a profile carrying it already does. Mapping it to a
+#: value that then refuses to load would take a running gateway down to
+#: correct a word.
+_ENFORCEMENT_RENAMES: dict[str, str] = {"annotate": "warn", "extract": "block"}
+
+
+def _normalize_enforcement(block: Any, *, key: str) -> Any:
+    """Migrate the old spellings, and refuse `clean` with an explanation.
+
+    **Why there is no `clean` enforcement mode.** As a TOOL it exists and
+    works: `clean_fetch` hands the page to the Q-Agent and returns what comes
+    back. As an enforcement mode it never has. The gateway shipped `extract`
+    on 2026-09-13 deliberately unimplemented, with a log line saying so,
+    because the config surface was built ahead of the flip.
+
+    The two are not the same code and cannot trivially be. Extraction needs a
+    PROMPT. On the tool path the agent supplies one. At the gateway the agent
+    called `jira_get_issue`, not "extract something from this", so there is no
+    instruction to extract against — and inventing one means deciding what
+    extraction means for an arbitrary backend's structured response.
+
+    0.26.0 renamed both sides to the word `clean` and so made a known gap read
+    like a promise. A config must not name a capability the gateway does not
+    have, so this refuses it at load.
+
+    Pydantic would refuse it anyway now that it is out of the Literal, but it
+    would say "input should be 'warn' or 'block'" — which tells an operator
+    the word is wrong, not that the FEATURE is missing, and sends them hunting
+    for a typo in a value they read in our own documentation. A profile that
+    fails to load is fatal, so the one line they get has to be the line that
+    explains it.
+    """
+    if not isinstance(block, dict):
+        return block
+    old = block.get("enforcement")
+    if old == "clean":
+        raise ValueError(
+            f"{key}: enforcement 'clean' is not implemented and never has "
+            f"been — the gateway has no extraction instruction to work from "
+            f"on a proxied response. Use 'warn' (deliver the content with "
+            f"the verdict attached) or 'block' (refuse it). The clean_* "
+            f"TOOLS are unaffected and continue to work."
+        )
+    if old in _ENFORCEMENT_RENAMES:
+        block = dict(block)
+        block["enforcement"] = _ENFORCEMENT_RENAMES[old]
+        logger.warning(
+            "%s: enforcement %r is deprecated and is removed in 0.28.0; "
+            "write %r",
+            key, old, _ENFORCEMENT_RENAMES[old],
+        )
+    return block
 
 # Pre-0.21.0 scan_view.extractor names. 'full' is not here: it maps to an
 # empty processor list rather than to a name.
@@ -460,6 +514,11 @@ class AlertIngressConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _check_enforcement(cls, block: Any) -> Any:
+        return _normalize_enforcement(block, key="alert_ingress")
+
     token_env: str = Field(
         ..., description="Env var name whose value is the alert ingress token",
     )
@@ -559,8 +618,9 @@ class DefenseConfig(BaseModel):
         description=(
             "What a flagged tool response becomes. warn: delivered intact "
             "with a _trentina_warning attached, so the reading agent sees "
-            "the caution before the content. clean: replaced by a Q-Agent "
-            "extraction. block: refused outright. "
+            "the caution before the content. block: refused outright. "
+            "There is no `clean` here — the clean_* TOOLS exist, the "
+            "enforcement mode never has. "
             "TRENTINA_ENFORCEMENT_OVERRIDE=warn is the kill switch: it "
             "forces warn everywhere for the night block misfires."
         ),
@@ -568,25 +628,15 @@ class DefenseConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _accept_the_old_mode_names(cls, block: Any) -> Any:
-        """Load a pre-0.25.0 ``annotate``/``extract`` as ``warn``/``clean``.
-
-        The old names described the MECHANISM (a note gets attached, an
-        extraction is run). The new ones describe what the agent is being
-        told, which is the thing a profile author is actually choosing
-        between. Every profile model is ``extra="forbid"`` and a profile
-        that fails to load is fatal, so a deployed config carrying the old
-        spelling would take the gateway down on upgrade rather than warn.
-        """
-        if not isinstance(block, dict):
-            return block
+    def _check_enforcement(cls, block: Any) -> Any:
+        return _normalize_enforcement(block, key="defense")
         old = block.get("enforcement")
         if old not in _ENFORCEMENT_RENAMES:
             return block
         block = dict(block)
         block["enforcement"] = _ENFORCEMENT_RENAMES[old]
         logger.warning(
-            "defense.enforcement: %r is deprecated and is removed in 0.27.0; "
+            "defense.enforcement: %r is deprecated and is removed in 0.28.0; "
             "write %r",
             old, _ENFORCEMENT_RENAMES[old],
         )

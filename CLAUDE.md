@@ -80,6 +80,11 @@ offered. Families: `fetch`, `read`, `content`, `search`.
 `safe_*` = `block_*` and `quarantine_*` = `clean_*`, deprecated, removed in
 0.28.0.
 
+NOTE the asymmetry: `clean` is a TOOL prefix, not an enforcement mode.
+`defense.enforcement` accepts only `warn` and `block`, and refuses `clean` at
+load. A tool call carries an extraction prompt; a proxied backend response
+does not, which is why the gateway never implemented it.
+
 `block_*` now also carries `_trentina_warning` when a scan could not COMPLETE
 but nothing was flagged (L2 unavailable, L3 unavailable). It used to deliver
 that silently.

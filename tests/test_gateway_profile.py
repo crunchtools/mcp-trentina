@@ -684,9 +684,16 @@ class TestEnforcementModeNames:
         assert DefenseConfig().enforcement == "warn"
 
     @pytest.mark.parametrize(
-        ("old", "new"), [("annotate", "warn"), ("extract", "clean")]
+        ("old", "new"), [("annotate", "warn"), ("extract", "block")]
     )
     def test_the_old_spelling_still_loads(self, old: str, new: str) -> None:
+        """`extract` maps to `block`, NOT to `clean`.
+
+        Not a downgrade: the gateway has always failed closed on `extract`,
+        so `block` describes what a profile carrying it already does.
+        Mapping it to `clean` — which 0.27.0 refuses at load — would take a
+        running gateway down in order to correct a word.
+        """
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
         assert DefenseConfig(enforcement=old).enforcement == new
@@ -699,9 +706,42 @@ class TestEnforcementModeNames:
 
         with caplog.at_level(logging.WARNING):
             DefenseConfig(enforcement="annotate")
-        assert any("0.27.0" in r.getMessage() for r in caplog.records), (
+        assert any("0.28.0" in r.getMessage() for r in caplog.records), (
             "the deprecation must name the release that removes it"
         )
+
+    def test_clean_is_refused_at_load_and_says_why(self) -> None:
+        """A config must not name a capability the gateway does not have.
+
+        `clean` as a TOOL works — `clean_fetch` hands the page to the
+        Q-Agent. `clean` as an ENFORCEMENT MODE never has: the gateway has
+        no extraction instruction to work from on a proxied response, since
+        the agent called `jira_get_issue` and not "extract something from
+        this". 0.26.0 gave both the same name and so made a known gap read
+        like a promise.
+
+        Refused at LOAD rather than degraded at runtime, and the message has
+        to explain the FEATURE is missing — pydantic's own "input should be
+        'warn' or 'block'" sends an operator hunting for a typo in a value
+        they read in our documentation.
+        """
+        from pydantic import ValidationError
+
+        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+
+        with pytest.raises(ValidationError, match="not implemented"):
+            DefenseConfig(enforcement="clean")
+
+    def test_the_alert_ingress_refuses_clean_too(self) -> None:
+        """Both push and pull paths, or the gap just moves."""
+        from pydantic import ValidationError
+
+        from mcp_trentina_crunchtools.gateway.profile import AlertIngressConfig
+
+        with pytest.raises(ValidationError, match="not implemented"):
+            AlertIngressConfig(
+                token_env="T", forward_url="http://x:1/h", enforcement="clean"
+            )
 
     def test_a_bogus_mode_is_still_refused(self) -> None:
         from pydantic import ValidationError

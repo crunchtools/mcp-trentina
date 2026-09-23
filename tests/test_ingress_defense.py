@@ -469,11 +469,21 @@ class TestEnforcement:
         )
         assert decision.blocked, "an unknown override must not weaken block"
 
-    async def test_clean_fails_closed_until_implemented(self) -> None:
+    async def test_anything_that_is_not_warn_fails_closed(self) -> None:
+        """`warn` is the only mode that DELIVERS flagged content.
+
+        The disposition is spelled `!= "warn"` rather than `== "block"` on
+        purpose: any mode added later fails closed until somebody implements
+        it. The opposite spelling puts a new mode on the delivering side by
+        default, which is how an unimplemented enforcement mode becomes a
+        hole rather than an outage. Asserted by forcing a value past the
+        model, which the loader itself refuses.
+        """
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
         p = _profile("agent2")
-        p.defense = DefenseConfig(enforcement="clean")
+        p.defense = DefenseConfig(enforcement="block")
+        object.__setattr__(p.defense, "enforcement", "some_future_mode")
         decision = await scan_tool_response(
             profile=p,
             backend_name="jira",
@@ -482,7 +492,7 @@ class TestEnforcement:
             structured_content=None,
         )
         assert decision.blocked, (
-            "clean without an extraction contract must refuse, not deliver"
+            "a mode nobody implemented must refuse, not deliver"
         )
 
     def test_layer_toggles_no_longer_exist(self) -> None:
