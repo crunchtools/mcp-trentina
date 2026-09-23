@@ -147,7 +147,7 @@ Each profile configures its defense **policy** — never the layers' existence. 
 
 An autonomous agent runs `enforcement: block` with a strict `l2_threshold`; a human-supervised agent runs `warn`. `TRENTINA_ENFORCEMENT_OVERRIDE=warn` is the global kill switch for the night a block threshold misfires.
 
-`annotate` and `extract` are the pre-0.25.0 spellings. They still load, with a warning naming the release that removes them (0.28.0). `annotate` becomes `warn`; `extract` becomes `block`, which is what it already did — it shipped unimplemented and always failed closed.
+`annotate` and `extract` are the pre-0.25.0 spellings. They still load, with a warning naming the release that removes them (0.29.0). `annotate` becomes `warn`; `extract` becomes `block`, which is what it already did — it shipped unimplemented and always failed closed.
 
 The `provider` field lets each profile use a different LLM for L3 Q-Agent operations and tool description compression. When omitted, the profile uses the global `TRENTINA_MODEL_PROVIDER` environment variable. All provider API keys must be present in the environment regardless of which profiles use them.
 

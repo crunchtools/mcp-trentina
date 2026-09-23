@@ -9,7 +9,7 @@ class TestServerRegistration:
     """Test that all tools are registered correctly."""
 
     async def test_tool_count(self) -> None:
-        """29 during the alias window; 21 once 0.28.0 drops the old names.
+        """29 during the alias window; 21 once 0.29.0 drops the old names.
 
         The count is asserted because twenty-nine tool definitions sit in
         every agent's context on every call. Adding one should be a decision
@@ -45,7 +45,7 @@ class TestServerRegistration:
             for mode in ("block", "warn", "clean")
         }
         # The pre-0.26.0 spellings. Still registered and still routed; this
-        # set and the registrations it names go in 0.28.0 together.
+        # set and the registrations it names go in 0.29.0 together.
         deprecated = {
             "safe_fetch_tool",
             "quarantine_fetch_tool",

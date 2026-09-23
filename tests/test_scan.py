@@ -85,7 +85,6 @@ class TestDeepScanVsStandardScan:
                 "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
             patch("mcp_trentina_crunchtools.tools.scan.build_scan_view") as mock_sanitize,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
@@ -98,7 +97,6 @@ class TestDeepScanVsStandardScan:
             defense_config.return_value.has_api_key = True
             raw = "RAW UNSANITIZED CONTENT"
             mock_fetch.return_value = (raw, "file", "/tmp/test.txt")
-            mock_html.return_value = False
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "SANITIZED CONTENT"
@@ -132,7 +130,6 @@ class TestDeepScanVsStandardScan:
                 "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
             patch("mcp_trentina_crunchtools.tools.scan.build_scan_view") as mock_sanitize,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
@@ -145,7 +142,6 @@ class TestDeepScanVsStandardScan:
             defense_config.return_value.has_api_key = True
             raw = "RAW UNSANITIZED CONTENT"
             mock_fetch.return_value = (raw, "file", "/tmp/test.txt")
-            mock_html.return_value = False
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "SANITIZED CONTENT"
@@ -179,7 +175,6 @@ class TestDeepScanVsStandardScan:
                 "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
             patch("mcp_trentina_crunchtools.tools.scan.build_scan_view") as mock_sanitize,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
@@ -191,7 +186,6 @@ class TestDeepScanVsStandardScan:
         ):
             defense_config.return_value.has_api_key = False
             mock_fetch.return_value = ("content", "file", "/tmp/test.txt")
-            mock_html.return_value = False
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "sanitized"

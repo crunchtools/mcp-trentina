@@ -275,7 +275,7 @@ async def _defend_alert(
         # it here was a silent downgrade for every non-JSON alert body.
         first = await defend(
             text, source=source, source_type="alert", defense=defense,
-            is_html=False, guarded=False, record=False,
+            guarded=False, record=False,
         )
         counts = _L1Counts(
             detections=first.pipeline.stats.total_detections(),

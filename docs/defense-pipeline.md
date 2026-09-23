@@ -48,7 +48,7 @@ There is no `clean` enforcement mode, and a profile naming one is refused at loa
 
 The PUSH paths set it themselves, because no agent is waiting to be asked: `alert_ingress.enforcement` defaults to `warn`, so a Nagios page forwards with the caution attached. The Matrix path has no setting on purpose — refusing a streamed `/sync` response breaks the client's sync loop rather than dropping a message.
 
-**Content is never silently modified.** L1 detects; it does not censor. What the agent receives is byte-identical to what entered the perimeter, or (under `block`) nothing plus the warning. The one transformation that remains is HTML→Markdown extraction in the fetch tools, which is their product, not a security edit.
+**Content is never silently modified.** L1 detects; it does not censor. What the agent receives is byte-identical to what entered the perimeter, or (under `block`) nothing plus the warning. Transformation belongs to the pre-processors, which run OUTSIDE the perimeter and whose output crosses the pipeline like anything else — HTML→Markdown conversion is one of them, and it is the fetch tools' product rather than a security edit.
 
 ## Why This Matters
 
@@ -65,7 +65,12 @@ L1 produces two views of one payload and never modifies what the agent receives:
 - **The delivery view** — the caller's text, untouched. A CVE ticket, a Nagios alert, or a security mail *discusses* attacks in the words attacks use; amputating those lines destroyed exactly the content an ops agent exists to read, and destroyed the evidence before the smarter layers could judge it.
 - **The scan view** — the same text with obfuscation normalized away: zero-width characters removed, encoded blobs decoded and replaced with markers, fake `<|im_start|>`/`[INST]` delimiter tokens dropped, exfiltration image URLs defanged. **L2 reads this view**, so an attacker cannot blind the classifier with the very tricks L1 counts.
 
-Detections (hidden HTML, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions") feed three places: the risk score, the sidecar warning, and the L3 gate — **any suspicious L1 detection sends the full original to the Q-Agent**, whose briefing says explicitly that nothing was removed and that the flag may be an attack *or* legitimate security content: judge intent, not vocabulary.
+Detections (hidden markup, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions") feed three places: the risk score, the sidecar warning, and the L3 gate — **any suspicious L1 detection sends the full original to the Q-Agent**, whose briefing says explicitly that nothing was removed and that the flag may be an attack *or* legitimate security content: judge intent, not vocabulary.
+
+**L1 is format-agnostic.** It scans what it is handed and makes no judgement about a payload's type. Until 0.28.0 a `looks_like_html` sniffer chose between an HTML pipeline and a text one on a leading `<!DOCTYPE` or `<html>`; an HTML *fragment* — the shape most tool output carries — matched neither, so identical bytes were defended two different ways depending on their first few characters. The fork is gone. Markup is handled in two tiers instead:
+
+- **Tier 1, conversion (`preprocess/html.py`).** Converting to Markdown does not detect hidden content, it removes the vocabulary that expresses it: Markdown has no `style` attribute, no `display:none`, no foreground/background pair. After conversion the attack class is absent rather than mitigated. The converter declines on anything it cannot parse, so it sits in the default chain and no-ops on everything that is not markup.
+- **Tier 2, fingerprints (`l1/hidden.py`).** Conversion cannot be guaranteed to have run — the agent may ask for raw bytes, the converter may decline, or the text may merely embed markup. So an ordinary L1 stage counts hiding fingerprints (`display:none`, off-screen positioning, same-colour text) on every payload and feeds the risk score.
 
 **Latency:** <10ms. **Cost:** Zero (no model calls). **Always runs.**
 
@@ -100,7 +105,7 @@ Benchmarked against 105 test cases across 10 attack categories (Prompt Guard 2 2
 
 | Attack Type | L1 (Structural) | L2 (Classifier) | L3 (Q-Agent) |
 |-------------|-----------------|-----------------|--------------|
-| Hidden div injection | **catches** | n/a (L1 strips it) | n/a |
+| Hidden div injection | **catches** (counts; conversion removes it) | n/a | n/a |
 | Zero-width obfuscation | **catches** | n/a (L1 strips it) | n/a |
 | Base64 encoded payloads | **catches** | n/a (L1 strips it) | n/a |
 | Markdown image exfiltration | **catches** | misses | n/a |

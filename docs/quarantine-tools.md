@@ -28,7 +28,7 @@ Which modes a given profile is offered is the existing `tools_allow` filter. No 
 
 ### Deprecated spellings
 
-`safe_*` and `quarantine_*` still work and are removed in **0.28.0**.
+`safe_*` and `quarantine_*` still work and are removed in **0.29.0**.
 
 | old | new |
 |---|---|

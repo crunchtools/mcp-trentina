@@ -14,8 +14,6 @@ from ..errors import BlockedSourceError, ContentSizeError
 from ..l1.pipeline import (
     PipelineResult,
     build_scan_view,
-    build_scan_view_from_html,
-    looks_like_html,
 )
 from ..quarantine.agent import quarantine_extract
 from ..quarantine.classifier import (
@@ -37,13 +35,6 @@ def _validate_content_size(content: str, max_size: int) -> None:
         raise ContentSizeError(len(content), max_size)
 
 
-def _run_pipeline(content: str, content_type: str) -> PipelineResult:
-    """Select and run the appropriate sanitization pipeline."""
-    if content_type == "text/html" or looks_like_html(content):
-        return build_scan_view_from_html(content)
-    return build_scan_view(content)
-
-
 def _build_sanitization_metadata(pipeline_result: PipelineResult) -> dict[str, Any]:
     """Build the sanitization section of tool response."""
     return {
@@ -54,7 +45,7 @@ def _build_sanitization_metadata(pipeline_result: PipelineResult) -> dict[str, A
 
 
 async def _content_judged(
-    content: str, content_type: str, *, mode: str
+    content: str, _content_type: str, *, mode: str
 ) -> dict[str, Any]:
     """Judge inline content with all three layers, dispose of it per `mode`.
 
@@ -81,7 +72,6 @@ async def _content_judged(
         # nothing — which is why trust is the caller's answer, not the
         # pipeline's.
         is_trusted=False,
-        is_html=content_type == "text/html" or looks_like_html(content),
     )
     if mode == "block":
         enforce_block(verdict, chash)
@@ -137,7 +127,7 @@ async def warn_content(
 async def safe_content(
     content: str, content_type: str = "text/plain"
 ) -> dict[str, Any]:
-    """Deprecated spelling of `block_content`. Removed in 0.28.0."""
+    """Deprecated spelling of `block_content`. Removed in 0.29.0."""
     return await block_content(content, content_type)
 
 
@@ -149,7 +139,15 @@ async def quarantine_content(
     """Sanitize + Q-Agent extraction on inline content.
 
     Warns but proceeds if content hash is in blocklist.
+
+    ``content_type`` no longer selects a pipeline — L1 is format-agnostic
+    (#172) — but it stays in the signature as published tool surface, and as
+    the authoritative hint a converter will want once processors become
+    selectable per call. Discarded explicitly rather than silently, so the
+    next reader does not go looking for the branch it used to pick.
     """
+    del content_type
+
     start_time = time.time()
     config = get_config()
 
@@ -169,7 +167,6 @@ async def quarantine_content(
         content,
         source=chash,
         source_type="content",
-        is_html=content_type == "text/html" or looks_like_html(content),
     )
     pipeline_result = verdict.pipeline
     classification = verdict.classification
@@ -253,7 +250,11 @@ async def scan_content(
 
     chash = _content_hash(content)
 
-    l1 = _run_pipeline(content, content_type)
+    # Published tool surface, discarded explicitly: L1 is format-agnostic and
+    # `content_type` selects nothing (#172). See `quarantine_content`.
+    del content_type
+
+    l1 = build_scan_view(content)
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
@@ -318,7 +319,11 @@ async def deep_scan_content(
 
     chash = _content_hash(content)
 
-    l1 = _run_pipeline(content, content_type)
+    # Published tool surface, discarded explicitly: L1 is format-agnostic and
+    # `content_type` selects nothing (#172). See `quarantine_content`.
+    del content_type
+
+    l1 = build_scan_view(content)
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()

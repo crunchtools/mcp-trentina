@@ -63,8 +63,13 @@ class TestSafeContent:
             assert result["trust"]["content_hash"] == _hash("Hello, world.")
 
     @pytest.mark.asyncio
-    async def test_safe_content_html(self) -> None:
-        """text/html content gets full HTML pipeline."""
+    async def test_content_type_does_not_select_a_pipeline(self) -> None:
+        """`text/html` takes the same path as anything else (#172).
+
+        There used to be two pipelines and `content_type` picked one. The
+        parameter survives as published tool surface, but L1 is
+        format-agnostic and there is nothing left to pick.
+        """
         html = "<p>Hello</p>"
         with (
             patch(
@@ -79,11 +84,8 @@ class TestSafeContent:
                 "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.defense.build_scan_view_from_html",
-            ) as mock_sanitize,
-            patch(
                 "mcp_trentina_crunchtools.defense.build_scan_view",
-            ) as mock_sanitize_text,
+            ) as mock_sanitize,
         ):
             from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, PipelineStats
 
@@ -100,7 +102,6 @@ class TestSafeContent:
             result = await safe_content(html, content_type="text/html")
 
             mock_sanitize.assert_called_once_with(html)
-            mock_sanitize_text.assert_not_called()
             assert result["content"] == "Hello"
 
     @pytest.mark.asyncio
@@ -154,8 +155,12 @@ class TestSafeContent:
                 await safe_content("A" * 11)
 
     @pytest.mark.asyncio
-    async def test_safe_content_auto_upgrades_html(self) -> None:
-        """text/plain with <!DOCTYPE triggers HTML pipeline."""
+    async def test_a_doctype_does_not_select_a_pipeline(self) -> None:
+        """A leading `<!DOCTYPE` used to "auto-upgrade" a `text/plain` call
+        onto the HTML pipeline. That sniff is the one that fired on documents
+        and missed fragments, which is why identical bytes were defended two
+        different ways; it is gone, and one path takes everything.
+        """
         html = "<!DOCTYPE html><html><body>Hi</body></html>"
         with (
             patch(
@@ -170,11 +175,8 @@ class TestSafeContent:
                 "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.defense.build_scan_view_from_html",
-            ) as mock_sanitize,
-            patch(
                 "mcp_trentina_crunchtools.defense.build_scan_view",
-            ) as mock_sanitize_text,
+            ) as mock_sanitize,
         ):
             from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, PipelineStats
 
@@ -191,7 +193,6 @@ class TestSafeContent:
             result = await safe_content(html, content_type="text/plain")
 
             mock_sanitize.assert_called_once_with(html)
-            mock_sanitize_text.assert_not_called()
             assert result["content"] == "Hi"
 
 

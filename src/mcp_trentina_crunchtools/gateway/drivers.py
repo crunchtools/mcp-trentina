@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 from ..channels import Channel, Kind
 from ..preprocess import (
     EmailProcessor,
+    HtmlProcessor,
     MatrixProcessor,
     PetitProcessor,
     SelectProcessor,
@@ -60,6 +61,7 @@ Driver = "PreProcessor | DocumentProcessor"
 _PETIT = PetitProcessor()
 _STRUCTURED = StructuredProcessor()
 _EMAIL = EmailProcessor()
+_HTML = HtmlProcessor()
 _SUMMARIZE = SummarizeProcessor()
 
 def _make_matrix(cfg: ProcessorChainConfig, keys: Any) -> MatrixProcessor:
@@ -76,6 +78,7 @@ PREPROCESSORS: dict[str, Callable[[ProcessorChainConfig, Any], Any]] = {
     "petit": lambda _cfg, _keys: _PETIT,
     "structured": lambda _cfg, _keys: _STRUCTURED,
     "email": lambda _cfg, _keys: _EMAIL,
+    "html": lambda _cfg, _keys: _HTML,
     "summarize": lambda _cfg, _keys: _SUMMARIZE,
     "select": lambda cfg, _keys: SelectProcessor(
         skip_sample_bytes=cfg.skip_sample_bytes

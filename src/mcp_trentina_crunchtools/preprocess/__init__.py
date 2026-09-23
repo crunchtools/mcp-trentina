@@ -16,6 +16,7 @@ from ..channels import Channel
 from .base import Cost, PreProcessContext, PreProcessor, PreProcessResult
 from .compose import PreProcessOutcome, Strategy, run_preprocessors
 from .email import EmailProcessor
+from .html import HtmlProcessor
 from .matrix import MatrixProcessor
 from .petit import PetitProcessor
 from .select import DEFAULT_SKIP_SAMPLE_BYTES, SelectProcessor
@@ -35,6 +36,7 @@ __all__ = [
     "Cost",
     "DocumentProcessor",
     "EmailProcessor",
+    "HtmlProcessor",
     "MatrixProcessor",
     "PetitProcessor",
     "PreProcessContext",

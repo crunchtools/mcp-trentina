@@ -118,7 +118,7 @@ def _normalize_enforcement(block: Any, *, key: str) -> Any:
         block = dict(block)
         block["enforcement"] = _ENFORCEMENT_RENAMES[old]
         logger.warning(
-            "%s: enforcement %r is deprecated and is removed in 0.28.0; "
+            "%s: enforcement %r is deprecated and is removed in 0.29.0; "
             "write %r",
             key, old, _ENFORCEMENT_RENAMES[old],
         )
@@ -137,6 +137,7 @@ ProcessorName = Literal[
     "petit",
     "structured",
     "email",
+    "html",
     "summarize",
     # DOCUMENT — parsed JSON in, the strings worth reading out. Valid on the
     # matrix channel. `select` alone reads any JSON; `matrix` decrypts first.
@@ -144,12 +145,14 @@ ProcessorName = Literal[
     "select",
     "matrix",
 ]
-# FREE only, and ordered by how cheaply each one can decline: structured
-# and email reject a payload of the wrong shape on their first check, so
-# petit — which has to group every line before it knows — goes last.
-# summarize is selectable but never a default: it is METERED and its output
-# draws unconditional L3, so it costs two model calls.
-_DEFAULT_PROCESSORS: list[ProcessorName] = ["structured", "email", "petit"]
+# FREE only. `html` runs FIRST: it is the only CONVERTER, so the reducers
+# behind it group the text a human would read rather than tag soup, and its
+# absence costs a whole attack class (`l1/hidden.py`, tier 1).
+#
+# The rest are ordered by how cheaply each can decline; petit has to group
+# every line before it knows, so it goes last. summarize is selectable but
+# never a default: METERED, and its output draws unconditional L3.
+_DEFAULT_PROCESSORS: list[ProcessorName] = ["html", "structured", "email", "petit"]
 
 # Fields of MatrixPreProcessConfig an AGENT may change by reloading its own
 # profile.
@@ -636,7 +639,7 @@ class DefenseConfig(BaseModel):
         block = dict(block)
         block["enforcement"] = _ENFORCEMENT_RENAMES[old]
         logger.warning(
-            "defense.enforcement: %r is deprecated and is removed in 0.28.0; "
+            "defense.enforcement: %r is deprecated and is removed in 0.29.0; "
             "write %r",
             old, _ENFORCEMENT_RENAMES[old],
         )
@@ -779,7 +782,7 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
     full/generic/matrix. ``extractor: full`` is now an empty ``processors``
     list, because reading everything is what naming nothing means; ``generic``
     is ``select``. Old spellings still load -- see the validator below -- and
-    are removed in 0.28.0.
+    are removed in 0.29.0.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -829,7 +832,7 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
             )
         logger.warning(
             "matrix_ingress.scan_view.extractor: %r is deprecated and is "
-            "removed in 0.28.0; write processors: %s",
+            "removed in 0.29.0; write processors: %s",
             old,
             [] if old == "full" else [_EXTRACTOR_RENAMES.get(old, old)],
         )
