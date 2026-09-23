@@ -57,9 +57,21 @@ class TestSafeContent:
             result = await block_content("Hello, world.")
 
             assert result["content"] == "Hello, world."
-            assert result["trust"]["level"] == "l1-only"
-            assert result["trust"]["source"] == "layer1"
-            assert result["trust"]["content_hash"] == _hash("Hello, world.")
+            # `annotated`, not `delivered`: this test patches the classifier
+            # away, so L2 never ran and the response carries a warning saying
+            # so. The old `trust.level` reported `l1-only` here, which put the
+            # same fact in a field nothing read.
+            assert result["scan"]["disposition"] == "annotated"
+            assert result["scan"]["layers"] == {
+                "l1": "complete",
+                "l2": "unavailable",
+                "l3": "unavailable",
+            }
+            assert result["scan"]["origin"] == {
+                "kind": "content",
+                "ref": _hash("Hello, world."),
+                "allowlisted": False,
+            }
 
     @pytest.mark.asyncio
     async def test_content_type_does_not_select_a_pipeline(self) -> None:
@@ -228,9 +240,9 @@ class TestQuarantineContent:
             result = await clean_content("Some raw content", "summarize")
 
             assert result["content"] == {"extracted_text": "extracted stuff"}
-            assert result["trust"]["level"] == "quarantined"
-            assert result["trust"]["source"] == "q-agent"
-            assert result["trust"]["content_hash"] == _hash("Some raw content")
+            assert result["scan"]["disposition"] == "extracted"
+            assert result["scan"]["origin"]["ref"] == _hash("Some raw content")
+            assert "extracted_by" in result["scan"]
             assert result["blocklist_warning"] is None
             assert result["classifier_warning"] is None
 

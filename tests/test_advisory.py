@@ -303,8 +303,12 @@ class TestBuildAdvisory:
             why_suspicious="Because it is.",
         )
         assert result["content"] is None
-        assert result["trust"]["level"] == "advisory"
-        assert result["trust"]["source"] == "trentina"
+        assert result["scan"]["disposition"] == "refused"
+        assert result["scan"]["layers"] == {
+            "l1": "not_applicable",
+            "l2": "not_applicable",
+            "l3": "not_applicable",
+        }, "the URL was refused on its shape; no layer ever saw it"
         advisory = result["security_advisory"]
         assert advisory["level"] == "critical"
         assert advisory["pattern"] == "test_pattern"

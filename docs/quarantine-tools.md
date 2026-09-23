@@ -39,6 +39,46 @@ The old names described a *trust model* ("safe", "quarantine") while actually en
 
 Note that `quarantine_scan`, `deep_quarantine_scan` and `quarantine_stats` are NOT affected: they are diagnostics, they carry no mode prefix because they report rather than deliver, and they keep their names.
 
+## What every response carries
+
+Three independent facts, never collapsed into one grade. There is no trust
+level, because content that crossed the perimeter is untrusted — permanently.
+The layers are *detectors*, and a detector finding nothing has not made
+anything safe; it has failed to find something.
+
+```json
+"scan": {
+  "layers":      {"l1": "complete", "l2": "complete", "l3": "unavailable"},
+  "disposition": "annotated",
+  "origin":      {"kind": "url", "ref": "https://example.com", "allowlisted": false}
+}
+```
+
+**`layers`** — what ran, and whether it finished. `complete`, `partial` (L2 hit
+its token cap), `unavailable` (no ONNX model, no API key, provider error), or
+`not_applicable` (nothing to judge). *A scan that did not happen must never
+read like a scan that found nothing*, which is why `unavailable` and
+`complete` are different words.
+
+**`disposition`** — what was done. `delivered` (the bytes that arrived,
+nothing attached), `annotated` (those bytes plus `_trentina_warning`),
+`extracted` (a Q-Agent extraction *instead of* the original — `extracted_by`
+names the model), `refused` (nothing delivered; the tool raised), `reported`
+(a diagnostic returned findings about a payload without delivering it).
+
+**`origin`** — where it came from, and whether an operator has allowlisted
+that source. Allowlisting **suppresses flags; it does not skip layers**: a
+trusted source still runs L1, L2 and L3, and `allowlisted: true` is what
+explains why a detection did not become a refusal.
+
+What was *found* is not here. That is `_trentina_warning`'s job, and two
+sources for one fact is two answers that can disagree.
+
+> Note the one case worth reading carefully: `clean_*` against an allowlisted
+> source skips the Q-Agent entirely and hands back the original text. That is
+> `disposition: delivered`, not `extracted` — you asked for an extraction and
+> did not get one.
+
 ## Diagnostic tools
 
 These report rather than deliver, and take no mode prefix:

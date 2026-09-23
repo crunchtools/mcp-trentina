@@ -483,8 +483,8 @@ class TestQuarantineSearch:
             )
 
             assert result["query"] == "RHEL 10 bootc"
-            assert result["trust"]["level"] == "quarantined"
-            assert result["trust"]["pipeline"] == "L0 → resolve → L1 → L2 → L3"
+            assert result["scan"]["disposition"] == "extracted"
+            assert result["pipeline"] == "L0 → resolve → L1 → L2 → L3"
             assert result["extraction"]["extracted_text"] == "structured bootc info"
             assert result["classifier_warning"] is None
 
@@ -589,4 +589,4 @@ class TestQuarantineSearch:
             result = await clean_search("test query", "summarize")
 
             assert result["extraction"]["extracted_text"] == "Some search results."
-            assert result["trust"]["level"] == "quarantined"
+            assert result["scan"]["disposition"] == "extracted"
