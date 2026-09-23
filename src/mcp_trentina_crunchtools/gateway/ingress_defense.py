@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..defense import Provenance, defend
-from .warning import build_warning
+from ..warning import build_warning
 
 if TYPE_CHECKING:
     from .profile import Profile

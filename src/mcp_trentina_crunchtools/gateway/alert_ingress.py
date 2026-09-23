@@ -292,7 +292,7 @@ async def _defend_alert(
     flagged = risk_level != "low" or final.flagged or l2_truncated
 
     # NOTE: this warning is still built by hand rather than via
-    # gateway.warning.build_warning, because this path derives risk_level from
+    # warning.build_warning, because this path derives risk_level from
     # its own suspicious-detection counts rather than from the verdict. Folding
     # it in means reconciling those two risk models, which is a behaviour
     # change to the alert path and does not belong in the commit that fixes

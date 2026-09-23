@@ -19,6 +19,7 @@ from ..quarantine.classifier import (
     join_warnings,
     truncation_warning,
 )
+from ..warning import build_warning
 
 MAX_FILE_SIZE = 2_000_000
 BINARY_CHECK_BYTES = 8192
@@ -74,8 +75,13 @@ def _build_sanitization_metadata(pipeline_result: PipelineResult) -> dict[str, A
     }
 
 
-async def safe_read(path: str) -> dict[str, Any]:
-    """Read local file with Layer 1 sanitization. Fails if injection detected."""
+async def _read_judged(path: str, *, mode: str) -> dict[str, Any]:
+    """Read, judge with all three layers, dispose of it per `mode`.
+
+    `block` and `warn` run identically and deliver the same bytes; they
+    differ in one decision. See `fetch.py` for why that is a parameter and
+    not a second function.
+    """
     start_time = time.time()
     config = get_config()
 
@@ -99,14 +105,15 @@ async def safe_read(path: str) -> dict[str, Any]:
         # fetch/ cannot do. Pass the answer rather than let the pipeline guess.
         is_html=looks_like_html(content, resolved),
     )
-    enforce_block(verdict, resolved)
+    if mode == "block":
+        enforce_block(verdict, resolved)
 
     pipeline_result = verdict.pipeline
     classification = verdict.classification
     trust_level = "trusted-sanitized" if is_trusted else "sanitized-only"
 
     emit_request_event(
-        tool="safe_read",
+        tool=f"{mode}_read",
         source=resolved,
         trust_level=trust_level,
         risk_level=pipeline_result.stats.risk_level(),
@@ -120,7 +127,7 @@ async def safe_read(path: str) -> dict[str, Any]:
         start_time=start_time,
     )
 
-    return {
+    result: dict[str, Any] = {
         "content": pipeline_result.content,
         "trust": {
             "level": trust_level,
@@ -129,6 +136,28 @@ async def safe_read(path: str) -> dict[str, Any]:
         },
         "sanitization": _build_sanitization_metadata(pipeline_result),
     }
+
+    # Only `warn` reaches here flagged; `block` raised. Also attached when
+    # nothing flagged but something could not be READ.
+    warning = build_warning(verdict)
+    if warning is not None:
+        result["_trentina_warning"] = warning
+    return result
+
+
+async def block_read(path: str) -> dict[str, Any]:
+    """Fail closed: a flagged file raises and the agent never sees the bytes."""
+    return await _read_judged(path, mode="block")
+
+
+async def warn_read(path: str) -> dict[str, Any]:
+    """Deliver the bytes that are on disk, with the verdict attached."""
+    return await _read_judged(path, mode="warn")
+
+
+async def safe_read(path: str) -> dict[str, Any]:
+    """Deprecated spelling of `block_read`. Removed in 0.28.0."""
+    return await block_read(path)
 
 
 async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
@@ -236,3 +265,8 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
         "blocklist_warning": blocklist_warning,
         "classifier_warning": classifier_warning,
     }
+
+
+async def clean_read(path: str, prompt: str) -> dict[str, Any]:
+    """Hand back a Q-Agent extraction rather than the bytes on disk."""
+    return await quarantine_read(path, prompt)

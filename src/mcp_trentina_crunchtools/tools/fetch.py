@@ -18,6 +18,7 @@ from ..quarantine.classifier import (
     join_warnings,
     truncation_warning,
 )
+from ..warning import build_warning
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..l1.pipeline import PipelineResult
@@ -188,11 +189,19 @@ def _build_sanitization_metadata(pipeline_result: PipelineResult) -> dict[str, A
     }
 
 
-async def safe_fetch(url: str) -> dict[str, Any]:
-    """Fetch URL with Layer 1 sanitization. Fails if injection detected.
+async def _fetch_judged(url: str, *, mode: str) -> dict[str, Any]:
+    """Fetch, judge with all three layers, and dispose of it per `mode`.
 
-    For untrusted sources, also runs Q-Agent detection scan.
-    Trusted sources get Layer 1 only (no Q-Agent cost).
+    `block` and `warn` differ in exactly one decision and nothing else: both
+    run the same layers over the same bytes and both deliver
+    `PipelineResult.content`, which is byte-identical to what arrived. One
+    refuses a flagged verdict; the other delivers it with the verdict
+    attached.
+
+    That is why this is one function with a parameter rather than two
+    functions. The pair is a DISPOSITION choice, and writing it twice is how
+    the two copies end up scanning differently — which is the drift
+    `warning.py` was extracted to stop.
     """
     start_time = time.time()
     config = get_config()
@@ -222,13 +231,14 @@ async def safe_fetch(url: str) -> dict[str, Any]:
         is_trusted=is_trusted,
         domain=urlparse(url).hostname,
     )
-    enforce_block(verdict, url)
+    if mode == "block":
+        enforce_block(verdict, url)
 
     pipeline_result = verdict.pipeline
     classification = verdict.classification
     trust_level = "trusted-sanitized" if is_trusted else "sanitized-only"
 
-    result = {
+    result: dict[str, Any] = {
         "content": pipeline_result.content,
         "trust": {
             "level": trust_level,
@@ -238,8 +248,16 @@ async def safe_fetch(url: str) -> dict[str, Any]:
         "sanitization": _build_sanitization_metadata(pipeline_result),
     }
 
+    # Only `warn` can reach this with a flagged verdict — `block` raised.
+    # Attached even when nothing was flagged but something could not be READ:
+    # a scan that did not fully happen must never look like a scan that found
+    # nothing, which is the whole rule `warning.py` encodes.
+    warning = build_warning(verdict)
+    if warning is not None:
+        result["_trentina_warning"] = warning
+
     emit_request_event(
-        tool="safe_fetch",
+        tool=f"{mode}_fetch",
         source=url,
         trust_level=trust_level,
         risk_level=pipeline_result.stats.risk_level(),
@@ -254,6 +272,27 @@ async def safe_fetch(url: str) -> dict[str, Any]:
     )
 
     return result
+
+
+async def block_fetch(url: str) -> dict[str, Any]:
+    """Fail closed: a flagged URL raises and the agent never sees the bytes."""
+    return await _fetch_judged(url, mode="block")
+
+
+async def warn_fetch(url: str) -> dict[str, Any]:
+    """Deliver the bytes that arrived, with the verdict attached.
+
+    The mode that did not exist before 0.26.0. An agent could be refused or
+    handed an LLM rewrite, and nothing in between — so the one posture with
+    the best argument behind it, "here is exactly what the server sent and
+    here is why I am uneasy about it", was unreachable from a tool call.
+    """
+    return await _fetch_judged(url, mode="warn")
+
+
+async def safe_fetch(url: str) -> dict[str, Any]:
+    """Deprecated spelling of `block_fetch`. Removed in 0.28.0."""
+    return await block_fetch(url)
 
 
 async def quarantine_fetch(url: str, prompt: str) -> dict[str, Any]:
@@ -366,3 +405,8 @@ async def quarantine_fetch(url: str, prompt: str) -> dict[str, Any]:
         "blocklist_warning": blocklist_warning,
         "classifier_warning": classifier_warning,
     }
+
+
+async def clean_fetch(url: str, prompt: str) -> dict[str, Any]:
+    """Hand back a Q-Agent extraction rather than the bytes that arrived."""
+    return await quarantine_fetch(url, prompt)

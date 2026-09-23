@@ -65,11 +65,27 @@ scan and takes the gateway down with it.
 
 ## Tools
 
-### Safe (Layer 1 only)
-- safe_fetch, safe_read
+### The three modes (0.26.0)
 
-### Quarantine (Layer 1 + Layer 2)
-- quarantine_fetch, quarantine_read, quarantine_scan
+Every content tool runs all three layers. The PREFIX is the disposition, and
+the agent picks it per call; `tools_allow` limits which ones a profile is
+offered. Families: `fetch`, `read`, `content`, `search`.
+
+- `block_*` — a flagged verdict raises; the agent never sees the content.
+- `warn_*` — delivers bytes IDENTICAL to what arrived, with
+  `_trentina_warning` attached. New in 0.26.0: there was previously no way to
+  ask for the real bytes plus a caution.
+- `clean_*` — returns a Q-Agent extraction instead of the original.
+
+`safe_*` = `block_*` and `quarantine_*` = `clean_*`, deprecated, removed in
+0.28.0.
+
+`block_*` now also carries `_trentina_warning` when a scan could not COMPLETE
+but nothing was flagged (L2 unavailable, L3 unavailable). It used to deliver
+that silently.
+
+### Diagnostics (no mode prefix — they report, they do not deliver)
+- quarantine_scan, deep_quarantine_scan, scan_content, deep_scan_content
 - quarantine_scan_dir — scan a directory for Python module shadowing attacks (e.g. struct.py replacing stdlib struct)
 
 ### Stats

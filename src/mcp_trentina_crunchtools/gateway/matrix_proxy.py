@@ -43,6 +43,7 @@ from ..channels import Channel
 from ..defense import defend, defend_scan_view
 from ..matrix.keybackup import KeyBackupProvider
 from ..preprocess import ScanViewContext
+from ..warning import build_warning
 from .drivers import build_preprocessors
 from .proxy_utils import (
     PLAIN_TEXT,
@@ -51,7 +52,6 @@ from .proxy_utils import (
     normalize_proxy_path,
 )
 from .selection import build_scan_view, describe
-from .warning import build_warning
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
