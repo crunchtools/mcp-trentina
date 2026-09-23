@@ -14,19 +14,23 @@ Everything Trentina wires into a request path is one of exactly two things. If y
 | **Response guards** | the backend's *result*, after the call returns and before anything is transformed, scanned or relayed | `gateway/guards.py`, [response-guards.md](response-guards.md) |
 | **The scanner** | content, through L1 → L2 → L3 below | `defense.py` — and `defend()` is the only entry point, enforced by `tests/test_defense_contract.py` |
 
-A guard also decides **what it reads**. On a payload too large or too opaque to scan whole, the scanner's read policy (`scanview/`) selects which strings reach L1/L2/L3 and accounts for every byte it declined — coverage, a skip histogram by reason, and `low_scan_coverage` when it falls below the floor. That privilege belongs to guards because deciding how thoroughly to judge *is* a judgement.
+A guard also decides **what it reads**. On a payload too large or too opaque to scan whole, a pre-processor selects which strings reach L1/L2/L3 and accounts for every byte it declined — coverage, a skip histogram by reason, and `low_scan_coverage` below the floor. The guard still makes the call; it is simply told what it is looking at.
 
 **Pre-processors are everything before that.** They run outside the perimeter, their output is exactly as untrusted as their input, and everything they emit crosses the guards on the way in. They may decode, decrypt, reduce, summarize, normalize, split and reshape — the contract is transformation generally, not reduction (`preprocess/base.py`, and [token-routing.md](token-routing.md) for how they are configured).
 
-### The line between them
+### Where the line falls
 
-One rule separates the roles, and it is the reason `scanview/` is guard machinery rather than a third kind of driver:
+One rule separates the roles:
 
-> **A pre-processor may never open a gap between what is scanned and what is delivered.** Its output is both. A driver that scans *less* than it delivers is a guard's read policy, never a pre-processor.
+> **A pre-processor never bypasses `defend()`.** Everything it emits is scanned. Whether the *delivered* bytes are its output or the untouched original is the **call site's** decision, not the driver's.
 
-The two halves are opposite security readings of the same verb. What a pre-processor drops never reaches the agent *or* the scanner, which is what makes fingerprint-collision games pointless — colliding your payload into a collapsed group deletes it. An extractor is the inverse: the full original is delivered while a subset is scanned, so colliding into a skipped bucket would deliver your payload unscanned. One Protocol cannot honestly carry both, which is why each role gets its own, and why they share exactly one piece of wiring — the registry and channel lock in `gateway/drivers.py`.
+`gateway/transform.py` delivers what the chain returned. `gateway/matrix_proxy.py` forwards the upstream ciphertext, because the agent must decrypt for itself. Where the two differ, the call site accounts for the gap.
 
-Their failure modes point in opposite directions for the same reason. A pre-processor fails open to **delivering the original**; a read policy fails open to **scanning everything**. Both mean "on failure, do the thing that hides nothing."
+**Scanning something different from what you deliver is not an anomaly — it is how L1 works.** L1 normalizes a copy for L2 to read and delivers the original untouched, because a Nagios alert or a CVE ticket discusses attacks in the words attacks use.
+
+An earlier revision of this page ruled the opposite: that a pre-processor may never open a gap between what is scanned and what is delivered, and used that to make scan-view extraction a separate kind of driver. The rule does not survive contact with L1, and the split it justified is gone. It is recorded here because the reasoning was plausible and someone will reconstruct it.
+
+Failure modes point in whichever direction hides nothing. A text pre-processor that fails delivers and scans the **original**; one that selects what to read fails to reading **everything**. Same rule, different thing owned.
 
 ## What crosses the pipeline
 

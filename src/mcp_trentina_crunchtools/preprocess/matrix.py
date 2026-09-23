@@ -1,26 +1,43 @@
-"""The Matrix extractor: decrypt to build a scan view, forward ciphertext.
+"""Decrypt to build the scan view; forward the ciphertext untouched.
 
-Everything the generic extractor does, plus the one thing that changes what
-the perimeter can actually see. Message bodies in an encrypted room are
-ciphertext at the proxy, so today an injection in a chat message crosses
-Trentina as an opaque blob and becomes plaintext inside the agent, past the
-perimeter. This reads it.
+Everything ``select`` does, plus the one thing that changes what the perimeter
+can actually see. Message bodies in an encrypted room are ciphertext at the
+proxy, so without this an injection in a chat message crosses Trentina as an
+opaque blob and becomes plaintext inside the agent, past the perimeter.
 
-S4 governs the whole file: decryption is read-only, additive and ephemeral.
-Recovered plaintext exists only in the scan view. It is never forwarded --
-the response body is built from the upstream buffer and never from anything
-here -- never written to disk, and never logged in full.
+Two properties govern this file. Both are about the Matrix CALL SITE rather
+than about pre-processing in general, which is why they live here and not in
+``base.py``:
+
+DELIVERY IS UNTOUCHED. What this processor reads never influences the bytes
+   forwarded to the client. The response body is built from the upstream
+   buffer and never from anything here; the only channel out is the
+   ``_trentina_warning`` key.
+
+DECRYPTION IS READ-ONLY, ADDITIVE AND EPHEMERAL. Recovered plaintext exists
+   only in the scan view. Never forwarded, never written to disk, never logged
+   in full. Trentina never writes to the homeserver and holds no Matrix device
+   identity.
+
+Both are contingent, and it is worth saying on what. They hold because the
+agent must decrypt for itself, so the proxy cannot deliver what it read — see
+``.specify/specs/013-matrix-scan-view/spec.md``, "Encryption posture": the
+homeserver never sees plaintext and E2EE is kept. Issue #162 proposes a
+bridge that terminates E2EE and delivers the plaintext. If that lands, this
+stops being a document processor at all: it would read exactly what it
+delivers, which is the ordinary pre-processor contract, and the scan view
+would simply be its output.
 
 Two habits worth naming, because both are easy to get wrong:
 
-Decrypted text goes back through the SAME generic rules as anything else. A
+Decrypted text goes back through the SAME ``select`` rules as anything else. A
 base64 blob pasted inside a message is still a base64 blob, and plaintext
 recovered from ciphertext is no more trustworthy than plaintext that arrived
 in the clear. There is no "it was encrypted, so it is ours" shortcut.
 
 Unrecognised shapes fall through to the generic leaf walk rather than being
-skipped. The extractor knows the shapes Matrix uses today; the failure mode
-for a shape it does not know must be "scan it anyway", not "ignore it".
+skipped. This knows the shapes Matrix uses today; the failure mode for a shape
+it does not know must be "read it anyway", not "ignore it".
 """
 
 from __future__ import annotations
@@ -29,13 +46,13 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ..channels import Channel
-from .base import ScanView, ScanViewContext, SkipReason, UndecryptableEvent
-from .walk import iter_leaves
+from ..channels import Channel, Kind
+from ..jsonwalk import iter_leaves
+from .view import ScanView, ScanViewContext, SkipReason, UndecryptableEvent
 
 if TYPE_CHECKING:
     from ..matrix.keybackup import KeyBackupProvider
-    from .generic import GenericExtractor
+    from .select import SelectProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -46,19 +63,20 @@ _PROSE_FIELDS = ("body", "formatted_body", "topic", "name")
 """Fields of a decrypted event that carry language worth judging."""
 
 
-class MatrixExtractor:
-    """Generic selection, plus Megolm decryption of room events."""
+class MatrixProcessor:
+    """Shape-based selection, plus Megolm decryption of room events."""
 
     name = "matrix"
     channels = frozenset({Channel.MATRIX})
+    kind = Kind.DOCUMENT
 
     def __init__(
         self,
         *,
-        generic: GenericExtractor,
+        select: SelectProcessor,
         keys: KeyBackupProvider | None = None,
     ) -> None:
-        self._generic = generic
+        self._select = select
         self._keys = keys
 
     async def extract(self, payload: Any, ctx: ScanViewContext) -> ScanView:
@@ -100,7 +118,7 @@ class MatrixExtractor:
             decrypted += 1
             decrypted_texts.extend(_prose_from(plaintext))
 
-        view = self._generic.select(
+        view = self._select.select(
             iter_leaves(_without_ciphertext(payload)),
             extra_segments=decrypted_texts,
             extra_skipped=skipped,

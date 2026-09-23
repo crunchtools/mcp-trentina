@@ -1,146 +1,146 @@
-"""The one registry: a configured name becomes a driver, per role.
+"""The one registry: a configured name becomes a pre-processor.
 
-Trentina has two driver roles and this module is the only place either one is
-resolved from configuration. It answers one question for both — "the profile
-asked for the driver called X on the Y channel; give me it, or fail the
-load" — and it is deliberately the same code for both roles, because the
-failure it prevents is the same failure:
+There is one driver role. Everything a profile can name in `processors:`
+resolves here, and nowhere else answers the question "the profile asked for X
+on the Y channel; give me it, or fail the load".
 
-* **Pre-processors** transform the payload outside the perimeter. Their
-  output is scanned and delivered; see ``preprocess/base.py``.
-* **Guard read policies** (``scanview/``) choose which strings the scanner
-  reads out of a payload that is delivered whole. See ``scanview/base.py``
-  for why that privilege is a guard's and never a pre-processor's.
+There were two registries until #167, one per role, each with its own parity
+test and only one of them with a channel lock. That was the cost of the split:
+the lock was written once, in the half nobody copied it out of, so a
+pre-processor could be named on any channel and nothing checked. Different
+input shapes do not need different wiring.
 
-There were two registries here until issue #160, one per role, each with its
-own parity test and only one of them with a channel lock. Different roles do
-not need different wiring, and the second copy is how the pre-processor
-registry came to have no channel lock at all. One mechanism, two tables.
-
-**Channel locking.** A driver declares the ingresses it understands and
+**Channel locking.** A processor declares the ingresses it understands and
 selecting one elsewhere is a ``ProfileConfigError`` at config load, not a
-runtime surprise. The Matrix case is the loud one — a Matrix extractor
-pointed at alert-ingress JSON would find no Matrix event shape, fall through
-to generic rules, and produce a perimeter nobody had checked against that
-payload. The pre-processor case is quiet and just as wrong: a reducer tuned
-for one payload shape, pointed at another, declines forever and looks like it
-is working.
+runtime surprise. ``loader._check_drivers`` builds every driver a profile
+names at startup, which is what makes "at load" true rather than "on the first
+request that happens to use it". The Matrix case is the loud one — a Matrix
+processor pointed at alert-ingress JSON would find no Matrix event shape, fall
+through to generic rules, and produce a perimeter nobody had checked against
+that payload. The text case is quiet and just as wrong: a reducer tuned for
+one shape, pointed at another, declines forever and looks like it is working.
 
-**Parity.** Each table is declared twice — once here, once as a ``Literal`` in
+**Kind locking.** A channel hands its processors either a string or a parsed
+document, never both. Refusing the mismatch here turns what would be an
+AttributeError deep inside a request into a refused config.
+
+**Parity.** The table is declared twice — once here, once as a ``Literal`` in
 ``profile.py`` that makes pydantic reject an unknown name at YAML load. A
-single parity test (``tests/test_gateway_drivers.py``) keeps both tables in
-step with both Literals. A driver registered but not in its Literal is dead on
-arrival: wired in, passing its own tests, and nameable by no profile.
+single parity test (``tests/test_gateway_drivers.py``) keeps them in step. A
+driver registered but not in the Literal is dead on arrival: wired in, passing
+its own tests, and nameable by no profile.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..channels import Channel
+from ..channels import Channel, Kind
 from ..preprocess import (
     EmailProcessor,
+    MatrixProcessor,
     PetitProcessor,
-    PreProcessor,
+    SelectProcessor,
     StructuredProcessor,
     SummarizeProcessor,
 )
-from ..scanview import (
-    FullExtractor,
-    GenericExtractor,
-    MatrixExtractor,
-    ScanViewExtractor,
-)
 from .errors import ProfileConfigError
-from .profile import ScanViewConfig
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .profile import PreProcessConfig
+    from .profile import ProcessorChainConfig
 
-# Pre-processors. Stateless by contract (the ``PreProcessor`` protocol), so
-# one instance each for the process.
-PREPROCESSORS: dict[str, PreProcessor] = {
-    "email": EmailProcessor(),
-    "petit": PetitProcessor(),
-    "structured": StructuredProcessor(),
-    "summarize": SummarizeProcessor(),
-}
+Driver = "PreProcessor | DocumentProcessor"
 
-# Guard read policies. Factories rather than singletons: an extractor may own
-# per-profile state (the Matrix one owns a key cache), so one instance per
-# configured profile rather than one per process.
-SCAN_POLICIES: dict[str, Callable[[ScanViewConfig, Any], ScanViewExtractor]] = {
-    "full": lambda _cfg, _keys: FullExtractor(),
-    "generic": lambda cfg, _keys: GenericExtractor(
+# Text processors are stateless by contract, so one instance each for the
+# process. Document processors may own per-profile state (the Matrix one owns
+# a key cache), so they are built per call. Factories throughout rather than a
+# mix, so the table reads one way.
+_PETIT = PetitProcessor()
+_STRUCTURED = StructuredProcessor()
+_EMAIL = EmailProcessor()
+_SUMMARIZE = SummarizeProcessor()
+
+def _make_matrix(cfg: ProcessorChainConfig, keys: Any) -> MatrixProcessor:
+    """Decryption on top of selection: decrypted text goes through the same
+    rules as anything else, so it gets its own SelectProcessor rather than a
+    shortcut."""
+    return MatrixProcessor(
+        select=SelectProcessor(skip_sample_bytes=cfg.skip_sample_bytes),
+        keys=keys,
+    )
+
+
+PREPROCESSORS: dict[str, Callable[[ProcessorChainConfig, Any], Any]] = {
+    "petit": lambda _cfg, _keys: _PETIT,
+    "structured": lambda _cfg, _keys: _STRUCTURED,
+    "email": lambda _cfg, _keys: _EMAIL,
+    "summarize": lambda _cfg, _keys: _SUMMARIZE,
+    "select": lambda cfg, _keys: SelectProcessor(
         skip_sample_bytes=cfg.skip_sample_bytes
     ),
-    "matrix": lambda cfg, keys: MatrixExtractor(
-        generic=GenericExtractor(skip_sample_bytes=cfg.skip_sample_bytes),
-        keys=keys,
-    ),
+    "matrix": _make_matrix,
 }
 
-
-def _lock_channel(driver: Any, *, channel: Channel, profile_name: str, role: str) -> None:
-    """Refuse a driver on a channel it has not declared it understands."""
-    if channel not in driver.channels:
-        raise ProfileConfigError(
-            f"Profile {profile_name!r}: {role} {driver.name!r} is not valid on "
-            f"the {channel.value} channel "
-            f"(valid: {sorted(c.value for c in driver.channels)})"
-        )
+# What each channel hands a processor. A channel that fed both would need a
+# processor to introspect its own input, which is how you get a driver that
+# guesses.
+CHANNEL_KIND: dict[Channel, Kind] = {
+    Channel.TOOL: Kind.TEXT,
+    Channel.ALERT: Kind.TEXT,
+    Channel.MATRIX: Kind.DOCUMENT,
+}
 
 
 def build_preprocessors(
-    cfg: PreProcessConfig,
-    *,
-    channel: Channel = Channel.TOOL,
-    profile_name: str = "",
-) -> list[PreProcessor]:
-    """Resolve the configured processor names, in the configured order.
-
-    An unknown name is a load error rather than a silent skip. Dropping it
-    quietly is how a typo becomes a profile that looks reduced and is not —
-    and the same typo in ``tools_allow`` would be caught, so this should be.
-    """
-    processors: list[PreProcessor] = []
-    for name in cfg.processors:
-        processor = PREPROCESSORS.get(name)
-        if processor is None:  # pragma: no cover - the Literal blocks this
-            raise ProfileConfigError(
-                f"Profile {profile_name!r}: unknown pre-processor {name!r}; "
-                f"known: {sorted(PREPROCESSORS)}"
-            )
-        _lock_channel(
-            processor, channel=channel, profile_name=profile_name, role="pre-processor"
-        )
-        processors.append(processor)
-    return processors
-
-
-def build_extractor(
-    cfg: ScanViewConfig | None,
+    cfg: ProcessorChainConfig,
     *,
     channel: Channel,
     profile_name: str = "",
     keys: Any = None,
-) -> ScanViewExtractor:
-    """Construct the configured guard read policy, or fail closed at load.
+) -> list[Any]:
+    """Resolve the configured processors, in order, or fail closed.
 
-    ``None`` means "no scan_view block", which is the same thing as the
-    default: read everything.
+    An empty list is the no-op and is meaningful: on a text channel it
+    delivers the payload unchanged, and on a document channel it reads
+    everything. That is why there is no ``full`` processor any more — "read
+    everything" is what naming nothing already means.
+
+    An unknown name is a load error rather than a silent skip. Dropping it
+    quietly is how a typo becomes a profile that looks reduced and is not, and
+    the same typo in ``tools_allow`` would be caught.
     """
-    cfg = cfg or ScanViewConfig()
-    factory = SCAN_POLICIES.get(cfg.extractor)
-    if factory is None:  # pragma: no cover - the Literal makes this unreachable
+    want = CHANNEL_KIND[channel]
+    out: list[Any] = []
+    for name in cfg.processors:
+        factory = PREPROCESSORS.get(name)
+        if factory is None:  # pragma: no cover - the Literal blocks this
+            raise ProfileConfigError(
+                f"Profile {profile_name!r}: unknown pre-processor {name!r}; "
+                f"known: {sorted(PREPROCESSORS)}"
+            )
+        processor = factory(cfg, keys)
+        if channel not in processor.channels:
+            raise ProfileConfigError(
+                f"Profile {profile_name!r}: pre-processor {processor.name!r} is "
+                f"not valid on the {channel.value} channel "
+                f"(valid: {sorted(c.value for c in processor.channels)})"
+            )
+        if processor.kind is not want:
+            raise ProfileConfigError(
+                f"Profile {profile_name!r}: pre-processor {processor.name!r} "
+                f"consumes {processor.kind.value}, but the {channel.value} "
+                f"channel supplies {want.value}"
+            )
+        out.append(processor)
+
+    if want is Kind.DOCUMENT and len(out) > 1:
+        # Chaining is defined for str -> str. A document processor returns
+        # selected strings, which is not something the next one can consume,
+        # so a two-element chain would silently run only the first.
         raise ProfileConfigError(
-            f"Profile {profile_name!r}: unknown scan_view extractor "
-            f"{cfg.extractor!r}; known: {sorted(SCAN_POLICIES)}"
+            f"Profile {profile_name!r}: the {channel.value} channel takes at "
+            f"most one pre-processor, got {[p.name for p in out]}"
         )
-    extractor = factory(cfg, keys)
-    _lock_channel(
-        extractor, channel=channel, profile_name=profile_name, role="scan_view extractor"
-    )
-    return extractor
+    return out

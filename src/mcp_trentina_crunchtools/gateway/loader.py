@@ -18,7 +18,7 @@ import yaml
 from pydantic import SecretStr, ValidationError
 
 from ..channels import Channel
-from .drivers import build_extractor, build_preprocessors
+from .drivers import build_preprocessors
 from .errors import ProfileConfigError
 from .profile import AlertIngressConfig, MatrixIngressConfig, Profile
 from .transform import resolve
@@ -101,15 +101,14 @@ def _build_profile(name: str, body: Any) -> Profile:
 def _check_drivers(name: str, profile: Profile) -> None:
     """Resolve every driver the profile names, and discard the result.
 
-    Building them here is the whole point: ``build_preprocessors`` and
-    ``build_extractor`` are the only places the channel lock lives, and a
-    lock that fires on the first request that happens to use the driver is
-    not a lock, it is a latent outage. This makes both roles fail at startup,
-    which is where ``gateway/drivers.py`` claims they fail.
+    Building them here is the whole point: ``build_preprocessors`` is the only
+    place the channel and kind locks live, and a lock that fires on the first
+    request that happens to use the driver is not a lock, it is a latent
+    outage. This makes them fail at startup, which is where
+    ``gateway/drivers.py`` claims they fail.
 
-    The extractor is built without its key provider — that needs the network
-    and belongs on the request path. What is being checked is the name and
-    the channel, and neither depends on the keys.
+    Both channels are checked, because both name processors and both can name
+    the wrong one.
     """
     build_preprocessors(profile.preprocess, channel=Channel.TOOL, profile_name=name)
     for backend_name, backend in profile.backends.items():
@@ -122,8 +121,11 @@ def _check_drivers(name: str, profile: Profile) -> None:
                 profile_name=f"{name}:{backend_name}:{tool_name}",
             )
     if profile.matrix_ingress is not None:
-        build_extractor(
-            profile.matrix_ingress.scan_view,
+        # Built without its key provider: that needs the network and belongs
+        # on the request path. What is checked here is the name, the channel
+        # and the kind, none of which depend on the keys.
+        build_preprocessors(
+            profile.matrix_ingress.preprocess,
             channel=Channel.MATRIX,
             profile_name=name,
         )
@@ -308,7 +310,7 @@ def _require_env(name: str, env_var: str, what: str) -> SecretStr:
 def _resolve_matrix_ingress_secrets(name: str, matrix_ingress: MatrixIngressConfig) -> None:
     matrix_ingress.token = _require_env(name, matrix_ingress.token_env, "matrix_ingress")
 
-    decrypt = matrix_ingress.scan_view.decrypt
+    decrypt = matrix_ingress.preprocess.decrypt
     if decrypt is not None and decrypt.enabled:
         decrypt.access_token = _require_env(
             name, decrypt.access_token_env, "matrix decrypt access token",

@@ -61,7 +61,7 @@ from ..gateway.loader import (
     load_profiles,
     replace_active_config,
 )
-from ..gateway.profile import SCAN_VIEW_AGENT_FIELDS
+from ..gateway.profile import PREPROCESS_AGENT_FIELDS
 from ..gateway.router import invalidate_profile_cache
 from ..gateway.scope import CallerScope, require_caller
 from ..gateway.sessions import session_registry
@@ -313,13 +313,13 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
     if b is None or a is None:
         return []
     held: list[str] = []
-    for field_name in type(a.scan_view).model_fields:
-        if field_name in SCAN_VIEW_AGENT_FIELDS:
+    for field_name in type(a.preprocess).model_fields:
+        if field_name in PREPROCESS_AGENT_FIELDS:
             continue
-        old = getattr(b.scan_view, field_name)
-        if old != getattr(a.scan_view, field_name):
-            setattr(a.scan_view, field_name, old)
-            held.append(f"matrix_ingress.scan_view.{field_name}")
+        old = getattr(b.preprocess, field_name)
+        if old != getattr(a.preprocess, field_name):
+            setattr(a.preprocess, field_name, old)
+            held.append(f"matrix_ingress.preprocess.{field_name}")
     return held
 
 

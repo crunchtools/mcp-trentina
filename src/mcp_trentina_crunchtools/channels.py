@@ -38,3 +38,29 @@ class Channel(str, Enum):
     MATRIX = "matrix"
     ALERT = "alert"
     TOOL = "tool"
+
+
+class Kind(str, Enum):
+    """What a pre-processor consumes.
+
+    Not a second role — both kinds are pre-processors, with the same contract
+    and the same registry. They differ only in what they are handed.
+
+    TEXT is ``str -> str``: the processor owns the bytes, and what it returns
+    is both scanned and delivered. DOCUMENT is parsed JSON in, selected
+    strings out, because ``m.room.encrypted`` is a structure rather than a
+    substring and there is nothing useful to do with its serialization. A
+    DOCUMENT processor does not decide what reaches the wire; its call site
+    does.
+
+    Declared so the registry can refuse a DOCUMENT processor where the caller
+    will hand it a string, which would otherwise be an AttributeError deep in
+    a request rather than a refused config.
+
+    Expected to be temporary. Once #162 lands and the Matrix bridge delivers
+    plaintext, ``matrix`` reads exactly what it delivers — which is TEXT — and
+    DOCUMENT may have no implementations left.
+    """
+
+    TEXT = "text"
+    DOCUMENT = "document"

@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..channels import Channel
+from ..channels import Channel, Kind
 from ..config import get_config
 from ..errors import QuarantineAgentError
 from ..quarantine.agent import quarantine_generate
@@ -70,6 +70,7 @@ class SummarizeProcessor:
     name = "summarize"
     cost = Cost.METERED
     channels = frozenset({Channel.TOOL})
+    kind = Kind.TEXT
 
     async def run(self, payload: str, ctx: PreProcessContext) -> PreProcessResult:
         bytes_in = len(payload.encode("utf-8"))
