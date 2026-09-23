@@ -4,7 +4,7 @@
 call site: run it, degrade safely if it raises, and turn the coverage
 accounting into the fields an operator reads.
 
-This file was ``gateway/scanview.py`` and held a second driver registry, a
+This file held a second driver registry until #167, alongside a
 mirror of the pre-processor one. Two registries for two roles is how the
 pre-processor table ended up with no channel lock at all — the lock was
 written once, in the half nobody copied it out of. Both tables now live in
@@ -17,16 +17,16 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..jsonwalk import iter_leaves
-from ..preprocess import ScanView
+from ..preprocess import Selection
 
 if TYPE_CHECKING:
-    from ..preprocess import DocumentProcessor, ScanViewContext
+    from ..preprocess import DocumentProcessor, SelectionContext
     from .profile import MatrixPreProcessConfig
 
 logger = logging.getLogger(__name__)
 
 
-def read_everything(payload: Any, *, extractor: str, why: str) -> ScanView:
+def read_everything(payload: Any, *, extractor: str, why: str) -> Selection:
     """The whole document, read, with nothing skipped.
 
     This is what the perimeter did before any selection existed, and it is
@@ -42,7 +42,7 @@ def read_everything(payload: Any, *, extractor: str, why: str) -> ScanView:
     """
     leaves = iter_leaves(payload)
     total = sum(len(leaf) for leaf in leaves)
-    return ScanView(
+    return Selection(
         extractor=extractor,
         segments=tuple(leaves),
         chars_total=total,
@@ -53,12 +53,12 @@ def read_everything(payload: Any, *, extractor: str, why: str) -> ScanView:
     )
 
 
-async def build_scan_view(
+async def run_l1(
     payload: Any,
     *,
     extractor: DocumentProcessor | None,
-    ctx: ScanViewContext,
-) -> ScanView:
+    ctx: SelectionContext,
+) -> Selection:
     """Run the configured processor, or read everything if there is none.
 
     FAIL OPEN TO MORE READING, NEVER LESS. A processor that raises has told us
@@ -82,7 +82,7 @@ async def build_scan_view(
         )
 
 
-def describe(view: ScanView, cfg: MatrixPreProcessConfig) -> dict[str, Any]:
+def describe(view: Selection, cfg: MatrixPreProcessConfig) -> dict[str, Any]:
     """The processor's contribution to `_trentina_warning`.
 
     Only reports when there is something to report: reading everything adds

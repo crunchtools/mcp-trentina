@@ -124,7 +124,7 @@ def _normalize_enforcement(block: Any, *, key: str) -> Any:
         )
     return block
 
-# Pre-0.21.0 scan_view.extractor names. 'full' is not here: it maps to an
+# Pre-0.21.0 l2_input.extractor names. 'full' is not here: it maps to an
 # empty processor list rather than to a name.
 _EXTRACTOR_RENAMES: dict[str, str] = {"generic": "select"}
 
@@ -702,7 +702,7 @@ class MatrixDecryptConfig(BaseModel):
 
     What it does NOT do is worth stating: Trentina takes no Matrix device
     identity, uploads nothing, and makes only GET requests. Decryption exists
-    to build a scan view. The response forwarded to the client is the
+    to build the L2 input. The response forwarded to the client is the
     upstream ciphertext, untouched.
     """
 
@@ -778,7 +778,7 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
     and a defense change whose default narrows the perimeter is one that lands
     by accident.
 
-    This was ``ScanViewConfig`` with an ``extractor:`` field naming one of
+    This was the ``scan_view:`` block with an ``extractor:`` field naming one of
     full/generic/matrix. ``extractor: full`` is now an empty ``processors``
     list, because reading everything is what naming nothing means; ``generic``
     is ``select``. Old spellings still load -- see the validator below -- and
@@ -845,7 +845,7 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
     def _decrypt_needs_the_matrix_processor(self) -> MatrixPreProcessConfig:
         if self.decrypt is not None and "matrix" not in self.processors:
             raise ValueError(
-                "scan_view.decrypt requires processors: [matrix] — the "
+                "l2_input.decrypt requires processors: [matrix] — the "
                 "'select' processor has nowhere to put decrypted text"
             )
         return self

@@ -58,7 +58,7 @@ class TestSafeContent:
             result = await safe_content("Hello, world.")
 
             assert result["content"] == "Hello, world."
-            assert result["trust"]["level"] == "sanitized-only"
+            assert result["trust"]["level"] == "l1-only"
             assert result["trust"]["source"] == "layer1"
             assert result["trust"]["content_hash"] == _hash("Hello, world.")
 
@@ -84,14 +84,14 @@ class TestSafeContent:
                 "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.defense.build_scan_view",
+                "mcp_trentina_crunchtools.defense.run_l1",
             ) as mock_sanitize,
         ):
             from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, PipelineStats
 
             mock_sanitize.return_value = PipelineResult(
                 content="Hello",
-                scan_view="Hello",
+                l2_input="Hello",
                 input_size=len(html),
                 output_size=5,
                 stats=PipelineStats(),
@@ -175,14 +175,14 @@ class TestSafeContent:
                 "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.defense.build_scan_view",
+                "mcp_trentina_crunchtools.defense.run_l1",
             ) as mock_sanitize,
         ):
             from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, PipelineStats
 
             mock_sanitize.return_value = PipelineResult(
                 content="Hi",
-                scan_view="Hi",
+                l2_input="Hi",
                 input_size=len(html),
                 output_size=2,
                 stats=PipelineStats(),

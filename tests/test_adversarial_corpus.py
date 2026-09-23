@@ -25,7 +25,7 @@ import json
 
 import pytest
 
-from mcp_trentina_crunchtools.l1.pipeline import build_scan_view
+from mcp_trentina_crunchtools.l1.pipeline import run_l1
 from mcp_trentina_crunchtools.preprocess import (
     EmailProcessor,
     PetitProcessor,
@@ -99,7 +99,7 @@ class TestLayer1Boundary:
 
     @pytest.mark.parametrize("case", CORPUS, ids=[c.id for c in CORPUS])
     def test_l1_annotation_holds(self, case: Case) -> None:
-        count = sum(build_scan_view(case.payload).stats.to_flat_dict().values())
+        count = sum(run_l1(case.payload).stats.to_flat_dict().values())
         if case.bypasses_l1:
             assert count == 0, (
                 f"{case.id}: expected to bypass Layer 1, but L1 made {count} "

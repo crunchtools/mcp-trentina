@@ -14,7 +14,7 @@ from ..defense import advise, defend
 from ..errors import FileReadError
 from ..l1.pipeline import (
     PipelineResult,
-    build_scan_view,
+    run_l1,
 )
 from ..l1.shadows import detect_module_shadows
 
@@ -65,7 +65,7 @@ def _build_layer1_context(stats: dict[str, int], detections: int) -> str | None:
     return (
         "Layer 1 deterministic scanning found the following injection vectors:\n"
         + "\n".join(lines)
-        + "\nEvaluate the following sanitized content for additional semantic "
+        + "\nEvaluate the following content for additional semantic "
         "injection vectors that may have survived deterministic stripping."
     )
 
@@ -148,7 +148,7 @@ async def quarantine_scan(
 
     Returns threat assessment only — risk level, vector counts, Q-Agent observations.
     Always runs full detection regardless of trust level. Q-Agent receives
-    sanitized content with Layer 1 stats as context.
+    the L2 input with Layer 1 stats as context.
     """
     if not url and not path:
         return {"error": "Provide either url or path to scan"}
@@ -157,7 +157,7 @@ async def quarantine_scan(
     config = get_config()
     content, source_type, source = await _fetch_content(url, path)
 
-    l1 = build_scan_view(content)
+    l1 = run_l1(content)
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
@@ -210,7 +210,7 @@ async def deep_quarantine_scan(
     url: str | None = None,
     path: str | None = None,
 ) -> dict[str, Any]:
-    """Deep scan: Q-Agent analyzes raw unsanitized content.
+    """Deep scan: L3 analyzes the raw content, not the L2 input.
 
     Layer 1 still runs for stats reporting, but the Q-Agent receives
     the original content for full semantic analysis. Higher risk of
@@ -228,13 +228,13 @@ async def deep_quarantine_scan(
     config = get_config()
     content, source_type, source = await _fetch_content(url, path)
 
-    l1 = build_scan_view(content)
+    l1 = run_l1(content)
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
 
     # Deep scan judges the RAW bytes: L2 and L3 both read the original text
-    # with no normalization at all — not even the scan view's obfuscation
+    # with no normalization at all — not even the L2 input's obfuscation
     # cleanup. Since L1 stopped stripping, the standard path already judges
     # full content; what "deep" still buys is judgment over the un-normalized
     # original (raw HTML included) plus the higher L3 spend.
@@ -246,7 +246,7 @@ async def deep_quarantine_scan(
         record=False,
         precomputed_l1=PipelineResult(
             content=content,
-            scan_view=content,
+            l2_input=content,
             stats=l1.stats,
             input_size=l1.input_size,
             output_size=l1.output_size,
@@ -352,7 +352,7 @@ async def quarantine_scan_dir(directory: str) -> dict[str, Any]:
     Python's real ``struct`` module when the agent runs code in that
     directory.
 
-    Also runs L1 sanitization + L2 classifier on each Python file to
+    Also runs L1 + L2 on each Python file to
     detect embedded prompt injection alongside the shadow scan.
     """
     resolved = str(Path(directory).resolve())

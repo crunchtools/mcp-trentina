@@ -1,6 +1,6 @@
 """`full` and `defend_json` are the same scan, and this proves it before we delete one.
 
-`read_everything` selects every string leaf and hands them to `defend_scan_view`.
+`read_everything` selects every string leaf and hands them to `defend_selection`.
 `defend_json` walks every string leaf and judges them itself. Two walks,
 written twice, reaching the same verdict — `jsonwalk.py`'s predecessor docstring
 says so and warns that "if the two walks ever disagree about what counts as a
@@ -33,16 +33,16 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from mcp_trentina_crunchtools.defense import defend_json, defend_scan_view
+from mcp_trentina_crunchtools.defense import defend_json, defend_selection
 from mcp_trentina_crunchtools.gateway.selection import read_everything
-from mcp_trentina_crunchtools.preprocess import ScanViewContext
+from mcp_trentina_crunchtools.preprocess import SelectionContext
 
 from .adversarial_corpus import CORPUS
 
 if TYPE_CHECKING:
     from mcp_trentina_crunchtools.l1.pipeline import PipelineStats
 
-CTX = ScanViewContext(source="test", profile_name="p", path="/x")
+CTX = SelectionContext(source="test", profile_name="p", path="/x")
 
 
 def _stat_tuples(stats: PipelineStats) -> dict[str, Any]:
@@ -77,14 +77,14 @@ class TestFullScanEqualsJsonScan:
     async def test_same_leaves_stats_and_risk(self, payload: Any) -> None:
         via_json = await defend_json(payload, source="s", source_type="tool_response")
         view = read_everything(payload, extractor="none", why="")
-        via_view = await defend_scan_view(
+        via_view = await defend_selection(
             view, source="s", source_type="tool_response"
         )
 
         assert via_json.verdict.pipeline.content == via_view.pipeline.content, (
             "the two walks disagree about which leaves exist, or their order"
         )
-        assert via_json.verdict.pipeline.scan_view == via_view.pipeline.scan_view
+        assert via_json.verdict.pipeline.l2_input == via_view.pipeline.l2_input
         assert _stat_tuples(via_json.verdict.pipeline.stats) == _stat_tuples(
             via_view.pipeline.stats
         )
@@ -109,12 +109,12 @@ class TestFullScanEqualsJsonScan:
                 payload, source="s", source_type="tool_response"
             )
             view = read_everything(payload, extractor="none", why="")
-            via_view = await defend_scan_view(
+            via_view = await defend_selection(
                 view, source="s", source_type="tool_response"
             )
 
             assert via_json.verdict.pipeline.content == via_view.pipeline.content
-            assert via_json.verdict.pipeline.scan_view == via_view.pipeline.scan_view
+            assert via_json.verdict.pipeline.l2_input == via_view.pipeline.l2_input
             assert via_json.verdict.risk_level == via_view.risk_level
 
     async def test_the_corpus_is_not_empty(self) -> None:

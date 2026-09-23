@@ -28,8 +28,8 @@ from .errors import (
     ContentSizeError,
     FetchError,
     FileReadError,
+    L1Error,
     QuarantineAgentError,
-    SanitizationError,
     TrentinaError,
     UnscannableContentError,
     UnsupportedContentTypeError,
@@ -104,7 +104,7 @@ _CLASSIFICATION: tuple[tuple[type[BaseException], Outcome], ...] = (
     (FileReadError, Outcome.BACKEND_ERROR),
     (QuarantineAgentError, Outcome.BACKEND_ERROR),
     (ConfigError, Outcome.GATEWAY_ERROR),
-    (SanitizationError, Outcome.GATEWAY_ERROR),
+    (L1Error, Outcome.GATEWAY_ERROR),
 )
 """Exception type to outcome, ordered most-specific first.
 

@@ -30,7 +30,7 @@ class TestEmitRequestEvent:
         emit_request_event(
             tool="safe_fetch",
             source="https://example.com",
-            trust_level="trusted-sanitized",
+            trust_level="trusted-l1",
             risk_level="low",
             l1_detections=0,
             l1_suspicious=0,
@@ -44,7 +44,7 @@ class TestEmitRequestEvent:
         assert len(received) == 1
         assert received[0]["tool"] == "safe_fetch"
         assert received[0]["source"] == "https://example.com"
-        assert received[0]["trust_level"] == "trusted-sanitized"
+        assert received[0]["trust_level"] == "trusted-l1"
         assert received[0]["risk_level"] == "low"
         assert received[0]["l2_label"] == "BENIGN"
         assert received[0]["l2_score"] == 0.02
@@ -132,7 +132,7 @@ class TestDbusInterfaceMethods:
         emit_request_event(
             tool="safe_read",
             source="/tmp/test.txt",
-            trust_level="sanitized-only",
+            trust_level="l1-only",
             risk_level="low",
             l1_detections=0,
             l1_suspicious=0,

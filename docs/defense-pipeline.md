@@ -38,7 +38,7 @@ Everything entering through the gateway is judged at its ingress — the firewal
 
 - **MCP tool responses** from every remote backend: text blocks, resource text, and every string leaf of `structuredContent`, judged as one document (recorded as `source_type=tool_response`). Image blocks and binary blobs cannot be judged; their counts ride in the warning.
 - **Tool definitions** on every `tools/list`: name, title, description, `inputSchema`, annotations — the MCP tool-poisoning channel (`tool_description`). Runs on post-compression text; a description the compressor rewrote is model output and gets unconditional L3.
-- **Matrix**: `/sync` and room `/messages` responses, buffered and judged whole (`matrix_sync`). E2EE rooms are ciphertext on the wire; with `scan_view.decrypt` configured the proxy terminates Megolm to build the scan view and forwards the original ciphertext untouched, so the homeserver never sees plaintext and the agent still decrypts for itself. Decryption is read-only, additive and ephemeral — recovered plaintext exists only in the scan view. Without it, encrypted rooms are outside what the gateway can read, and the coverage gap is counted and reported rather than assumed.
+- **Matrix**: `/sync` and room `/messages` responses, buffered and judged whole (`matrix_sync`). E2EE rooms are ciphertext on the wire; with `preprocess.decrypt` configured the proxy terminates Megolm to build the L2 input and forwards the original ciphertext untouched, so the homeserver never sees plaintext and the agent still decrypts for itself. Decryption is read-only, additive and ephemeral — recovered plaintext exists only in the L2 input. Without it, encrypted rooms are outside what the gateway can read, and the coverage gap is counted and reported rather than assumed.
 - **LLM completions** through the proxy, judged post-stream (`llm_completion`).
 - **Alert webhooks** (`alert`), and the standalone web tools (`safe_*`, `quarantine_*`).
 
@@ -58,12 +58,12 @@ The defense-in-depth approach means an attack has to evade three fundamentally d
 
 ## The Three Layers
 
-### Layer 1 — Deterministic Detection (the tripwire)
+### Layer 1 — Deterministic Detection
 
 L1 produces two views of one payload and never modifies what the agent receives:
 
-- **The delivery view** — the caller's text, untouched. A CVE ticket, a Nagios alert, or a security mail *discusses* attacks in the words attacks use; amputating those lines destroyed exactly the content an ops agent exists to read, and destroyed the evidence before the smarter layers could judge it.
-- **The scan view** — the same text with obfuscation normalized away: zero-width characters removed, encoded blobs decoded and replaced with markers, fake `<|im_start|>`/`[INST]` delimiter tokens dropped, exfiltration image URLs defanged. **L2 reads this view**, so an attacker cannot blind the classifier with the very tricks L1 counts.
+- **What the agent receives** (`content`) — the caller's text, untouched. A CVE ticket, a Nagios alert, or a security mail *discusses* attacks in the words attacks use; amputating those lines destroyed exactly the content an ops agent exists to read, and destroyed the evidence before the smarter layers could judge it.
+- **What L2 reads** (`l2_input`) — the same text with obfuscation normalized away: zero-width characters removed, encoded blobs decoded and replaced with markers, fake `<|im_start|>`/`[INST]` delimiter tokens dropped, exfiltration image URLs defanged. **L2 reads this and nothing else**, so an attacker cannot blind the classifier with the very tricks L1 counts.
 
 Detections (hidden markup, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions") feed three places: the risk score, the sidecar warning, and the L3 gate — **any suspicious L1 detection sends the full original to the Q-Agent**, whose briefing says explicitly that nothing was removed and that the flag may be an attack *or* legitimate security content: judge intent, not vocabulary.
 
@@ -159,7 +159,7 @@ silent.
 ## Pipeline Flow
 
 ```
-Content in → L1 scan view → L2 classify → L3 Q-Agent (if triggered) → Content out
+Content in → L1 builds `l2_input` → L2 classify → L3 (if triggered) → Content out
                                 ↓
                           Score < threshold?
                           → Pass through with metadata sidecar

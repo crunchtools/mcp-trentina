@@ -58,7 +58,7 @@ from typing import TYPE_CHECKING, Any
 from ..channels import Channel, Kind
 from ..jsonwalk import iter_leaves
 from .shapes import MIN_SKIP_LEN, classify_skip
-from .view import ScanView, ScanViewContext, SkipReason
+from .view import Selection, SelectionContext, SkipReason
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -85,7 +85,7 @@ class SelectProcessor:
     def __init__(self, *, skip_sample_bytes: int = DEFAULT_SKIP_SAMPLE_BYTES) -> None:
         self.skip_sample_bytes = skip_sample_bytes
 
-    async def extract(self, payload: Any, _ctx: ScanViewContext) -> ScanView:
+    async def extract(self, payload: Any, _ctx: SelectionContext) -> Selection:
         return self.select(iter_leaves(payload))
 
     def select(
@@ -98,7 +98,7 @@ class SelectProcessor:
         decrypted_events: int = 0,
         undecryptable: tuple[Any, ...] = (),
         extractor_name: str | None = None,
-    ) -> ScanView:
+    ) -> Selection:
         """Apply the rules to an already-collected leaf list.
 
         Split out from ``extract`` so the Matrix extractor can hand its
@@ -149,7 +149,7 @@ class SelectProcessor:
             # and the honest reading is that they WERE skipped — the sample
             # is a probe, not coverage.
 
-        return ScanView(
+        return Selection(
             extractor=extractor_name or self.name,
             segments=tuple(segments),
             chars_total=total,

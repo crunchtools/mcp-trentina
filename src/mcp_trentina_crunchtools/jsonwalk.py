@@ -1,7 +1,7 @@
 """The one JSON walk. There used to be two.
 
 Every place that asks "what strings are in this document?" comes here. That
-was not true until issue #167: this walk and ``defense.build_scan_view_json``
+was not true until issue #167: this walk and ``defense.run_l1_json``
 were separate implementations of the same traversal, maintained by hand,
 and the old docstring here said so — it warned that "if the two walks ever
 disagree about what counts as a leaf, the accounting stops meaning anything"

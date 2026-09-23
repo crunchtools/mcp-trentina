@@ -24,7 +24,7 @@ functions are the missing wall:
   cache ingress closes structurally rather than by a deploy-time flush.
 
 Enforcement here is hardwired ANNOTATE: content is never modified (L1 is a
-tripwire; the owner's rule), a flagged payload gets a ``_trentina_warning``
+owner's rule), a flagged payload gets a ``_trentina_warning``
 sibling field, and every flag lands in the detections table as
 ``source_type="tool_response"`` / ``"tool_description"`` — the score
 distribution that step 7's calibration needs before anything fails closed.

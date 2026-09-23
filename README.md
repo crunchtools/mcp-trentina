@@ -32,7 +32,7 @@ The egress half of parameter guards: the same allow/deny constraint applied to w
 
 ### [Three-Layer Defense Pipeline](docs/defense-pipeline.md)
 
-Every piece of untrusted content passes through three independent detection layers. Layer 1 strips structural attacks (hidden HTML, invisible Unicode, encoded payloads, exfiltration URLs). Layer 2 runs a Prompt Guard 2 86M classifier to catch instruction overrides. Layer 3 hands sanitized content to a quarantined LLM (Gemini Flash Lite) for semantic analysis — no tools, no memory, minimal blast radius. Each layer catches what the others miss.
+Every piece of untrusted content passes through three independent detection layers. Layer 1 deterministically detects structural attacks (hidden markup, invisible Unicode, encoded payloads, exfiltration URLs) and normalizes a copy for Layer 2 to read. Layer 2 runs a Prompt Guard 2 86M classifier on that copy to catch instruction overrides. Layer 3 hands the original content to a quarantined LLM (Gemini Flash Lite) for semantic analysis — no tools, no memory, minimal blast radius. Each layer catches what the others miss.
 
 ### [Tool Description Compression](docs/compression.md)
 

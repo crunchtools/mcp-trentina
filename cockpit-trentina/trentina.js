@@ -115,14 +115,14 @@
         el.innerHTML =
             '<dl class="pf-v6-c-description-list pf-m-horizontal">' +
             '<div class="pf-v6-c-description-list__group">' +
-            '<dt class="pf-v6-c-description-list__term">L1 Sanitize</dt>' +
-            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l1_sanitize.active) + ' ' + escapeHtml(layers.l1_sanitize.description) + '</dd></div>' +
+            '<dt class="pf-v6-c-description-list__term">L1</dt>' +
+            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l1.active) + ' ' + escapeHtml(layers.l1.description) + '</dd></div>' +
             '<div class="pf-v6-c-description-list__group">' +
-            '<dt class="pf-v6-c-description-list__term">L2 Classify</dt>' +
-            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l2_classifier.active) + ' ' + escapeHtml(layers.l2_classifier.description) + '</dd></div>' +
+            '<dt class="pf-v6-c-description-list__term">L2</dt>' +
+            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l2.active) + ' ' + escapeHtml(layers.l2.description) + '</dd></div>' +
             '<div class="pf-v6-c-description-list__group">' +
-            '<dt class="pf-v6-c-description-list__term">L3 Q-Agent</dt>' +
-            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l3_qagent.active) + ' ' + escapeHtml(layers.l3_qagent.description) +
+            '<dt class="pf-v6-c-description-list__term">L3</dt>' +
+            '<dd class="pf-v6-c-description-list__description">' + layerBadge(layers.l3.active) + ' ' + escapeHtml(layers.l3.description) +
             (layers.l3_qagent.model ? ' (' + escapeHtml(layers.l3_qagent.model) + ')' : '') + '</dd></div>' +
             '</dl>';
     }
@@ -202,7 +202,7 @@
 
         /* L1 */
         html += '<div class="pf-v6-c-description-list__group">' +
-            '<dt class="pf-v6-c-description-list__term">L1 Sanitize</dt>' +
+            '<dt class="pf-v6-c-description-list__term">L1</dt>' +
             '<dd class="pf-v6-c-description-list__description">';
         for (var key in stats) {
             if (stats[key] > 0) {
@@ -219,7 +219,7 @@
 
         /* L2 */
         html += '<div class="pf-v6-c-description-list__group">' +
-            '<dt class="pf-v6-c-description-list__term">L2 Classify</dt>' +
+            '<dt class="pf-v6-c-description-list__term">L2</dt>' +
             '<dd class="pf-v6-c-description-list__description">';
         if (d.l2_label) {
             html += escapeHtml(d.l2_label) + ' ' + scoreBar(d.l2_score);

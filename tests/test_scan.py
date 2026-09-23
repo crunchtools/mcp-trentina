@@ -85,7 +85,7 @@ class TestDeepScanVsStandardScan:
                 "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_trentina_crunchtools.tools.scan.build_scan_view") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.run_l1") as mock_sanitize,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
@@ -100,7 +100,7 @@ class TestDeepScanVsStandardScan:
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "SANITIZED CONTENT"
-            mock_pipeline.scan_view = "SANITIZED CONTENT"
+            mock_pipeline.l2_input = "SANITIZED CONTENT"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0
@@ -130,7 +130,7 @@ class TestDeepScanVsStandardScan:
                 "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_trentina_crunchtools.tools.scan.build_scan_view") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.run_l1") as mock_sanitize,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
@@ -145,7 +145,7 @@ class TestDeepScanVsStandardScan:
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "SANITIZED CONTENT"
-            mock_pipeline.scan_view = "SANITIZED CONTENT"
+            mock_pipeline.l2_input = "SANITIZED CONTENT"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0
@@ -175,7 +175,7 @@ class TestDeepScanVsStandardScan:
                 "mcp_trentina_crunchtools.tools.scan._fetch_content",
                 new_callable=AsyncMock,
             ) as mock_fetch,
-            patch("mcp_trentina_crunchtools.tools.scan.build_scan_view") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.run_l1") as mock_sanitize,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
@@ -189,7 +189,7 @@ class TestDeepScanVsStandardScan:
 
             mock_pipeline = MagicMock()
             mock_pipeline.content = "sanitized"
-            mock_pipeline.scan_view = "sanitized"
+            mock_pipeline.l2_input = "sanitized"
             mock_pipeline.stats.to_flat_dict.return_value = {}
             mock_pipeline.stats.risk_level.return_value = "low"
             mock_pipeline.stats.total_detections.return_value = 0

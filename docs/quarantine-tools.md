@@ -55,7 +55,7 @@ These report rather than deliver, and take no mode prefix:
 The search tools add a Layer 0 step — Gemini grounding with `google_search` — before the content enters the defense pipeline:
 
 ```
-L0 (Gemini grounding) → resolve redirects → L1 scan view → L2 classify → L3 Q-Agent
+L0 (Gemini grounding) → resolve redirects → L1 builds `l2_input` → L2 classify → L3
 ```
 
 `block_search` and `warn_search` return grounded prose + source URLs; they differ only in whether a flagged answer is refused or delivered with the reason attached. `clean_search` adds structured extraction with per-source summaries and relevance scores.
@@ -66,7 +66,7 @@ The content tools (`block_content`, `warn_content`, `clean_content`, `deep_scan_
 
 ## Deep Scan Tools
 
-The deep scan variants (`deep_quarantine_scan`, `deep_scan_content`) send the *unsanitized* content to the Q-Agent for analysis. L1 still runs for stats reporting, but the Q-Agent receives the original content for full semantic analysis. This provides better detection at the cost of higher Q-Agent compromise risk. Use these for diagnostic deep-dives on suspicious content.
+The deep scan variants (`deep_quarantine_scan`, `deep_scan_content`) send the *raw* content to L3 for analysis. L1 still runs for stats reporting, but L3 receives the original content for full semantic analysis. This provides better detection at the cost of higher L3 compromise risk. Use these for diagnostic deep-dives on suspicious content.
 
 ## Trust Domains
 

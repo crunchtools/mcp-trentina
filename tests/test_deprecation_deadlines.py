@@ -8,7 +8,7 @@ anything, and the message keeps claiming a removal that did not happen.
 It had already rotted three times when this file was written at 0.27.1.
 `defense.l3_threshold` told operators it "is rejected from 0.12.0" while the
 loader at 0.27.0 went on accepting it — fifteen minor releases past its own
-deadline. The two `scan_view` notices said 0.27.0 while running inside
+deadline. The two `l2_input` notices said 0.27.0 while running inside
 0.27.0.
 
 That failure is worse than no notice at all. A reader who sees a past release

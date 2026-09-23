@@ -47,7 +47,7 @@ mcp = FastMCP(
     version=__version__,
     instructions=(
         "Quarantined web content extraction with three-layer prompt injection defense. "
-        "Layer 1: deterministic sanitization. Layer 2: Prompt Guard 2 classifier. "
+        "Layer 1: deterministic detection. Layer 2: Prompt Guard 2 classifier. "
         "Layer 3: quarantined Gemini Q-Agent. "
         "Three modes, picked per call by NAME: block_* refuses flagged content, "
         "warn_* delivers exactly what arrived with the verdict attached, "
@@ -125,7 +125,7 @@ async def deep_quarantine_scan_tool(
     url: str | None = None,
     path: str | None = None,
 ) -> dict[str, Any]:
-    """Deep security scan: Q-Agent analyzes raw unsanitized content.
+    """Deep security scan: L3 analyzes the raw content, not the L2 input.
 
     Layer 1 runs for stats reporting, but the Q-Agent receives the original
     content for full semantic analysis. Use this for diagnostic deep-dives on
@@ -191,7 +191,7 @@ async def scan_content_tool(
 ) -> dict[str, Any]:
     """Three-layer security scan on inline content. Returns threat assessment only.
 
-    L1 sanitizes the content. L2 and L3 analyze the sanitized output.
+    L1 detects and counts. L2 and L3 analyze what L1 produced.
     No content is returned — only risk level, vector counts, and observations.
 
     Args:
@@ -206,7 +206,7 @@ async def deep_scan_content_tool(
     content: str,
     content_type: str = "text/plain",
 ) -> dict[str, Any]:
-    """Deep security scan on inline content. L2/L3 analyze raw unsanitized content.
+    """Deep security scan on inline content. L2/L3 analyze the raw content.
 
     L1 runs for stats reporting, but L2 classifier and L3 Q-Agent receive the
     original content for full semantic analysis. Higher risk of Q-Agent compromise

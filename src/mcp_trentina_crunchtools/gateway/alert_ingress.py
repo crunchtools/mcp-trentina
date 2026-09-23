@@ -9,12 +9,12 @@ headers required.  Designed for monitoring systems such as Nagios
 that need to page an agent (e.g. a Hermes agent) through Trentina.
 
 Before forwarding, the payload runs through the same three-layer
-defense used elsewhere: string leaves in the JSON are sanitized
-(Layer 1), the sanitized content is classified (Layer 2), and — when
+defense used elsewhere: string leaves in the JSON go through L1,
+the L1 input is classified by L2, and — when
 a Gemini API key is configured — the Q-Agent reviews it (Layer 3).
 This closes the injection vector in Hermes's own webhook adapter,
 which interpolates payload values into a live agent prompt with no
-sanitization of its own.
+detection of its own.
 
 What a flagged payload becomes is ``alert_ingress.enforcement``, and it
 defaults to ``warn``: forwarded with a ``_trentina_warning`` field attached
@@ -265,7 +265,7 @@ async def _defend_alert(
             detections=verdict.verdict.pipeline.stats.total_detections(),
             suspicious=verdict.verdict.pipeline.stats.suspicious_detections(),
         )
-        sanitized_payload: Any = verdict.payload
+        forward_payload: Any = verdict.payload
         joined_text = verdict.joined_text
         final = verdict.verdict
     else:
@@ -282,7 +282,7 @@ async def _defend_alert(
             suspicious=first.pipeline.stats.suspicious_detections(),
         )
         final = first
-        sanitized_payload = None
+        forward_payload = None
         joined_text = first.content
 
     risk_level = risk_level_for_count(counts.suspicious)
@@ -297,8 +297,8 @@ async def _defend_alert(
     # it in means reconciling those two risk models, which is a behaviour
     # change to the alert path and does not belong in the commit that fixes
     # the Matrix one. Tracked separately.
-    if flagged and isinstance(sanitized_payload, dict):
-        sanitized_payload["_trentina_warning"] = {
+    if flagged and isinstance(forward_payload, dict):
+        forward_payload["_trentina_warning"] = {
             "risk_level": risk_level,
             "l1_detections": counts.detections,
             "l2_label": classification.label if classification is not None else None,
@@ -312,8 +312,8 @@ async def _defend_alert(
         }
 
     forward_body = (
-        json.dumps(sanitized_payload).encode("utf-8")
-        if sanitized_payload is not None
+        json.dumps(forward_payload).encode("utf-8")
+        if forward_payload is not None
         else joined_text.encode("utf-8")
     )
 

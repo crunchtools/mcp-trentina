@@ -18,7 +18,7 @@ from mcp_trentina_crunchtools.quarantine.agent import (
 )
 from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
 from mcp_trentina_crunchtools.tools.search import (
-    _sanitize_l0_output,
+    _run_l1_on_l0_output,
     quarantine_search,
     safe_search,
 )
@@ -327,14 +327,14 @@ class TestRedirectResolution:
 
 
 class TestSanitizeL0Output:
-    """Tests for _sanitize_l0_output()."""
+    """Tests for _run_l1_on_l0_output()."""
 
     def test_clean_text_passes_through(self) -> None:
         """Clean text and sources pass through with zero detections."""
         sources = [
             {"uri": "https://example.com", "title": "Example Page"}
         ]
-        text_result, sanitized, detections, _stats = _sanitize_l0_output(
+        text_result, sanitized, detections, _stats = _run_l1_on_l0_output(
             "Clean text here.", sources
         )
         assert text_result.content == "Clean text here."

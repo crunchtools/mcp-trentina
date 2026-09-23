@@ -9,7 +9,7 @@ Two input shapes, not two roles. Most processors are ``str -> str``
 (``PreProcessor``). ``select`` and ``matrix`` take parsed JSON and return the
 strings worth reading out of it (``DocumentProcessor``), because
 ``m.room.encrypted`` is a structure rather than a substring. They were a
-separate framework until #167 — ``scanview/`` — on a ruling that did not hold.
+separate framework until #167, on a ruling that did not hold.
 """
 
 from ..channels import Channel
@@ -24,8 +24,8 @@ from .structured import StructuredProcessor
 from .summarize import SummarizeProcessor
 from .view import (
     DocumentProcessor,
-    ScanView,
-    ScanViewContext,
+    Selection,
+    SelectionContext,
     SkipReason,
     UndecryptableEvent,
 )
@@ -43,9 +43,9 @@ __all__ = [
     "PreProcessOutcome",
     "PreProcessResult",
     "PreProcessor",
-    "ScanView",
-    "ScanViewContext",
     "SelectProcessor",
+    "Selection",
+    "SelectionContext",
     "SkipReason",
     "Strategy",
     "StructuredProcessor",

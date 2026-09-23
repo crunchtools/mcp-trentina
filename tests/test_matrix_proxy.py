@@ -50,7 +50,7 @@ class TestMatrixPathTraversal:
 def _matrix_profile(
     name: str = "agent1",
     token: str = _FIXTURE_ACCESS,
-    scan_view: object = None,
+    preprocess: object = None,
 ) -> Profile:
     from pydantic import SecretStr
 
@@ -66,7 +66,7 @@ def _matrix_profile(
         auth=AuthConfig(bearer_token_env="TEST"),
         matrix_ingress=MatrixIngressConfig(
             token_env="MTOK",
-            scan_view=scan_view or MatrixPreProcessConfig(),
+            preprocess=preprocess or MatrixPreProcessConfig(),
         ),
     )
     p.auth.bearer_token = SecretStr("x")
@@ -263,9 +263,9 @@ class TestMatrixSyncScanning:
         async def _hang(*_args: object, **_kwargs: object) -> None:
             await asyncio.sleep(30)
 
-        monkeypatch.setattr(matrix_proxy, "defend_scan_view", _hang)
+        monkeypatch.setattr(matrix_proxy, "defend_selection", _hang)
 
-        profile = _matrix_profile(scan_view=MatrixPreProcessConfig(deadline_seconds=0.05))
+        profile = _matrix_profile(preprocess=MatrixPreProcessConfig(deadline_seconds=0.05))
         client = TestClient(_matrix_app({"agent1": profile}))
         resp = client.get("/matrix/sekrit/_matrix/client/v3/sync")
 

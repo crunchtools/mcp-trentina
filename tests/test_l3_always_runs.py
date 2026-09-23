@@ -169,7 +169,7 @@ class TestL3RunsRegardlessOfOtherLayers:
             detection={"injection_detected": True, "risk_level": "high"},
         )
         assert verdict.flagged_by is Layer.L3, (
-            "trust suppresses the L1 tripwire, not a judge that read the "
+            "trust suppresses an L1 flag, not a judge that read the "
             "content and concluded it is an attack"
         )
 

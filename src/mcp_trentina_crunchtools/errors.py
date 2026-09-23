@@ -41,8 +41,8 @@ class FetchError(TrentinaError):
         self.error_body = error_body
 
 
-class SanitizationError(TrentinaError):
-    """Raised when the sanitization pipeline encounters an unrecoverable error."""
+class L1Error(TrentinaError):
+    """Raised when L1 encounters an unrecoverable error."""
 
 
 class QuarantineAgentError(TrentinaError):
@@ -111,7 +111,7 @@ class UnsupportedContentTypeError(TrentinaError):
             (
                 f"Refusing to fetch {url}: content-type {content_type!r} is not "
                 "text. Binary bodies decode into garbage that wastes the "
-                "sanitization and classification pipeline."
+                "L1 and L2 pipeline."
             ),
         ]
         if redirect_chain:

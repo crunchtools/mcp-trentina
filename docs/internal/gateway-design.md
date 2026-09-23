@@ -10,7 +10,7 @@
 
 Trentina today exposes 6 web-content tools (`fetch`, `read`, `search`, `scan`,
 `blocklist`, `stats`) that run untrusted content through a 3-layer prompt-injection
-defense (L1 scan view → L2 Prompt Guard 2 classifier → L3 quarantined Gemini
+defense (L1 → L2 Prompt Guard 2 classifier → L3 quarantined Gemini
 re-extraction) before returning anything to the LLM.
 
 This design extends trentina with a second surface — a **per-consumer MCP gateway**
@@ -93,7 +93,7 @@ Each request to the gateway endpoint:
    come from.
 5. **On `tools/call` response:** runs the response content through the configured
    defense layers (L1 always; L2 always; L3 optional per-profile) and returns
-   sanitized content + detection metadata to the consumer.
+   the content + detection metadata to the consumer.
 6. **Audits** every passthrough (profile, backend, tool, detection scores, byte
    counts) to trentina's existing SQLite audit table.
 7. **Surfaces** in the Cockpit plugin under a new "Gateway" tab.
@@ -235,7 +235,7 @@ or discard.
 
 | Layer | Reuse | New |
 |---|---|---|
-| L1 — scan view | Existing `l1/` pipeline applied to MCP response content | None |
+| L1 | Existing `l1/` pipeline applied to MCP response content | None |
 | L2 — Prompt Guard 2 | Existing classifier, same thresholds (per-profile-configurable) | None |
 | L3 — Q-Agent | Existing quarantined Gemini path with `quarantine_threshold` trigger | Per-profile + runtime toggle |
 | Audit | Existing SQLite events table; add `gateway_passthrough` row type | New columns: `profile`, `backend`, `tool` |
@@ -392,7 +392,7 @@ blast radius, autonomous agent), then agent2.
    trove, claude-in-chrome, …) stay as-is.
 3. Shrink the SSH tunnel config from 10 `LocalForward` lines to
    one (the gateway port).
-4. Confirm `web__safe_fetch_tool` returns sanitized content and a remote backend
+4. Confirm `web__block_fetch_tool` returns content plus L1 metadata and a remote backend
    (`mcp-slack__slack_list_channels`) returns results — both via the same token,
    single endpoint.
 
@@ -446,7 +446,7 @@ Per gateway call (worst case, L3 triggered):
 |---|---|
 | Auth check + profile lookup | <1ms |
 | Backend MCP call (over `crunchtools` network) | depends on backend (5-500ms typical) |
-| L1 sanitization | <10ms |
+| L1 | <10ms |
 | L2 classifier | 50-200ms (Prompt Guard 2 inference) |
 | L3 quarantine (if triggered) | 1-2s (Gemini round-trip) |
 | Audit log write | <5ms |

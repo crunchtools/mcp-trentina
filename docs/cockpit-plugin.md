@@ -12,7 +12,7 @@ CLI tools and log files work for debugging, but they don't give you a persistent
 
 Real-time status of each defense layer:
 
-- **Layer 1 (Sanitize)** — active/unavailable
+- **Layer 1** — active/unavailable
 - **Layer 2 (Classifier)** — active/unavailable, with the loaded model path
 - **Layer 3 (Q-Agent)** — active/unavailable, with the configured model name
 

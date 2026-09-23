@@ -562,7 +562,7 @@ class TestPerimeterIsOperatorOnly:
         """A deployed config must survive the upgrade.
 
         Every profile model is `extra="forbid"` and a load failure is fatal,
-        so the old `scan_view.extractor` spelling has to keep working until
+        so the old `l2_input.extractor` spelling has to keep working until
         0.25.0 removes it. `full` maps to the empty list, which is why an
         alias could not do this and a before-validator does.
         """
