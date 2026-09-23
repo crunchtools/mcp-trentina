@@ -706,7 +706,7 @@ class TestEnforcementModeNames:
 
         with caplog.at_level(logging.WARNING):
             DefenseConfig(enforcement="annotate")
-        assert any("0.28.0" in r.getMessage() for r in caplog.records), (
+        assert any("0.29.0" in r.getMessage() for r in caplog.records), (
             "the deprecation must name the release that removes it"
         )
 

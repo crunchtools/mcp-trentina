@@ -525,7 +525,6 @@ async def _text_fallback_scan(body: bytes, profile: Profile, path: str) -> None:
             source=f"matrix:{profile.name}:{path}",
             source_type="matrix_sync",
             defense=profile.defense,
-            is_html=False,
             guarded=False,
         )
         if verdict.flagged:

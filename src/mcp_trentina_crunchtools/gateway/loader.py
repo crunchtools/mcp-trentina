@@ -138,7 +138,7 @@ def _warn_deprecated_defense_keys(name: str, body: dict[str, Any]) -> None:
     every input the gateway scans — and a config key that silently stopped
     mattering is exactly what an operator should be told about rather than
     discover. Retained so `extra="forbid"` does not reject profiles written
-    for 0.9.x; removed in 0.28.0 along with every other alias.
+    for 0.9.x; removed in 0.29.0 along with every other alias.
 
     It said 0.12.0 until 0.27.1, and 0.12.0 shipped fifteen minor releases
     ago — so the warning told operators the key was already rejected while

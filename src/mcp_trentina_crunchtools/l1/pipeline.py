@@ -1,26 +1,33 @@
-"""L1: the 7-stage deterministic pipeline that builds the scan view."""
+"""L1: the deterministic pipeline that builds the scan view.
+
+FORMAT-AGNOSTIC since 0.28.0. There is one entry point and it scans what it
+is handed. The ``looks_like_html`` dispatch that used to choose between an
+HTML pipeline and a text pipeline is gone: it matched a leading ``<!DOCTYPE``
+or ``<html>``, so an HTML FRAGMENT took the text path, and identical bytes
+received two different security behaviours depending on their first few
+characters. Conversion now belongs to ``preprocess/html.py``, which declines
+on what it cannot parse instead of asking whether anything "is HTML", and
+hidden-markup fingerprints are counted by an ordinary stage that runs on
+every payload. See ``l1/hidden.py`` for the two tiers.
+"""
 
 from __future__ import annotations
 
-import re
 from dataclasses import asdict, dataclass, field
 
 from .delimiters import DelimiterStats, normalize_delimiters
 from .directives import DirectiveStats, strip_directives
 from .encoded import EncodedStats, normalize_encoded
 from .exfiltration import ExfiltrationStats, strip_exfiltration
-from .html import HtmlStats, strip_hidden_html
+from .hidden import HiddenStats, detect_hidden_markup
 from .unicode import UnicodeStats, normalize_unicode
-
-_HTML_EXTENSIONS = frozenset({".html", ".htm", ".xhtml", ".svg"})
-_HTML_CONTENT_RE = re.compile(r"^\s*(<(!DOCTYPE|html)\b)", re.IGNORECASE)
 
 
 @dataclass
 class PipelineStats:
     """Combined statistics from all L1 stages."""
 
-    html: HtmlStats = field(default_factory=HtmlStats)
+    hidden: HiddenStats = field(default_factory=HiddenStats)
     unicode: UnicodeStats = field(default_factory=UnicodeStats)
     encoded: EncodedStats = field(default_factory=EncodedStats)
     exfiltration: ExfiltrationStats = field(default_factory=ExfiltrationStats)
@@ -31,7 +38,7 @@ class PipelineStats:
         """Flatten all stats into a single dict for serialization."""
         flat: dict[str, int] = {}
         named_sections = [
-            ("html", asdict(self.html)),
+            ("hidden", asdict(self.hidden)),
             ("unicode", asdict(self.unicode)),
             ("encoded", asdict(self.encoded)),
             ("exfiltration", asdict(self.exfiltration)),
@@ -54,17 +61,20 @@ class PipelineStats:
     def suspicious_detections(self) -> int:
         """Count only genuinely suspicious detections for risk scoring.
 
-        Normal HTML elements (comments, scripts, styles, meta, noscript) are
-        expected on any website and stripped as a precaution — they do not
-        indicate injection. Only categories that signal actual attack vectors
-        count toward risk: hidden elements, off-screen positioning, same-color
-        text, unicode manipulation, encoded payloads, exfiltration URLs,
-        LLM delimiters, and directive injection.
+        Only categories that signal an actual attack vector count: hidden
+        elements, off-screen positioning, same-color text, unicode
+        manipulation, encoded payloads, exfiltration URLs, LLM delimiters and
+        directive injection.
+
+        Normal HTML hygiene (comments, scripts, styles, meta, noscript) is
+        expected on any website and never counted here. Those counters left
+        ``PipelineStats`` entirely in 0.28.0 and live in the converter's
+        sidecar, which is the only place that still strips them.
         """
         return int(
-            self.html.hidden_elements
-            + self.html.off_screen_elements
-            + self.html.same_color_text
+            self.hidden.elements
+            + self.hidden.off_screen
+            + self.hidden.same_color
             + sum(asdict(self.unicode).values())
             + sum(asdict(self.encoded).values())
             + sum(asdict(self.exfiltration).values())
@@ -122,77 +132,43 @@ class PipelineResult:
     output_size: int
 
 
-def looks_like_html(content: str, file_path: str | None = None) -> bool:
-    """Detect if content is HTML based on extension or content sniffing."""
-    if file_path:
-        dot = file_path.rfind(".")
-        if dot != -1 and file_path[dot:].lower() in _HTML_EXTENSIONS:
-            return True
-    return bool(_HTML_CONTENT_RE.search(content))
+def _run_stages(content: str, stats: PipelineStats) -> PipelineResult:
+    """Apply every stage and assemble the result.
 
+    There is ONE path now. It used to be two — one entered after HTML had
+    been converted to Markdown, one for everything else — and keeping them
+    from drifting was a standing chore. The dispatch that chose between them
+    was also wrong often enough to matter (see the module docstring), so the
+    fix was to delete the fork rather than to guard it.
 
-def _run_text_stages(
-    original: str, content: str, stats: PipelineStats
-) -> PipelineResult:
-    """Apply stages 5-8 and assemble the result.
-
-    Both entry points end here. HTML reaches these stages after conversion to
-    Markdown; plain text starts at them. Keeping them in one place is what
-    stops the two paths from drifting: a stage added to only one of them would
-    leave text content defended differently from HTML, silently.
-
-    ``original`` is the caller's raw input, measured for input_size before
-    any stage has run; ``content`` is the delivery text the stages should
-    inspect (for HTML input, the extracted Markdown). The stages' transforms
-    build the scan view; the delivery text passes through untouched.
+    The delivery text passes through untouched; every stage transforms only
+    the scan view, except ``detect_hidden_markup``, which transforms nothing
+    and counts. It runs FIRST, because it is the only stage that reads markup
+    and the later stages rewrite the very characters it looks for.
     """
     scan_view = content
+    scan_view, stats.hidden = detect_hidden_markup(scan_view)
     scan_view, stats.unicode = normalize_unicode(scan_view)
     scan_view, stats.encoded = normalize_encoded(scan_view)
     scan_view, stats.exfiltration = strip_exfiltration(scan_view)
     scan_view, stats.delimiters = normalize_delimiters(scan_view)
     scan_view, stats.directives = strip_directives(scan_view)
 
+    size = len(content.encode("utf-8"))
     return PipelineResult(
         content=content,
         scan_view=scan_view,
         stats=stats,
-        input_size=len(original.encode("utf-8")),
-        output_size=len(content.encode("utf-8")),
+        input_size=size,
+        output_size=size,
     )
 
 
-def build_scan_view_from_html(html_content: str) -> PipelineResult:
-    """Run the full pipeline on HTML content.
-
-    Stages 1-4 are EXTRACTION, not security stripping: converting a page to
-    the Markdown a human would see is the fetch tools' product, and hidden
-    elements are by definition not part of that product. The extracted
-    Markdown is the delivery view; stages 5-9 then build the scan view from
-    it without modifying it.
-
-    1. Parse HTML (BeautifulSoup)
-    2. Strip hidden elements (display:none, off-screen, same-color)
-    3. Strip dangerous tags (script, style, noscript, meta, link) + comments
-    4. Convert HTML to Markdown
-    5. Unicode normalization (zero-width, bidi, control chars, NFKC)
-    6. Encoded payload detection (base64/hex with instruction patterns)
-    7. Exfiltration URL detection (suspicious markdown images)
-    8. LLM delimiter detection
-    9. Directive detection
-
-    Stages 5-9 transform only the scan view and count detections; the
-    delivery view is what stage 4 produced.
-    """
-    stats = PipelineStats()
-    content, stats.html = strip_hidden_html(html_content)
-    return _run_text_stages(html_content, content, stats)
-
-
 def build_scan_view(text: str) -> PipelineResult:
-    """Run the text-only pipeline (no HTML parsing).
+    """Run the pipeline on whatever the caller was handed.
 
-    For non-HTML content (markdown files, plain text, source code).
-    Runs stages 5-8 only.
+    The only entry point. It makes no judgement about the payload's format:
+    a stage that cares about markup looks for markup, and finds none in text
+    that has none.
     """
-    return _run_text_stages(text, text, PipelineStats())
+    return _run_stages(text, PipelineStats())

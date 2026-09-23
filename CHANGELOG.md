@@ -10,6 +10,84 @@ under that name.
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-09-23
+
+### Security
+- **L1 no longer guesses at formats, and the guess it used to make was
+  wrong for most HTML it saw** (#172). `looks_like_html` selected between an
+  HTML pipeline and a text pipeline on a leading `<!DOCTYPE` or `<html>`. An
+  HTML **fragment** — the shape most MCP tool output actually carries —
+  matched neither, so it was never parsed, never stripped, and never checked
+  for hidden content. Identical bytes therefore received two different
+  security behaviours depending on their first few characters.
+
+  Measured on the fragment `<p>Quarterly report.</p><span
+  style="color:#ffffff;background:#ffffff">…</span>`: the text path scored
+  `suspicious=0, risk=low` and delivered the hidden span intact, where the
+  same markup behind a doctype scored `medium` and stripped it. The wording
+  is bland enough that the directives and delimiter stages see nothing, so
+  the structural detector was the only signal there was — and the sniffer
+  decided at random whether it ran.
+
+  The fork is deleted rather than improved. `build_scan_view` is now the only
+  entry point and scans whatever it is handed; `build_scan_view_from_html`,
+  `looks_like_html` and `defend(is_html=...)` are gone. Markup is handled in
+  two tiers instead:
+
+  - **Tier 1 — `preprocess/html.py`.** Conversion to Markdown does not detect
+    hidden content, it removes the vocabulary that expresses it: Markdown has
+    no `style` attribute, no `display:none`, no foreground/background pair.
+    After conversion the attack class is absent rather than mitigated, which
+    is why the converter is a default rather than an opt-in. It declines what
+    it cannot parse instead of asking whether anything "is HTML", so it sits
+    in the chain permanently and no-ops on everything that is not markup.
+  - **Tier 2 — `l1/hidden.py`.** Conversion cannot be guaranteed to have run,
+    so an ordinary L1 stage counts hiding fingerprints on every payload and
+    feeds `suspicious_detections()` as before. It counts and never strips:
+    the hidden text's words are exactly what L2 should still read.
+
+  Net coverage is strictly wider in both directions. A Markdown file with an
+  inline hidden `<span>` never matched the old sniffer at all and is now
+  checked; a converted page has nothing left to find.
+
+### Changed
+- **`html` is a registered pre-processor and a default** (#172), first in the
+  chain: it is the only converter, and the reducers behind it should be
+  grouping the text a human would read rather than tag soup. It transforms
+  without existing to shrink, so configure it under `chain` — `best_of`
+  selects on size and would discard it.
+- **L1 stats renamed.** The `html` section of `PipelineStats` is now `hidden`
+  and carries only the three suspicious counters, flattening to
+  `hidden_elements`, `hidden_off_screen` and `hidden_same_color` (was
+  `html_hidden_elements`, `html_off_screen_elements`, `html_same_color_text`).
+  The tag-hygiene counters — `script_tags`, `style_tags`, `meta_tags`,
+  `noscript_tags`, `html_comments` — moved to the converter's sidecar. They
+  were never suspicious and never fed risk; counting them in `PipelineStats`
+  only made it look like a dataclass about HTML rather than about hiding.
+- **`content_type` no longer selects a pipeline** on the `*_content` tools.
+  It stays in the published signature, and remains the authoritative hint a
+  converter would want once processors become selectable per call.
+
+### Removed
+- `l1/html.py`. Conversion moved to `preprocess/html.py`; detection moved to
+  `l1/hidden.py`, which owns the predicate table both now share so that the
+  converter stripping an element and the stage counting one decide by one
+  rule.
+
+### Deprecated
+- **The alias removals announced for 0.28.0 slip to 0.29.0.** `safe_*` /
+  `quarantine_*`, the pre-0.25.0 enforcement spellings (`annotate`,
+  `extract`), the `reduce` → `processors` rename and the gateway loader's
+  remaining aliases all named this release, and none of them are removed in
+  it. They are retargeted rather than left to rot: a notice naming a release
+  that has already shipped is the failure `tests/test_deprecation_deadlines.py`
+  exists to catch, and a reader who sees a past release concludes the removal
+  already happened and stops looking.
+
+  The removals are due and should be the next release rather than drifting
+  again. They are a public-surface change with their own review and revert
+  story, which is why they are not bundled into a release about L1.
+
 ## [0.27.3] - 2026-09-23
 
 ### Fixed

@@ -320,7 +320,6 @@ async def scan_tool_response(
         defense=profile.defense,
         provenance=provenance,
         l3_context=l3_context,
-        is_html=False,
         guarded=False,
         attribution={
             "profile": profile.name,
@@ -437,7 +436,6 @@ async def scan_tool_list(
                 source_type="tool_description",
                 defense=profile.defense,
                 provenance=provenance,
-                is_html=False,
                 guarded=False,
                 attribution={
                     "profile": profile.name,

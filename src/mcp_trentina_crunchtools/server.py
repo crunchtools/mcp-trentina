@@ -55,14 +55,14 @@ mcp = FastMCP(
         "Prefer warn_* when you need the real bytes and can weigh a caution; "
         "block_* when acting unsupervised. quarantine_scan is pre-flight "
         "assessment. safe_*/quarantine_* are the deprecated spellings of "
-        "block_*/clean_* and are removed in 0.28.0."
+        "block_*/clean_* and are removed in 0.29.0."
     ),
 )
 
 
 @mcp.tool()
 async def safe_fetch_tool(url: str) -> dict[str, Any]:
-    """DEPRECATED — use `block_fetch`. Removed in 0.28.0.
+    """DEPRECATED — use `block_fetch`. Removed in 0.29.0.
 
     Identical behaviour; the name now says what the mode DOES.
     """
@@ -74,7 +74,7 @@ async def quarantine_fetch_tool(
     url: str,
     prompt: str = "Extract the main content from this page.",
 ) -> dict[str, Any]:
-    """DEPRECATED — use `clean_fetch`. Removed in 0.28.0.
+    """DEPRECATED — use `clean_fetch`. Removed in 0.29.0.
 
     Identical behaviour; the name now says what the mode DOES.
     """
@@ -83,7 +83,7 @@ async def quarantine_fetch_tool(
 
 @mcp.tool()
 async def safe_read_tool(path: str) -> dict[str, Any]:
-    """DEPRECATED — use `block_read`. Removed in 0.28.0.
+    """DEPRECATED — use `block_read`. Removed in 0.29.0.
 
     Identical behaviour; the name now says what the mode DOES.
     """
@@ -95,7 +95,7 @@ async def quarantine_read_tool(
     path: str,
     prompt: str = "Extract the main content from this file.",
 ) -> dict[str, Any]:
-    """DEPRECATED — use `clean_read`. Removed in 0.28.0.
+    """DEPRECATED — use `clean_read`. Removed in 0.29.0.
 
     Identical behaviour; the name now says what the mode DOES.
     """
@@ -164,7 +164,7 @@ async def safe_content_tool(
     content: str,
     content_type: str = "text/plain",
 ) -> dict[str, Any]:
-    """DEPRECATED — use `block_content`. Removed in 0.28.0.
+    """DEPRECATED — use `block_content`. Removed in 0.29.0.
 
     Identical behaviour; the name now says what the mode DOES.
     """
@@ -177,7 +177,7 @@ async def quarantine_content_tool(
     prompt: str = "Extract the main content.",
     content_type: str = "text/plain",
 ) -> dict[str, Any]:
-    """DEPRECATED — use `clean_content`. Removed in 0.28.0.
+    """DEPRECATED — use `clean_content`. Removed in 0.29.0.
 
     Identical behaviour; the name now says what the mode DOES.
     """
@@ -226,7 +226,7 @@ async def safe_search_tool(
     query: str,
     num_results: int = 5,
 ) -> dict[str, Any]:
-    """DEPRECATED — use `block_search`. Removed in 0.28.0.
+    """DEPRECATED — use `block_search`. Removed in 0.29.0.
 
     Identical behaviour; the name now says what the mode DOES.
     """
@@ -239,7 +239,7 @@ async def quarantine_search_tool(
     prompt: str = "Summarize the search results.",
     num_results: int = 5,
 ) -> dict[str, Any]:
-    """DEPRECATED — use `clean_search`. Removed in 0.28.0.
+    """DEPRECATED — use `clean_search`. Removed in 0.29.0.
 
     Identical behaviour; the name now says what the mode DOES.
     """

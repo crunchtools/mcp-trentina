@@ -5,14 +5,13 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..config import get_config
 from ..database import is_blocked
 from ..dbus_interface import emit_request_event
 from ..defense import advise, defend, enforce_block
 from ..errors import BlockedSourceError, FileReadError
-from ..l1.pipeline import PipelineResult, looks_like_html
 from ..models import ALLOWED_TEXT_EXTENSIONS
 from ..quarantine.agent import quarantine_extract
 from ..quarantine.classifier import (
@@ -20,6 +19,9 @@ from ..quarantine.classifier import (
     truncation_warning,
 )
 from ..warning import build_warning
+
+if TYPE_CHECKING:
+    from ..l1.pipeline import PipelineResult
 
 MAX_FILE_SIZE = 2_000_000
 BINARY_CHECK_BYTES = 8192
@@ -103,7 +105,6 @@ async def _read_judged(path: str, *, mode: str) -> dict[str, Any]:
         is_trusted=is_trusted,
         # read/ decides HTML-ness from the extension as well as the body, which
         # fetch/ cannot do. Pass the answer rather than let the pipeline guess.
-        is_html=looks_like_html(content, resolved),
     )
     if mode == "block":
         enforce_block(verdict, resolved)
@@ -156,7 +157,7 @@ async def warn_read(path: str) -> dict[str, Any]:
 
 
 async def safe_read(path: str) -> dict[str, Any]:
-    """Deprecated spelling of `block_read`. Removed in 0.28.0."""
+    """Deprecated spelling of `block_read`. Removed in 0.29.0."""
     return await block_read(path)
 
 
@@ -185,7 +186,6 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
         source=resolved,
         source_type="file",
         is_trusted=is_trusted,
-        is_html=looks_like_html(content, resolved),
     )
     pipeline_result = verdict.pipeline
     classification = verdict.classification

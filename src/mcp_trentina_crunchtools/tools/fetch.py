@@ -59,7 +59,6 @@ async def _scan_error_body(body: str, url: str) -> dict[str, Any]:
         body,
         source=url,
         source_type="url",
-        is_html=False,
         guarded=False,
         record=False,
         l3_context=(
@@ -291,7 +290,7 @@ async def warn_fetch(url: str) -> dict[str, Any]:
 
 
 async def safe_fetch(url: str) -> dict[str, Any]:
-    """Deprecated spelling of `block_fetch`. Removed in 0.28.0."""
+    """Deprecated spelling of `block_fetch`. Removed in 0.29.0."""
     return await block_fetch(url)
 
 

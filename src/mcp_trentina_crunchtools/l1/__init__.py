@@ -1,6 +1,6 @@
 """L1: the deterministic layer, and the one that builds the scan view.
 
-Seven stages, no model, no network. What they produce is a normalized COPY
+Deterministic stages, no model, no network. What they produce is a normalized COPY
 for L2 and L3 to read — the scan view — while the delivered bytes stay
 whatever the call site decided to deliver. Scan-differs-from-deliver is what
 this layer has always done, which is why `preprocess/` is allowed to do it
@@ -13,18 +13,19 @@ judge have something stable to judge, and it counts what it found.
 
 from __future__ import annotations
 
+from .hidden import HiddenStats, detect_hidden_markup
 from .pipeline import (
     PipelineResult,
     PipelineStats,
     build_scan_view,
-    build_scan_view_from_html,
     risk_level_for_count,
 )
 
 __all__ = [
+    "HiddenStats",
     "PipelineResult",
     "PipelineStats",
     "build_scan_view",
-    "build_scan_view_from_html",
+    "detect_hidden_markup",
     "risk_level_for_count",
 ]

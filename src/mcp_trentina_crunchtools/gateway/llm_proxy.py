@@ -374,7 +374,6 @@ def _schedule_completion_scan(
                 source_type="llm_completion",
                 defense=profile.defense,
                 provenance=Provenance.MODEL_OUTPUT,
-                is_html=False,
                 guarded=False,
             )
             if verdict.flagged:

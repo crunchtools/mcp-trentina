@@ -173,7 +173,7 @@ async def warn_search(query: str, num_results: int = 5) -> dict[str, Any]:
 
 
 async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
-    """Deprecated spelling of `block_search`. Removed in 0.28.0."""
+    """Deprecated spelling of `block_search`. Removed in 0.29.0."""
     return await block_search(query, num_results)
 
 
@@ -206,7 +206,6 @@ async def quarantine_search(
         sanitized_text,
         source=f"search:{query}",
         source_type="url",
-        is_html=False,
     )
     classification = verdict.classification
     if classification and classification.label == "MALICIOUS":

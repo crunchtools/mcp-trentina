@@ -57,8 +57,6 @@ from .l1.pipeline import (
     PipelineResult,
     PipelineStats,
     build_scan_view,
-    build_scan_view_from_html,
-    looks_like_html,
 )
 from .quarantine.agent import quarantine_detect
 from .quarantine.classifier import ClassifierResult, classify_async, classify_guarded
@@ -131,7 +129,7 @@ class DefenseVerdict:
         return self.classification.score if self.classification else None
 
 
-def _run_l1(content: str, *, is_html: bool | None) -> PipelineResult:
+def _run_l1(content: str) -> PipelineResult:
     """Layer 1: the tripwire. Detects, counts, and builds the scan view.
 
     L1 never modifies the delivery text (owner's rule, 2026-09-13). Its
@@ -142,9 +140,12 @@ def _run_l1(content: str, *, is_html: bool | None) -> PipelineResult:
 
     There is no off switch: L1 is free, deterministic, and non-destructive,
     so a profile that could disable it would only be hiding its own eyes.
+
+    It takes no format hint. It used to accept ``is_html``, defaulting to a
+    content sniff, and chose a different pipeline on the answer; both the hint
+    and the sniff are gone with the fork they selected between (#172).
     """
-    html = looks_like_html(content) if is_html is None else is_html
-    return build_scan_view_from_html(content) if html else build_scan_view(content)
+    return build_scan_view(content)
 
 
 def _should_run_l3(*, defense: DefenseConfig | None, l3_gate: bool) -> bool:
@@ -236,7 +237,6 @@ async def defend(
     defense: DefenseConfig | None = None,
     provenance: Provenance = Provenance.EXTERNAL,
     domain: str | None = None,
-    is_html: bool | None = None,
     guarded: bool = True,
     record: bool = True,
     l3_gate: bool = True,
@@ -288,7 +288,7 @@ async def defend(
     pipeline = (
         precomputed_l1
         if precomputed_l1 is not None
-        else _run_l1(content, is_html=is_html)
+        else _run_l1(content)
     )
 
     # Nothing to judge. A payload whose string leaves are all empty (or a
@@ -411,7 +411,6 @@ async def advise(
     source: str,
     source_type: str,
     is_trusted: bool = False,
-    is_html: bool | None = None,
     defense: DefenseConfig | None = None,
 ) -> DefenseVerdict:
     """L1 + L2, no gate, no detection row — the `quarantine_*` posture.
@@ -428,7 +427,6 @@ async def advise(
         source=source,
         source_type=source_type,
         is_trusted=is_trusted,
-        is_html=is_html,
         defense=defense,
         guarded=False,
         record=False,

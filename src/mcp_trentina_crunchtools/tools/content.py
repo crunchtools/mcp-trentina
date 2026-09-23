@@ -14,8 +14,6 @@ from ..errors import BlockedSourceError, ContentSizeError
 from ..l1.pipeline import (
     PipelineResult,
     build_scan_view,
-    build_scan_view_from_html,
-    looks_like_html,
 )
 from ..quarantine.agent import quarantine_extract
 from ..quarantine.classifier import (
@@ -37,10 +35,14 @@ def _validate_content_size(content: str, max_size: int) -> None:
         raise ContentSizeError(len(content), max_size)
 
 
-def _run_pipeline(content: str, content_type: str) -> PipelineResult:
-    """Select and run the appropriate sanitization pipeline."""
-    if content_type == "text/html" or looks_like_html(content):
-        return build_scan_view_from_html(content)
+def _run_pipeline(content: str, _content_type: str) -> PipelineResult:
+    """Run the pipeline.
+
+    There is nothing left to select: L1 is format-agnostic and the content
+    type no longer picks a path (#172). The parameter stays so the call sites
+    that have an authoritative ``Content-Type`` keep reading naturally, and so
+    a future processor hint has somewhere to arrive.
+    """
     return build_scan_view(content)
 
 
@@ -54,7 +56,7 @@ def _build_sanitization_metadata(pipeline_result: PipelineResult) -> dict[str, A
 
 
 async def _content_judged(
-    content: str, content_type: str, *, mode: str
+    content: str, _content_type: str, *, mode: str
 ) -> dict[str, Any]:
     """Judge inline content with all three layers, dispose of it per `mode`.
 
@@ -81,7 +83,6 @@ async def _content_judged(
         # nothing — which is why trust is the caller's answer, not the
         # pipeline's.
         is_trusted=False,
-        is_html=content_type == "text/html" or looks_like_html(content),
     )
     if mode == "block":
         enforce_block(verdict, chash)
@@ -137,18 +138,23 @@ async def warn_content(
 async def safe_content(
     content: str, content_type: str = "text/plain"
 ) -> dict[str, Any]:
-    """Deprecated spelling of `block_content`. Removed in 0.28.0."""
+    """Deprecated spelling of `block_content`. Removed in 0.29.0."""
     return await block_content(content, content_type)
 
 
 async def quarantine_content(
     content: str,
     prompt: str = "Extract the main content.",
-    content_type: str = "text/plain",
+    content_type: str = "text/plain",  # noqa: ARG001 - public tool parameter
 ) -> dict[str, Any]:
     """Sanitize + Q-Agent extraction on inline content.
 
     Warns but proceeds if content hash is in blocklist.
+
+    ``content_type`` no longer selects a pipeline — L1 is format-agnostic
+    (#172) — but it stays in the signature because it is part of the tool's
+    published surface, and because it is the authoritative hint a converter
+    would want once processors become selectable per call.
     """
     start_time = time.time()
     config = get_config()
@@ -169,7 +175,6 @@ async def quarantine_content(
         content,
         source=chash,
         source_type="content",
-        is_html=content_type == "text/html" or looks_like_html(content),
     )
     pipeline_result = verdict.pipeline
     classification = verdict.classification

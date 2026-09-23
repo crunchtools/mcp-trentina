@@ -15,8 +15,6 @@ from ..errors import FileReadError
 from ..l1.pipeline import (
     PipelineResult,
     build_scan_view,
-    build_scan_view_from_html,
-    looks_like_html,
 )
 from ..l1.shadows import detect_module_shadows
 
@@ -159,11 +157,7 @@ async def quarantine_scan(
     config = get_config()
     content, source_type, source = await _fetch_content(url, path)
 
-    l1 = (
-        build_scan_view_from_html(content)
-        if looks_like_html(content, path)
-        else build_scan_view(content)
-    )
+    l1 = build_scan_view(content)
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
@@ -234,11 +228,7 @@ async def deep_quarantine_scan(
     config = get_config()
     content, source_type, source = await _fetch_content(url, path)
 
-    l1 = (
-        build_scan_view_from_html(content)
-        if looks_like_html(content, path)
-        else build_scan_view(content)
-    )
+    l1 = build_scan_view(content)
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
@@ -315,7 +305,7 @@ async def _scan_py_files(resolved: str) -> list[dict[str, Any]]:
             continue
 
         verdict = await advise(
-            content, source=entry.path, source_type="file", is_html=False
+            content, source=entry.path, source_type="file"
         )
         pipeline_result = verdict.pipeline
         classifier_result = None
