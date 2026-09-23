@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from fnmatch import fnmatch
 from pathlib import Path
 from urllib.parse import urlparse
 
 from pydantic import SecretStr
+
+logger = logging.getLogger(__name__)
 
 _config: Config | None = None
 
@@ -42,6 +45,33 @@ contend for the same quota and make scans slower — measured on host01
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "qwen2.5:0.5b"
 SUPPORTED_PROVIDERS = ("gemini", "openai", "anthropic", "ollama")
+
+
+def int_env(name: str, default: int, *, minimum: int | None = None) -> int:
+    """Read an integer environment variable, recovering from a bad value.
+
+    A typo in a tuning knob must not stop the gateway from starting: it takes
+    the documented default, says which variable it could not read, and
+    continues. The name is in the message because the alternative — a silent
+    fallback — looks identical to the value having been applied.
+
+    ``minimum`` clamps rather than rejects, for knobs where a small value is
+    meaningful but a tiny one is pathological (a one-second sweep interval,
+    say). Clamping keeps the operator's intent, which was "make it small".
+
+    Every caller's variable belongs in README.md's environment table.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default if minimum is None else max(minimum, default)
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "config: %s=%r is not an integer — using %d", name, raw, default,
+        )
+        return default if minimum is None else max(minimum, default)
+    return value if minimum is None else max(minimum, value)
 DEFAULT_PROVIDER_FALLBACK: list[str] = []
 
 

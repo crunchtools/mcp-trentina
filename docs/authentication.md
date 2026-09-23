@@ -190,10 +190,13 @@ persist across a restart.
 Endpoints mounted: `/authorize`, `/token`, `/register`, `/consent`,
 `/auth/callback`, and a root `/.well-known/oauth-authorization-server`.
 
-Registration is confidential **unless the client opts out**. RFC 7591's default
-is a confidential client, and the MCP SDK follows it: a registration that omits
-`token_endpoint_auth_method` is treated as `client_secret_post`, issued a real
-secret, and must present it at `/token` from then on. Only a client that
+Registration is confidential **unless the client opts out**. A registration that
+omits `token_endpoint_auth_method` is treated as `client_secret_post`, issued a
+real secret, and must present it at `/token` from then on. That default is the
+MCP SDK's own choice, not the RFC's — RFC 7591 §2 defaults the field to
+`client_secret_basic`. (Earlier versions of this page and the 0.15.0 notes called
+it "RFC 7591's own default", which sent readers to the RFC for a sentence that is
+not there.) Only a client that
 explicitly registers with `"none"` stays public — which the Python MCP client
 and FastMCP's own client both do, so Claude Code is unaffected.
 
@@ -439,6 +442,64 @@ cannot be turned into an equal flood against Google's quota. Rejections caused
 by Google being *unreachable* are never cached — that would turn an outage into
 a lockout. Valid tokens are never cached at all, so a revoked token stops
 working on the very next request.
+
+## Hardening the unauthenticated endpoints
+
+`/register`, `/authorize` and `/consent` cannot require a credential — that is
+what Dynamic Client Registration and a browser login mean. Since 0.27.2 they are
+limited and capped by default, so the gateway is sane without a proxy in front
+of it.
+
+| | Default |
+|---|---|
+| `POST /register` body | 8 KiB, refused with `413` before it is parsed |
+| `/register` rate | 10 burst, 10/hour per source address |
+| `/authorize`, `/consent` rate | 20 burst, 60/hour per source address |
+| Refusal | `429` with `Retry-After: 60` |
+
+`/token` is deliberately **not** limited: it is reached with an authorization
+code or refresh token this gateway itself issued, so it is not an
+unauthenticated path, and limiting it would throttle a legitimate client's token
+refresh for no gain. CORS preflights are not limited either.
+
+### Set `TRENTINA_FORWARDED_ALLOW_IPS` if you run behind a proxy
+
+The limiter keys on the peer address, which uvicorn rewrites from
+`X-Forwarded-For` **only when the immediate peer is trusted** — `127.0.0.1` by
+default. In a container behind a reverse proxy the peer is the container
+network's gateway, not loopback, so without this every caller collapses onto one
+address and shares one bucket.
+
+```bash
+TRENTINA_FORWARDED_ALLOW_IPS=10.88.0.1     # your proxy's address
+```
+
+The startup log says which of the two is in effect, at `WARNING` so it survives
+a production log level:
+
+```
+ratelimit: /register 10 burst + 10/h, ... source address trusted from
+X-Forwarded-For only when the peer is in 10.88.0.1 — if your proxy is not in
+that set every caller shares ONE bucket
+```
+
+A refusal is logged at `WARNING` too, naming the address, so "login is broken"
+is a journal lookup rather than an inference. `TRENTINA_RATE_LIMIT=off` disables
+the limiting entirely — an escape hatch for an operator locked out during an
+incident, not a normal setting.
+
+### Registrations expire
+
+A new registration is **provisional** and lives an hour. Completing a token
+exchange promotes it to `TRENTINA_REGISTRATION_TTL_DAYS` (90 by default), and
+every later exchange — including a refresh — re-stamps it. A client that
+registers and never logs in is gone within the hour.
+
+Expired registrations, abandoned OAuth transactions and spent CSRF records are
+unlinked by a sweep every `TRENTINA_OAUTH_CULL_INTERVAL` seconds (3600 by
+default). The underlying store only removes an expired entry when something
+reads its key, and an abandoned flow is never read again, so without the sweep
+those files stayed forever.
 
 ## Related
 

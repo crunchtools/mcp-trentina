@@ -315,10 +315,22 @@ class TestStreamableHTTPDelete:
 
 
 class TestStreamableHTTPGet:
-    def test_get_without_session_returns_400(self) -> None:
+    def test_get_without_session_returns_405(self) -> None:
+        """405, not 400. The streamable-HTTP spec reserves 405 for "no
+        standalone SSE stream here", which is what a GET with no session is
+        asking for and not getting; 400 claimed the client sent something
+        malformed and sent readers hunting a bug that was not there. See #156.
+        """
         _, client = _make_registry_and_client()
         resp = client.get("/alice/mcp", headers=AUTH)
-        assert resp.status_code == 400
+        assert resp.status_code == 405
+
+    def test_the_405_names_the_methods_that_do_work(self) -> None:
+        """RFC 9110 §15.5.6 requires Allow on a 405, and a client that reads it
+        learns the endpoint is alive rather than broken."""
+        _, client = _make_registry_and_client()
+        resp = client.get("/alice/mcp", headers=AUTH)
+        assert resp.headers["allow"] == "POST, DELETE"
 
     def test_get_with_unknown_session_returns_404(self) -> None:
         _, client = _make_registry_and_client()

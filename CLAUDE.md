@@ -21,6 +21,20 @@ uv run mcp-trentina-crunchtools
   blocklist (default: `perimeter.db` beside `QUARANTINE_DB`). See `perimeter_db.py`
   for why it is its own file. Deleting it costs one slow restart and nothing else.
 - `QUARANTINE_TRUST_CONFIG` — Trust allowlist JSON path
+- `TRENTINA_RATE_LIMIT` — "off" disables limiting on the unauthenticated OAuth
+  write paths (default on). An incident escape hatch, not a setting.
+- `TRENTINA_FORWARDED_ALLOW_IPS` — peer addresses whose `X-Forwarded-For` is
+  trusted, forwarded to uvicorn. **Unset behind a proxy, every caller shares
+  one rate-limit bucket** — the limiter keys on `scope["client"]`, which
+  uvicorn only rewrites for a trusted peer. Startup logs which is in effect.
+- `TRENTINA_MAX_REGISTRATION_BYTES` — `POST /register` body cap (default 8192)
+- `TRENTINA_REGISTRATION_TTL_DAYS` — lifetime of a PROMOTED registration
+  (default 90). A new one is provisional for an hour; a token exchange
+  promotes it and every later exchange re-stamps it. See `gateway/oauth_store.py`.
+- `TRENTINA_OAUTH_CULL_INTERVAL` — seconds between sweeps of the OAuth store
+  (default 3600, floor 60). Nothing else removes an expired record: the store
+  unlinks one only when something reads its key, and an abandoned flow never
+  is read again.
 - `CLASSIFIER_THRESHOLD` — L2 malicious score cutoff (default: 0.5)
 - `CLASSIFIER_MODEL_PATH` — Prompt Guard 2 ONNX dir (default: /models/prompt-guard-2-86m)
 - `CLASSIFIER_MAX_TOKENS` — Max tokens L2 will scan; 0 disables the cap (default: 32768)
@@ -185,6 +199,19 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
     leaves repeated footers to petit, which is what `chain` is for. Rewrites
     the thread, where petit's `EmailHash` only fingerprints its skeleton.
 - `gateway/` — Per-consumer MCP gateway proxy with tool allowlists, parameter guards, and defense pipeline
+  - `ratelimit.py` — the token bucket and the ASGI guard on `/register`,
+    `/authorize` and `/consent`. NOT on `/token`: that is reached with a code
+    or refresh token this gateway issued, so it is not unauthenticated, and
+    limiting it throttles a legitimate refresh for no gain. Reads the address
+    from `scope["client"]` and never from a header — reading `X-Forwarded-For`
+    here would hand an attacker a fresh bucket per request.
+  - `oauth_store.py` — registration lifetimes and the sweep that enforces
+    them. `PromoteOnExchange` is mixed into the provider because that class is
+    defined inside a function, where every method counts against its
+    complexity budget.
+  - `consent_ui.py` — patches fastmcp's consent page on the way out (a
+    double-submit explanation, a client-side submit guard). Fails soft: markup
+    it does not recognize passes through unchanged.
   - **Parameter guards**: per-tool argument validation with allow/deny value patterns — see `docs/gateway-design.md`
   - `drivers.py` — the ONE registry. A configured name becomes a driver, for
     either role, with one channel lock and one parity test. Two registries

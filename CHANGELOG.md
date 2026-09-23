@@ -10,6 +10,76 @@ under that name.
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-09-23
+
+### Security
+- **The unauthenticated OAuth write paths are limited and capped by default**
+  (#156). `/register`, `/authorize` and `/consent` cannot require a credential
+  — that is what DCR and a browser login mean — and nothing in this codebase
+  limited how often any of them could be called, at any layer. That left "put
+  a proxy in front of it" as the only answer, and made it an answer most
+  operators would never know they needed.
+
+  `POST /register` now refuses a body over 8 KiB with a `413`, before it is
+  parsed, which closes the cheapest abuse: a single large request wrote a
+  large file to the client store, permanently, at no cost to the sender. The
+  three paths get an in-process token bucket per source address — no redis, no
+  new dependency — at 10 burst + 10/h for `/register` and 20 burst + 60/h for
+  the other two, refusing with `429` and `Retry-After`.
+
+  Two things mattered more than the algorithm. It must not lock out a shared
+  address, so the buckets are per route class, the allowances are sized for a
+  burst of real people rather than one, and a refusal is logged at WARNING
+  naming the address. And the address has to be the real one: it comes from
+  uvicorn's `scope["client"]`, never from a header this process reads itself,
+  so set `TRENTINA_FORWARDED_ALLOW_IPS` to your proxy or every caller behind
+  it shares one bucket. The startup line says which of the two is in effect.
+
+  `/token` is deliberately not limited — it is reached with a code or refresh
+  token this gateway issued, so limiting it would throttle a legitimate
+  refresh for no gain.
+
+- **Registrations expire, and expired records are actually removed** (#156). A
+  DCR registration was stored with no TTL and nothing ever called `cull()`, so
+  a gateway accumulated one permanent file per registration and one immortal
+  file per abandoned OAuth flow. Three records were in production with two
+  legitimate clients and no attacker.
+
+  A new registration is provisional for an hour; a successful token exchange
+  promotes it to 90 days and every later exchange re-stamps it. Re-putting the
+  record with a fresh TTL *is* the "last used" stamp, so there is no second
+  store to fall out of step. A sweep every hour unlinks what has expired —
+  registrations, abandoned transactions and spent CSRF records alike.
+
+- **The Gemini API key no longer travels in the request URL.** It moves to the
+  `x-goog-api-key` header. `httpx` logs full request URLs at INFO, so
+  `?key=...` landed in `podman logs` and journald the moment anyone raised
+  `TRENTINA_LOG_LEVEL` to debug something unrelated — a credential leak armed
+  by a routine troubleshooting step and warned about by nothing. Observed
+  live. The httpx logger still tracks the configured level, as #73 decided:
+  that is only safe because nothing puts a secret in a query string any more.
+
+### Fixed
+- **A double-submitted consent form no longer dead-ends.** The single-use CSRF
+  token is correct and unchanged; what was wrong is that a user who
+  double-clicked saw a bare `<h1>Error</h1>` with a `400`, no explanation and
+  no way forward — after their login had in fact succeeded. The buttons now
+  disable on first submit, and a spent token renders a page that says what
+  happened and what to do next.
+- **`GET /gateway/<profile>/mcp` with no session answers `405`, not `400`.**
+  The streamable-HTTP spec reserves 405 for "no standalone SSE stream here",
+  which is what the request is asking for and not getting; 400 claimed the
+  client sent something malformed. `Allow: POST, DELETE` is included.
+
+### Documentation
+- `docs/authentication.md` gains a hardening section, and both it and the
+  `register_client` docstring stop attributing the `client_secret_post`
+  default to RFC 7591. RFC 7591 §2 defaults `token_endpoint_auth_method` to
+  `client_secret_basic`; `client_secret_post` is the MCP SDK's own choice.
+- `l1/unicode.py`'s control-character range says why tab, LF and CR are
+  excluded, and why "fixing" the CodeQL `py/overly-large-range` alert by
+  widening it breaks whitespace silently.
+
 ## [0.22.0] - 2026-09-23
 
 ### Changed
