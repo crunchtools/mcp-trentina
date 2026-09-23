@@ -1038,7 +1038,7 @@ wheels = [
 
 [[package]]
 name = "mcp-trentina-crunchtools"
-version = "0.22.0"
+version = "0.23.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -1078,7 +1078,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "onnxruntime", specifier = ">=1.17" },
-    { name = "petit-log-crunchtools", git = "https://github.com/crunchtools/petit.git?tag=v3.2.0" },
+    { name = "petit-log-crunchtools", specifier = ">=4.1.1" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
@@ -1440,8 +1440,12 @@ wheels = [
 
 [[package]]
 name = "petit-log-crunchtools"
-version = "3.2.0"
-source = { git = "https://github.com/crunchtools/petit.git?tag=v3.2.0#360768a38ce82102caeb07759120a5f67ecf3094" }
+version = "4.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/84/42/b1be4a8890b4b61b6da3c13f289c2f9b32a75611f776274a884a268ce21b/petit_log_crunchtools-4.1.1.tar.gz", hash = "sha256:a0189387e667ed7e048f0ba4f962365171670f434a8564e26d7928dbca3775ac", size = 338639, upload-time = "2026-09-23T08:20:01.6Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ce/77/76d8f6e8f36864110f14838d4806c2c4d1bfb964156a8d3bf0b54f48da63/petit_log_crunchtools-4.1.1-py3-none-any.whl", hash = "sha256:0e167ed7e62586e33453031aa010768936a54c6f1ead78457dd7842fa7efef77", size = 167488, upload-time = "2026-09-23T08:19:59.989Z" },
+]
 
 [[package]]
 name = "platformdirs"

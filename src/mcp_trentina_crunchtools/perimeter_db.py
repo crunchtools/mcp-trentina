@@ -49,9 +49,13 @@ CREATE TABLE IF NOT EXISTS verdict_cache (
 # any other value are swept on load, which is what makes an older perimeter's
 # verdict unusable rather than merely old.
 #
-# "2" since 0.22.0: petit now picks its own driver and normalization, so
-# different lines survive reduction and different bytes reach L1/L2/L3.
-PERIMETER_VERSION = "2"
+# "3" since 0.23.0: petit frames before it groups, so the unit is a record
+# rather than a line and the 400-char line cap that used to break framing is
+# gone; `structured.py` normalizes with petit's `strict.stopwords` instead of
+# a local table. Different bytes survive reduction, so different bytes reach
+# L1/L2/L3 and a verdict cached under "2" was reached on content this build
+# would not produce.
+PERIMETER_VERSION = "3"
 
 
 def get_perimeter_db(db_path: str | None = None) -> sqlite3.Connection:

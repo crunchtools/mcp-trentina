@@ -1,6 +1,6 @@
 [project]
 name = "mcp-trentina-crunchtools"
-version = "0.22.0"
+version = "0.23.0"
 description = "Secure MCP gateway and quarantine for AI agent traffic — three-layer defense against prompt injection"
 requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
@@ -37,11 +37,13 @@ dependencies = [
     # which is a clearer error than most but says nothing about which name is
     # right — hence this comment rather than a bare pin.
     #
-    # 3.2.0 is the floor because it is where a hash driver declares its own
-    # normalization (DEFAULT_FILTER) instead of the caller picking one. That
-    # inversion is why preprocess/petit.py can stop pinning a driver and a
-    # stopword list. See crunchtools/petit#31 and mcp-trentina#95.
-    "petit-log-crunchtools>=3.2.0",
+    # 4.1.1 is the floor. 4.1.0 is where petit gained the two drivers
+    # this package used to carry itself: StructuredHash (JSON records) and
+    # EmailHash (mail threads). Below that floor `preprocess/structured.py`
+    # and `preprocess/email.py` have no library to delegate to and the
+    # grouping they call for silently does not exist.
+    # See crunchtools/petit#31 and mcp-trentina#95.
+    "petit-log-crunchtools>=4.1.1",
     "httpx>=0.28",
     "pydantic>=2.0",
     "beautifulsoup4>=4.12",
@@ -164,23 +166,9 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
 
-# petit-log-crunchtools is tagged and built but not yet uploaded to PyPI, so
-# dev and CI resolution is pinned to the tag. The requirement above is the
-# real dependency and is what consumers install. Removing this block is
-# tracked in issue #96 and is blocked on a human with PyPI credentials
-# running the upload.
-#
-# Pinned to 3.x deliberately, not to the newest tag. 4.0.0 adds multi-line
-# record framing, which changes what petit considers a comparable unit on
-# JSON and mail. That is the NEXT phase (#167, 0.23.0); this one drops the
-# driver and stopword pins and nothing else, so that production says whether
-# unpinning was right before framing is layered on top.
-[tool.uv.sources]
-petit-log-crunchtools = { git = "https://github.com/crunchtools/petit.git", tag = "v3.2.0" }
-
 # petit-log ships no type information — it is a long-lived tool whose library
 # surface was added recently and whose internals carry no annotations. Only
 # preprocess/petit.py imports it.
 [[tool.mypy.overrides]]
-module = ["petit"]
+module = ["petit", "petit.*"]
 ignore_missing_imports = true

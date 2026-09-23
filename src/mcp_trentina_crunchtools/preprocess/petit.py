@@ -85,10 +85,27 @@ from petit import PetitError, analyze_text
 from ..channels import Channel, Kind
 from .base import Cost, PreProcessContext, PreProcessResult
 
+# Handed to petit as ``max_record_chars``, which caps the FINGERPRINT KEY and
+# never the samples. It used to be applied here, by truncating every line
+# before the call — which silently broke framing: a 60-element JSON array cut
+# at 400 characters is no longer parseable JSON, so ``JsonFramer`` declines,
+# the whole payload falls back to one raw line, and the grouping the
+# structured driver exists to do never happens. The cap has to be inside the
+# library, past framing and in front of the stopword scrub.
 _FINGERPRINT_MAX_CHARS = 400
 
-# Below this many lines there is nothing worth grouping.
+# Below this many RECORDS there is nothing worth grouping. Records, not lines:
+# petit 4.x frames before it groups, so a single-line JSON array is hundreds
+# of comparable units and twenty lines of a mail thread may be two.
+_MIN_RECORDS = 20
+
+# The cheap pre-check, and the only thing that can be known before framing.
+# A payload under BOTH floors cannot hold _MIN_RECORDS of anything, so it is
+# refused without paying for a thread hop. Under either floor alone it is
+# handed to petit, because neither measure is sound on its own any more —
+# lines miss minified JSON, bytes miss a long single record.
 _MIN_LINES = 20
+_MIN_BYTES = 1024
 
 # Keep this many real sample lines per group.
 _SAMPLES_PER_GROUP = 3
@@ -101,7 +118,7 @@ _SAMPLES_PER_GROUP = 3
 
 
 class PetitProcessor:
-    """FREE. Collapses repetitive lines, keeps samples, accounts for the rest."""
+    """FREE. Collapses repetitive records, keeps samples, accounts for the rest."""
 
     name = "petit"
     cost = Cost.FREE
@@ -109,32 +126,23 @@ class PetitProcessor:
     kind = Kind.TEXT
 
     async def run(self, payload: str, _ctx: PreProcessContext) -> PreProcessResult:
-        # petit reduces by line structure alone; it reads no job context.
+        # petit reduces by structure alone; it reads no job context.
         bytes_in = len(payload.encode("utf-8"))
         lines = payload.split("\n")
 
-        if len(lines) < _MIN_LINES:
-            # Named for the condition, not for the size. A 1.6 MB payload of
-            # single-line JSON lands here, and calling that "too few lines"
-            # reads as "too small" — which sent an earlier analysis of the
-            # production sidecar looking for short responses that were not
-            # there. The counts say which it actually was.
+        if len(lines) < _MIN_LINES and bytes_in < _MIN_BYTES:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="not_line_structured",
+                self.name, self.cost, payload, reason="too_small",
                 details={"lines_in": len(lines), "bytes_in": bytes_in},
             )
-
-        # Only the head of each line is fingerprinted, so a single enormous
-        # line cannot buy unbounded work. Samples come back by line number
-        # and are read from `lines`, so the cap never reaches the output.
-        capped = "\n".join(line[:_FINGERPRINT_MAX_CHARS] for line in lines)
 
         try:
             analysis = await asyncio.to_thread(
                 analyze_text,
-                capped,
+                payload,
                 max_samples=_SAMPLES_PER_GROUP,
                 source_name="trentina",
+                max_record_chars=_FINGERPRINT_MAX_CHARS,
             )
         except PetitError as exc:
             # The library raises rather than exits, and a reducer that
@@ -144,27 +152,60 @@ class PetitProcessor:
                 reason="petit_error", details={"error": type(exc).__name__},
             )
 
+        if analysis.records_in < _MIN_RECORDS:
+            # Named for the condition, not for the size. A 1.6 MB payload that
+            # frames into three records lands here, and calling that "too
+            # small" sent an earlier analysis of the production sidecar
+            # looking for short responses that were not there.
+            return PreProcessResult.declined(
+                self.name, self.cost, payload, reason="not_enough_records",
+                details={
+                    "records_in": analysis.records_in,
+                    "lines_in": analysis.lines_in,
+                    "bytes_in": bytes_in,
+                    "petit_framer": analysis.framer,
+                },
+            )
+
         collapsed = [g for g in analysis.groups if g.count > _SAMPLES_PER_GROUP]
         if not collapsed:
             return PreProcessResult.declined(
                 self.name, self.cost, payload, reason="nothing_repetitive",
+                details={
+                    "records_in": analysis.records_in,
+                    "petit_driver": analysis.driver,
+                    "petit_framer": analysis.framer,
+                },
             )
 
-        # Emit samples in the order they were written, not the order their
-        # groups happened to sort. The artifact should read like the log it
-        # came from.
-        kept = sorted(
-            number
+        # In written order, so the artifact reads like the payload it came
+        # from — and by SPAN, not by first line. A record stopped being a line
+        # in 4.0.0: the first line of a pretty-printed JSON element is "{",
+        # and selecting by line hands the agent a brace where a record was
+        # promised. Spans index the ORIGINAL lines, so the fingerprint cap
+        # never reaches what is delivered.
+        spans = sorted(
+            (start, end)
             for group in analysis.groups
-            for number in group.sample_lines
-            if 0 <= number < len(lines)
+            for start, end in group.sample_spans
+            if 0 <= start < end <= len(lines)
         )
-        out_lines = [lines[number] for number in kept]
+        out_lines: list[str] = []
+        emitted = 0
+        for start, end in spans:
+            # Groups should not overlap, but a driver that ever emitted
+            # overlapping spans would otherwise duplicate delivered content.
+            first = max(start, emitted)
+            if first >= end:
+                continue
+            out_lines.extend(lines[first:end])
+            emitted = end
 
         summary = [
             "",
             (
-                f"[petit] {len(lines)} lines reduced to {len(out_lines)}; "
+                f"[petit] {analysis.records_in} records reduced to "
+                f"{len(out_lines)} line(s); "
                 f"{len(collapsed)} repetitive group(s) collapsed "
                 f"(showing first {_SAMPLES_PER_GROUP} of each):"
             ),
@@ -196,19 +237,26 @@ class PetitProcessor:
             bytes_in=bytes_in,
             bytes_out=bytes_out,
             details={
-                "lines_in": len(lines),
+                "lines_in": analysis.lines_in,
                 "lines_out": len(out_lines),
+                "records_in": analysis.records_in,
+                "records_grouped": analysis.records_grouped,
                 "groups_collapsed": len(collapsed),
                 # Lines petit scrubbed away to nothing (blanks, bare
-                # markers) are counted by neither group nor sample. Say so
-                # rather than let the arithmetic look wrong.
+                # markers) are counted by neither group nor sample, and a
+                # framer leaves its structural lines — a JSON array's own
+                # brackets — outside every record. Say so rather than let
+                # the arithmetic look wrong.
                 "lines_dropped": max(0, analysis.lines_in - analysis.lines_grouped),
-                # Which driver petit chose, and whether it had to fall back.
-                # Detection is load-bearing now that we no longer pin it: the
-                # driver decides the normalization, so an operator reading a
-                # surprising reduction needs to know which one ran. Scalar,
-                # so the whole dict serializes into an audit row.
+                # Which driver petit chose, how it cut the payload into
+                # records, and whether it had to fall back. Detection is
+                # load-bearing now that we no longer pin it: the driver
+                # decides the normalization and the framer decides what a
+                # comparable unit even is, so an operator reading a
+                # surprising reduction needs both. Scalar, so the whole dict
+                # serializes into an audit row.
                 "petit_driver": analysis.driver,
+                "petit_framer": analysis.framer,
                 "petit_degraded": analysis.degraded,
             },
         )

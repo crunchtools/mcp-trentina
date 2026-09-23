@@ -30,11 +30,19 @@ pytestmark = pytest.mark.asyncio
 
 
 def _issues(n: int, *, summary: str = "Nightly build failed") -> str:
-    """n Jira-ish records that differ only in volatile tokens."""
+    """n Jira-ish records that differ only in volatile tokens.
+
+    The ``key`` is deliberately CONSTANT. An earlier version of this fixture
+    varied it as ``PROJ-{i}``, which made the suite assert that two different
+    issues collapse into one issue and a count — data loss dressed as
+    compression. petit's ``strict.stopwords`` leaves a digit inside a word
+    alone, so identifiers keep records apart now, and
+    ``test_records_distinguished_only_by_an_identifier_survive`` pins that.
+    """
     return json.dumps(
         [
             {
-                "key": f"PROJ-{i}",
+                "key": "PROJ-1",
                 "summary": summary,
                 "status": "Open",
                 "assignee": "alice",
@@ -88,6 +96,28 @@ class TestSecurityProperties:
         assert result.applied
         assert needle in result.content
 
+    async def test_records_distinguished_only_by_an_identifier_survive(self) -> None:
+        """The decided trade, and the reason reduction dropped on Jira-shaped
+        payloads.
+
+        petit's ``strict.stopwords`` normalizes an ISOLATED number but leaves
+        a digit inside a word alone, so ``PROJ-1234`` and ``PROJ-1235`` keep
+        their own fingerprints. Two different issues must not become one
+        issue and a count: the keys are what the agent needs in order to act,
+        and collapsing them deletes 197 of them behind a number.
+
+        The cost is real — an array whose only variation is an identifier now
+        reduces by nothing — and it is preferred to silent data loss.
+        """
+        records = [
+            {"key": f"PROJ-{1000 + i}", "summary": "Nightly build failed"}
+            for i in range(200)
+        ]
+        result = await _run(json.dumps(records, indent=2))
+        assert not result.applied
+        for record in records:
+            assert record["key"] in result.content
+
     async def test_distinct_values_do_not_collapse_on_shared_keys(self) -> None:
         """Collapsing on key-sets alone would deliver three of forty search
         results. Fingerprinting the values keeps genuinely different records
@@ -105,9 +135,9 @@ class TestSecurityProperties:
         records = json.loads(_issues(50))
         result = await _run(json.dumps(records, indent=2))
         assert result.applied
-        # PROJ-40's fingerprint matches the group; only the first three
-        # elements of that group survive.
-        assert '"PROJ-40"' not in result.content
+        # The 41st element's fingerprint matches the group; only the first
+        # three elements of that group survive, so its timestamp is gone.
+        assert records[40]["updated"] not in result.content
 
     async def test_key_order_does_not_defeat_grouping(self) -> None:
         """Two objects with the same content written in different key orders

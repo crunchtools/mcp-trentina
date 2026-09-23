@@ -20,7 +20,7 @@ return the strings worth reading out of it (``DocumentProcessor`` in
 substring. They were a separate package with a separate contract until #167.
 
 Reduction is the most common transformation, not the only one, and the
-package has never been reduction-only. ``volatile.normalize()`` rewrites
+package has never been reduction-only. petit's ``strict.stopwords`` rewrites
 timestamps and identifiers into placeholders — the fingerprinting policy
 invariant 2 rests on, whose size effect is incidental and goes both ways.
 ``structured.py`` re-serializes with indentation. Normalizing, restructuring

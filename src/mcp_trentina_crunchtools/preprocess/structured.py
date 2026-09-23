@@ -23,7 +23,7 @@ Jira issues all have the same keys, so a search for forty issues would
 deliver three. Fingerprinting the normalized VALUES keeps forty genuinely
 different issues distinct (different summaries are different words) while
 forty near-identical status rows collapse to one group. The rule from
-``volatile.py`` carries over unchanged: words are never normalized, so an
+petit's ``strict.stopwords`` applies: words are never normalized, so an
 element carrying a semantic payload keeps its own fingerprint and reaches
 the perimeter scan.
 
@@ -68,9 +68,20 @@ import asyncio
 import json
 from typing import Any
 
+from petit.Filter import Filter
+
 from ..channels import Channel, Kind
 from .base import Cost, PreProcessContext, PreProcessResult
-from .volatile import normalize
+
+# The normalization policy, loaded from petit rather than restated here — the
+# same file its JSON and mail drivers declare, so this fingerprint and petit's
+# are normalized by one table. It replaced a local copy (`volatile.py`) whose
+# only possible future was drifting into a second, weaker rule, and it is
+# stricter: `<N>` is `(?<![\w-])\d+(?![\w-])`, leaving a digit inside a word
+# alone, so `PROJ-1234`/`PROJ-1235` stay distinct. Reduces less; deletes
+# nothing real. Module-level because constructing it reads a packaged data
+# file and this is the gateway's hot path.
+_SCRUB = Filter("strict.stopwords")
 
 # Past this, do not even parse. QUARANTINE_MAX_CONTENT caps what reaches
 # the gateway; this is the reducer refusing to be the expensive step.
@@ -160,7 +171,7 @@ class _Reducer:
             # Every item came out of json.loads, so it is serializable by
             # construction; there is no unserializable case to guard.
             text = json.dumps(item, sort_keys=True, ensure_ascii=False)
-            fingerprint = normalize(text[:_FINGERPRINT_MAX_CHARS])
+            fingerprint = _SCRUB.scrub(text[:_FINGERPRINT_MAX_CHARS])
 
             count = seen.get(fingerprint, 0) + 1
             seen[fingerprint] = count

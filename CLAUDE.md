@@ -143,19 +143,23 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
   strings worth reading (`view.py`'s `DocumentProcessor`). A driver may read
   less than its call site delivers, and then it accounts for every byte it
   declined.
-  - `petit.py` — line grouping via the `petit-log` package (petit itself,
-    https://github.com/crunchtools/petit), pinned to `driver="RawEntry"` with
-    our own `stopwords`. Both arguments are load-bearing: petit's format
-    drivers and its packaged `hash.stopwords` normalize WORDS, and this layer
-    normalizes only tokens that cannot carry meaning. Needs >= 3.0.0, which is
-    the first deterministic release returning verbatim samples.
-  - `structured.py` — JSON. Fingerprints ARRAY ELEMENTS where petit
-    fingerprints lines, so the comparable unit stops being a line. Emits
-    valid JSON.
+  - `petit.py` — record grouping via the `petit-log-crunchtools` package
+    (petit itself, https://github.com/crunchtools/petit). Picks no driver and
+    no stopword file: petit 3.2.0 made a hash driver declare its own
+    normalization, so the policy lives with the format that needs it. Needs
+    >= 4.1.1, where framing made the unit a RECORD rather than a line — the
+    fingerprint cap is now `max_record_chars` INSIDE the library, because
+    capping lines here cut records mid-JSON and silently disabled grouping.
+    Samples are selected by `sample_spans`, so what is delivered is the
+    original bytes; a record's first line is often just `{`.
+  - `structured.py` — JSON. Fingerprints ARRAY ELEMENTS in element-index
+    space and emits valid JSON, which is why petit does not replace it:
+    petit reports positions as source LINE ranges and exposes group
+    membership only for samples, so neither a minified array nor a
+    per-element account is expressible through its API.
   - `email.py` — mail. Collapses quoted reply chains and strips signatures;
-    leaves repeated footers to petit, which is what `chain` is for.
-  - `volatile.py` — the one normalization policy all of them share. Import
-    it; a second copy is a second, weaker security rule.
+    leaves repeated footers to petit, which is what `chain` is for. Rewrites
+    the thread, where petit's `EmailHash` only fingerprints its skeleton.
 - `gateway/` — Per-consumer MCP gateway proxy with tool allowlists, parameter guards, and defense pipeline
   - **Parameter guards**: per-tool argument validation with allow/deny value patterns — see `docs/gateway-design.md`
   - `drivers.py` — the ONE registry. A configured name becomes a driver, for
