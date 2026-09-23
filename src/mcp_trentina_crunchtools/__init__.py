@@ -412,7 +412,7 @@ def _advertise_secret_post(route: Any) -> Any:
 #: request that route serves. Module-level rather than per-provider because the
 #: bucket must outlive any single route object: rebuilding the limiter on a
 #: route rebuild would hand a caller a fresh allowance for free.
-_LIMITERS: dict[str, Any] = {}
+_limiters: dict[str, Any] = {}
 
 
 def _limiter(path: str) -> Any:
@@ -429,12 +429,12 @@ def _limiter(path: str) -> Any:
         "/authorize": AUTHORIZE_LIMIT,
         "/consent": CONSENT_LIMIT,
     }
-    existing = _LIMITERS.get(path)
+    existing = _limiters.get(path)
     if existing is not None:
         return existing
     capacity, per_hour = allowances[path]
     created = RateLimiter(capacity, per_hour, name=path)
-    _LIMITERS[path] = created
+    _limiters[path] = created
     return created
 
 
