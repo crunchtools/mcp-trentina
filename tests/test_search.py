@@ -387,7 +387,7 @@ class TestSafeSearch:
     async def test_safe_search_blocks_on_l2(self) -> None:
         """MALICIOUS classification raises BlockedSourceError."""
         mock_raw = {
-            # Multi-line: sanitize_directives strips whole lines, so a
+            # Multi-line: strip_directives strips whole lines, so a
             # single-line payload is emptied by L1 and L2 never sees it.
             "text": (
                 "Search results for the query.\n"

@@ -30,7 +30,7 @@ class DelimiterStats:
     custom_patterns: int = field(default=0)
 
 
-def sanitize_delimiters(
+def normalize_delimiters(
     text: str,
     custom_patterns: list[str] | None = None,
 ) -> tuple[str, DelimiterStats]:

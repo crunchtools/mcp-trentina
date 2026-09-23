@@ -53,7 +53,7 @@ Three invariants, none negotiable:
    ``low_scan_coverage`` below the floor.
 
    Scan-differs-from-deliver is not an anomaly to be designed out. It is what
-   L1 has always done: ``sanitize/pipeline.py`` normalizes a COPY for L2 to
+   L1 has always done: ``l1/pipeline.py`` normalizes a COPY for L2 to
    read and delivers the original untouched, because a Nagios alert or a CVE
    ticket discusses attacks in the words attacks use, and amputating those
    lines destroys exactly the content an ops agent exists to read.

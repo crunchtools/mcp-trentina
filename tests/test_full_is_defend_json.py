@@ -40,7 +40,7 @@ from mcp_trentina_crunchtools.preprocess import ScanViewContext
 from .adversarial_corpus import CORPUS
 
 if TYPE_CHECKING:
-    from mcp_trentina_crunchtools.sanitize.pipeline import PipelineStats
+    from mcp_trentina_crunchtools.l1.pipeline import PipelineStats
 
 CTX = ScanViewContext(source="test", profile_name="p", path="/x")
 

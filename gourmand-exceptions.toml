@@ -126,8 +126,8 @@ classification = "by_design"
 
 [[exceptions]]
 check = "over_abstraction"
-path = "src/mcp_trentina_crunchtools/sanitize/pipeline.py"
-justification = "Two findings. PipelineStats.risk_level delegates to risk_level_for_count, which exists so callers that aggregate detections across several PipelineStats (alert ingress) classify risk identically. sanitize_text is a one-liner only because the stages it shared with sanitize() were just extracted into _run_text_stages; it remains a distinct public entry point with its own contract."
+path = "src/mcp_trentina_crunchtools/l1/pipeline.py"
+justification = "Two findings. PipelineStats.risk_level delegates to risk_level_for_count, which exists so callers that aggregate detections across several PipelineStats (alert ingress) classify risk identically. build_scan_view is a one-liner only because the stages it shared with build_scan_view_from_html() were just extracted into _run_text_stages; it remains a distinct public entry point with its own contract."
 classification = "by_design"
 
 [[exceptions]]
@@ -217,13 +217,13 @@ classification = "by_design"
 
 [[exceptions]]
 check = "hardcoded_years"
-path = "src/mcp_trentina_crunchtools/sanitize/pipeline.py"
+path = "src/mcp_trentina_crunchtools/l1/pipeline.py"
 justification = "2026-09-13 documents the actual date of the owner's architectural ruling (byte-identical passthrough or nothing), the same decision referenced in defense.py and profile.py."
 classification = "by_design"
 
 [[exceptions]]
 check = "hardcoded_years"
-path = "src/mcp_trentina_crunchtools/sanitize/shadows.py"
+path = "src/mcp_trentina_crunchtools/l1/shadows.py"
 justification = "2026-08-26 cites the actual publication date of wunderwuzzi's real-world Claude Code exploit chain using struct.py shadowing, referenced as prior art for this defense."
 classification = "by_design"
 
@@ -376,7 +376,7 @@ classification = "by_design"
 
 [[exceptions]]
 check = "copy_paste_detection"
-path = "src/mcp_trentina_crunchtools/sanitize/html.py"
+path = "src/mcp_trentina_crunchtools/l1/html.py"
 justification = "_has_same_color_text is reported as identical to _safe_endpoint in tools/reconnect.py, and _normalize_color as identical to _validate_file in tools/read.py. These pairs share a guard-then-return statement shape and nothing else -- one detects hidden text in HTML, the others validate an endpoint and a file path. Structural collision, not duplication."
 classification = "gourmand_bug"
 

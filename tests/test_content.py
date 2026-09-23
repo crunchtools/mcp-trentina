@@ -77,13 +77,13 @@ class TestSafeContent:
                 "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.defense.sanitize",
+                "mcp_trentina_crunchtools.defense.build_scan_view_from_html",
             ) as mock_sanitize,
             patch(
-                "mcp_trentina_crunchtools.defense.sanitize_text",
+                "mcp_trentina_crunchtools.defense.build_scan_view",
             ) as mock_sanitize_text,
         ):
-            from mcp_trentina_crunchtools.sanitize.pipeline import PipelineResult, PipelineStats
+            from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, PipelineStats
 
             mock_sanitize.return_value = PipelineResult(
                 content="Hello",
@@ -126,7 +126,7 @@ class TestSafeContent:
             mock_config.return_value.has_api_key = False
 
             with pytest.raises(BlockedSourceError):
-                # Multi-line: sanitize_directives strips whole lines, so a single-line
+                # Multi-line: strip_directives strips whole lines, so a single-line
                 # payload is emptied by L1 and L2 never sees it. Real content
                 # that survives L1 is what exercises an L2 block.
                 await safe_content(
@@ -168,13 +168,13 @@ class TestSafeContent:
                 "mcp_trentina_crunchtools.tools.content.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.defense.sanitize",
+                "mcp_trentina_crunchtools.defense.build_scan_view_from_html",
             ) as mock_sanitize,
             patch(
-                "mcp_trentina_crunchtools.defense.sanitize_text",
+                "mcp_trentina_crunchtools.defense.build_scan_view",
             ) as mock_sanitize_text,
         ):
-            from mcp_trentina_crunchtools.sanitize.pipeline import PipelineResult, PipelineStats
+            from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, PipelineStats
 
             mock_sanitize.return_value = PipelineResult(
                 content="Hi",

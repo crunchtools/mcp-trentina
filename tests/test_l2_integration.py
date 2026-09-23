@@ -16,12 +16,12 @@ from typing import Any
 
 import pytest
 
+from mcp_trentina_crunchtools.l1.pipeline import build_scan_view
 from mcp_trentina_crunchtools.quarantine.classifier import (
     classify,
     is_classifier_available,
     reset_classifier,
 )
-from mcp_trentina_crunchtools.sanitize.pipeline import sanitize_text
 
 requires_model = pytest.mark.skipif(
     not is_classifier_available(),
@@ -152,7 +152,7 @@ class TestL2UniqueCatches:
     @pytest.mark.parametrize(("payload", "min_score"), L2_CATCHES)
     def test_l1_passes_cleanly(self, payload: str, min_score: float) -> None:
         """Verify Layer 1 finds nothing to strip in these payloads."""
-        result = sanitize_text(payload)
+        result = build_scan_view(payload)
         total_detections = sum(result.stats.to_flat_dict().values())
         assert total_detections == 0, (
             f"L1 detected {total_detections} vectors in payload that should be L1-clean"
@@ -183,7 +183,7 @@ class TestL3OnlyGap:
     @pytest.mark.parametrize("payload", L3_ONLY)
     def test_l1_passes_cleanly(self, payload: str) -> None:
         """Verify Layer 1 finds nothing to strip."""
-        result = sanitize_text(payload)
+        result = build_scan_view(payload)
         total_detections = sum(result.stats.to_flat_dict().values())
         assert total_detections == 0
 

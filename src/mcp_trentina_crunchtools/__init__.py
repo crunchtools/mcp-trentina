@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.23.0"
+__version__ = "0.24.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -1031,7 +1031,7 @@ def _warm_classifier() -> None:
 
     Loading here converts a silent gap into a startup log line and a /health
     field that is true from the first request. It does not make the gateway
-    refuse to start: a box with no model should still proxy, still sanitize,
+    refuse to start: a box with no model should still proxy, still run L1,
     and still be obviously degraded rather than quietly so.
     """
     from .quarantine.classifier import classifier_status, is_classifier_available

@@ -60,7 +60,7 @@ def _is_suspicious_url(url: str) -> bool:
     return False
 
 
-def sanitize_exfiltration(text: str) -> tuple[str, ExfiltrationStats]:
+def strip_exfiltration(text: str) -> tuple[str, ExfiltrationStats]:
     """Detect and remove markdown images with suspicious exfiltration URLs."""
     stats = ExfiltrationStats()
 

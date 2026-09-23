@@ -10,7 +10,7 @@
 
 Trentina today exposes 6 web-content tools (`fetch`, `read`, `search`, `scan`,
 `blocklist`, `stats`) that run untrusted content through a 3-layer prompt-injection
-defense (L1 sanitize → L2 Prompt Guard 2 classifier → L3 quarantined Gemini
+defense (L1 scan view → L2 Prompt Guard 2 classifier → L3 quarantined Gemini
 re-extraction) before returning anything to the LLM.
 
 This design extends trentina with a second surface — a **per-consumer MCP gateway**
@@ -235,7 +235,7 @@ or discard.
 
 | Layer | Reuse | New |
 |---|---|---|
-| L1 — sanitize | Existing `sanitize/` pipeline applied to MCP response content | None |
+| L1 — scan view | Existing `l1/` pipeline applied to MCP response content | None |
 | L2 — Prompt Guard 2 | Existing classifier, same thresholds (per-profile-configurable) | None |
 | L3 — Q-Agent | Existing quarantined Gemini path with `quarantine_threshold` trigger | Per-profile + runtime toggle |
 | Audit | Existing SQLite events table; add `gateway_passthrough` row type | New columns: `profile`, `backend`, `tool` |
@@ -529,7 +529,7 @@ Each phase is independently mergeable behind a feature flag (`TRENTINA_GATEWAY_E
 
 ## References
 
-- Existing trentina 3-layer defense: `src/mcp_trentina_crunchtools/sanitize/`,
+- Existing trentina 3-layer defense: `src/mcp_trentina_crunchtools/l1/`,
   `quarantine/` (this repo)
 - crunchtools MCP fleet topology: see private ops notes
 - Autonomous-agent constitution profile §V (kill switches): drives the L3

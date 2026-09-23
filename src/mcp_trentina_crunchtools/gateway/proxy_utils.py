@@ -15,7 +15,7 @@ STRIP_RESPONSE_HEADERS = frozenset({
 PLAIN_TEXT = "text/plain"
 
 
-def sanitize_proxy_path(raw_path: str) -> str | None:
+def normalize_proxy_path(raw_path: str) -> str | None:
     """Strip path traversal sequences. Returns None if the path is malicious."""
     decoded = unquote(raw_path)
     segments = decoded.replace("\\", "/").split("/")

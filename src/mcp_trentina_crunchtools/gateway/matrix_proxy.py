@@ -48,7 +48,7 @@ from .proxy_utils import (
     PLAIN_TEXT,
     filter_response_headers,
     forward_request_headers,
-    sanitize_proxy_path,
+    normalize_proxy_path,
 )
 from .selection import build_scan_view, describe
 from .warning import build_warning
@@ -192,7 +192,7 @@ async def _proxy_matrix(
 ) -> Response:
     """Forward one Matrix Client-Server API request."""
     raw_path = request.path_params.get("path", "")
-    path = sanitize_proxy_path(raw_path)
+    path = normalize_proxy_path(raw_path)
     if path is None:
         return Response(
             content="Path traversal rejected",

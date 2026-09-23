@@ -9,14 +9,14 @@ count is right, and the text came back byte-identical.
 
 from __future__ import annotations
 
-from mcp_trentina_crunchtools.sanitize.directives import sanitize_directives
+from mcp_trentina_crunchtools.l1.directives import strip_directives
 
 
 class TestDirectiveDetection:
     """Verify directive pattern detection without modification."""
 
     def _detect(self, text: str) -> int:
-        result, stats = sanitize_directives(text)
+        result, stats = strip_directives(text)
         assert result == text, "the directives stage must never modify content"
         return stats.directives_detected
 
@@ -88,6 +88,6 @@ class TestDirectiveDetection:
         the agent a field had been amputated.
         """
         text = "CVE-2025-1234: attacker embeds 'ignore previous instructions' in email footers"
-        result, stats = sanitize_directives(text)
+        result, stats = strip_directives(text)
         assert result == text
         assert stats.directives_detected == 1

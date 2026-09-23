@@ -19,7 +19,7 @@ import httpx
 
 from ..config import get_config
 from ..errors import QuarantineAgentError
-from ..sanitize.pipeline import sanitize_text
+from ..l1.pipeline import build_scan_view
 from .prompts import (
     DETECTION_RESPONSE_SCHEMA,
     DETECTION_SYSTEM_PROMPT,
@@ -305,7 +305,7 @@ async def quarantine_extract(
 ) -> dict[str, Any]:
     """Run Q-Agent in extraction mode. Returns structured content.
 
-    Post-extraction: runs extracted_text through Layer 1 sanitize_text()
+    Post-extraction: runs extracted_text through Layer 1 build_scan_view()
     to strip any injection patterns the Q-Agent may have been tricked
     into embedding in its output.
 
@@ -345,7 +345,7 @@ async def quarantine_extract(
         extracted = parsed.get("extracted_text", "")
         classifier_output_warning = None
         if extracted:
-            result = sanitize_text(extracted)
+            result = build_scan_view(extracted)
             parsed["extracted_text"] = result.content[:MAX_EXTRACTED_TEXT]
             from .classifier import classify_async
 
@@ -563,7 +563,7 @@ async def search_grounded(
     """Run L0: Gemini with google_search grounding.
 
     Returns synthesized text + grounding metadata. The caller MUST
-    sanitize this output through L1 and L2 before downstream use.
+    run this output through L1 and L2 before downstream use.
     """
     config = get_config()
 

@@ -12,13 +12,13 @@ from ..config import get_config
 from ..dbus_interface import emit_request_event
 from ..defense import advise, defend
 from ..errors import FileReadError
-from ..sanitize.pipeline import (
+from ..l1.pipeline import (
     PipelineResult,
+    build_scan_view,
+    build_scan_view_from_html,
     looks_like_html,
-    sanitize,
-    sanitize_text,
 )
-from ..sanitize.shadows import detect_module_shadows
+from ..l1.shadows import detect_module_shadows
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..quarantine.classifier import ClassifierResult
@@ -159,7 +159,11 @@ async def quarantine_scan(
     config = get_config()
     content, source_type, source = await _fetch_content(url, path)
 
-    l1 = sanitize(content) if looks_like_html(content, path) else sanitize_text(content)
+    l1 = (
+        build_scan_view_from_html(content)
+        if looks_like_html(content, path)
+        else build_scan_view(content)
+    )
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
@@ -230,7 +234,11 @@ async def deep_quarantine_scan(
     config = get_config()
     content, source_type, source = await _fetch_content(url, path)
 
-    l1 = sanitize(content) if looks_like_html(content, path) else sanitize_text(content)
+    l1 = (
+        build_scan_view_from_html(content)
+        if looks_like_html(content, path)
+        else build_scan_view(content)
+    )
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()

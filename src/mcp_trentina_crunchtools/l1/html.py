@@ -1,4 +1,4 @@
-"""HTML sanitization — parse HTML, strip hidden elements, convert to markdown."""
+"""HTML — parse, strip hidden elements, convert to markdown."""
 
 from __future__ import annotations
 
@@ -212,7 +212,7 @@ def _strip_dangerous_tags(soup: BeautifulSoup, stats: HtmlStats) -> None:
             tag.decompose()
 
 
-def sanitize_html(html_content: str) -> tuple[str, HtmlStats]:
+def strip_hidden_html(html_content: str) -> tuple[str, HtmlStats]:
     """Parse HTML, strip hidden/dangerous elements, convert to markdown."""
     stats = HtmlStats()
     soup = BeautifulSoup(html_content, "html.parser")

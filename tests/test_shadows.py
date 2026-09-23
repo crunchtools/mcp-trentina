@@ -11,7 +11,7 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from mcp_trentina_crunchtools.sanitize.shadows import (
+from mcp_trentina_crunchtools.l1.shadows import (
     STDLIB_MODULES,
     _scan_for_obfuscation,
     detect_module_shadows,
