@@ -137,15 +137,21 @@ def _warn_deprecated_defense_keys(name: str, body: dict[str, Any]) -> None:
     `l3_threshold` gated whether L3 ran. It does not any more — L3 runs on
     every input the gateway scans — and a config key that silently stopped
     mattering is exactly what an operator should be told about rather than
-    discover. Retained for one release so `extra="forbid"` does not reject
-    profiles written for 0.9.x; removed in 0.12.0.
+    discover. Retained so `extra="forbid"` does not reject profiles written
+    for 0.9.x; removed in 0.28.0 along with every other alias.
+
+    It said 0.12.0 until 0.27.1, and 0.12.0 shipped fifteen minor releases
+    ago — so the warning told operators the key was already rejected while
+    the loader went on accepting it. A deprecation notice naming a release
+    that has passed is worse than none: it is read as "this already
+    happened", and the reader stops looking.
     """
     defense = body.get("defense")
     if isinstance(defense, dict) and "l3_threshold" in defense:
         logger.warning(
             "Profile %r sets defense.l3_threshold, which is ignored — L3 "
             "runs on every scanned input. Remove the key; it is rejected "
-            "from 0.12.0.",
+            "from 0.28.0.",
             name,
         )
 

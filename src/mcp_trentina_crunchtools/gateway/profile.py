@@ -779,7 +779,7 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
     full/generic/matrix. ``extractor: full`` is now an empty ``processors``
     list, because reading everything is what naming nothing means; ``generic``
     is ``select``. Old spellings still load -- see the validator below -- and
-    are removed in 0.27.0.
+    are removed in 0.28.0.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -829,7 +829,7 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
             )
         logger.warning(
             "matrix_ingress.scan_view.extractor: %r is deprecated and is "
-            "removed in 0.27.0; write processors: %s",
+            "removed in 0.28.0; write processors: %s",
             old,
             [] if old == "full" else [_EXTRACTOR_RENAMES.get(old, old)],
         )
