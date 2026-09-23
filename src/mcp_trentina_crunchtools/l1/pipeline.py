@@ -1,16 +1,16 @@
-"""7-stage sanitization pipeline orchestrator."""
+"""L1: the 7-stage deterministic pipeline that builds the scan view."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field
 
-from .delimiters import DelimiterStats, sanitize_delimiters
-from .directives import DirectiveStats, sanitize_directives
-from .encoded import EncodedStats, sanitize_encoded
-from .exfiltration import ExfiltrationStats, sanitize_exfiltration
-from .html import HtmlStats, sanitize_html
-from .unicode import UnicodeStats, sanitize_unicode
+from .delimiters import DelimiterStats, normalize_delimiters
+from .directives import DirectiveStats, strip_directives
+from .encoded import EncodedStats, normalize_encoded
+from .exfiltration import ExfiltrationStats, strip_exfiltration
+from .html import HtmlStats, strip_hidden_html
+from .unicode import UnicodeStats, normalize_unicode
 
 _HTML_EXTENSIONS = frozenset({".html", ".htm", ".xhtml", ".svg"})
 _HTML_CONTENT_RE = re.compile(r"^\s*(<(!DOCTYPE|html)\b)", re.IGNORECASE)
@@ -18,7 +18,7 @@ _HTML_CONTENT_RE = re.compile(r"^\s*(<(!DOCTYPE|html)\b)", re.IGNORECASE)
 
 @dataclass
 class PipelineStats:
-    """Combined statistics from all sanitization stages."""
+    """Combined statistics from all L1 stages."""
 
     html: HtmlStats = field(default_factory=HtmlStats)
     unicode: UnicodeStats = field(default_factory=UnicodeStats)
@@ -81,7 +81,7 @@ def risk_level_for_count(suspicious: int) -> str:
     """Classify risk from a raw suspicious-detection count.
 
     Shared with callers that aggregate detections across multiple
-    ``PipelineStats`` instances (e.g. alert ingress sanitizing several JSON
+    ``PipelineStats`` instances (e.g. alert ingress scanning several JSON
     fields) and can't hand back a single ``PipelineStats`` to call
     ``risk_level()`` on.
     """
@@ -96,7 +96,7 @@ def risk_level_for_count(suspicious: int) -> str:
 
 @dataclass
 class PipelineResult:
-    """Result from the sanitization pipeline: two views of one payload.
+    """Result from the L1 pipeline: two views of one payload.
 
     ``content`` is the DELIVERY view — the caller's text, unmodified. L1
     never strips: excising lines or tokens destroyed exactly the content an
@@ -147,11 +147,11 @@ def _run_text_stages(
     build the scan view; the delivery text passes through untouched.
     """
     scan_view = content
-    scan_view, stats.unicode = sanitize_unicode(scan_view)
-    scan_view, stats.encoded = sanitize_encoded(scan_view)
-    scan_view, stats.exfiltration = sanitize_exfiltration(scan_view)
-    scan_view, stats.delimiters = sanitize_delimiters(scan_view)
-    scan_view, stats.directives = sanitize_directives(scan_view)
+    scan_view, stats.unicode = normalize_unicode(scan_view)
+    scan_view, stats.encoded = normalize_encoded(scan_view)
+    scan_view, stats.exfiltration = strip_exfiltration(scan_view)
+    scan_view, stats.delimiters = normalize_delimiters(scan_view)
+    scan_view, stats.directives = strip_directives(scan_view)
 
     return PipelineResult(
         content=content,
@@ -162,7 +162,7 @@ def _run_text_stages(
     )
 
 
-def sanitize(html_content: str) -> PipelineResult:
+def build_scan_view_from_html(html_content: str) -> PipelineResult:
     """Run the full pipeline on HTML content.
 
     Stages 1-4 are EXTRACTION, not security stripping: converting a page to
@@ -185,11 +185,11 @@ def sanitize(html_content: str) -> PipelineResult:
     delivery view is what stage 4 produced.
     """
     stats = PipelineStats()
-    content, stats.html = sanitize_html(html_content)
+    content, stats.html = strip_hidden_html(html_content)
     return _run_text_stages(html_content, content, stats)
 
 
-def sanitize_text(text: str) -> PipelineResult:
+def build_scan_view(text: str) -> PipelineResult:
     """Run the text-only pipeline (no HTML parsing).
 
     For non-HTML content (markdown files, plain text, source code).

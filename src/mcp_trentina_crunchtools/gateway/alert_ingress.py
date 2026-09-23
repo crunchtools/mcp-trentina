@@ -33,7 +33,7 @@ import httpx
 from starlette.responses import Response
 
 from ..defense import defend, defend_json
-from ..sanitize.pipeline import risk_level_for_count
+from ..l1.pipeline import risk_level_for_count
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -47,7 +47,7 @@ _alert_client: httpx.AsyncClient | None = None
 
 
 @dataclass
-class _SanitizeCounts:
+class _L1Counts:
     """Aggregate L1 detection counts across every string leaf in a JSON payload."""
 
     detections: int = field(default=0)
@@ -192,7 +192,7 @@ async def _handle_alert(
 
 async def _sanitize_and_classify(
     body: bytes, profile: Profile,
-) -> tuple[bytes, str, bool, _SanitizeCounts]:
+) -> tuple[bytes, str, bool, _L1Counts]:
     """Run the three-layer defense over an alert payload.
 
     Returns the bytes to forward — the payload's content intact, with a
@@ -231,7 +231,7 @@ async def _sanitize_and_classify(
         verdict = await defend_json(
             payload, source=source, source_type="alert", defense=defense,
         )
-        counts = _SanitizeCounts(
+        counts = _L1Counts(
             detections=verdict.verdict.pipeline.stats.total_detections(),
             suspicious=verdict.verdict.pipeline.stats.suspicious_detections(),
         )
@@ -247,7 +247,7 @@ async def _sanitize_and_classify(
             text, source=source, source_type="alert", defense=defense,
             is_html=False, guarded=False, record=False,
         )
-        counts = _SanitizeCounts(
+        counts = _L1Counts(
             detections=first.pipeline.stats.total_detections(),
             suspicious=first.pipeline.stats.suspicious_detections(),
         )

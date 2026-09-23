@@ -11,12 +11,17 @@ from ..database import is_blocked
 from ..dbus_interface import emit_request_event
 from ..defense import advise, defend, enforce_block
 from ..errors import BlockedSourceError, ContentSizeError
+from ..l1.pipeline import (
+    PipelineResult,
+    build_scan_view,
+    build_scan_view_from_html,
+    looks_like_html,
+)
 from ..quarantine.agent import quarantine_extract
 from ..quarantine.classifier import (
     join_warnings,
     truncation_warning,
 )
-from ..sanitize.pipeline import PipelineResult, looks_like_html, sanitize, sanitize_text
 from .scan import _build_layer1_context, _build_scan_result, _classifier_result
 
 
@@ -34,8 +39,8 @@ def _validate_content_size(content: str, max_size: int) -> None:
 def _run_pipeline(content: str, content_type: str) -> PipelineResult:
     """Select and run the appropriate sanitization pipeline."""
     if content_type == "text/html" or looks_like_html(content):
-        return sanitize(content)
-    return sanitize_text(content)
+        return build_scan_view_from_html(content)
+    return build_scan_view(content)
 
 
 def _build_sanitization_metadata(pipeline_result: PipelineResult) -> dict[str, Any]:

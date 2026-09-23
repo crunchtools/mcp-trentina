@@ -32,7 +32,7 @@ The two families serve different trust models:
 The search tools add a Layer 0 step — Gemini grounding with `google_search` — before the content enters the defense pipeline:
 
 ```
-L0 (Gemini grounding) → resolve redirects → L1 sanitize → L2 classify → L3 Q-Agent
+L0 (Gemini grounding) → resolve redirects → L1 scan view → L2 classify → L3 Q-Agent
 ```
 
 `safe_search` returns sanitized prose + source URLs. `quarantine_search` adds structured extraction with per-source summaries and relevance scores.

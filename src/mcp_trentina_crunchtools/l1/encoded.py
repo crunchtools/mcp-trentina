@@ -50,7 +50,7 @@ def _decode_hex_safe(encoded: str) -> str | None:
         return None
 
 
-def sanitize_encoded(
+def normalize_encoded(
     text: str,
     max_decode_length: int = MAX_BASE64_DECODE_LENGTH,
 ) -> tuple[str, EncodedStats]:

@@ -12,13 +12,13 @@ from ..database import is_blocked
 from ..dbus_interface import emit_request_event
 from ..defense import advise, defend, enforce_block
 from ..errors import BlockedSourceError, FileReadError
+from ..l1.pipeline import PipelineResult, looks_like_html
 from ..models import ALLOWED_TEXT_EXTENSIONS
 from ..quarantine.agent import quarantine_extract
 from ..quarantine.classifier import (
     join_warnings,
     truncation_warning,
 )
-from ..sanitize.pipeline import PipelineResult, looks_like_html
 
 MAX_FILE_SIZE = 2_000_000
 BINARY_CHECK_BYTES = 8192

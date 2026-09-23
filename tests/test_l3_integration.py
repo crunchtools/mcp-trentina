@@ -20,12 +20,12 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
+from mcp_trentina_crunchtools.l1.pipeline import build_scan_view
 from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
 from mcp_trentina_crunchtools.quarantine.classifier import (
     classify,
     is_classifier_available,
 )
-from mcp_trentina_crunchtools.sanitize.pipeline import sanitize_text
 from tests.adversarial_corpus import CORPUS, Case
 
 _has_classifier = is_classifier_available()
@@ -353,7 +353,7 @@ class TestL3UniqueCatches:
     @pytest.mark.parametrize("payload", L3_CATCHES)
     def test_l1_passes_cleanly(self, payload: str) -> None:
         """Verify Layer 1 finds nothing to strip."""
-        result = sanitize_text(payload)
+        result = build_scan_view(payload)
         total_detections = sum(result.stats.to_flat_dict().values())
         assert total_detections == 0, (
             f"L1 detected {total_detections} vectors — expected 0 for L3-only attack"
@@ -464,7 +464,7 @@ class TestL3DetectorMetaAttacks:
     )
     def test_reaches_l3_intact(self, case: Case) -> None:
         """Meta-attacks must bypass L1 (no structural markers to strip)."""
-        result = sanitize_text(case.payload)
+        result = build_scan_view(case.payload)
         total = sum(result.stats.to_flat_dict().values())
         assert total == 0, (
             f"{case.id} unexpectedly stripped by L1 — it should reach L3 intact"

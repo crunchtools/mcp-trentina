@@ -289,7 +289,7 @@ class TestPostExtractionSanitization:
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
-            patch("mcp_trentina_crunchtools.quarantine.agent.sanitize_text") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.quarantine.agent.build_scan_view") as mock_sanitize,
         ):
             mock_config.return_value.fallback = "layer1"
             mock_result = MagicMock()
@@ -330,7 +330,7 @@ class TestPostExtractionSanitization:
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
             patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
-            patch("mcp_trentina_crunchtools.quarantine.agent.sanitize_text") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.quarantine.agent.build_scan_view") as mock_sanitize,
         ):
             mock_config.return_value.fallback = "layer1"
 

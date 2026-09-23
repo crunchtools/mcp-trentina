@@ -50,7 +50,7 @@ class DirectiveStats:
     directives_detected: int = 0
 
 
-def sanitize_directives(text: str) -> tuple[str, DirectiveStats]:
+def strip_directives(text: str) -> tuple[str, DirectiveStats]:
     """Count lines containing LLM directive patterns; return text unchanged.
 
     One detection per line, however many patterns hit it — the unit of

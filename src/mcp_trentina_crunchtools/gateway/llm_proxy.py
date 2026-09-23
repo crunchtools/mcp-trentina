@@ -33,7 +33,7 @@ from .proxy_utils import (
     PLAIN_TEXT,
     filter_response_headers,
     forward_request_headers,
-    sanitize_proxy_path,
+    normalize_proxy_path,
 )
 
 if TYPE_CHECKING:
@@ -237,7 +237,7 @@ async def _proxy_llm(
             status_code=502, media_type=PLAIN_TEXT,
         )
 
-    path = sanitize_proxy_path(raw_path)
+    path = normalize_proxy_path(raw_path)
     if path is None:
         return Response(
             content="Path traversal rejected",

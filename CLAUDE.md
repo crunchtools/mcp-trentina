@@ -120,7 +120,10 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
 
 ## Architecture
 
-- `sanitize/` — Layer 1: 7-stage deterministic sanitization pipeline + module shadow detection
+- `l1/` — Layer 1: the 7-stage deterministic pipeline that builds the SCAN VIEW,
+  plus module shadow detection. It does not make content safe — it normalizes a
+  copy so L2 and L3 have something stable to judge, and counts what it found.
+  Called `sanitize/` until 0.24.0.
   - `shadows.py` — Python stdlib module shadow detection and obfuscation scanning
 - `quarantine/` — Layer 2: Q-Agent (Gemini REST via httpx, NO SDK, NO tools)
 - `tools/` — Tool implementations called by server.py wrappers

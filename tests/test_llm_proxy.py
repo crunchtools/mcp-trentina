@@ -24,7 +24,7 @@ from mcp_trentina_crunchtools.gateway.profile import (
     LlmKeyOverride,
     Profile,
 )
-from mcp_trentina_crunchtools.gateway.proxy_utils import sanitize_proxy_path
+from mcp_trentina_crunchtools.gateway.proxy_utils import normalize_proxy_path
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -35,28 +35,28 @@ class TestSanitizeProxyPath:
     """Path traversal prevention for proxy endpoints."""
 
     def test_clean_path_passes(self) -> None:
-        assert sanitize_proxy_path("v1/chat/completions") == "v1/chat/completions"
+        assert normalize_proxy_path("v1/chat/completions") == "v1/chat/completions"
 
     def test_empty_path_passes(self) -> None:
-        assert sanitize_proxy_path("") == ""
+        assert normalize_proxy_path("") == ""
 
     def test_dotdot_rejected(self) -> None:
-        assert sanitize_proxy_path("../admin") is None
+        assert normalize_proxy_path("../admin") is None
 
     def test_dotdot_middle_rejected(self) -> None:
-        assert sanitize_proxy_path("v1/../admin/secret") is None
+        assert normalize_proxy_path("v1/../admin/secret") is None
 
     def test_encoded_dotdot_rejected(self) -> None:
-        assert sanitize_proxy_path("v1/%2e%2e/admin") is None
+        assert normalize_proxy_path("v1/%2e%2e/admin") is None
 
     def test_backslash_dotdot_rejected(self) -> None:
-        assert sanitize_proxy_path("v1\\..\\admin") is None
+        assert normalize_proxy_path("v1\\..\\admin") is None
 
     def test_single_dot_rejected(self) -> None:
-        assert sanitize_proxy_path("v1/./completions") is None
+        assert normalize_proxy_path("v1/./completions") is None
 
     def test_deep_path_passes(self) -> None:
-        assert sanitize_proxy_path("v1beta/models/gemini-pro:generateContent") == (
+        assert normalize_proxy_path("v1beta/models/gemini-pro:generateContent") == (
             "v1beta/models/gemini-pro:generateContent"
         )
 

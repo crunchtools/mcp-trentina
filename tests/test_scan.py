@@ -86,7 +86,7 @@ class TestDeepScanVsStandardScan:
                 new_callable=AsyncMock,
             ) as mock_fetch,
             patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
-            patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.build_scan_view") as mock_sanitize,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
@@ -133,7 +133,7 @@ class TestDeepScanVsStandardScan:
                 new_callable=AsyncMock,
             ) as mock_fetch,
             patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
-            patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.build_scan_view") as mock_sanitize,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,
@@ -180,7 +180,7 @@ class TestDeepScanVsStandardScan:
                 new_callable=AsyncMock,
             ) as mock_fetch,
             patch("mcp_trentina_crunchtools.tools.scan.looks_like_html") as mock_html,
-            patch("mcp_trentina_crunchtools.tools.scan.sanitize_text") as mock_sanitize,
+            patch("mcp_trentina_crunchtools.tools.scan.build_scan_view") as mock_sanitize,
             patch(
                 "mcp_trentina_crunchtools.defense.quarantine_detect",
                 new_callable=AsyncMock,

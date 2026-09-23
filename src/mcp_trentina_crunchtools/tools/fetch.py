@@ -20,7 +20,7 @@ from ..quarantine.classifier import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..sanitize.pipeline import PipelineResult
+    from ..l1.pipeline import PipelineResult
 
 log = logging.getLogger(__name__)
 

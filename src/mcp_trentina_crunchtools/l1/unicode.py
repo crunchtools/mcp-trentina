@@ -1,4 +1,4 @@
-"""Unicode sanitization — strip invisible chars, bidi overrides, NFKC normalize."""
+"""Unicode — strip invisible chars, bidi overrides, NFKC normalize."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ _UNICODE_TAGS = re.compile("[\U000e0001-\U000e007f]")
 _CONTROL_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 
-def sanitize_unicode(text: str) -> tuple[str, UnicodeStats]:
+def normalize_unicode(text: str) -> tuple[str, UnicodeStats]:
     """Strip invisible unicode characters and normalize with NFKC."""
     stats = UnicodeStats()
 

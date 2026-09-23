@@ -190,7 +190,7 @@ async def safe_content_tool(
     Uses SHA-256 content hash for blocklist.
 
     Args:
-        content: Raw text content to sanitize
+        content: Raw text content to scan
         content_type: MIME type — text/plain (default), text/html, or text/markdown
     """
     return await safe_content(content, content_type)

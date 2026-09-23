@@ -14,7 +14,7 @@ not. Four divergences across five copies, none of them written down as a
 decision.
 
 Commit 433ff1c fixed this identical disease one floor down, extracting
-`_run_text_stages()` from the two sanitize entry points, with the reasoning:
+`_run_text_stages()` from the two L1 entry points, with the reasoning:
 "a stage added to one path and not the other would have left plain text
 defended differently from HTML, silently, with nothing to catch it." The same
 bug lived one level up, across the whole pipeline. A drifting sub-stage misses
@@ -53,15 +53,15 @@ from .database import record_detection
 from .dbus_interface import emit_detection_event
 from .errors import BlockedSourceError
 from .jsonwalk import iter_leaves
-from .quarantine.agent import quarantine_detect
-from .quarantine.classifier import ClassifierResult, classify_async, classify_guarded
-from .sanitize.pipeline import (
+from .l1.pipeline import (
     PipelineResult,
     PipelineStats,
+    build_scan_view,
+    build_scan_view_from_html,
     looks_like_html,
-    sanitize,
-    sanitize_text,
 )
+from .quarantine.agent import quarantine_detect
+from .quarantine.classifier import ClassifierResult, classify_async, classify_guarded
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +144,7 @@ def _run_l1(content: str, *, is_html: bool | None) -> PipelineResult:
     so a profile that could disable it would only be hiding its own eyes.
     """
     html = looks_like_html(content) if is_html is None else is_html
-    return sanitize(content) if html else sanitize_text(content)
+    return build_scan_view_from_html(content) if html else build_scan_view(content)
 
 
 def _should_run_l3(*, defense: DefenseConfig | None, l3_gate: bool) -> bool:
@@ -265,9 +265,9 @@ async def defend(
         record: Write the detection row and emit the D-Bus event. Scan-only
             tools report without recording.
         precomputed_l1: L1 already ran elsewhere — pass its result rather than
-            sanitizing twice. Structured payloads need this: their leaves are
-            sanitized individually so the JSON can be rebuilt, and only the
-            joined text goes to L2/L3.
+            running it twice. Structured payloads need this: each leaf gets
+            its own scan view so the JSON can be rebuilt, and only the joined
+            text goes to L2/L3.
         l3_context: A short L1 summary handed to the Q-Agent as context.
             Only the alert ingress and scan tools did this before; telling L3
             what L1 already found measurably sharpens its judgement, so it is
@@ -442,7 +442,7 @@ async def advise(
 def merge_stats(target: PipelineStats, other: PipelineStats) -> None:
     """Accumulate one stage-stats set into another, field by field.
 
-    Walks dataclass fields rather than naming them, so a sanitize stage added
+    Walks dataclass fields rather than naming them, so an L1 stage added
     later is merged automatically. Naming them here would recreate the exact
     bug this module exists to kill: a stage that counts on one path and not
     another, silently.
@@ -456,7 +456,7 @@ def merge_stats(target: PipelineStats, other: PipelineStats) -> None:
             )
 
 
-def sanitize_json_value(
+def build_scan_view_json(
     value: Any,
     texts: list[str],
     stats: PipelineStats,
@@ -484,7 +484,7 @@ def sanitize_json_value(
     RecursionError, and an exception mid-scan is a fail-open.
     """
     for text in iter_leaves(value):
-        leaf = sanitize_text(text)
+        leaf = build_scan_view(text)
         merge_stats(stats, leaf.stats)
         texts.append(leaf.content)
         if scan_views is not None:
@@ -541,7 +541,7 @@ async def defend_json(
     l3_context: str | None = None,
     attribution: dict[str, Any] | None = None,
 ) -> JsonVerdict:
-    """Defend a structured payload: sanitize the leaves, judge the whole.
+    """Defend a structured payload: scan-view the leaves, judge the whole.
 
     The second named posture over the same pipeline. Used by the alert ingress
     today and by proxied `structuredContent` next — both are arbitrary nested
@@ -550,7 +550,7 @@ async def defend_json(
     texts: list[str] = []
     scan_views: list[str] = []
     stats = PipelineStats()
-    rebuilt = sanitize_json_value(payload, texts, stats, scan_views)
+    rebuilt = build_scan_view_json(payload, texts, stats, scan_views)
     joined = "\n".join(texts)
 
     verdict = await _defend_texts(
@@ -643,7 +643,7 @@ async def defend_scan_view(
     scan_views: list[str] = []
     stats = PipelineStats()
     for segment in view.segments:
-        leaf = sanitize_text(segment)
+        leaf = build_scan_view(segment)
         merge_stats(stats, leaf.stats)
         texts.append(leaf.content)
         scan_views.append(leaf.scan_view)

@@ -17,6 +17,7 @@ from ..config import get_config
 from ..dbus_interface import emit_detection_event, emit_request_event
 from ..defense import advise, defend, merge_stats
 from ..errors import BlockedSourceError, QuarantineAgentError
+from ..l1.pipeline import PipelineResult, PipelineStats, build_scan_view
 from ..quarantine.agent import (
     quarantine_extract,
     resolve_grounding_urls,
@@ -26,7 +27,6 @@ from ..quarantine.classifier import (
     join_warnings,
     truncation_warning,
 )
-from ..sanitize.pipeline import PipelineResult, PipelineStats, sanitize_text
 
 
 def _sanitize_l0_output(
@@ -40,15 +40,15 @@ def _sanitize_l0_output(
     it judges everything else: L1 ran across several fields here, so the
     aggregate has to be reassembled before L2 sees the document.
     """
-    text_result = sanitize_text(text)
+    text_result = build_scan_view(text)
     merged = PipelineStats()
     merge_stats(merged, text_result.stats)
     scanned_sources = []
     total_detections = text_result.stats.total_detections()
 
     for source in sources:
-        title_r = sanitize_text(source.get("title", ""))
-        url_r = sanitize_text(source.get("uri", ""))
+        title_r = build_scan_view(source.get("title", ""))
+        url_r = build_scan_view(source.get("uri", ""))
         merge_stats(merged, title_r.stats)
         merge_stats(merged, url_r.stats)
         total_detections += (

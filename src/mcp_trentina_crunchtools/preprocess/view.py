@@ -86,7 +86,7 @@ class ScanViewContext:
 class ScanView:
     """What the pipeline will read, and an account of what it will not.
 
-    ``segments`` are RAW strings. Normalisation is ``sanitize_text``'s job and
+    ``segments`` are RAW strings. Normalisation is ``build_scan_view``'s job and
     happens once, in the defense layer, so that the delivery view and the
     judgement view keep being derived in exactly one place.
     """

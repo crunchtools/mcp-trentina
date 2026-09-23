@@ -150,7 +150,7 @@ silent.
 ## Pipeline Flow
 
 ```
-Content in → L1 sanitize → L2 classify → L3 Q-Agent (if triggered) → Content out
+Content in → L1 scan view → L2 classify → L3 Q-Agent (if triggered) → Content out
                                 ↓
                           Score < threshold?
                           → Pass through with metadata sidecar

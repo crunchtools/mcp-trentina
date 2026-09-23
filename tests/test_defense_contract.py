@@ -32,7 +32,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src" / "mcp_trentina_crunchtools"
 
 # Modules whose names may not be imported outside the pipeline.
-GUARDED_MODULES = ("quarantine.classifier", "quarantine.agent", "sanitize.pipeline")
+GUARDED_MODULES = ("quarantine.classifier", "quarantine.agent", "l1.pipeline")
 
 # The detectors themselves. Importing one of these outside defense.py means a
 # second pipeline is being born.
