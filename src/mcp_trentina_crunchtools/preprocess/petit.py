@@ -23,17 +23,34 @@ never delivered, and a line that is never delivered injects nothing.
 
 That rule is why the library is called the way it is:
 
-* ``driver="RawEntry"`` pins the structural driver and declines petit's
-  per-format vocabulary. ``SecureLogHash`` knows sshd's phrases and
-  collapses everything after one of them, so "Invalid user <anything>"
-  becomes a single group — semantic, word-level, and exactly what the rule
-  above forbids. Detection would select it on any sshd-shaped payload.
-* ``stopwords=VOLATILE`` replaces petit's packaged ``hash.stopwords``,
-  which is tuned for system logs and more aggressive than its name: its
-  ``[a-f]+#`` rule eats the letters next to a scrubbed number, so "bob0"
-  and "boa0" share a fingerprint. Right for finding a flapping daemon,
-  wrong for us. These are our own patterns, unchanged from the hand-rolled
-  implementation this replaced.
+Both pins are gone as of 0.22.0, and the rule above moved with them.
+
+``driver="RawEntry"`` and ``stopwords=VOLATILE`` used to pin petit's fallback
+driver and override its normalization, because the rule was Trentina's to
+enforce and petit handed the knob to the caller. petit 3.2.0 inverts that: a
+hash driver declares its own ``DEFAULT_FILTER`` and its own generalizations,
+so the policy lives with the format that needs it, is tested once, and is
+shared with every consumer. If a driver merges too eagerly, it gets tuned
+there rather than overridden here.
+
+The rule itself was also mis-justified. It argued that keeping a buried
+payload distinct meant it "reaches the perimeter scan" — but a payload that
+collides into a group is DELETED, so it reaches nobody, scanner included. The
+rule never prevented smuggling. What it bought was preserved distinctions for
+the agent reading the output, which is signal quality rather than a security
+boundary. See issue #95.
+
+DETECTION IS NOW LOAD-BEARING, and that is a new attack surface worth naming.
+With no ``driver=``, an attacker who controls part of a tool response controls
+which driver petit SELECTS, and therefore which generalization table is
+applied to the whole payload — splice sshd-shaped lines into a Jira comment
+and ``SecureLogHash``'s rules may apply to content they were never designed
+for. Three things bound it: ``SecureLogEntry.tally_logic`` demands unanimity
+across the sample, ``sample_indices`` spreads evenly so a contiguous injected
+block cannot dominate unless it is most of the payload, and the chosen driver
+rides in the sidecar so a surprising reduction is attributable. Do not lower
+any driver's ``tally_logic`` bar. Tested by
+``test_detection_cannot_be_steered_by_an_injected_block``.
 
 Known limitation (adversarial review, 2026-09-13): an attacker who can
 WRITE to a shared log ahead of time can pre-seed sample slots — three lines
@@ -67,7 +84,6 @@ from petit import PetitError, analyze_text
 
 from ..channels import Channel, Kind
 from .base import Cost, PreProcessContext, PreProcessResult
-from .volatile import VOLATILE
 
 _FINGERPRINT_MAX_CHARS = 400
 
@@ -117,8 +133,6 @@ class PetitProcessor:
             analysis = await asyncio.to_thread(
                 analyze_text,
                 capped,
-                driver="RawEntry",
-                stopwords=VOLATILE,
                 max_samples=_SAMPLES_PER_GROUP,
                 source_name="trentina",
             )
@@ -189,5 +203,12 @@ class PetitProcessor:
                 # markers) are counted by neither group nor sample. Say so
                 # rather than let the arithmetic look wrong.
                 "lines_dropped": max(0, analysis.lines_in - analysis.lines_grouped),
+                # Which driver petit chose, and whether it had to fall back.
+                # Detection is load-bearing now that we no longer pin it: the
+                # driver decides the normalization, so an operator reading a
+                # surprising reduction needs to know which one ran. Scalar,
+                # so the whole dict serializes into an audit row.
+                "petit_driver": analysis.driver,
+                "petit_degraded": analysis.degraded,
             },
         )

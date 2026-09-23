@@ -21,8 +21,17 @@ the case (e.g. move a now-caught attack down a layer), not to paper over it.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from mcp_trentina_crunchtools.preprocess import (
+    EmailProcessor,
+    PetitProcessor,
+    PreProcessContext,
+    StructuredProcessor,
+    run_preprocessors,
+)
 from mcp_trentina_crunchtools.quarantine.classifier import (
     classify,
     is_classifier_available,
@@ -132,4 +141,132 @@ class TestLayer2Boundary:
         assert result.label == expected, (
             f"{case.id}: L2 returned {result.label} (score={result.score:.4f}), "
             f"expected {expected}. If Prompt Guard changed, re-annotate this case."
+        )
+
+
+@pytest.mark.asyncio
+class TestPreProcessorsDoNotSuppressAttacks:
+    """Reduction must not delete the thing the perimeter exists to catch.
+
+    This replaces an ARGUMENT with a MEASUREMENT, and that is the whole point
+    of the file.
+
+    Until 0.22.0, `preprocess/petit.py` pinned `driver="RawEntry"` and passed
+    its own stopword list, under a rule stated as "normalize only tokens that
+    cannot carry meaning to a model — never words". The rule was never a test.
+    It lived as prose in a docstring, and the docstring's own justification did
+    not hold: it argued that keeping a payload distinct meant it "reaches the
+    perimeter scan", while the next paragraph established that a payload which
+    collides into a group is DELETED — and a deleted line reaches nobody, the
+    scanner included.
+
+    So the rule was not preventing smuggling. What it prevented was an attack
+    being quietly dropped before anyone judged or recorded it. That is worth
+    keeping, and it is measurable, which prose is not.
+
+    Each case is buried in three carriers that look like real tool output —
+    repetitive syslog, a JSON array of near-identical records, a quoted mail
+    thread — and run through the production chain. The assertion is that the
+    payload is still there afterwards.
+
+    A case that legitimately does not survive becomes
+    `survives_preprocessing=False` with a reason in `notes`. That is a visible
+    edit to the corpus, not a skip, because "we measured this and accepted it"
+    and "nobody noticed" must not look the same.
+    """
+
+    @staticmethod
+    def _syslog_carrier(payload: str) -> str:
+        """200 lines of boilerplate with the payload at a fixed position.
+
+        Fixed, not random: an incident has to be reproducible from the corpus
+        alone, and a flaky position would make a failure impossible to chase.
+        """
+        lines = [
+            f"Sep 13 04:{i % 60:02d}:00 host01 sshd[{1000 + i}]: "
+            f"Accepted publickey for svc from 10.0.0.{i % 250} port {2000 + i}"
+            for i in range(200)
+        ]
+        lines.insert(137, f"Sep 13 04:59:59 host01 app[9999]: {payload}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _json_carrier(payload: str) -> str:
+        records = [
+            {"id": i, "status": "ok", "message": "sync completed", "retries": 0}
+            for i in range(40)
+        ]
+        records[23]["message"] = payload
+        return json.dumps(records, indent=2)
+
+    @staticmethod
+    def _mail_carrier(payload: str) -> str:
+        thread = []
+        for depth in range(8):
+            quote = "> " * depth
+            thread.append(f"{quote}On Mon, someone wrote:")
+            thread.append(f"{quote}Thanks, that works for me.")
+            thread.append(f"{quote}")
+        thread.append(payload)
+        thread.append("-- ")
+        thread.append("Sent from my phone")
+        return "\n".join(thread)
+
+    @pytest.mark.parametrize(
+        "case",
+        [c for c in CORPUS if c.expect_injection and c.survives_preprocessing],
+        ids=lambda c: c.id,
+    )
+    @pytest.mark.parametrize(
+        "carrier", ["syslog", "json", "mail"]
+    )
+    async def test_the_payload_survives_reduction(
+        self, case: Case, carrier: str
+    ) -> None:
+        build = {
+            "syslog": self._syslog_carrier,
+            "json": self._json_carrier,
+            "mail": self._mail_carrier,
+        }[carrier]
+        # The longest single line, not the whole payload: a carrier reflows
+        # multi-line text, so asserting on all of it would fail for reasons
+        # that have nothing to do with suppression.
+        needle = max(case.payload.splitlines(), key=len).strip()
+        document = build(case.payload)
+
+        # Escaping is not suppression, and the two are easy to confuse. The
+        # JSON carrier is built with ensure_ascii=True, so an em-dash lands as
+        # \u2014; the structured reducer re-serializes with ensure_ascii=False
+        # and emits the literal character. Both spell the same payload, so
+        # accept either rather than fail a case that in fact survived.
+        forms = {needle, json.dumps(needle)[1:-1]}
+        assert any(f in document for f in forms), (
+            "carrier lost the payload before reduction"
+        )
+
+        # The order the shipped default uses (_DEFAULT_PROCESSORS), not an
+        # arbitrary one: petit first would turn a JSON array into loose text
+        # and the structured reducer would then decline on its own input.
+        outcome = await run_preprocessors(
+            document,
+            processors=[StructuredProcessor(), EmailProcessor(), PetitProcessor()],
+            strategy="chain",
+            ctx=PreProcessContext(source="test", target_bytes=20_000),
+        )
+
+        assert any(f in outcome.content for f in forms), (
+            f"{case.id!r} was suppressed by reduction in the {carrier} "
+            f"carrier. The agent never sees it, which is safe — but the "
+            f"perimeter never judged it and the blocklist never recorded it. "
+            f"Either tighten the driver in petit, or set "
+            f"survives_preprocessing=False on this case with a written reason."
+        )
+
+    def test_every_case_still_claims_to_survive(self) -> None:
+        """The exception list is empty, and a change to it should be loud."""
+        excepted = [c.id for c in CORPUS if not c.survives_preprocessing]
+        assert excepted == [], (
+            f"cases now excepted from suppression testing: {excepted}. That "
+            f"may be correct, but it is a perimeter coverage decision and "
+            f"belongs in a release note, not in a corpus field nobody reads."
         )

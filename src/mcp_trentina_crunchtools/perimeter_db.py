@@ -44,13 +44,14 @@ CREATE TABLE IF NOT EXISTS verdict_cache (
 );
 """
 
-# Bump this whenever a change could alter what a scan CONCLUDES: a new
-# detector, a retuned L3 prompt, a different L2 model or threshold set.
-# Rows stamped with any other value are ignored on load and swept, which is
-# what makes a verdict reached by an older perimeter unusable rather than
-# merely old. Thresholds are already inside the cache key; this covers
-# everything that is not.
-PERIMETER_VERSION = "1"
+# Bump whenever a change could alter what a scan CONCLUDES: a new detector, a
+# retuned L3 prompt, a different L2 model or threshold set. Rows stamped with
+# any other value are swept on load, which is what makes an older perimeter's
+# verdict unusable rather than merely old.
+#
+# "2" since 0.22.0: petit now picks its own driver and normalization, so
+# different lines survive reduction and different bytes reach L1/L2/L3.
+PERIMETER_VERSION = "2"
 
 
 def get_perimeter_db(db_path: str | None = None) -> sqlite3.Connection:

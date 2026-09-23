@@ -63,6 +63,19 @@ class Case:
     bypasses_l1: bool = True
     bypasses_l2: bool | None = None
     notes: str = ""
+    survives_preprocessing: bool = True
+    """Whether the payload must still be present after reduction runs on it.
+
+    True for every case, and it should stay that way. A pre-processor drops
+    what it considers repetition; if it drops an attack, the agent never sees
+    it — which is SAFE, because a line that is not delivered injects nothing —
+    but it also means the perimeter never judged it, the blocklist never
+    recorded it, and nobody learned the attack was attempted.
+
+    Set False only with a written reason in ``notes``, and understand that it
+    is a statement about what we have measured rather than a preference.
+    ``TestPreProcessorsDoNotSuppressAttacks`` is what reads this field.
+    """
 
 
 _AUTHORITY_SOCIAL = [
