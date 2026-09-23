@@ -21,7 +21,7 @@ FastMCP.
 
 ```
 Agent (Claude Code)
-    │ POST /gateway/josui/mcp
+    │ POST /gateway/agent2/mcp
     ▼
 app.py (_handle_post)
     │ auth, parse JSON-RPC
@@ -39,7 +39,7 @@ Backend MCP Server (GitHub, Jira, Slack, etc.)
 
 ```
 Agent (Claude Code)
-    │ POST/GET/DELETE /gateway/josui/mcp
+    │ POST/GET/DELETE /gateway/agent2/mcp
     ▼
 app.py (streamable HTTP handler)
     │ auth, session lookup/create

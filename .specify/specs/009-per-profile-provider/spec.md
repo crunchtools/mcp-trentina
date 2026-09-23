@@ -8,7 +8,7 @@
 
 ## Overview
 
-Add an optional `provider` field to `DefenseConfig` so each gateway profile can use a different LLM provider for L3 Q-Agent operations and tool description compression. Profiles without a provider set fall back to `TRENTINA_MODEL_PROVIDER`. This enables cost/quality tradeoffs per consumer — e.g., josui uses anthropic for better detection, kagetora uses gemini for cheapest cost.
+Add an optional `provider` field to `DefenseConfig` so each gateway profile can use a different LLM provider for L3 Q-Agent operations and tool description compression. Profiles without a provider set fall back to `TRENTINA_MODEL_PROVIDER`. This enables cost/quality tradeoffs per consumer — e.g., agent2 uses anthropic for better detection, agent1 uses gemini for cheapest cost.
 
 ---
 

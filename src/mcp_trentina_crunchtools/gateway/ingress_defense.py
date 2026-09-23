@@ -276,7 +276,7 @@ async def scan_tool_response(
     block — a flagged response is refused (`blocked=True`); the caller
         delivers the warning INSTEAD of the content. `extract` currently
         degrades to block with a logged notice: the extraction response
-        contract ships with the josui flip, and until then failing closed
+        contract ships when the first interactive profile flips to it, and until then failing closed
         is the only honest reading of "extract" — falling back to annotate
         would silently deliver what the mode existed to transform.
 

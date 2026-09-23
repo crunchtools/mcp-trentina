@@ -6,7 +6,7 @@ Trentina filters which tools each agent can see and call. Tools not in the allow
 
 A Google Workspace MCP server exposes ~130 tools. Most agents need maybe 25 of them. The other 105 waste context tokens on tool definitions the agent will never use, and some of them (`delete*`, `send_gmail_message`) are capabilities you don't want an autonomous agent to even know about. Filtering at the gateway means the tools are invisible — not just disabled, but absent from the agent's view of the world.
 
-The CrunchTools deployment reduced Kagetora's tool count from ~520 to ~210 (60% cut) just through allowlist filtering, before description compression even runs.
+The CrunchTools deployment reduced agent1's tool count from ~520 to ~210 (60% cut) just through allowlist filtering, before description compression even runs.
 
 ## How It Works
 
@@ -15,7 +15,7 @@ Each backend in a profile has two lists:
 ```yaml
 backends:
   gws-personal:
-    url: "http://gws-personal:8011/mcp"
+    url: "http://gws-personal:8000/mcp"
     tools_allow:
       - search_gmail_messages
       - get_gmail_message_content
@@ -74,7 +74,7 @@ tools_allow:
   - list_calendars
 ```
 
-Good for autonomous agents where you want to enumerate exactly what's available. This is what the Kagetora profile uses — every tool is explicitly listed for the heavy backends (Google Workspace, Jira, GitHub).
+Good for autonomous agents where you want to enumerate exactly what's available. This is what the agent1 profile uses — every tool is explicitly listed for the heavy backends (Google Workspace, Jira, GitHub).
 
 ### Read-only access
 

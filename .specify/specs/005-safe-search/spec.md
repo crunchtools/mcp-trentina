@@ -3,14 +3,14 @@
 > **Spec ID:** 005-safe-search
 > **Status:** Draft
 > **Version:** 0.3.0
-> **Author:** Scott McCarty / Josui
+> **Author:** Scott McCarty
 > **Date:** 2026-03-10
 > **GitHub Issue:** [#6](https://github.com/crunchtools/mcp-trentina/issues/6)
 
 ## Overview
 
 Trentina protects agents from prompt injection when fetching web content, but has no
-way to search the web safely. Takeda (OpenClaw Signal bot) needs web search capability
+way to search the web safely. agent3 (OpenClaw Signal bot) needs web search capability
 routed through trentina's defense layers so all web access flows through a single
 security boundary.
 
@@ -1088,7 +1088,7 @@ Flash-Lite (reported on developer forums), fall back to `gemini-2.5-flash`.
 
 - Depends on: None. All required infrastructure exists. No new credentials.
 - Depends on (external): Gemini API `google_search` grounding on Flash-Lite
-- Blocks: Takeda/OpenClaw safe web search integration on lotor.
+- Blocks: agent3/OpenClaw safe web search integration on host01.
 
 ---
 

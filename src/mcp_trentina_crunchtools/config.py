@@ -31,7 +31,7 @@ DEFAULT_CLASSIFIER_THREADS = 4
 which lets a single inference saturate the host.
 
 Set this to match the container's CPU allocation. Threads beyond that just
-contend for the same quota and make scans slower — measured on lotor
+contend for the same quota and make scans slower — measured on host01
 (6 vCPU) against a 9,100-token article:
 
     --cpus=2, threads=2   39.2s

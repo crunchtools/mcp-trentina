@@ -12,19 +12,19 @@ Profiles are defined in YAML, typically at `/etc/trentina/profiles.yaml` or wher
 
 ```yaml
 profiles:
-  josui:
+  agent2:
     role: operator          # default: agent (see Roles)
     auth:
-      bearer_token_env: TRENTINA_PROFILE_JOSUI_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_AGENT2_TOKEN
     backends:
       web:
         url: "internal://web"
         tools_allow: ["*"]
       slack:
-        url: "http://mcp-slack:8005/mcp"
+        url: "http://mcp-slack:8000/mcp"
         tools_allow: ["*"]
       gws-personal:
-        url: "http://gws-personal:8011/mcp"
+        url: "http://gws-personal:8000/mcp"
         tools_allow: ["*"]
         tools_deny: ["delete*"]
         compress_descriptions: true
@@ -33,15 +33,15 @@ profiles:
       l2_threshold: 0.5
       l3_threshold: 0.7
 
-  kagetora:
+  agent1:
     auth:
-      bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_AGENT1_TOKEN
     backends:
       web:
         url: "internal://web"
         tools_allow: ["*"]
       gws-personal:
-        url: "http://gws-personal:8011/mcp"
+        url: "http://gws-personal:8000/mcp"
         tools_allow:
           - search_gmail_messages
           - get_gmail_message_content
@@ -93,8 +93,8 @@ Each profile authenticates via bearer token. The token value is read from an env
 
 ```bash
 # Token env vars (set in your env file, not profiles.yaml)
-TRENTINA_PROFILE_JOSUI_TOKEN=your-secret-token
-TRENTINA_PROFILE_KAGETORA_TOKEN=another-secret-token
+TRENTINA_PROFILE_AGENT2_TOKEN=your-secret-token
+TRENTINA_PROFILE_AGENT1_TOKEN=another-secret-token
 ```
 
 The agent sends the token in the `Authorization` header:
@@ -121,16 +121,16 @@ A typical deployment serves multiple agents with different trust levels:
 
 | Profile | Agent Type | Tool Count | Defense | Use Case |
 |---------|-----------|------------|---------|----------|
-| josui | Claude Code (human-supervised) | 440+ | L1+L2+L3 | Full access, human in the loop |
-| kagetora | Hermes (autonomous) | ~210 | L1+L2 only | Tightened allowlists, no L3 (token cost) |
-| takeda | OpenClaw (chat agent) | ~440 | L1+L2+L3 | Full access, different auth context |
+| agent2 | Claude Code (human-supervised) | 440+ | L1+L2+L3 | Full access, human in the loop |
+| agent1 | Hermes (autonomous) | ~210 | L1+L2 only | Tightened allowlists, no L3 (token cost) |
+| agent3 | OpenClaw (chat agent) | ~440 | L1+L2+L3 | Full access, different auth context |
 
 All three connect to the same Trentina instance on the same port. The profile name in the URL determines everything:
 
 ```
-http://trentina:8019/gateway/josui/mcp
-http://trentina:8019/gateway/kagetora/mcp
-http://trentina:8019/gateway/takeda/mcp
+http://trentina:8019/gateway/agent2/mcp
+http://trentina:8019/gateway/agent1/mcp
+http://trentina:8019/gateway/agent3/mcp
 ```
 
 ## Defense Settings
@@ -156,7 +156,7 @@ Some backends require their own authentication. Pass headers per-backend:
 ```yaml
 backends:
   memory:
-    url: "http://mcp-memory:8006/mcp"
+    url: "http://mcp-memory:8000/mcp"
     headers:
       Authorization: "Bearer ${MCP_MEMORY_API_KEY}"
 ```

@@ -22,7 +22,7 @@ pipeline application yet — that's Phase 2.
 ### Request Flow (Phase 1)
 
 ```
-Consumer (Josui / Kagetora / future Takeda)
+Consumer (agent2 / agent1 / future agent3)
     │
     │  POST /gateway/<profile>/mcp   (Authorization: Bearer <token>)
     │  Content-Type: application/json
@@ -44,7 +44,7 @@ FastMCP app  —  custom_route("/gateway/{profile}/mcp")  (gateway/app.py)
     │  └──────────────────┘
     ▼
    scheme dispatch
-    ├── http(s):// ──► backend.py  ──► remote MCP server (mcp-slack:8005, …)
+    ├── http(s):// ──► backend.py  ──► remote MCP server (mcp-slack:8000, …)
     └── internal:// ─► internal.py ──► trentina's own FastMCP tool registry (in-process)
     │
     │  response (both paths return the same dict / BackendCall shape)
@@ -164,12 +164,12 @@ auth check awkward, and complicates the future defense-pipeline injection point
 ### Step 13: Deploy (Option C cutover)
 
 - [ ] Push branch → GHA build (or build the overlay image) → image carrying Option C
-- [ ] Provision `/srv/<service>/config/profiles.yaml` with real `josui` + `kagetora` profiles, each carrying the `web` (`internal://web`) backend + their http backend matrix
-- [ ] Generate `TRENTINA_GATEWAY_JOSUI_TOKEN` + `TRENTINA_GATEWAY_KAGETORA_TOKEN` (`secrets.token_hex(32)`), add to `mcp-trentina.env`
+- [ ] Provision `/srv/<service>/config/profiles.yaml` with real `agent2` + `agent1` profiles, each carrying the `web` (`internal://web`) backend + their http backend matrix
+- [ ] Generate `TRENTINA_GATEWAY_AGENT2_TOKEN` + `TRENTINA_GATEWAY_AGENT1_TOKEN` (`secrets.token_hex(32)`), add to `mcp-trentina.env`
 - [ ] Add `TRENTINA_GATEWAY_ENABLED=true` + `TRENTINA_PROFILES_PATH=/etc/trentina/profiles.yaml`; mount profiles.yaml into the container
 - [ ] systemctl restart; verify `/gateway/<profile>/mcp` lists tools across an http backend AND `web__safe_fetch_tool`; confirm `/mcp` 404 is deliberate
-- [ ] **Cut Kagetora over first** (smaller blast radius, autonomous agent): one `mcp_servers:` entry in Hermes `config.yaml`; verify prompt-token count drops from ~146K toward <50K
-- [ ] **Then Josui**: one `trentina-gateway` entry in `~/.claude.json`; shrink the SSH tunnel from 10 LocalForwards to one (8019)
+- [ ] **Cut agent1 over first** (smaller blast radius, autonomous agent): one `mcp_servers:` entry in Hermes `config.yaml`; verify prompt-token count drops from ~146K toward <50K
+- [ ] **Then agent2**: one `trentina-gateway` entry in `~/.claude.json`; shrink the SSH tunnel from 10 LocalForwards to one (8019)
 - [ ] Clean up: delete the `gateway-test` profile, `/root/.trentina-gateway-test-token`, the `phase1` overlay image, and `Containerfile.gateway-overlay`
 
 ---
@@ -223,4 +223,4 @@ auth check awkward, and complicates the future defense-pipeline injection point
 | Date | Changes |
 |------|---------|
 | 2026-06-13 | Initial Phase 1 plan |
-| 2026-06-13 | Option C: internal-tool backend steps; routing-collision risk retired; migration step rewritten as the Kagetora-then-Josui single-endpoint cutover |
+| 2026-06-13 | Option C: internal-tool backend steps; routing-collision risk retired; migration step rewritten as the agent1-then-agent2 single-endpoint cutover |

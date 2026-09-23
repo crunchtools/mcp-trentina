@@ -39,12 +39,12 @@ def _profile() -> Profile:
         auth=AuthConfig(bearer_token_env="TEST"),
         backends={
             "mcp-slack": Backend(
-                url="http://mcp-slack:8005/mcp",
+                url="http://mcp-slack:8000/mcp",
                 tools_allow=["*"],
                 tools_deny=["slack_dangerous"],
             ),
             "mcp-atlassian": Backend(
-                url="http://mcp-atlassian:8021/mcp",
+                url="http://mcp-atlassian:8000/mcp",
                 tools_allow=["*"],
             ),
         },
@@ -59,7 +59,7 @@ def _mixed_profile() -> Profile:
         name="mixed",
         auth=AuthConfig(bearer_token_env="TEST"),
         backends={
-            "mcp-slack": Backend(url="http://mcp-slack:8005/mcp", tools_allow=["*"]),
+            "mcp-slack": Backend(url="http://mcp-slack:8000/mcp", tools_allow=["*"]),
             "web": Backend(url="internal://web", tools_allow=["*"]),
         },
     )
@@ -466,13 +466,13 @@ class TestRouter:
         import mcp_trentina_crunchtools.database as db_mod
 
         db_mod._db = None
-        secret = "RHEL 11 ships on a date nobody outside may read"
+        secret = "NIGHTJAR ships on a date nobody outside may read"
 
         async def memory_call(
             _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
         ) -> BackendCall:
             return BackendCall(
-                content=[{"type": "text", "text": f"Red Hat note: {secret}"}],
+                content=[{"type": "text", "text": f"NIGHTJAR note: {secret}"}],
                 is_error=False,
                 structured_content=None,
             )
@@ -482,11 +482,11 @@ class TestRouter:
             auth=AuthConfig(bearer_token_env="TEST"),
             backends={
                 "memory": Backend(
-                    url="http://mcp-memory:8006/mcp",
+                    url="http://mcp-memory:8000/mcp",
                     tools_allow=["*"],
                     response_guards={
                         "memory_search": {
-                            "content": ParameterConstraint(deny=["*Red Hat*"]),
+                            "content": ParameterConstraint(deny=["*NIGHTJAR*"]),
                         }
                     },
                 ),
@@ -550,11 +550,11 @@ class TestRouter:
             auth=AuthConfig(bearer_token_env="TEST"),
             backends={
                 "memory": Backend(
-                    url="http://mcp-memory:8006/mcp",
+                    url="http://mcp-memory:8000/mcp",
                     tools_allow=["*"],
                     response_guards={
                         "memory_search": {
-                            "content": ParameterConstraint(deny=["*Red Hat*"]),
+                            "content": ParameterConstraint(deny=["*NIGHTJAR*"]),
                         }
                     },
                 ),
@@ -745,7 +745,7 @@ class TestRouter:
         runs its circuit breaker check.  The circuit-open backend never reaches
         the transport; the healthy backend does.
         """
-        slack_url = "http://mcp-slack:8005/mcp"
+        slack_url = "http://mcp-slack:8000/mcp"
         for _ in range(3):
             breaker.record_failure(slack_url)
 
@@ -780,7 +780,7 @@ class TestRouter:
 
     async def test_tools_call_circuit_open_returns_error(self) -> None:
         """A tools/call to a circuit-open backend returns a JSON-RPC error immediately."""
-        slack_url = "http://mcp-slack:8005/mcp"
+        slack_url = "http://mcp-slack:8000/mcp"
         for _ in range(3):
             breaker.record_failure(slack_url)
 
@@ -839,7 +839,7 @@ class TestProfileToolsCache:
             auth=AuthConfig(bearer_token_env="TEST"),
             backends={
                 "mcp-slack": Backend(
-                    url="http://mcp-slack:8005/mcp",
+                    url="http://mcp-slack:8000/mcp",
                     tools_allow=["*"],
                 ),
             },

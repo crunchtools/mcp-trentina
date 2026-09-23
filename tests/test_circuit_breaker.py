@@ -9,8 +9,8 @@ from mcp_trentina_crunchtools.gateway.circuit import (
     State,
 )
 
-URL = "http://mcp-rotv:8080/mcp"
-URL_B = "http://mcp-slack:8005/mcp"
+URL = "http://mcp-rotv:8000/mcp"
+URL_B = "http://mcp-slack:8000/mcp"
 
 
 class TestCircuitBreaker:

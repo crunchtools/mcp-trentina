@@ -84,10 +84,10 @@ class TestAlertIngressConfig:
     def test_valid_config(self) -> None:
         cfg = AlertIngressConfig(
             token_env="MY_TOKEN",
-            forward_url="http://kagetora:8644/webhooks/nagios",
+            forward_url="http://agent1:8644/webhooks/nagios",
         )
         assert cfg.token_env == "MY_TOKEN"
-        assert cfg.forward_url == "http://kagetora:8644/webhooks/nagios"
+        assert cfg.forward_url == "http://agent1:8644/webhooks/nagios"
 
     def test_rejects_lowercase_env(self) -> None:
         with pytest.raises(ValueError, match="UPPERCASE"):

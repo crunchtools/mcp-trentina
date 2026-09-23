@@ -10,6 +10,17 @@ under that name.
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-09-22
+
+### Changed
+- **Examples, tests, docs and comments use a fictional roster** (RT #1504,
+  crunchtools/constitution 1.16.0 Section XVII). Real deployment names, a
+  private host name, personal addresses and a real employer used as the
+  example "secret" are replaced by `agent1`/`agent2`/`agent3`, `host01`,
+  `alice@example.com` and the codename `NIGHTJAR`. The example profile is now
+  `examples/profiles-agent1.yaml`, trimmed to five illustrative backends on
+  placeholder hosts. No behavior change.
+
 ## [0.20.0] - 2026-09-22
 
 ### Changed

@@ -71,7 +71,7 @@ class TestSkipRules:
     @pytest.mark.parametrize(
         ("text", "reason"),
         [
-            ("@takeda-crunchtools-bot:matrix.org", SkipReason.IDENTIFIER),
+            ("@agent3-crunchtools-bot:matrix.org", SkipReason.IDENTIFIER),
             ("!NGKyeztcJXyHwdbWbN:matrix.org", SkipReason.IDENTIFIER),
             ("$4_B35Bl-0ecc6c0E7TeZ9BZgYzMOEnqSRoj890hsHX8", SkipReason.IDENTIFIER),
             ("m.secret_storage.v1.aes-hmac-sha2".replace("-", "_"),
@@ -227,7 +227,7 @@ _SYNTHETIC_SYNC = json.dumps(
                             {
                                 "type": "m.room.encrypted",
                                 "event_id": "$4_B35Bl0ecc6c0E7TeZ9BZgYzMOEnqSRoj890hsHX8",
-                                "sender": "@fatherlinux:matrix.org",
+                                "sender": "@alice:example.org",
                                 "origin_server_ts": 1758412345678,
                                 "content": {
                                     "algorithm": "m.megolm.v1.aes_sha2",
@@ -238,7 +238,7 @@ _SYNTHETIC_SYNC = json.dumps(
                             {
                                 "type": "m.room.encrypted",
                                 "event_id": "$MvAg2sQ1X0ucCSV7WDKCKP1pQzCHt9BASPmfMu0RL2Q",
-                                "sender": "@takeda-crunchtools-bot:matrix.org",
+                                "sender": "@agent3-crunchtools-bot:matrix.org",
                                 "origin_server_ts": 1758412345679,
                                 "content": {
                                     "algorithm": "m.megolm.v1.aes_sha2",
@@ -259,10 +259,10 @@ _SYNTHETIC_SYNC = json.dumps(
                             },
                             {
                                 "type": "m.room.member",
-                                "state_key": "@fatherlinux:matrix.org",
+                                "state_key": "@alice:example.org",
                                 "content": {
                                     "membership": "join",
-                                    "displayname": "fatherlinux",
+                                    "displayname": "alice",
                                 },
                                 "origin_server_ts": 1758412330000,
                             },

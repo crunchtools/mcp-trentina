@@ -66,7 +66,7 @@ No new tools. Extends `quarantine_stats` output with compression metrics.
 ```yaml
 backends:
   gws-personal:
-    url: "http://gws-personal:8011/mcp"
+    url: "http://gws-personal:8000/mcp"
     compress_descriptions: true    # opt-in, default false
 ```
 

@@ -3,7 +3,7 @@
 > **Spec ID:** 004-content-tools
 > **Status:** Draft
 > **Version:** 0.2.0
-> **Author:** Scott McCarty / Josui
+> **Author:** Scott McCarty
 > **Date:** 2026-03-10
 > **GitHub Issue:** [#5](https://github.com/crunchtools/mcp-trentina/issues/5)
 
@@ -14,7 +14,7 @@ or a file path inside the container (read tools). This creates a hard dependency
 filesystem access or web availability — neither of which exists when another MCP agent
 needs to pass content through trentina's defense pipeline.
 
-Takeda (OpenClaw Signal bot) is the immediate consumer. It receives Signal
+agent3 (OpenClaw Signal bot) is the immediate consumer. It receives Signal
 messages containing URLs, pasted text, and decoded attachments. It connects to trentina
 over streamable-http on the same host but cannot mount volumes into the trentina
 container or serve content via HTTP for trentina to fetch.
@@ -264,7 +264,7 @@ The only new code is the tool orchestration layer in `content.py`.
 ## Dependencies
 
 - Depends on: None. All required infrastructure (pipeline, classifier, Q-Agent, database) exists.
-- Blocks: Takeda/OpenClaw trentina integration.
+- Blocks: agent3/OpenClaw trentina integration.
 
 ---
 

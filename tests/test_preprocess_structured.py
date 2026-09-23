@@ -37,7 +37,7 @@ def _issues(n: int, *, summary: str = "Nightly build failed") -> str:
                 "key": f"PROJ-{i}",
                 "summary": summary,
                 "status": "Open",
-                "assignee": "smccarty",
+                "assignee": "alice",
                 "updated": f"2026-09-{1 + i % 28:02d}T10:{i % 60:02d}:00Z",
             }
             for i in range(n)

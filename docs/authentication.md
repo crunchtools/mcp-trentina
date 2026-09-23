@@ -14,7 +14,7 @@ token in the static one.
 
 | Mechanism | Who mints the token | Client must support | Trentina's role | Use it for |
 |---|---|---|---|---|
-| **Static bearer** | You | Sending a header | Resource server with a shared secret | Agents you control — kagetora, takeda, scripts |
+| **Static bearer** | You | Sending a header | Resource server with a shared secret | Agents you control — agent1, agent3, scripts |
 | **OAuth proxy + DCR** | Trentina, proxying login to Google | Dynamic client registration | Authorization server **and** resource server | Claude Code and most MCP clients |
 | **OAuth proxy + provisioned client** | Trentina | A pasted Client ID and Secret | Authorization server + resource server | A console-configured connector willing to use our AS |
 | **Delegated issuer** | Google (or another IdP) directly | Linking to that IdP itself | Pure resource server | A connector that refuses a third-party AS. Not Gemini Custom Apps — see below |
@@ -144,9 +144,9 @@ a profile enables.
 
 ```yaml
 profiles:
-  kagetora:
+  agent1:
     auth:
-      bearer_token_env: TRENTINA_PROFILE_KAGETORA_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_AGENT1_TOKEN
 ```
 
 The token value lives in an environment variable, never in `profiles.yaml`.
@@ -166,13 +166,13 @@ itself at `/register`, and is sent through `/authorize` → Google → `/token`.
 
 ```yaml
 profiles:
-  josui:
+  agent2:
     auth:
-      bearer_token_env: TRENTINA_PROFILE_JOSUI_TOKEN
+      bearer_token_env: TRENTINA_PROFILE_AGENT2_TOKEN
     oauth:
       enabled: true
       allowed_emails:
-        - scott@example.com
+        - alice@example.com
 ```
 
 ```bash
@@ -272,7 +272,7 @@ product — so they are URLs rather than patterns.
 ```yaml
     oauth:
       enabled: true
-      allowed_emails: [scott@example.com]
+      allowed_emails: [alice@example.com]
       allowed_redirect_uris:
         - https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-1145977644041769710-mcp_example_com
 ```
@@ -315,7 +315,7 @@ you declare one.
 ```yaml
     oauth:
       enabled: true
-      allowed_emails: [scott@example.com]
+      allowed_emails: [alice@example.com]
       client_id: 375f3fdb-c322-41bc-8dc6-c2010a095f04
       client_secret_env: TRENTINA_GEMINI_APP_CLIENT_SECRET
       client_redirect_uris:
@@ -339,7 +339,7 @@ directly, and Trentina verifies the token that comes back.
 ```yaml
     oauth:
       enabled: true
-      allowed_emails: [scott@example.com]
+      allowed_emails: [alice@example.com]
       issuer: https://accounts.google.com
       audience_env: TRENTINA_GEMINI_GOOGLE_CLIENT_ID
 ```

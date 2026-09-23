@@ -171,7 +171,7 @@ class TestTheLockFiresAtStartup:
         cfg.write_text(
             """
 profiles:
-  josui:
+  agent2:
     auth:
       bearer_token_env: TRENTINA_TEST_TOKEN
     preprocess:
@@ -179,7 +179,7 @@ profiles:
       processors: ["petit"]
     backends:
       mcp-slack:
-        url: http://mcp-slack:8005/mcp
+        url: http://mcp-slack:8000/mcp
         tools_allow: ["*"]
 """
         )

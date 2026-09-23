@@ -23,12 +23,12 @@ Response guards are configured per-backend, per-tool, with exactly the shape of 
 ```yaml
 backends:
   memory:
-    url: "http://mcp-memory:8006/mcp"
+    url: "http://mcp-memory:8000/mcp"
     tools_allow: ["*"]
     response_guards:
       memory_search:
         content:
-          deny: ["*Red Hat*", "*RHEL*"]
+          deny: ["*NIGHTJAR*", "*Nightjar*"]
 ```
 
 When the backend answers, Trentina evaluates the guard against the raw result. On a match the whole response is withheld: the agent gets a JSON-RPC `-32602` error naming the field, never the content, and the call is audited as `denied_response_guard`.
@@ -57,7 +57,7 @@ Identical to parameter guards — the same `ParameterConstraint` model, validate
 
 In practice response guards are deny-oriented: `allow` is left at its default and `deny` carries the policy. An `allow` list is useful for a tool with a small known output vocabulary (a status tool that may only ever say `ok`), and a trap for anything free-form.
 
-Matching uses `fnmatch.fnmatchcase()`, which matches across newlines — so `*Red Hat*` catches the term anywhere inside a multi-line memory blob.
+Matching uses `fnmatch.fnmatchcase()`, which matches across newlines — so `*NIGHTJAR*` catches the term anywhere inside a multi-line memory blob.
 
 ## Pipeline Position
 
@@ -85,15 +85,15 @@ Scrubbing sounds friendlier and is worse. Partial delivery makes the guard a lea
 
 ```yaml
 memory:
-  url: "http://mcp-memory:8006/mcp"
+  url: "http://mcp-memory:8000/mcp"
   tools_allow: ["*"]
   response_guards:
     memory_search:
       content:
-        deny: ["*Red Hat*", "*RHEL*", "*redhat*"]
+        deny: ["*NIGHTJAR*", "*Nightjar*", "*nightjar*"]
     memory_list:
       content:
-        deny: ["*Red Hat*", "*RHEL*", "*redhat*"]
+        deny: ["*NIGHTJAR*", "*Nightjar*", "*nightjar*"]
 ```
 
 Leaves the backend usable for everything else. Fails open on paraphrase — read **What This Is Not** before relying on it.
@@ -102,7 +102,7 @@ Leaves the backend usable for everything else. Fails open on paraphrase — read
 
 ```yaml
 memory:
-  url: "http://mcp-memory:8006/mcp"
+  url: "http://mcp-memory:8000/mcp"
   tools_allow: ["*"]
   response_guards:
     memory_search:
@@ -115,7 +115,7 @@ Depends on no vocabulary and therefore cannot be paraphrased past. When *every* 
 
 ```yaml
 jira:
-  url: "http://mcp-jira:8021/mcp"
+  url: "http://mcp-jira:8000/mcp"
   tools_allow: ["*"]
   response_guards:
     jira_get_issue:

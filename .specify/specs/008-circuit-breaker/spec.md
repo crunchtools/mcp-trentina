@@ -8,7 +8,7 @@
 
 ## Overview
 
-Trentina is critical infrastructure — every Claude Code session, every agent (Kagetora, Takeda), and every LLM proxy request flows through it. A single unreachable backend MCP server currently blocks the entire `tools/list` response, taking down all profiles that reference that backend. This spec adds a circuit breaker to the gateway backend layer so that backend failures are isolated, fast, and self-healing.
+Trentina is critical infrastructure — every Claude Code session, every agent (agent1, agent3), and every LLM proxy request flows through it. A single unreachable backend MCP server currently blocks the entire `tools/list` response, taking down all profiles that reference that backend. This spec adds a circuit breaker to the gateway backend layer so that backend failures are isolated, fast, and self-healing.
 
 ---
 
@@ -147,7 +147,7 @@ This change is internal to the gateway. No new MCP tools are added.
 ```yaml
 backends:
   rotv:
-    url: http://mcp-rotv:8080/mcp
+    url: http://mcp-rotv:8000/mcp
     timeout_seconds: 30        # operational call timeout (existing)
     list_timeout_seconds: 10   # tools/list timeout (new, default 10)
 ```

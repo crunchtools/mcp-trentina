@@ -52,9 +52,9 @@ class TestParameterGuards:
     def test_exact_allow_match_passes(self) -> None:
         result = check_parameter_guards(
             "send_gmail_message",
-            {"to": "scott@gmail.com"},
+            {"to": "alice@example.com"},
             _backend({
-                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+                "send_gmail_message": {"to": ParameterConstraint(allow=["alice@example.com"])}
             }),
         )
         assert result is None
@@ -62,8 +62,10 @@ class TestParameterGuards:
     def test_glob_allow_match_passes(self) -> None:
         result = check_parameter_guards(
             "send_gmail_message",
-            {"to": "you@redhat.com"},
-            _backend({"send_gmail_message": {"to": ParameterConstraint(allow=["*@redhat.com"])}}),
+            {"to": "you@corp.example.com"},
+            _backend({
+                "send_gmail_message": {"to": ParameterConstraint(allow=["*@corp.example.com"])}
+            }),
         )
         assert result is None
 
@@ -72,7 +74,7 @@ class TestParameterGuards:
             "send_gmail_message",
             {"to": "evil@example.com"},
             _backend({
-                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+                "send_gmail_message": {"to": ParameterConstraint(allow=["alice@example.com"])}
             }),
         )
         assert result is not None
@@ -81,12 +83,12 @@ class TestParameterGuards:
     def test_deny_wins_over_allow(self) -> None:
         result = check_parameter_guards(
             "send_gmail_message",
-            {"to": "banned@redhat.com"},
+            {"to": "banned@corp.example.com"},
             _backend({
                 "send_gmail_message": {
                     "to": ParameterConstraint(
-                        allow=["*@redhat.com"],
-                        deny=["banned@redhat.com"],
+                        allow=["*@corp.example.com"],
+                        deny=["banned@corp.example.com"],
                     )
                 }
             }),
@@ -99,7 +101,7 @@ class TestParameterGuards:
             "send_gmail_message",
             {"subject": "hello"},
             _backend({
-                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+                "send_gmail_message": {"to": ParameterConstraint(allow=["alice@example.com"])}
             }),
         )
         assert result is None
@@ -109,7 +111,7 @@ class TestParameterGuards:
             "send_gmail_message",
             {"to": None},
             _backend({
-                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+                "send_gmail_message": {"to": ParameterConstraint(allow=["alice@example.com"])}
             }),
         )
         assert result is None
@@ -117,13 +119,13 @@ class TestParameterGuards:
     def test_multiple_params_first_failure_reported(self) -> None:
         guards = {
             "send_gmail_message": {
-                "to": ParameterConstraint(allow=["scott@gmail.com"]),
-                "cc": ParameterConstraint(allow=["scott@gmail.com"]),
+                "to": ParameterConstraint(allow=["alice@example.com"]),
+                "cc": ParameterConstraint(allow=["alice@example.com"]),
             }
         }
         result = check_parameter_guards(
             "send_gmail_message",
-            {"to": "scott@gmail.com", "cc": "evil@example.com"},
+            {"to": "alice@example.com", "cc": "evil@example.com"},
             _backend(guards),
         )
         assert result is not None
@@ -142,7 +144,7 @@ class TestParameterGuards:
             "send_gmail_message",
             {},
             _backend({
-                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+                "send_gmail_message": {"to": ParameterConstraint(allow=["alice@example.com"])}
             }),
         )
         assert result is None
@@ -153,7 +155,7 @@ class TestParameterGuards:
             "send_gmail_message",
             {"to": secret},
             _backend({
-                "send_gmail_message": {"to": ParameterConstraint(allow=["scott@gmail.com"])}
+                "send_gmail_message": {"to": ParameterConstraint(allow=["alice@example.com"])}
             }),
         )
         assert result is not None
@@ -165,25 +167,25 @@ class TestResponseGuards:
 
     def test_no_guards_configured_passes(self) -> None:
         result = check_response_guards(
-            "memory_search", _text("Red Hat roadmap"), None, _backend()
+            "memory_search", _text("NIGHTJAR roadmap"), None, _backend()
         )
         assert result is None
 
     def test_no_guard_for_this_tool_passes(self) -> None:
         result = check_response_guards(
             "memory_list",
-            _text("Red Hat roadmap"),
+            _text("NIGHTJAR roadmap"),
             None,
-            _guarded("content", deny=["*Red Hat*"]),
+            _guarded("content", deny=["*NIGHTJAR*"]),
         )
         assert result is None
 
     def test_content_deny_pattern_blocks(self) -> None:
         result = check_response_guards(
             "memory_search",
-            _text("The Red Hat roadmap for next year"),
+            _text("The NIGHTJAR roadmap for next year"),
             None,
-            _guarded("content", deny=["*Red Hat*"]),
+            _guarded("content", deny=["*NIGHTJAR*"]),
         )
         assert result is not None
         assert "deny" in result
@@ -193,7 +195,7 @@ class TestResponseGuards:
             "memory_search",
             _text("The motorcycle trip to Trentino"),
             None,
-            _guarded("content", deny=["*Red Hat*"]),
+            _guarded("content", deny=["*NIGHTJAR*"]),
         )
         assert result is None
 
@@ -219,20 +221,20 @@ class TestResponseGuards:
         """A memory blob arrives as several blocks; the guard reads them joined."""
         result = check_response_guards(
             "memory_search",
-            _text("entry one\nsecond line", "entry two mentioning Red Hat\nand more"),
+            _text("entry one\nsecond line", "entry two mentioning NIGHTJAR\nand more"),
             None,
-            _guarded("content", deny=["*Red Hat*"]),
+            _guarded("content", deny=["*NIGHTJAR*"]),
         )
         assert result is not None
         assert "deny" in result
 
     def test_embedded_resource_text_is_read(self) -> None:
-        blocks = [{"type": "resource", "resource": {"text": "Red Hat internal note"}}]
+        blocks = [{"type": "resource", "resource": {"text": "NIGHTJAR internal note"}}]
         result = check_response_guards(
             "memory_search",
             blocks,
             None,
-            _guarded("content", deny=["*Red Hat*"]),
+            _guarded("content", deny=["*NIGHTJAR*"]),
         )
         assert result is not None
 
@@ -240,8 +242,8 @@ class TestResponseGuards:
         result = check_response_guards(
             "memory_search",
             _text("harmless"),
-            {"summary": "Red Hat product plans"},
-            _guarded("summary", deny=["*Red Hat*"]),
+            {"summary": "NIGHTJAR product plans"},
+            _guarded("summary", deny=["*NIGHTJAR*"]),
         )
         assert result is not None
         assert "summary" in result
@@ -251,7 +253,7 @@ class TestResponseGuards:
             "memory_search",
             _text("harmless"),
             {"other": "value"},
-            _guarded("summary", deny=["*Red Hat*"]),
+            _guarded("summary", deny=["*NIGHTJAR*"]),
         )
         assert result is None
 
@@ -260,7 +262,7 @@ class TestResponseGuards:
             "memory_search",
             _text("harmless"),
             None,
-            _guarded("summary", deny=["*Red Hat*"]),
+            _guarded("summary", deny=["*NIGHTJAR*"]),
         )
         assert result is None
 
@@ -280,18 +282,18 @@ class TestResponseGuards:
             "memory_search",
             blocks,
             None,
-            _guarded("content", deny=["*Red Hat*"]),
+            _guarded("content", deny=["*NIGHTJAR*"]),
         )
         assert result is None
 
     def test_error_message_does_not_leak_content(self) -> None:
-        secret = "Red Hat RHEL 11 ship date is a secret"
+        secret = "Example Corp NIGHTJAR ship date is a secret"
         result = check_response_guards(
             "memory_search",
             _text(secret),
             None,
-            _guarded("content", deny=["*Red Hat*"]),
+            _guarded("content", deny=["*NIGHTJAR*"]),
         )
         assert result is not None
         assert secret not in result
-        assert "RHEL" not in result
+        assert "ship date" not in result

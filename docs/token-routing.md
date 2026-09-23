@@ -95,7 +95,7 @@ inherits from the profile.
 
 ```yaml
 profiles:
-  kagetora:
+  agent1:
     preprocess:
       enabled: true
       strategy: auto          # none | chain | best_of | auto
@@ -104,7 +104,7 @@ profiles:
       min_bytes: 4096         # below this, leave the response alone
     backends:
       syslog:
-        url: http://mcp-syslog:8027/mcp
+        url: http://mcp-syslog:8000/mcp
         preprocess_tools:               # per-tool overrides, keyed by tool name
           syslog_tail_tool:
             strategy: chain             # log-shaped: always worth petit
@@ -190,7 +190,7 @@ profiles:
 ```yaml
 profiles:
   # Human-supervised IDE agent — light delegation
-  josui:
+  agent2:
     delegation:
       enabled: true
       worker_model: gemini-2.5-flash
@@ -209,7 +209,7 @@ profiles:
           enabled: true
 
   # Chat agent — no delegation (doesn't read code)
-  takeda:
+  agent3:
     delegation:
       enabled: false
 ```

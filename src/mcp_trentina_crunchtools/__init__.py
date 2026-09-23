@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.20.0"
+__version__ = "0.20.1"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -868,7 +868,7 @@ def _build_proxy_provider(
     # proxied profiles only the pinned one authorizes. See CHANGELOG 0.8.3.
     #
     # Never over `enabled`: a delegated profile presents no token here, and
-    # names sort, so "gemini-app" would win over "josui" and fail every proxy
+    # names sort, so a delegated "gemini-app" would win over a proxied "web" and fail every proxy
     # /authorize with invalid_target.
     resource_profile = sorted(proxied)[0]
     resource_url = f"{base_url}/gateway/{resource_profile}/mcp"
