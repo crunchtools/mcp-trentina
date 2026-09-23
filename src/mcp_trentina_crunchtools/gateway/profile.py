@@ -145,18 +145,13 @@ ProcessorName = Literal[
     "select",
     "matrix",
 ]
-# FREE only. `html` runs FIRST because it is the only CONVERTER here: it
-# rewrites markup into Markdown, and the reducers behind it should be grouping
-# the text a human would read rather than tag soup. It is also the one whose
-# absence costs a whole attack class (`l1/hidden.py`, tier 1), which is why it
-# is a default rather than opt-in.
+# FREE only. `html` runs FIRST: it is the only CONVERTER, so the reducers
+# behind it group the text a human would read rather than tag soup, and its
+# absence costs a whole attack class (`l1/hidden.py`, tier 1).
 #
-# The rest are ordered by how cheaply each can decline: structured and email
-# reject a payload of the wrong shape on their first check, so petit — which
-# has to group every line before it knows — goes last.
-#
-# summarize is selectable but never a default: it is METERED and its output
-# draws unconditional L3, so it costs two model calls.
+# The rest are ordered by how cheaply each can decline; petit has to group
+# every line before it knows, so it goes last. summarize is selectable but
+# never a default: METERED, and its output draws unconditional L3.
 _DEFAULT_PROCESSORS: list[ProcessorName] = ["html", "structured", "email", "petit"]
 
 # Fields of MatrixPreProcessConfig an AGENT may change by reloading its own

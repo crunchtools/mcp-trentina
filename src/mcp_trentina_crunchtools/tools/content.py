@@ -145,17 +145,20 @@ async def safe_content(
 async def quarantine_content(
     content: str,
     prompt: str = "Extract the main content.",
-    content_type: str = "text/plain",  # noqa: ARG001 - public tool parameter
+    content_type: str = "text/plain",
 ) -> dict[str, Any]:
     """Sanitize + Q-Agent extraction on inline content.
 
     Warns but proceeds if content hash is in blocklist.
 
     ``content_type`` no longer selects a pipeline — L1 is format-agnostic
-    (#172) — but it stays in the signature because it is part of the tool's
-    published surface, and because it is the authoritative hint a converter
-    would want once processors become selectable per call.
+    (#172) — but it stays in the signature as published tool surface, and as
+    the authoritative hint a converter will want once processors become
+    selectable per call. Discarded explicitly rather than silently, so the
+    next reader does not go looking for the branch it used to pick.
     """
+    del content_type
+
     start_time = time.time()
     config = get_config()
 
