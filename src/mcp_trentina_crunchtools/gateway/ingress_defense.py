@@ -284,11 +284,11 @@ async def scan_tool_response(
     warn — deliver intact, warning attached (`blocked=False`).
     block — a flagged response is refused (`blocked=True`); the caller
         delivers the warning INSTEAD of the content.
-    clean — currently degrades to block with a logged notice. The extraction
-        response contract ships when the first interactive profile flips to
-        it; until then failing closed is the only honest reading, because
-        falling back to warn would silently deliver the very bytes the mode
-        exists to replace.
+
+    Those are the only two. `clean` used to be accepted here and degraded to
+    block with a logged notice; since 0.27.0 a profile naming it is refused
+    at LOAD, because a config that names a capability the gateway does not
+    have is a config that lies to whoever reads it.
 
     Flags are recorded to the detections table (source_type="tool_response")
     except on a verdict-cache hit.
@@ -327,12 +327,12 @@ async def scan_tool_response(
             "backend": backend_name,
             "tool": tool_name,
             "direction": "response",
-            "blocked": enforcement in ("block", "clean"),
+            "blocked": enforcement != "warn",
         },
     )
     warning = build_warning(verdict, unscannable=unscannable)
 
-    # Under block/clean, "we could not finish judging this" is treated
+    # Under block, "we could not finish judging this" is treated
     # exactly like "this is hostile" — the adversarial review's H1/H3:
     # padding a response past the classifier's token cap made L2 scan only
     # the benign head, and an L3 outage answered "clean" — either one used
@@ -348,7 +348,13 @@ async def scan_tool_response(
     unjudgeable = l2_truncated or l3_unavailable
 
     blocked = False
-    if (verdict.flagged or unjudgeable) and enforcement in ("block", "clean"):
+    # `!= "warn"` rather than `== "block"`, deliberately. `warn` is the only
+    # mode that DELIVERS flagged content, so making it the sole exception
+    # means any mode added later fails closed until someone implements it.
+    # The opposite spelling puts a new mode on the delivering side by
+    # default, which is how an unimplemented enforcement mode becomes a hole
+    # rather than an outage.
+    if (verdict.flagged or unjudgeable) and enforcement != "warn":
         blocked = True
         if warning is None:
             # build_warning() only returns None when nothing was flagged and
@@ -358,11 +364,6 @@ async def scan_tool_response(
             # block under python -O.
             raise RuntimeError(
                 "ingress_defense: warning is None while blocking -- invariant violated"
-            )
-        if enforcement == "clean":
-            logger.warning(
-                "gateway: enforcement=clean not yet implemented — failing "
-                "closed (block) for profile=%s", profile.name,
             )
         if unjudgeable and not verdict.flagged:
             logger.warning(
@@ -443,7 +444,7 @@ async def scan_tool_list(
                     "backend": backend_name,
                     "tool": str(tool.get("name", "?")),
                     "direction": "tool_list",
-                    "blocked": effective_enforcement(profile) in ("block", "clean"),
+                    "blocked": effective_enforcement(profile) != "warn",
                 },
             )
             warning = build_warning(verdict)

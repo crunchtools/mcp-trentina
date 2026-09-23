@@ -139,15 +139,15 @@ Each profile configures its defense **policy** — never the layers' existence. 
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `enforcement` | string | `warn` | What a flagged response becomes: `warn` (delivered intact + warning — the calibration mode), `block` (refused — autonomous agents), `clean` (Q-Agent rewrite — interactive agents; not yet implemented, fails closed to `block`) |
+| `enforcement` | string | `warn` | What a flagged response becomes: `warn` (delivered intact + warning — the calibration mode) or `block` (refused — autonomous agents). `clean` is refused at load: the clean_* TOOLS work, the enforcement mode never has |
 | `l2_threshold` | float | `0.5` | L2 score at/above which content is flagged, in addition to the model's own MALICIOUS label. Lower = stricter. |
 | `l3_threshold` | float | `0.7` | **Deprecated and ignored.** L3 runs on every input the gateway scans; there is no score gate. Retained for one release so existing profiles keep loading, removed in 0.12.0. |
 | `audit` | bool | `true` | Write detection rows to SQLite |
 | `provider` | string | `null` | LLM provider override (`gemini`, `openai`, `anthropic`, `ollama`) |
 
-An autonomous agent runs `enforcement: block` with a strict `l2_threshold`; a human-supervised agent runs `clean` or `warn`. `TRENTINA_ENFORCEMENT_OVERRIDE=warn` is the global kill switch for the night a block threshold misfires.
+An autonomous agent runs `enforcement: block` with a strict `l2_threshold`; a human-supervised agent runs `warn`. `TRENTINA_ENFORCEMENT_OVERRIDE=warn` is the global kill switch for the night a block threshold misfires.
 
-`annotate` and `extract` are the pre-0.25.0 spellings of `warn` and `clean`. They still load, with a warning naming the release that removes them (0.27.0).
+`annotate` and `extract` are the pre-0.25.0 spellings. They still load, with a warning naming the release that removes them (0.28.0). `annotate` becomes `warn`; `extract` becomes `block`, which is what it already did — it shipped unimplemented and always failed closed.
 
 The `provider` field lets each profile use a different LLM for L3 Q-Agent operations and tool description compression. When omitted, the profile uses the global `TRENTINA_MODEL_PROVIDER` environment variable. All provider API keys must be present in the environment regardless of which profiles use them.
 
