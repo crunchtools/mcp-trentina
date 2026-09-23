@@ -2,13 +2,39 @@
 
 Trentina runs untrusted content through three independent detection layers before it reaches your agent. Each layer catches attack categories the others miss. No single layer — structural, classifier, or LLM — covers everything.
 
+## Two roles: guards decide, pre-processors transform
+
+Everything Trentina wires into a request path is one of exactly two things. If you are adding a driver and it seems to be neither, it is one of them and you have not decided which yet.
+
+**Guards make the final call on admission to the trust perimeter.** Nothing else does. There are three kinds and they are named here so that "what decides?" is answerable from the docs rather than from `git log`:
+
+| guard | what it judges | where |
+|---|---|---|
+| **Parameter guards** | the *arguments* of a `tools/call`, after the tool-name allowlist and before the backend is contacted | `gateway/guards.py`, [parameter-guards.md](parameter-guards.md) |
+| **Response guards** | the backend's *result*, after the call returns and before anything is transformed, scanned or relayed | `gateway/guards.py`, [response-guards.md](response-guards.md) |
+| **The scanner** | content, through L1 → L2 → L3 below | `defense.py` — and `defend()` is the only entry point, enforced by `tests/test_defense_contract.py` |
+
+A guard also decides **what it reads**. On a payload too large or too opaque to scan whole, the scanner's read policy (`scanview/`) selects which strings reach L1/L2/L3 and accounts for every byte it declined — coverage, a skip histogram by reason, and `low_scan_coverage` when it falls below the floor. That privilege belongs to guards because deciding how thoroughly to judge *is* a judgement.
+
+**Pre-processors are everything before that.** They run outside the perimeter, their output is exactly as untrusted as their input, and everything they emit crosses the guards on the way in. They may decode, decrypt, reduce, summarize, normalize, split and reshape — the contract is transformation generally, not reduction (`preprocess/base.py`, and [token-routing.md](token-routing.md) for how they are configured).
+
+### The line between them
+
+One rule separates the roles, and it is the reason `scanview/` is guard machinery rather than a third kind of driver:
+
+> **A pre-processor may never open a gap between what is scanned and what is delivered.** Its output is both. A driver that scans *less* than it delivers is a guard's read policy, never a pre-processor.
+
+The two halves are opposite security readings of the same verb. What a pre-processor drops never reaches the agent *or* the scanner, which is what makes fingerprint-collision games pointless — colliding your payload into a collapsed group deletes it. An extractor is the inverse: the full original is delivered while a subset is scanned, so colliding into a skipped bucket would deliver your payload unscanned. One Protocol cannot honestly carry both, which is why each role gets its own, and why they share exactly one piece of wiring — the registry and channel lock in `gateway/drivers.py`.
+
+Their failure modes point in opposite directions for the same reason. A pre-processor fails open to **delivering the original**; a read policy fails open to **scanning everything**. Both mean "on failure, do the thing that hides nothing."
+
 ## What crosses the pipeline
 
 Everything entering through the gateway is judged at its ingress — the firewall model: filter where content enters, once.
 
 - **MCP tool responses** from every remote backend: text blocks, resource text, and every string leaf of `structuredContent`, judged as one document (recorded as `source_type=tool_response`). Image blocks and binary blobs cannot be judged; their counts ride in the warning.
 - **Tool definitions** on every `tools/list`: name, title, description, `inputSchema`, annotations — the MCP tool-poisoning channel (`tool_description`). Runs on post-compression text; a description the compressor rewrote is model output and gets unconditional L3.
-- **Matrix**: `/sync` and room `/messages` responses, buffered and judged whole (`matrix_sync`). E2EE rooms are ciphertext at the proxy — encrypted rooms are outside what any gateway can defend, and we say so.
+- **Matrix**: `/sync` and room `/messages` responses, buffered and judged whole (`matrix_sync`). E2EE rooms are ciphertext on the wire; with `scan_view.decrypt` configured the proxy terminates Megolm to build the scan view and forwards the original ciphertext untouched, so the homeserver never sees plaintext and the agent still decrypts for itself. Decryption is read-only, additive and ephemeral — recovered plaintext exists only in the scan view. Without it, encrypted rooms are outside what the gateway can read, and the coverage gap is counted and reported rather than assumed.
 - **LLM completions** through the proxy, judged post-stream (`llm_completion`).
 - **Alert webhooks** (`alert`), and the standalone web tools (`safe_*`, `quarantine_*`).
 

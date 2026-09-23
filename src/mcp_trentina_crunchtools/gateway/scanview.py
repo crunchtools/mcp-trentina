@@ -1,17 +1,18 @@
-"""Extractor registry and the one place a scan view gets built.
+"""The one place a scan view gets built and reported.
 
-Sibling of ``gateway/reduce.py``, which does the same job for pre-processors.
-The two registries answer different questions — reduce asks "what can this
-payload be shrunk to", this asks "what of this payload must be read" — and
-they deliberately do not share a Protocol, for the reason spelled out in
-``scanview/base.py``.
+A guard read policy (``scanview/``) is selected by name in ``profiles.yaml``;
+``gateway/drivers.py`` turns that name into an extractor and enforces the
+channel lock. This module is the call site: run the extractor the profile
+asked for, degrade to a full scan if it fails, and turn the coverage
+accounting into the fields an operator reads.
 
-Channel locking lives here. An extractor declares which ingresses it
-understands and selecting one it does not is a load-time error, not a runtime
-surprise. That matters because the failure is silent otherwise: a Matrix
-extractor pointed at alert-ingress JSON would find no Matrix event shape,
-fall through to generic rules, and produce a perimeter nobody had checked
-against that payload.
+Until issue #160 this file also held a second driver registry, a mirror of
+the pre-processor one in ``reduce.py``. Two registries for two roles is how
+the pre-processor table ended up with no channel lock at all; both tables now
+live in ``drivers.py`` behind one mechanism and one parity test. The roles
+stay distinct — a pre-processor may never scan less than it delivers, which
+is exactly what an extractor does — and that distinction lives in the
+Protocols, not in a duplicated lookup table.
 """
 
 from __future__ import annotations
@@ -19,65 +20,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from ..scanview import (
-    Channel,
-    FullExtractor,
-    GenericExtractor,
-    MatrixExtractor,
-    ScanView,
-    ScanViewContext,
-    ScanViewExtractor,
-)
-from .errors import ProfileConfigError
-from .profile import ScanViewConfig
+from ..scanview import FullExtractor, ScanView
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from ..scanview import ScanViewContext, ScanViewExtractor
+    from .profile import ScanViewConfig
 
 logger = logging.getLogger(__name__)
-
-# Factories, not the singletons gateway/reduce.py uses: an extractor may own
-# per-profile state (the Matrix one will own a key cache), so one instance per
-# configured profile rather than one per process.
-_REGISTRY: dict[str, Callable[[ScanViewConfig, Any], ScanViewExtractor]] = {
-    "full": lambda _cfg, _keys: FullExtractor(),
-    "generic": lambda cfg, _keys: GenericExtractor(
-        skip_sample_bytes=cfg.skip_sample_bytes
-    ),
-    "matrix": lambda cfg, keys: MatrixExtractor(
-        generic=GenericExtractor(skip_sample_bytes=cfg.skip_sample_bytes),
-        keys=keys,
-    ),
-}
-
-
-def build_extractor(
-    cfg: ScanViewConfig | None,
-    *,
-    channel: Channel,
-    profile_name: str = "",
-    keys: Any = None,
-) -> ScanViewExtractor:
-    """Construct the configured extractor, or fail closed at config load.
-
-    ``None`` means "no scan_view block", which is the same thing as the
-    default: read everything.
-    """
-    cfg = cfg or ScanViewConfig()
-    factory = _REGISTRY.get(cfg.extractor)
-    if factory is None:  # pragma: no cover - the Literal makes this unreachable
-        raise ProfileConfigError(
-            f"Profile {profile_name!r}: unknown scan_view extractor "
-            f"{cfg.extractor!r}; known: {sorted(_REGISTRY)}"
-        )
-    extractor = factory(cfg, keys)
-    if channel not in extractor.channels:
-        raise ProfileConfigError(
-            f"Profile {profile_name!r}: scan_view extractor "
-            f"{cfg.extractor!r} is not valid on the {channel.value} channel "
-            f"(valid: {sorted(c.value for c in extractor.channels)})"
-        )
-    return extractor
 
 
 async def build_scan_view(

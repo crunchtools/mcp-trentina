@@ -39,16 +39,18 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from starlette.responses import Response, StreamingResponse
 
+from ..channels import Channel
 from ..defense import defend, defend_scan_view
 from ..matrix.keybackup import KeyBackupProvider
-from ..scanview import Channel, ScanViewContext
+from ..scanview import ScanViewContext
+from .drivers import build_extractor
 from .proxy_utils import (
     PLAIN_TEXT,
     filter_response_headers,
     forward_request_headers,
     sanitize_proxy_path,
 )
-from .scanview import build_extractor, build_scan_view, describe
+from .scanview import build_scan_view, describe
 from .warning import build_warning
 
 if TYPE_CHECKING:

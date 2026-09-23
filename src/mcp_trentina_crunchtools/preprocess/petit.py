@@ -65,6 +65,7 @@ import asyncio
 
 from petit import PetitError, analyze_text
 
+from ..channels import Channel
 from .base import Cost, PreProcessContext, PreProcessResult
 from .volatile import VOLATILE
 
@@ -88,6 +89,7 @@ class PetitProcessor:
 
     name = "petit"
     cost = Cost.FREE
+    channels = frozenset({Channel.TOOL})
 
     async def run(self, payload: str, _ctx: PreProcessContext) -> PreProcessResult:
         # petit reduces by line structure alone; it reads no job context.

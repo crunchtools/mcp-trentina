@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import re
 
+from ..channels import Channel
 from .base import Cost, PreProcessContext, PreProcessResult
 
 # A quoted line: any number of ">" markers, optionally spaced, at the start.
@@ -173,6 +174,7 @@ class EmailProcessor:
 
     name = "email"
     cost = Cost.FREE
+    channels = frozenset({Channel.TOOL})
 
     async def run(self, payload: str, _ctx: PreProcessContext) -> PreProcessResult:
         # Reduction is driven by the payload's shape; it reads no job context.

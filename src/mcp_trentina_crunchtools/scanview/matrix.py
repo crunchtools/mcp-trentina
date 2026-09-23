@@ -29,7 +29,8 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
-from .base import Channel, ScanView, ScanViewContext, SkipReason, UndecryptableEvent
+from ..channels import Channel
+from .base import ScanView, ScanViewContext, SkipReason, UndecryptableEvent
 from .walk import iter_leaves
 
 if TYPE_CHECKING:

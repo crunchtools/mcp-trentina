@@ -10,6 +10,57 @@ under that name.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-22
+
+### Changed
+- **Two driver roles, not three: guards decide, pre-processors transform.**
+  Trentina had `preprocess/` (reducers), `scanview/` (extractors) and a planned
+  third shape for the Matrix bridge. The extractor/pre-processor split was
+  justified at the time and it was a symptom, not a design. Closes #160.
+
+  The load-bearing question was how a driver that **scans less than it
+  delivers** is expressed, because that is the one thing the two contracts
+  disagree about. It is now answered in one line, in `preprocess/base.py`
+  invariant 2: a pre-processor may never open a gap between what is scanned
+  and what is delivered. A driver that wants one is a GUARD choosing what it
+  reads, because deciding how thoroughly to judge is a judgement.
+
+  So `scanview/` is reclassified as guard machinery — the scanner's read
+  policy — rather than a sibling of `preprocess/`. It is not retired: reading
+  less is the only lever that keeps the Matrix perimeter inside OpenClaw's
+  30-second readiness budget, and S1-S5 still bind it. What changes is that it
+  is no longer a second driver framework that a third one could be modelled on.
+
+- **One registry** (`gateway/drivers.py`) replaces the two that each role had.
+  Both tables, one channel-locking mechanism, one parity test
+  (`tests/test_gateway_drivers.py`). The duplication was not free: the lock was
+  written once, in the extractor half, and the pre-processor table never got a
+  copy.
+
+- **`gateway/reduce.py` is `gateway/transform.py`**, and `reduce_response` is
+  `transform_response`. The contract has been transformation rather than
+  reduction since 0.19.1; the file name was the last place still saying
+  otherwise. Internal — no configuration key changes.
+
+### Added
+- **Pre-processors declare their channels, and the lock is enforced at
+  startup.** All four ship as `tool`-only, which is the only channel that
+  hands a pre-processor a string today. `loader._check_drivers` builds every
+  driver a profile names and discards the result, so a driver on a channel it
+  does not declare is a refused start for BOTH roles. It previously fired on
+  the first request that happened to use the driver, which is a latent outage
+  rather than a lock.
+
+- **The guards are named as a role in `docs/defense-pipeline.md`**, so "what
+  makes the final call" is answerable from the docs: parameter guards,
+  response guards, and the scanner, with the line between guards and
+  pre-processors stated as a rule rather than implied by two docstrings.
+
+### Fixed
+- `docs/defense-pipeline.md` still said E2EE rooms were "outside what any
+  gateway can defend". Megolm termination for the scan view shipped in 0.18.0
+  (#150); ciphertext is still forwarded untouched, and the doc now says both.
+
 ## [0.19.1] - 2026-09-22
 
 ### Changed

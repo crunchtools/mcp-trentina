@@ -1,7 +1,12 @@
-"""Scan-view extraction: choosing what the defense pipeline reads."""
+"""Scan-view extraction: a guard choosing what it reads.
 
+Guard machinery, not a driver role of its own -- see ``base.py`` for why
+"scans less than it delivers" is a guard's privilege and a pre-processor's
+prohibition, and ``channels.py`` for the two roles.
+"""
+
+from ..channels import Channel
 from .base import (
-    Channel,
     ScanView,
     ScanViewContext,
     ScanViewExtractor,

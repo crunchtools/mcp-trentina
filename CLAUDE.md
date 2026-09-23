@@ -128,10 +128,14 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
 - `perimeter_db.py` — the perimeter's own store, deliberately a second database:
   verdicts `defend()` reached, so a restart does not re-judge ~210 tool
   descriptions through all three layers before the first `tools/list` answers
+- `channels.py` — the two driver roles and the ingresses a driver may be bound
+  to. Guards decide admission; pre-processors transform outside the perimeter.
+  Everything wired into a request path is one of the two.
 - `preprocess/` — Payload transformation, OUTSIDE the perimeter. May subtract
   but never absolve: it drops, collapses, normalizes and restructures, and
   everything it emits still crosses `defend()` as untrusted. Reduction is the
-  common case, not the contract.
+  common case, not the contract. A pre-processor may never scan less than it
+  delivers — that is a guard's privilege, see `scanview/`.
   - `petit.py` — line grouping via the `petit-log` package (petit itself,
     https://github.com/crunchtools/petit), pinned to `driver="RawEntry"` with
     our own `stopwords`. Both arguments are load-bearing: petit's format
@@ -145,5 +149,15 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
     leaves repeated footers to petit, which is what `chain` is for.
   - `volatile.py` — the one normalization policy all of them share. Import
     it; a second copy is a second, weaker security rule.
+- `scanview/` — the scanner's read policy: which strings L1/L2/L3 actually
+  read out of a payload that is delivered whole. GUARD machinery, not a driver
+  role of its own and not a sibling of `preprocess/` — it is the one place
+  allowed to scan less than it delivers, and it accounts for every byte it
+  declined. S1-S5 in `scanview/base.py`.
 - `gateway/` — Per-consumer MCP gateway proxy with tool allowlists, parameter guards, and defense pipeline
   - **Parameter guards**: per-tool argument validation with allow/deny value patterns — see `docs/gateway-design.md`
+  - `drivers.py` — the ONE registry. A configured name becomes a driver, for
+    either role, with one channel lock and one parity test. Two registries
+    here is what left the pre-processor table with no channel lock at all.
+  - `transform.py` — the pre-processor call site on the tool path (was
+    `reduce.py`; the contract is transformation, not reduction).

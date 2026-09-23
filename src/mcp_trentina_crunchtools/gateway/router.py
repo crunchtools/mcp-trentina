@@ -39,7 +39,7 @@ from .filter import filter_tools
 from .guards import check_parameter_guards, check_response_guards
 from .ingress_defense import scan_tool_list, scan_tool_response
 from .internal import call_internal_tool, list_internal_tools
-from .reduce import reduce_response
+from .transform import transform_response
 
 if TYPE_CHECKING:
     from .profile import Backend, Profile
@@ -461,7 +461,7 @@ async def _assemble_call_result(
     # Internal tools are excluded for the same reason they skip the scan —
     # they run the pipeline at their own ingress.
     if not backend.is_internal:
-        reduced = await reduce_response(
+        reduced = await transform_response(
             profile=profile,
             backend=backend,
             backend_name=backend_name,

@@ -23,7 +23,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .base import Channel, ScanView, ScanViewContext, SkipReason
+from ..channels import Channel
+from .base import ScanView, ScanViewContext, SkipReason
 from .shapes import MIN_SKIP_LEN, classify_skip
 from .walk import iter_leaves
 

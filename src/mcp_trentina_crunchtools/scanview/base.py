@@ -1,20 +1,33 @@
-"""Scan-view extractors — choosing what the defense pipeline reads.
+"""Scan-view extraction — a GUARD choosing what it reads.
 
-An extractor answers one question about a structured payload: which of its
-strings could carry language, and therefore an instruction? Everything it
-selects goes to L1/L2/L3. Everything it declines is counted and reported but
-never judged.
+Trentina has two driver roles (``channels.py``): guards decide admission,
+pre-processors transform outside the perimeter. This package is neither a
+third role nor a sibling of ``preprocess/``. It is guard machinery — the
+content guard's read policy, the part of the scanner that decides which
+strings it puts in front of L1/L2/L3.
 
-This is a sibling of ``preprocess/``, not an extension of it, and the
-difference is a safety property rather than taste. A pre-processor transforms
-a payload that is then scanned AND delivered — invariant 2 over there — so
+That classification is the answer to the one question the two-role model has
+to settle: **how is a driver that scans less than it delivers expressed?**
+It is expressed here, on the guard side, and it is FORBIDDEN on the other.
+
+The reasoning is a safety property, not taste. A pre-processor transforms a
+payload that is then scanned AND delivered -- invariant 2 over there -- so
 whatever it drops never reaches the agent either, which is what makes
-fingerprint-collision games pointless. That is why a pre-processor is allowed
-to subtract. An extractor is the inverse: the FULL original is delivered while
-only a subset is scanned, so colliding into a skipped bucket delivers your
-payload unscanned. An extractor therefore may not drop anything at all — it
-selects what is READ, never what is sent. One Protocol cannot honestly carry
-both readings.
+fingerprint-collision games pointless. An extractor is the inverse: the FULL
+original is delivered while only a subset is scanned, so colliding into a
+skipped bucket delivers your payload unscanned. Those are opposite security
+readings of the same verb, and the earlier design mistake was to give the
+second one its own driver framework as if the two were peers.
+
+They are not peers. Deciding how thoroughly to judge is a judgement, which
+makes it the guard's to make and the guard's to confess. So:
+
+  A pre-processor may never open a gap between what is scanned and what is
+  delivered. Only a guard may, only about its own reading, and only while
+  accounting for every byte it declined (S3).
+
+Everything a guard's read policy selects goes to L1/L2/L3. Everything it
+declines is counted and reported but never judged.
 
 Why this exists at all: a measured Matrix initial sync was 68,092 characters
 reaching the classifier, of which 45,552 were Megolm ciphertext, 13,352 were
@@ -25,31 +38,47 @@ runs and one that times out and is skipped entirely.
 
 Five invariants, none negotiable:
 
-S1 — DELIVERY IS UNTOUCHED. An extractor never influences the bytes forwarded
+S1 -- DELIVERY IS UNTOUCHED. An extractor never influences the bytes forwarded
    to the client. Its output reaches the wire through exactly one channel,
-   the ``_trentina_warning`` key.
+   the ``_trentina_warning`` key. This is the inverse of a pre-processor,
+   which owns delivery and owes nothing to the scan view; between them the
+   two roles cover both halves without either one holding both.
 
-S2 — SKIPPING IS STRUCTURAL, NEVER SEMANTIC. A string may be skipped only on
+S2 -- SKIPPING IS STRUCTURAL, NEVER SEMANTIC. A string may be skipped only on
    a property of its own shape: charset, length, absence of whitespace, a
    match against an identifier grammar. Never on its meaning, its sender, its
    room, or a classifier's opinion of it. The predicate is a pure function of
    the string. There is no trusted-sender list and there never will be, because
    the sender is the thing an attacker controls most cheaply.
 
-S3 — SKIPPING IS ACCOUNTED, AND LOW COVERAGE IS ITSELF A FINDING. Every
+S3 -- SKIPPING IS ACCOUNTED, AND LOW COVERAGE IS ITSELF A FINDING. Every
    skipped byte is counted by reason. The histogram rides into the audit
    record and into L3's briefing, because "this is the 4% that survived
    selection" is context a judge should have. A scan that read 2% of a
    document must not look like a scan that read all of it.
 
-S4 — DECRYPTION IS READ-ONLY, ADDITIVE AND EPHEMERAL. Plaintext an extractor
+S4 -- DECRYPTION IS READ-ONLY, ADDITIVE AND EPHEMERAL. Plaintext an extractor
    recovers exists only in the scan view: never forwarded, never written to
    disk, never logged in full.
 
-S5 — FAIL OPEN TO MORE SCANNING, NEVER LESS. Any extractor error, timeout or
-   missing dependency falls back to ``full`` — scan every leaf, the behaviour
-   that shipped before any of this — and marks the result degraded. No failure
+   S4 is what makes the Matrix extractor a guard rather than a pre-processor,
+   and it is the one invariant here that is contingent rather than permanent.
+   A Matrix BRIDGE -- terminating E2EE and delivering the plaintext -- would
+   scan exactly what it delivers, which is the pre-processor contract, and it
+   would belong in ``preprocess/`` with no extractor involved. Trentina does
+   not do that today (see ``.specify/specs/013-matrix-scan-view/spec.md``,
+   "Encryption posture": ciphertext is forwarded untouched so the homeserver
+   never sees plaintext). Until that product decision changes, decryption
+   here is read-only and this extractor stays on the guard side.
+
+S5 -- FAIL OPEN TO MORE SCANNING, NEVER LESS. Any extractor error, timeout or
+   missing dependency falls back to ``full`` -- scan every leaf, the behaviour
+   that shipped before any of this -- and marks the result degraded. No failure
    mode may result in "scanned nothing, looked clean".
+
+   Note the asymmetry with pre-processing, which fails open to DELIVERING the
+   original. Both mean "on failure, do the thing that hides nothing", and they
+   point in opposite directions because the roles do.
 
 Extractors parse hostile bytes. Predicates here must be linear-time: an
 attacker choosing the input must not be able to buy quadratic work.
@@ -64,21 +93,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-
-class Channel(str, Enum):
-    """Where an extractor is allowed to run.
-
-    An extractor decides what goes unscanned, which makes selecting one a
-    privilege rather than a preference. Binding each to the channels it
-    understands means naming the Matrix extractor on the alert ingress is a
-    load-time error instead of a silently wrong perimeter — it would walk for
-    a Matrix event shape, find none, and quietly fall through to generic
-    rules on a payload nobody checked it against.
-    """
-
-    MATRIX = "matrix"
-    ALERT = "alert"
-    TOOL = "tool"
+    from ..channels import Channel
 
 
 class SkipReason(str, Enum):

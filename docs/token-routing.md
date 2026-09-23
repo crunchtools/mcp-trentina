@@ -284,7 +284,7 @@ The tool is only visible to profiles that have `delegation.modes.code_write.enab
 
 Pre-processing runs **outside** the perimeter and never replaces it. The three invariants live in `preprocess/base.py`; the second is the one that governs here:
 
-> A pre-processor never bypasses `defend()`. The composition layer hands back a transformed artifact; the caller scans THAT artifact and delivers THAT artifact.
+> A pre-processor never bypasses `defend()`, and never opens a gap between what is SCANNED and what is DELIVERED. The composition layer hands back one artifact; the caller scans THAT artifact and delivers THAT artifact.
 
 So the order is always **transform → scan → deliver**, enforced at the call site in `gateway/router.py::_assemble_call_result` and pinned by a test. Two properties follow:
 
@@ -292,6 +292,17 @@ So the order is always **transform → scan → deliver**, enforced at the call 
 - **The bytes the wall judged are the bytes the agent receives.** Transforming after the scan would hand the agent content the perimeter never saw.
 
 That first property is about **deletion**, not about getting smaller. A processor that rearranges rather than deletes does not inherit it — its bytes are still delivered — so it has to carry its own argument for why reshaping them is safe.
+
+##### Scan less than you deliver, and you are not a pre-processor
+
+The second half of invariant 2 settles where a driver goes when it wants to read only part of what it forwards. Such drivers are real and necessary — reading less is the only lever that keeps the Matrix perimeter inside its readiness budget — so they are not forbidden, they are placed on the other side of the line:
+
+| | scans | delivers | role |
+|---|---|---|---|
+| pre-processor (`preprocess/`) | its output | its output | transform, outside the perimeter |
+| read policy (`scanview/`) | a selected subset | the full original | **guard machinery** |
+
+A guard may narrow its own reading, because deciding how thoroughly to judge is a judgement. A pre-processor may not, because it owns the bytes on the wire and a scan/delivery split there is a bypass wearing a reducer's name. See [defense-pipeline.md](defense-pipeline.md#two-roles-guards-decide-pre-processors-transform).
 
 ##### Subtract, never absolve
 

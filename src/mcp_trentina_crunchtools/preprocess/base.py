@@ -22,16 +22,38 @@ Three invariants, none negotiable:
    always safe, because a byte that is deleted reaches no one. What is
    forbidden is the other direction: never mark content clean, never shorten
    or skip ``defend()``, and never let output be trusted more than input.
-2. A pre-processor never bypasses ``defend()``. The composition layer hands
-   back a transformed artifact; the caller scans THAT artifact and delivers
-   THAT artifact. What a processor dropped never reaches the agent at all,
-   which is what makes fingerprint-collision games pointless — colliding your
+2. A pre-processor never bypasses ``defend()``, and never opens a gap
+   between what is SCANNED and what is DELIVERED. The composition layer hands
+   back one artifact; the caller scans THAT artifact and delivers THAT
+   artifact. What a processor dropped never reaches the agent at all, which
+   is what makes fingerprint-collision games pointless — colliding your
    payload into a collapsed group deletes it.
 
    That argument is about DELETION specifically, not about getting smaller.
    A processor that rearranges rather than deletes does not inherit it: its
    bytes are still delivered, so it must carry its own reasoning for why
    reshaping them is safe.
+
+   The second half of the invariant settles a question the two-role model
+   has to answer: a driver that scans LESS than it delivers is not a
+   pre-processor and cannot be made into one. Such a driver is not
+   hypothetical — reading less is the only lever that keeps the Matrix
+   perimeter inside its readiness budget at all (``scanview/``) — so it is
+   not forbidden outright; it is placed on the other side of the line. It is
+   a GUARD choosing what to read, because deciding how thoroughly to judge
+   is a judgement, and judgements belong to guards. Concretely:
+
+     * scan == deliver  -> pre-processor. It owns the bytes; the scan view
+       is whatever it hands back.
+     * scan <  deliver  -> guard read policy (``scanview/base.py``, S1-S5).
+       It owns nothing on the wire; it must account for every byte it
+       declined and low coverage is itself a finding.
+
+   Nothing legitimate needs both, and a Protocol that carried both would let
+   the wrong one be configured in the wrong place. This is why ``scanview/``
+   exists as guard machinery rather than as a second driver framework —
+   growing it as a peer of this package was the wrong turn that issue #160
+   was filed to undo.
 3. Every pre-processor accounts for itself. The sidecar (bytes in/out, ratio,
    what was collapsed) reaches L3's briefing, because "this artifact is the
    3% that survived transformation" is context a judge should have. Routing
@@ -62,7 +84,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from ..channels import Channel
 
 
 class Cost(str, Enum):
@@ -161,6 +186,11 @@ class PreProcessor(Protocol):
 
     name: str
     cost: Cost
+    # Which ingresses this processor understands. Enforced once, in
+    # gateway/drivers.py, by the same mechanism that locks a guard's read
+    # policy to its channel — a processor tuned for one payload shape and
+    # pointed at another declines forever and looks like it is working.
+    channels: frozenset[Channel]
 
     async def run(self, payload: str, ctx: PreProcessContext) -> PreProcessResult:
         """Transform the payload. Must return the input unchanged

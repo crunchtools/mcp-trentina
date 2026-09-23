@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import Channel, ScanView, ScanViewContext
+from ..channels import Channel
+from .base import ScanView, ScanViewContext
 from .walk import iter_leaves
 
 
