@@ -246,19 +246,10 @@ async def quarantine_search_tool(
     return await quarantine_search(query, prompt, num_results)
 
 
-# ---------------------------------------------------------------------------
-# The three modes, exposed as tool names so the AGENT picks per call.
-#
-# Before 0.26.0 the choice was `safe_*` or `quarantine_*`: fail closed, or be
-# handed an LLM rewrite. There was no way to ask for the real bytes plus a
-# caution, which is the posture with the best argument behind it — a warning
-# that lands in context ahead of the payload is the difference between an
-# agent reading hostile content credulously and reading it on guard.
-#
-# The profile's `tools_allow` filter decides which of the three a given agent
-# is offered, so a profile can still be block-only without new permission
-# machinery.
-# ---------------------------------------------------------------------------
+# The three modes as tool names, so the AGENT picks per call and the profile's
+# `tools_allow` filter limits the menu. Before 0.26.0 the choice was fail
+# closed or be handed an LLM rewrite: there was no way to ask for the real
+# bytes plus a caution, which is the posture with the best argument behind it.
 
 
 @mcp.tool()

@@ -44,7 +44,8 @@ class TestServerRegistration:
             for family in ("fetch", "read", "content", "search")
             for mode in ("block", "warn", "clean")
         }
-        # Deprecated spellings, removed in 0.28.0 along with this set.
+        # The pre-0.26.0 spellings. Still registered and still routed; this
+        # set and the registrations it names go in 0.28.0 together.
         deprecated = {
             "safe_fetch_tool",
             "quarantine_fetch_tool",
