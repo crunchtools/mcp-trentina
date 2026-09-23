@@ -14,10 +14,20 @@ defense used elsewhere: string leaves in the JSON are sanitized
 a Gemini API key is configured — the Q-Agent reviews it (Layer 3).
 This closes the injection vector in Hermes's own webhook adapter,
 which interpolates payload values into a live agent prompt with no
-sanitization of its own. Flagged payloads are forwarded anyway (with
-a ``_trentina_warning`` field attached) rather than blocked — this is
-a paging pipeline, and silently dropping a real incident on a
-classifier false positive is worse than forwarding a flagged one.
+sanitization of its own.
+
+What a flagged payload becomes is ``alert_ingress.enforcement``, and it
+defaults to ``warn``: forwarded with a ``_trentina_warning`` field attached
+rather than dropped. For paging that is the right default — silently
+dropping a real incident on a classifier false positive is worse than
+forwarding a flagged one, and the warning lands in context ahead of the
+payload, so the receiving agent reads the caution before the content.
+
+Until 0.25.0 that behaviour was HARDCODED here and the setting did not
+exist. `defense.enforcement` was read only on the tool path, so the one
+path with an agent to ask was the only path that was ever configurable,
+while the paths with nobody to ask could not be configured at all. An
+operator who wants a stricter ingress can now say so.
 """
 
 from __future__ import annotations
@@ -141,9 +151,7 @@ async def _handle_alert(
             content="bad request body", status_code=400, media_type="text/plain",
         )
 
-    forward_body, risk_level, flagged, counts = await _sanitize_and_classify(
-        body, profile
-    )
+    forward_body, risk_level, flagged, counts = await _defend_alert(body, profile)
 
     client_host = request.client.host if request.client is not None else "unknown"
     log_fn = logger.warning if flagged else logger.info
@@ -151,6 +159,23 @@ async def _handle_alert(
         "alert_ingress: profile=%s source_ip=%s risk=%s l1_detections=%d payload=%s",
         profile.name, client_host, risk_level, counts.detections, forward_body[:4000],
     )
+
+    enforcement = profile.alert_ingress.enforcement
+    if flagged and enforcement != "warn":
+        # `clean` has no extraction contract on this path yet, so it refuses
+        # rather than forwarding the bytes it exists to replace — the same
+        # reading the tool path takes.
+        logger.warning(
+            "alert_ingress: refusing flagged payload for profile=%s "
+            "(enforcement=%s risk=%s)", profile.name, enforcement, risk_level,
+        )
+        return Response(
+            content=json.dumps(
+                {"error": "payload refused by trentina", "risk_level": risk_level}
+            ),
+            status_code=403,
+            media_type="application/json",
+        )
 
     fwd_headers: dict[str, str] = {"Content-Type": "application/json"}
     if profile.alert_ingress.forward_secret is not None:
@@ -190,7 +215,7 @@ async def _handle_alert(
     )
 
 
-async def _sanitize_and_classify(
+async def _defend_alert(
     body: bytes, profile: Profile,
 ) -> tuple[bytes, str, bool, _L1Counts]:
     """Run the three-layer defense over an alert payload.
@@ -200,8 +225,13 @@ async def _sanitize_and_classify(
     plain text has nowhere to carry an annotation, so its warning lives in
     the log line and the D-Bus event) — plus the L1 risk level, whether any
     layer flagged, and the raw L1 detection counts. Content is never
-    modified on the way through: L1 detects, the sidecar warns, and the
-    enforcement mode (not this function) decides disposition.
+    modified on the way through: L1 detects and the sidecar warns.
+
+    This function does not decide disposition and never did — an earlier
+    revision claimed "the enforcement mode (not this function) decides
+    disposition", which was false in the only way that matters: no
+    enforcement mode was consulted anywhere on this path. `_handle_alert`
+    reads `alert_ingress.enforcement` and decides.
 
     Two things changed when this moved onto the shared pipeline, both
     deliberate:

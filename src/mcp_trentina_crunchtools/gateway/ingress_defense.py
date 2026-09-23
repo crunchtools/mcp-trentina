@@ -1,4 +1,4 @@
-"""The perimeter at the MCP proxy ingress — annotate mode (plan step 5).
+"""The perimeter at the MCP proxy ingress — warn mode (plan step 5).
 
 Until tonight the gateway's README claim was false: proxied tool responses
 and tool descriptions crossed into the agent verbatim, and the three-layer
@@ -60,18 +60,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: Kill switch (owner requirement, ahead of any enforcement flip): setting
-#: TRENTINA_ENFORCEMENT_OVERRIDE=annotate forces every profile to annotate,
-#: for the night `block` misfires at 3am. Any other value is ignored loudly.
+#: TRENTINA_ENFORCEMENT_OVERRIDE=warn forces every profile to warn, for the
+#: night `block` misfires at 3am. Any other value is ignored loudly.
+#:
+#: `annotate` is still accepted, because the one moment this variable is
+#: reached for is the moment nobody wants to discover it was renamed.
 _OVERRIDE_ENV = "TRENTINA_ENFORCEMENT_OVERRIDE"
+_OVERRIDE_VALUES = {"warn": "warn", "annotate": "warn"}
 
 
 def effective_enforcement(profile: Profile) -> str:
     override = os.environ.get(_OVERRIDE_ENV, "").strip().lower()
     if override:
-        if override == "annotate":
-            return "annotate"
+        if override in _OVERRIDE_VALUES:
+            if override != "warn":
+                logger.warning(
+                    "%s=%r is the pre-0.25.0 spelling of 'warn'; honouring it",
+                    _OVERRIDE_ENV, override,
+                )
+            return _OVERRIDE_VALUES[override]
         logger.error(
-            "%s=%r is not a valid override (only 'annotate' is); ignoring",
+            "%s=%r is not a valid override (only 'warn' is); ignoring",
             _OVERRIDE_ENV, override,
         )
     return profile.defense.enforcement
@@ -272,13 +281,14 @@ async def scan_tool_response(
     """Judge one tool response and decide its fate under the profile's
     enforcement mode.
 
-    annotate — deliver intact, warning attached (`blocked=False`).
+    warn — deliver intact, warning attached (`blocked=False`).
     block — a flagged response is refused (`blocked=True`); the caller
-        delivers the warning INSTEAD of the content. `extract` currently
-        degrades to block with a logged notice: the extraction response
-        contract ships when the first interactive profile flips to it, and until then failing closed
-        is the only honest reading of "extract" — falling back to annotate
-        would silently deliver what the mode existed to transform.
+        delivers the warning INSTEAD of the content.
+    clean — currently degrades to block with a logged notice. The extraction
+        response contract ships when the first interactive profile flips to
+        it; until then failing closed is the only honest reading, because
+        falling back to warn would silently deliver the very bytes the mode
+        exists to replace.
 
     Flags are recorded to the detections table (source_type="tool_response")
     except on a verdict-cache hit.
@@ -317,12 +327,12 @@ async def scan_tool_response(
             "backend": backend_name,
             "tool": tool_name,
             "direction": "response",
-            "blocked": enforcement in ("block", "extract"),
+            "blocked": enforcement in ("block", "clean"),
         },
     )
     warning = build_warning(verdict, unscannable=unscannable)
 
-    # Under block/extract, "we could not finish judging this" is treated
+    # Under block/clean, "we could not finish judging this" is treated
     # exactly like "this is hostile" — the adversarial review's H1/H3:
     # padding a response past the classifier's token cap made L2 scan only
     # the benign head, and an L3 outage answered "clean" — either one used
@@ -332,13 +342,13 @@ async def scan_tool_response(
     # Deliberately NOT l2_unavailable. A missing ONNX model is a deploy
     # fault, not an attacker-triggerable one, and folding it in here would
     # let one bad image refuse every response on every block-mode profile.
-    # It still forbids CACHING the verdict and still annotates, so the gap
+    # It still forbids CACHING the verdict and still warns, so the gap
     # is visible and does not outlive the fix. Promoting it to a block is a
     # separate decision with its own blast radius.
     unjudgeable = l2_truncated or l3_unavailable
 
     blocked = False
-    if (verdict.flagged or unjudgeable) and enforcement in ("block", "extract"):
+    if (verdict.flagged or unjudgeable) and enforcement in ("block", "clean"):
         blocked = True
         if warning is None:
             # build_warning() only returns None when nothing was flagged and
@@ -349,9 +359,9 @@ async def scan_tool_response(
             raise RuntimeError(
                 "ingress_defense: warning is None while blocking -- invariant violated"
             )
-        if enforcement == "extract":
+        if enforcement == "clean":
             logger.warning(
-                "gateway: enforcement=extract not yet implemented — failing "
+                "gateway: enforcement=clean not yet implemented — failing "
                 "closed (block) for profile=%s", profile.name,
             )
         if unjudgeable and not verdict.flagged:
@@ -433,7 +443,7 @@ async def scan_tool_list(
                     "backend": backend_name,
                     "tool": str(tool.get("name", "?")),
                     "direction": "tool_list",
-                    "blocked": effective_enforcement(profile) in ("block", "extract"),
+                    "blocked": effective_enforcement(profile) in ("block", "clean"),
                 },
             )
             warning = build_warning(verdict)

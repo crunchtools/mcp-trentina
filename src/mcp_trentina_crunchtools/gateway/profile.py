@@ -60,6 +60,16 @@ INTERNAL_SCHEME = "internal://"
 # the box. See gateway/scope.py, which is the only place this is interpreted.
 ProfileRole = Literal["agent", "operator"]
 
+#: The three things a flagged payload can become, named for what the reading
+#: agent is told rather than for the mechanism that tells it. `warn` forwards
+#: the original bytes with the caution attached, `clean` substitutes a Q-Agent
+#: extraction, `block` refuses. Spelled `annotate`/`extract`/`block` before
+#: 0.25.0.
+EnforcementMode = Literal["warn", "clean", "block"]
+
+#: Pre-0.25.0 enforcement values, accepted with a warning until 0.27.0.
+_ENFORCEMENT_RENAMES: dict[str, str] = {"annotate": "warn", "extract": "clean"}
+
 # Pre-0.21.0 scan_view.extractor names. 'full' is not here: it maps to an
 # empty processor list rather than to a name.
 _EXTRACTOR_RENAMES: dict[str, str] = {"generic": "select"}
@@ -456,6 +466,22 @@ class AlertIngressConfig(BaseModel):
     token: SecretStr | None = Field(
         default=None, exclude=True, description="Resolved token (load-time only)",
     )
+    enforcement: EnforcementMode = Field(
+        default="warn",
+        description=(
+            "What a flagged alert payload becomes. There is no agent to ask on a "
+            "PUSH path — nobody is waiting to pick a mode per call — so it "
+            "is set here. Defaults to warn, which is what this path already "
+            "did before the setting existed: forward the payload with the "
+            "caution attached. For paging that is the right default, because "
+            "silently dropping a real incident on a classifier false "
+            "positive is worse than forwarding a flagged one, and the "
+            "warning lands in context ahead of the payload so the receiving "
+            "agent reads it first. Advisory, not a substitute for L1/L2/L3 "
+            "catching the thing: a convincing enough injection can still "
+            "talk an agent past its own warning."
+        ),
+    )
     forward_url: str = Field(
         ..., description="URL to forward alert payloads to",
     )
@@ -528,18 +554,43 @@ class DefenseConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    enforcement: Literal["annotate", "extract", "block"] = Field(
-        default="annotate",
+    enforcement: EnforcementMode = Field(
+        default="warn",
         description=(
-            "What a flagged tool response becomes. annotate: delivered "
-            "intact with a _trentina_warning (the calibration mode). "
-            "block: refused outright — autonomous agents (agent1, "
-            "agent3). extract: replaced by a Q-Agent extraction — "
-            "interactive profiles (agent2). "
-            "TRENTINA_ENFORCEMENT_OVERRIDE=annotate is the kill switch: it "
-            "forces annotate everywhere for the night block misfires."
+            "What a flagged tool response becomes. warn: delivered intact "
+            "with a _trentina_warning attached, so the reading agent sees "
+            "the caution before the content. clean: replaced by a Q-Agent "
+            "extraction. block: refused outright. "
+            "TRENTINA_ENFORCEMENT_OVERRIDE=warn is the kill switch: it "
+            "forces warn everywhere for the night block misfires."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_the_old_mode_names(cls, block: Any) -> Any:
+        """Load a pre-0.25.0 ``annotate``/``extract`` as ``warn``/``clean``.
+
+        The old names described the MECHANISM (a note gets attached, an
+        extraction is run). The new ones describe what the agent is being
+        told, which is the thing a profile author is actually choosing
+        between. Every profile model is ``extra="forbid"`` and a profile
+        that fails to load is fatal, so a deployed config carrying the old
+        spelling would take the gateway down on upgrade rather than warn.
+        """
+        if not isinstance(block, dict):
+            return block
+        old = block.get("enforcement")
+        if old not in _ENFORCEMENT_RENAMES:
+            return block
+        block = dict(block)
+        block["enforcement"] = _ENFORCEMENT_RENAMES[old]
+        logger.warning(
+            "defense.enforcement: %r is deprecated and is removed in 0.27.0; "
+            "write %r",
+            old, _ENFORCEMENT_RENAMES[old],
+        )
+        return block
     l2_threshold: float = Field(
         default=0.5,
         ge=0.0,
@@ -678,7 +729,7 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
     full/generic/matrix. ``extractor: full`` is now an empty ``processors``
     list, because reading everything is what naming nothing means; ``generic``
     is ``select``. Old spellings still load -- see the validator below -- and
-    are removed in 0.25.0.
+    are removed in 0.27.0.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -728,7 +779,7 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
             )
         logger.warning(
             "matrix_ingress.scan_view.extractor: %r is deprecated and is "
-            "removed in 0.25.0; write processors: %s",
+            "removed in 0.27.0; write processors: %s",
             old,
             [] if old == "full" else [_EXTRACTOR_RENAMES.get(old, old)],
         )
@@ -767,6 +818,14 @@ class MatrixIngressConfig(BaseModel):
     token: SecretStr | None = Field(
         default=None, exclude=True, description="Resolved token (load-time only)",
     )
+    # Deliberately NO `enforcement` here, unlike alert_ingress. This path
+    # forwards a STREAMED /sync response, and refusing one does not drop a
+    # message — it breaks the client's sync loop, which is the proxy eating
+    # the agent's Matrix traffic rather than filtering it. A flagged event
+    # forwards annotated, always. Recorded as a deliberate non-change in
+    # spec 013 and re-affirmed in 0.25.0 when the alert path became
+    # configurable. If this ever needs a mode, the mode is per-EVENT and
+    # drops the event from the timeline, not per-response.
     preprocess: MatrixPreProcessConfig = Field(
         default_factory=MatrixPreProcessConfig,
         validation_alias=AliasChoices("preprocess", "scan_view"),

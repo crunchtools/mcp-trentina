@@ -15,10 +15,10 @@ profiles:
 
     # Defense POLICY. All three layers always run — there are no per-layer
     # off switches. An autonomous agent gets `block` once thresholds are
-    # calibrated from annotate-mode data; until then annotate delivers
+    # calibrated from warn-mode data; until then warn delivers
     # flagged content with a warning and records every score.
     defense:
-      enforcement: annotate   # flip to `block` after calibration
+      enforcement: warn       # flip to `block` after calibration
       l2_threshold: 0.3       # stricter classifier gate for an autonomous agent
 
     # Payload transformation on tool responses. Runs OUTSIDE the perimeter

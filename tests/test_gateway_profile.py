@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -87,7 +88,7 @@ class TestProfileModel:
         assert p.name == "agent2"
         assert p.auth.bearer_token_env == "TRENTINA_PROFILE_AGENT2_TOKEN"
         assert p.backends == {}
-        assert p.defense.enforcement == "annotate"
+        assert p.defense.enforcement == "warn"
         assert p.defense.audit is True
 
     def test_profile_with_backends(self) -> None:
@@ -211,7 +212,7 @@ class TestProfileModel:
 
     def test_defense_defaults(self) -> None:
         d = DefenseConfig()
-        assert d.enforcement == "annotate"
+        assert d.enforcement == "warn"
         assert d.audit is True
         assert d.audit is True
         assert 0.0 <= d.l2_threshold <= 1.0
@@ -662,3 +663,79 @@ class TestBearerPathWithNoStaticToken:
         )
         _resolve_bearer_token("claude-web", profile)  # must not raise
         assert profile.auth is None
+
+
+class TestEnforcementModeNames:
+    """`annotate`/`extract` became `warn`/`clean` in 0.25.0.
+
+    The old names described the MECHANISM — a note gets attached, an
+    extraction is run. The new ones describe what the reading agent is being
+    told, which is the thing a profile author is actually choosing between.
+
+    Every profile model is `extra="forbid"` and a profile that fails to load
+    is FATAL, so a deployed config carrying the old spelling would take the
+    gateway down on upgrade rather than warn. These tests are the alias
+    window; they get deleted with it in 0.27.0.
+    """
+
+    def test_the_default_is_warn(self) -> None:
+        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+
+        assert DefenseConfig().enforcement == "warn"
+
+    @pytest.mark.parametrize(
+        ("old", "new"), [("annotate", "warn"), ("extract", "clean")]
+    )
+    def test_the_old_spelling_still_loads(self, old: str, new: str) -> None:
+        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+
+        assert DefenseConfig(enforcement=old).enforcement == new
+
+    def test_the_old_spelling_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A silent migration is how a config stays wrong until removal day."""
+        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+
+        with caplog.at_level(logging.WARNING):
+            DefenseConfig(enforcement="annotate")
+        assert any("0.27.0" in r.getMessage() for r in caplog.records), (
+            "the deprecation must name the release that removes it"
+        )
+
+    def test_a_bogus_mode_is_still_refused(self) -> None:
+        from pydantic import ValidationError
+
+        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+
+        with pytest.raises(ValidationError):
+            DefenseConfig(enforcement="ignore")
+
+
+class TestPushPathEnforcement:
+    """Who picks the mode, on the paths where no agent exists to ask.
+
+    On the PULL path a primary agent picks per call. On a PUSH path nobody
+    is waiting, so before 0.25.0 the choice was hardcoded — and
+    `defense.enforcement` was read ONLY on the tool path, which meant the
+    one path with an agent to ask was the only path that was configurable.
+    """
+
+    def test_the_alert_ingress_defaults_to_warn(self) -> None:
+        """Nagios pages forward with the warning attached.
+
+        Silently dropping a real incident on a classifier false positive is
+        worse than forwarding a flagged one, and the warning lands ahead of
+        the payload so the receiving agent reads the caution first.
+        """
+        from mcp_trentina_crunchtools.gateway.profile import AlertIngressConfig
+
+        assert AlertIngressConfig.model_fields["enforcement"].default == "warn"
+
+    def test_the_matrix_ingress_has_no_mode_on_purpose(self) -> None:
+        """Refusing a Matrix response does not drop a message — it breaks the
+        client's /sync loop, which is the proxy eating the agent's traffic
+        rather than filtering it. A mode here would have to be per-EVENT."""
+        from mcp_trentina_crunchtools.gateway.profile import MatrixIngressConfig
+
+        assert "enforcement" not in MatrixIngressConfig.model_fields
