@@ -48,6 +48,9 @@ _CANARY_PREFIX = "CANARY-"
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_TIMEOUT = 60.0
+#: Re-exported from the provider so both call sites carry the credential the
+#: same way. See the note there for why it is never a query parameter.
+GEMINI_API_KEY_HEADER = "x-goog-api-key"
 MAX_OUTPUT_TOKENS = 4096
 MAX_EXTRACTED_TEXT = 50_000
 
@@ -580,7 +583,7 @@ async def search_grounded(
 
     api_key = config.api_key.get_secret_value()
     model = config.search_model
-    url = f"{GEMINI_API_BASE}/{model}:generateContent?key={api_key}"
+    url = f"{GEMINI_API_BASE}/{model}:generateContent"
 
     try:
         async with httpx.AsyncClient(
@@ -588,7 +591,12 @@ async def search_grounded(
         ) as http_client:
             resp = await http_client.post(
                 url, json=request_body,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    # In the header, never `?key=` — httpx logs full URLs at
+                    # INFO. See GEMINI_API_KEY_HEADER in providers/gemini.py.
+                    GEMINI_API_KEY_HEADER: api_key,
+                },
             )
             resp.raise_for_status()
             resp_json = resp.json()

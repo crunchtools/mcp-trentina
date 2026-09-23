@@ -80,6 +80,25 @@ class TestGeminiProvider:
         assert result.input_tokens == 10
         assert result.output_tokens == 5
 
+    async def test_api_key_travels_in_a_header_never_the_url(self) -> None:
+        """httpx logs the full request URL at INFO, so a `?key=` credential
+        lands in podman logs and journald the moment anyone raises
+        TRENTINA_LOG_LEVEL to debug something unrelated — a leak armed by a
+        routine troubleshooting step, warned about by nothing. Observed live.
+        See #156.
+        """
+        provider = GeminiProvider(api_key="super-secret-key", model="test")
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = _gemini_response('{"answer":"hi"}')
+            await provider.generate("sys", "user")
+
+        url = mock_post.call_args.args[0]
+        assert "super-secret-key" not in url
+        assert "key=" not in url
+        assert mock_post.call_args.kwargs["headers"]["x-goog-api-key"] == (
+            "super-secret-key"
+        )
+
     async def test_generate_with_schema(self) -> None:
         provider = GeminiProvider(api_key="test-key", model="test")
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:

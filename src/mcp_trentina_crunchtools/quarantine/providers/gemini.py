@@ -12,6 +12,15 @@ from .base import Provider, ProviderResult
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_TIMEOUT = 60.0
 
+#: Google accepts the API key either as a `?key=` query parameter or in this
+#: header. It goes in the header, always. httpx logs the full request URL at
+#: INFO, so a key in the query string lands in `podman logs` and journald the
+#: moment anyone raises TRENTINA_LOG_LEVEL to debug something unrelated — a
+#: credential leak armed by a routine troubleshooting step and warned about by
+#: nothing. The logger is also clamped (see `_configure_logging`); this is the
+#: half that removes the secret rather than hiding it.
+GEMINI_API_KEY_HEADER = "x-goog-api-key"
+
 
 class GeminiProvider(Provider):
     """Gemini REST API provider using raw httpx."""
@@ -28,7 +37,7 @@ class GeminiProvider(Provider):
         temperature: float = 0.1,
         max_output_tokens: int = 4096,
     ) -> ProviderResult:
-        url = f"{GEMINI_API_BASE}/{self._model}:generateContent?key={self._api_key}"
+        url = f"{GEMINI_API_BASE}/{self._model}:generateContent"
 
         gen_config: dict[str, Any] = {
             "temperature": temperature,
@@ -54,7 +63,10 @@ class GeminiProvider(Provider):
                 resp = await client.post(
                     url,
                     json=request_body,
-                    headers={"Content-Type": "application/json"},
+                    headers={
+                        "Content-Type": "application/json",
+                        GEMINI_API_KEY_HEADER: self._api_key,
+                    },
                 )
                 resp.raise_for_status()
                 resp_json = resp.json()

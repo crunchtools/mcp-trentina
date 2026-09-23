@@ -553,3 +553,25 @@ path = "src/mcp_trentina_crunchtools/preprocess/view.py"
 pattern = "ScanViewContext"
 justification = "Constructed in gateway/matrix_proxy.py::_scan_and_forward, once per proxied Matrix response, and passed to the processor's extract(). Not test-only."
 classification = "gourmand_bug"
+
+# --- #156: hardening the unauthenticated OAuth write paths ---
+
+[[exceptions]]
+check = "hidden_env_config"
+path = "src/mcp_trentina_crunchtools/gateway/ratelimit.py"
+justification = "TRENTINA_RATE_LIMIT, TRENTINA_MAX_REGISTRATION_BYTES and TRENTINA_FORWARDED_ALLOW_IPS are all in README.md's Environment Variables table, with defaults checked against this file's constants. FORWARDED_ALLOW_IPS is uvicorn's own variable, not Trentina's; it is read only to REPORT the trust boundary in the startup line, and it is named in the table alongside the Trentina variable that overrides it. Same disposition as the existing config.py and __init__.py entries."
+classification = "by_design"
+
+[[exceptions]]
+check = "dead_structs"
+path = "src/mcp_trentina_crunchtools/gateway/oauth_store.py"
+pattern = "PromoteOnExchange"
+justification = "A mixin is never instantiated -- it is mixed in. _GatewayGoogleProvider inherits it (src/mcp_trentina_crunchtools/__init__.py), and tests/test_oauth_store.py exercises its two methods against a stub provider. It lives here rather than as two more methods on that class because registration lifetimes are this module's subject and the class is defined inside a function, where every method counts against that function's complexity budget."
+classification = "by_design"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/ratelimit.py"
+pattern = "client_address"
+justification = "Shape collision, not duplication. client_address pulls the peer IP out of an ASGI scope so a rate-limit bucket can be keyed on it; reconnect.py's _safe_endpoint strips the path and query off a backend URL so a token in it is never echoed to a caller. Both happen to be guard-then-return-sentinel-then-format in three statements. They share no input type, no output meaning and no reason to change together, so folding them into one function would couple the rate limiter to the reconnect tool for the sake of three lines."
+classification = "gourmand_bug"

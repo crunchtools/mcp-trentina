@@ -153,6 +153,11 @@ these variables control the process itself. Profile tokens
 | `QUARANTINE_DB` | `~/.local/share/mcp-trentina/trentina.db` (container: `/data/quarantine.db`) | Path to the main SQLite database (blocklist, audit log). See [Audit Log](docs/audit-log.md) and [Blocklist](docs/blocklist.md). |
 | `TRENTINA_PERIMETER_DB` | `<QUARANTINE_DB's directory>/perimeter.db` | Path to the perimeter verdict-cache database, deliberately separate from `QUARANTINE_DB`. |
 | `QUARANTINE_TRUST_CONFIG` | `~/.config/mcp-env/mcp-trentina-trust.json` | Path to the trust-level configuration JSON. See [Quarantine Tools](docs/quarantine-tools.md). |
+| `TRENTINA_RATE_LIMIT` | on | Set to `off`/`0`/`false` to disable rate limiting on the unauthenticated OAuth write paths. An escape hatch for an operator locked out during an incident — not a normal setting. |
+| `TRENTINA_MAX_REGISTRATION_BYTES` | `8192` | Largest `POST /register` body accepted, rejected before it is parsed. `0` or negative disables the cap. |
+| `TRENTINA_FORWARDED_ALLOW_IPS` | unset (uvicorn's default of `127.0.0.1`) | Peer addresses whose `X-Forwarded-For` is trusted. **Set this to your reverse proxy's address**, or every caller behind it shares one rate-limit bucket. See [Authentication](docs/authentication.md). |
+| `TRENTINA_REGISTRATION_TTL_DAYS` | `90` | How long a DCR registration lives once a token exchange has promoted it. Each later exchange re-stamps it. |
+| `TRENTINA_OAUTH_CULL_INTERVAL` | `3600` | Seconds between sweeps that unlink expired registrations, transactions and CSRF records from the OAuth store. Floored at 60. |
 
 ## Development
 

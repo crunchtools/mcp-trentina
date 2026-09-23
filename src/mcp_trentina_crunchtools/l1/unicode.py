@@ -22,6 +22,13 @@ _INVISIBLE_CHARS = re.compile("[\u200b\u200c\u200d\u200e\u200f\u2060\u2063\ufeff
 _BIDI_CHARS = re.compile("[\u202a-\u202e\u2066-\u2069]")
 _VARIATION_SELECTORS = re.compile("[\ufe00-\ufe0f]")
 _UNICODE_TAGS = re.compile("[\U000e0001-\U000e007f]")
+# The gaps are deliberate: \x09 (tab), \x0a (LF) and \x0d (CR) are the
+# whitespace the document is MADE of, and stripping them corrupts the thing
+# being cleaned — code blocks collapse onto one line and the scan view stops
+# resembling what the agent would have read. CodeQL reads the syntax and not
+# the intent, so it flags this as `py/overly-large-range` (alert #2, dismissed
+# as a false positive). Widening to \x00-\x1f to silence it breaks whitespace
+# silently: nothing raises, the text just comes out wrong.
 _CONTROL_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 

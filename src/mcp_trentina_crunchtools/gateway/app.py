@@ -454,7 +454,19 @@ async def _handle_get(
 
     session_id = request.headers.get(MCP_SESSION_ID_HEADER, "")
     if not session_id:
-        return _plain(400, "Bad Request: missing Mcp-Session-Id header")
+        # 405, not 400. The streamable-HTTP spec reserves 405 for "this server
+        # does not offer a standalone SSE stream here", which is exactly what a
+        # GET with no session is asking for and not getting. A 400 says the
+        # client sent something malformed, which sends whoever reads it looking
+        # for a bug that is not there. Gemini's connector probes with HEAD and
+        # GET and proceeds either way, so nothing depended on the old code — a
+        # stricter client may. `Allow` is required on a 405 (RFC 9110 15.5.6).
+        return _plain(
+            405,
+            "Method Not Allowed: no standalone SSE stream without an "
+            "Mcp-Session-Id header",
+            headers={"Allow": "POST, DELETE"},
+        )
 
     session = sessions.get_session(session_id)
     if session is None:
@@ -687,6 +699,10 @@ async def _handle_post(
     return JSONResponse(response, headers=headers)
 
 
-def _plain(status: int, text: str) -> Response:
+def _plain(
+    status: int, text: str, *, headers: dict[str, str] | None = None
+) -> Response:
     """Build a plain-text response with the given status code."""
-    return Response(content=text, media_type="text/plain", status_code=status)
+    return Response(
+        content=text, media_type="text/plain", status_code=status, headers=headers,
+    )

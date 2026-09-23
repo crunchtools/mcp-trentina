@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.27.1"
+__version__ = "0.27.2"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -69,6 +69,14 @@ def _configure_logging() -> str:
         level=level,
         format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
     )
+    # Tracks `level` exactly, including DEBUG — #73 decided an operator who
+    # asks for DEBUG gets it, and that decision stands. It is only safe to
+    # stand because httpx logs full request URLs at INFO and NOTHING here puts
+    # a credential in one any more: the Gemini key moved to the
+    # `x-goog-api-key` header (see providers/gemini.py) and tokeninfo has
+    # always been a POST with the token in the body (see google_verifier.py).
+    # A new upstream that takes a secret in the query string would re-open the
+    # leak here, so it belongs in a header — not behind a clamped logger.
     logging.getLogger("httpx").setLevel(level)
     return level_name
 
@@ -289,7 +297,28 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         port=port,
         log_level=log_level,
         path=mcp_path,
+        **_uvicorn_overrides(),
     )
+
+
+def _uvicorn_overrides() -> dict[str, Any]:
+    """uvicorn settings the gateway pins, as kwargs for ``mcp_server.run()``.
+
+    The rate limiter keys on ``scope["client"]``, which uvicorn rewrites from
+    ``X-Forwarded-For`` only when the immediate peer is in its trusted set —
+    ``127.0.0.1`` by default. In a container behind a reverse proxy the peer is
+    the container network's gateway, not loopback, so without naming the proxy
+    here every caller collapses onto one address and shares one bucket. That is
+    what makes per-source limiting actually per-source.
+
+    Returns nothing when ``TRENTINA_FORWARDED_ALLOW_IPS`` is unset, which
+    leaves uvicorn's own default and its own ``FORWARDED_ALLOW_IPS`` handling
+    exactly as they were.
+    """
+    forwarded = os.environ.get("TRENTINA_FORWARDED_ALLOW_IPS", "").strip()
+    if not forwarded:
+        return {}
+    return {"uvicorn_config": {"forwarded_allow_ips": forwarded}}
 
 
 _AS_METADATA_PREFIX = "/.well-known/oauth-authorization-server"
@@ -376,6 +405,127 @@ def _advertise_secret_post(route: Any) -> Any:
         endpoint=_AdvertiseSecretPost(route.app),
         methods=list(route.methods or ["GET", "OPTIONS"]),
         name=route.name,
+    )
+
+
+#: One limiter per unauthenticated write path, built once and shared by every
+#: request that route serves. Module-level rather than per-provider because the
+#: bucket must outlive any single route object: rebuilding the limiter on a
+#: route rebuild would hand a caller a fresh allowance for free.
+_LIMITERS: dict[str, Any] = {}
+
+
+def _limiter(path: str) -> Any:
+    """The limiter for one route path, created on first use."""
+    from .gateway.ratelimit import (
+        AUTHORIZE_LIMIT,
+        CONSENT_LIMIT,
+        REGISTER_LIMIT,
+        RateLimiter,
+    )
+
+    allowances = {
+        "/register": REGISTER_LIMIT,
+        "/authorize": AUTHORIZE_LIMIT,
+        "/consent": CONSENT_LIMIT,
+    }
+    existing = _LIMITERS.get(path)
+    if existing is not None:
+        return existing
+    capacity, per_hour = allowances[path]
+    created = RateLimiter(capacity, per_hour, name=path)
+    _LIMITERS[path] = created
+    return created
+
+
+def _harden(route: Any, *, storage: Any) -> Any:
+    """Rate-limit the unauthenticated write paths; pass everything else through.
+
+    Applied to `/register`, `/authorize` and `/consent` only. `/token` is left
+    alone deliberately: it is reached with an authorization code or a refresh
+    token that this gateway itself issued, so it is not an unauthenticated
+    write path, and limiting it would throttle a legitimate client's token
+    refresh for no gain. The metadata documents are reads.
+
+    Every route also gets the sweeper trigger, including the ones that are not
+    limited — a flow that abandons after `/token` still leaves a transaction
+    record behind, and the sweep is what removes it. See #156.
+    """
+    from starlette.routing import Route
+
+    from .gateway.oauth_store import SweeperTrigger
+    from .gateway.ratelimit import (
+        UnauthenticatedWriteGuard,
+        enabled,
+        max_registration_bytes,
+    )
+
+    if not isinstance(route, Route):
+        return route
+
+    app: Any = route.app
+    if route.path == "/consent":
+        from .gateway.consent_ui import ConsentUsability
+
+        # Innermost, so it sees the handler's own response — a 429 from the
+        # limiter outside it is not a consent page and has nothing to patch.
+        app = ConsentUsability(app)
+    if enabled() and route.path in ("/register", "/authorize", "/consent"):
+        app = UnauthenticatedWriteGuard(
+            app,
+            limiter=_limiter(route.path),
+            max_body_bytes=(
+                max_registration_bytes() if route.path == "/register" else None
+            ),
+        )
+
+    return Route(
+        path=route.path,
+        endpoint=SweeperTrigger(app, storage),
+        methods=list(route.methods or ["GET"]),
+        name=route.name,
+        include_in_schema=route.include_in_schema,
+    )
+
+
+def _confidential_client(
+    client_info: Any,
+    *,
+    secret: str,
+    default_scope: str,
+    allowed_patterns: Any,
+) -> Any:
+    """Rebuild a DCR registration as a confidential client, keeping its secret.
+
+    Sits beside ``_provisioned_clients``, which builds the same record type
+    from static config; this one builds it from what a client just asked for.
+
+    The defaults are the SDK's own, restated because ``super()`` has already
+    stripped the fields off the object by the time this runs: a registration
+    that named no redirect URI or no grant type still needs both, and getting
+    them wrong here would produce a record that authorizes nothing.
+    """
+    from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
+    from pydantic import AnyUrl
+
+    redirect_uris = (
+        list(client_info.redirect_uris)
+        if client_info.redirect_uris
+        else [AnyUrl("http://localhost")]
+    )
+    grant_types = list(
+        client_info.grant_types or ["authorization_code", "refresh_token"]
+    )
+    return ProxyDCRClient(
+        client_id=client_info.client_id,
+        client_secret=secret,
+        redirect_uris=redirect_uris,
+        grant_types=grant_types,
+        scope=client_info.scope or default_scope,
+        token_endpoint_auth_method=_AUTH_METHOD_POST,
+        application_type=client_info.application_type,
+        allowed_redirect_uri_patterns=allowed_patterns,
+        client_name=getattr(client_info, "client_name", None),
     )
 
 
@@ -667,6 +817,13 @@ def _build_proxy_provider(
     belong to the proxy and to nothing else: a delegated profile never uses
     them, and keeping the secret out of the caller means it exists only in the
     frame that hands it to the provider.
+
+    The provider class is nested to keep the ``GoogleProvider`` import lazy,
+    the way every other fastmcp import in this package is. It closes over no
+    local, so anything that does not need that import — the registration
+    lifetimes, in ``gateway/oauth_store.py`` — lives at module level instead
+    of adding another method here. ``PromoteOnExchange`` leads the bases so
+    its ``super()`` calls reach the provider.
     """
     from .gateway.errors import ProfileConfigError
 
@@ -681,7 +838,9 @@ def _build_proxy_provider(
         )
     from fastmcp.server.auth.providers.google import GoogleProvider
 
-    class _GatewayGoogleProvider(GoogleProvider):
+    from .gateway.oauth_store import PromoteOnExchange
+
+    class _GatewayGoogleProvider(PromoteOnExchange, GoogleProvider):
         """GoogleProvider whose protected-resource URL is the gateway endpoint.
 
         FastMCP derives the RFC 8707 resource (the audience of issued tokens and
@@ -778,10 +937,22 @@ def _build_proxy_provider(
             DCR client keeps the registration it already has.
 
             Note this is opt-OUT, not opt-in: the SDK defaults an omitted
-            `token_endpoint_auth_method` to `client_secret_post` (RFC 7591's own
-            default), so a client that says nothing gets a secret and must then
-            present it. The Python MCP client and FastMCP's client both send
-            `"none"` explicitly, which is why that does not surprise them.
+            `token_endpoint_auth_method` to `client_secret_post`, so a client
+            that says nothing gets a secret and must then present it. That
+            default is the MCP SDK's own choice
+            (`mcp/server/auth/handlers/register.py`), NOT the RFC's — RFC 7591
+            §2 defaults the field to `client_secret_basic`. The 0.15.0 notes
+            and an earlier version of this docstring both called it "RFC 7591's
+            own default", which sent a reader to the RFC to find a sentence
+            that is not there. The Python MCP client and FastMCP's client both
+            send `"none"` explicitly, which is why the SDK default does not
+            surprise them.
+
+            Every registration is stored PROVISIONALLY — see
+            `gateway/oauth_store.py`. It lives an hour unless a token exchange
+            promotes it, which is what stops the ordinary connect/reconnect
+            cycle from littering the store with permanent records nobody
+            reads again. See #156.
 
             Only `client_secret_post` is honoured. The SDK reads `client_id`
             from the form body before it looks at the Authorization header, so
@@ -796,35 +967,32 @@ def _build_proxy_provider(
             issued_secret = getattr(client_info, "client_secret", None)
             expires_at = getattr(client_info, "client_secret_expires_at", None)
 
+            from .gateway.oauth_store import (
+                PROVISIONAL_TTL_SECONDS,
+                mark_provisional,
+            )
+
             await super().register_client(client_info)
 
             if requested_method != _AUTH_METHOD_POST or not issued_secret:
+                await mark_provisional(self._client_store, client_info.client_id)
                 return
 
-            from fastmcp.server.auth.oauth_proxy.models import ProxyDCRClient
-            from pydantic import AnyUrl
-
-            confidential = ProxyDCRClient(
-                client_id=client_info.client_id,
-                client_secret=issued_secret,
-                redirect_uris=(
-                    list(client_info.redirect_uris)
-                    if client_info.redirect_uris
-                    else [AnyUrl("http://localhost")]
-                ),
-                grant_types=list(
-                    client_info.grant_types or ["authorization_code", "refresh_token"]
-                ),
-                scope=client_info.scope or self._default_scope_str,
-                token_endpoint_auth_method=_AUTH_METHOD_POST,
-                application_type=client_info.application_type,
-                allowed_redirect_uri_patterns=self._allowed_client_redirect_uris,
-                client_name=getattr(client_info, "client_name", None),
+            confidential = _confidential_client(
+                client_info,
+                secret=issued_secret,
+                default_scope=self._default_scope_str,
+                allowed_patterns=self._allowed_client_redirect_uris,
             )
             # Overwrites the public record super() just stored. get_client reads
             # this store, so from here the secret is the one that is checked.
+            # Provisional like the public path: a confidential client that
+            # registers and never exchanges a code is litter for the same
+            # reason, and gets swept for the same reason.
             await self._client_store.put(
-                key=client_info.client_id, value=confidential
+                key=client_info.client_id,
+                value=confidential,
+                ttl=PROVISIONAL_TTL_SECONDS,
             )
 
             # The SDK serializes this same object into the DCR response after we
@@ -860,7 +1028,10 @@ def _build_proxy_provider(
             reimplementing that construction. See CHANGELOG 0.9.0, RT #1502.
             """
             return [
-                _advertise_secret_post(route) for route in super().get_routes(mcp_path)
+                _harden(
+                    _advertise_secret_post(route), storage=self._client_storage,
+                )
+                for route in super().get_routes(mcp_path)
             ]
 
     # Pin the resource to a PROXIED profile's endpoint (see
@@ -939,6 +1110,13 @@ def _build_proxy_provider(
         "(base_url=%s issuer=%s scopes=%s)",
         len(proxied), ", ".join(sorted(proxied)), base_url, issuer, " ".join(scopes),
     )
+    # WARNING, not INFO, for the same reason the cache line is: production runs
+    # at TRENTINA_LOG_LEVEL=WARNING, and the one question an operator asks after
+    # a refused login is "what are the limits and what address are they keyed
+    # on". That answer has to already be in the journal when they look.
+    from .gateway.ratelimit import describe_limits
+
+    logger.warning("%s", describe_limits())
     return provider, issuer, scopes
 
 
