@@ -153,12 +153,8 @@ profiles:
           - "batch_delete*"
       # ... rest of agent2's backends
     defense:
-      sanitize: true                # L1 — always cheap, default on
-      classify: true                # L2 — Prompt Guard 2 inference
-      classify_threshold: 0.5
-      quarantine: true              # L3 — Gemini re-extraction
-      quarantine_threshold: 0.7
-      audit: true
+      enforcement: extract          # interactive: flagged content is Q-Agent-extracted
+      l2_threshold: 0.5             # how suspicious L2 must be before it flags
 
   agent1:
     auth:
@@ -180,11 +176,8 @@ profiles:
         tools_deny: ["send_gmail_message", "delete*"]
       # ... narrower backend set
     defense:
-      sanitize: true
-      classify: true
-      classify_threshold: 0.3       # more aggressive for autonomous agent
-      quarantine: false             # L3 OFF — token-cost-sensitive (see §"L3 toggle")
-      audit: true
+      enforcement: block            # autonomous: a flagged response is refused outright
+      l2_threshold: 0.3             # flags earlier than agent2 — nobody is watching
 ```
 
 ### Allowlist semantics
