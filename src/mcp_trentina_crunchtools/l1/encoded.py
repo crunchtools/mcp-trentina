@@ -18,7 +18,17 @@ _BASE64_PATTERN = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
 _HEX_PATTERN = re.compile(r"(?:0x|\\x)?([0-9a-f]{2}[\s,;]?){20,}", re.IGNORECASE)
 _DATA_URI_PATTERN = re.compile(r"data:text/[^;]*;base64,([A-Za-z0-9+/=]+)", re.IGNORECASE)
 
-MAX_BASE64_DECODE_LENGTH = 500
+
+# Was 500 with no recorded rationale. Decoding and pattern-scanning a
+# base64 blob is O(n) and cheap in practice — under 2ms even at 340k encoded
+# chars — so a tiny cap bought no real protection while giving an attacker a
+# free bypass: pad the payload past the cutoff and it skips decoding (and
+# therefore detection) entirely, regardless of what it contains. The new
+# value tracks QUARANTINE_MAX_CONTENT's 100k-char default, since a single
+# blob can't exceed the whole document anyway on that path; it stays a cap,
+# not an unbounded scan, in case a caller feeds this module content that
+# was never bounded upstream (e.g. a raw alert field).
+MAX_BASE64_DECODE_LENGTH = 100_000
 BASE64_EXPANSION_RATIO = 1.4
 
 
