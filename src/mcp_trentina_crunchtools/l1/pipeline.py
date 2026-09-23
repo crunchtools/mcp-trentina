@@ -1,4 +1,4 @@
-"""L1: the deterministic pipeline that builds the scan view.
+"""L1: the deterministic pipeline, and the one that builds the L2 input.
 
 FORMAT-AGNOSTIC since 0.28.0. There is one entry point and it scans what it
 is handed. The ``looks_like_html`` dispatch that used to choose between an
@@ -108,14 +108,14 @@ def risk_level_for_count(suspicious: int) -> str:
 class PipelineResult:
     """Result from the L1 pipeline: two views of one payload.
 
-    ``content`` is the DELIVERY view — the caller's text, unmodified. L1
+    ``content`` is WHAT THE AGENT RECEIVES — the caller's text, unmodified. L1
     never strips: excising lines or tokens destroyed exactly the content an
     ops agent exists to read (a CVE ticket discusses attacks in the words
     attacks use), and it destroyed the evidence before the smarter layers
     could judge it. Disposition belongs to the profile's enforcement mode
     and the Q-Agent, not to a regex.
 
-    ``scan_view`` is the JUDGMENT view — the same text with obfuscation
+    ``l2_input`` is WHAT L2 READS — the same text with obfuscation
     normalized away: zero-width characters removed, encoded blobs replaced,
     delimiter tokens dropped. L2 reads this view so an attacker cannot blind
     a pattern classifier with the very tricks L1 counts. It is derived
@@ -126,7 +126,7 @@ class PipelineResult:
     """
 
     content: str
-    scan_view: str
+    l2_input: str
     stats: PipelineStats
     input_size: int
     output_size: int
@@ -142,29 +142,29 @@ def _run_stages(content: str, stats: PipelineStats) -> PipelineResult:
     fix was to delete the fork rather than to guard it.
 
     The delivery text passes through untouched; every stage transforms only
-    the scan view, except ``detect_hidden_markup``, which transforms nothing
+    the L2 input, except ``detect_hidden_markup``, which transforms nothing
     and counts. It runs FIRST, because it is the only stage that reads markup
     and the later stages rewrite the very characters it looks for.
     """
-    scan_view = content
-    scan_view, stats.hidden = detect_hidden_markup(scan_view)
-    scan_view, stats.unicode = normalize_unicode(scan_view)
-    scan_view, stats.encoded = normalize_encoded(scan_view)
-    scan_view, stats.exfiltration = strip_exfiltration(scan_view)
-    scan_view, stats.delimiters = normalize_delimiters(scan_view)
-    scan_view, stats.directives = strip_directives(scan_view)
+    l2_input = content
+    l2_input, stats.hidden = detect_hidden_markup(l2_input)
+    l2_input, stats.unicode = normalize_unicode(l2_input)
+    l2_input, stats.encoded = normalize_encoded(l2_input)
+    l2_input, stats.exfiltration = strip_exfiltration(l2_input)
+    l2_input, stats.delimiters = normalize_delimiters(l2_input)
+    l2_input, stats.directives = strip_directives(l2_input)
 
     size = len(content.encode("utf-8"))
     return PipelineResult(
         content=content,
-        scan_view=scan_view,
+        l2_input=l2_input,
         stats=stats,
         input_size=size,
         output_size=size,
     )
 
 
-def build_scan_view(text: str) -> PipelineResult:
+def run_l1(text: str) -> PipelineResult:
     """Run the pipeline on whatever the caller was handed.
 
     The only entry point. It makes no judgement about the payload's format:

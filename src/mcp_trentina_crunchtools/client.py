@@ -26,7 +26,7 @@ TEXT_CONTENT_TYPES = frozenset({
     "application/xml",
     "application/yaml",
 })
-"""Media types the sanitization pipeline can read as text.
+"""Media types the defense pipeline can read as text.
 
 Anything outside this set — PDF, images, archives, office documents —
 decodes into replacement characters that tokenize into hundreds of
@@ -37,10 +37,10 @@ TEXT_CONTENT_SUFFIXES = ("+json", "+xml")
 
 
 def _is_text_content_type(content_type: str) -> bool:
-    """True if the media type is text the sanitization pipeline can handle.
+    """True if the media type is text the defense pipeline can handle.
 
     An absent content-type is common on plain files, so it counts as text;
-    the size cap and sanitizer handle whatever actually turns up.
+    the size cap and L1 handle whatever actually turns up.
     """
     media_type = content_type.split(";", 1)[0].strip().lower()
 

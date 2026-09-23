@@ -10,6 +10,81 @@ under that name.
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-09-23
+
+Two cleanups that had to land together: the vocabulary release, and the
+removals every deprecation notice had promised.
+
+### Changed
+- **The invented vocabulary is retired. Layers are L1/L2/L3 and nothing
+  else.** Scott's 2026-09-23 decision was only half-applied — 0.24.0 renamed
+  the PACKAGE (`sanitize/` → `l1/`) and left the words everywhere. The reason
+  this is in the Changed section rather than filed as tidying: a name that
+  skews the reader's mental model skews their risk model, and two of these
+  were actively lying.
+
+  `scan_view` → `l2_input`. It is read by exactly one thing — L2 — and "scan
+  view" told you neither that nor which layer produced it. `PipelineResult`
+  now carries two strings whose names say who reads each: `content` (what the
+  agent receives, byte-identical to what arrived) and `l2_input` (what L2
+  reads). L3 reads NEITHER; it gets the original plus L1's counts as a
+  briefing. Also `build_scan_view` → `run_l1`, `defend_scan_view` →
+  `defend_selection`, `ScanView`/`ScanViewContext` →
+  `Selection`/`SelectionContext`.
+
+  "sanitized" was the dangerous one, because it reached the API. The trust
+  levels `sanitized-only` and `trusted-sanitized` told an operator the
+  content had been made safe; `l1/__init__.py` has said since 0.24.0 that the
+  layer "does not make content safe — it cannot". They are now `l1-only` and
+  `trusted-l1`, the tool-response key `sanitization` is `l1`, and
+  `SanitizationError` is `L1Error`.
+
+  D-Bus `layers` keys drop their invented suffixes: `l1_sanitize` /
+  `l2_classifier` / `l3_qagent` → `l1` / `l2` / `l3`. `cockpit-trentina` is
+  updated in the same commit.
+
+### Fixed
+- **Three documentation statements that would have misled someone reasoning
+  about the perimeter.** CLAUDE.md called `quarantine/` "Layer 2: Q-Agent" —
+  the Q-Agent is L3, and L2 is the Prompt Guard classifier sitting in the
+  same directory. README said L3 "hands sanitized content" to the quarantined
+  LLM; L3 reads the ORIGINAL, which is the entire point of the deep-scan
+  variants. `docs/defense-pipeline.md` documented `scan_view.decrypt` as live
+  Matrix config, a key renamed in 0.20.0.
+- **`tests/test_deprecation_deadlines.py` had two blind spots and was missing
+  most of what it existed to watch.** The pattern was case-sensitive, so
+  every ``"""DEPRECATED — use `block_fetch`. Removed in 0.28.0."""`` docstring
+  was invisible to it — eight live notices. And it scanned line by line, so a
+  notice split across two adjacent string literals slipped through; that hid
+  `l3_threshold`'s own description claiming removal "in 0.12.0", seventeen
+  minor releases stale, for the whole life of the file. Both fixed, and the
+  sentinel test now exercises the pattern against known spellings rather than
+  requiring src/ to carry live deprecations — zero pending is a good state.
+- Ten lines of unreachable code after a `return` in
+  `DefenseConfig._check_enforcement`, a security config validator. Present
+  since before this branch and missed by both ruff and mypy; removed with the
+  machinery it referenced.
+
+### Removed
+Every alias whose notice named 0.28.0 or 0.29.0. They were announced between
+0.21.0 and 0.26.0, the warnings named a release for four to eight minors, and
+this is that release.
+
+- **Tools**: `safe_fetch` / `safe_read` / `safe_content` / `safe_search` (use
+  `block_*`) and `quarantine_fetch` / `quarantine_read` / `quarantine_content`
+  / `quarantine_search` (use `clean_*`). The MCP tool count drops from 29 to
+  21. `quarantine_scan`, `deep_quarantine_scan` and `quarantine_stats` are NOT
+  affected — they are diagnostics, they report rather than deliver, and they
+  carry no mode prefix by design.
+- **Config**: `defense.enforcement: annotate` / `extract` (write `warn` /
+  `block`); `matrix_ingress.scan_view:` and its `extractor:` field (write
+  `preprocess:` with `processors:`); `defense.l3_threshold`, which has been
+  accepted-and-ignored since 0.12.0 and is now rejected by `extra="forbid"`.
+
+  A profile still carrying any of these now FAILS TO LOAD, which is loud and
+  recoverable — the alternative was migrating it forever. lotor's
+  `/etc/trentina/profiles.yaml` was migrated off all of them on 2026-09-23.
+
 ## [0.28.0] - 2026-09-23
 
 ### Security

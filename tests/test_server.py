@@ -9,14 +9,14 @@ class TestServerRegistration:
     """Test that all tools are registered correctly."""
 
     async def test_tool_count(self) -> None:
-        """29 during the alias window; 21 once 0.29.0 drops the old names.
+        """21: block_*/warn_*/clean_* plus the diagnostics. The alias
 
-        The count is asserted because twenty-nine tool definitions sit in
+        The count is asserted because twenty-one tool definitions sit in
         every agent's context on every call. Adding one should be a decision
         somebody made, not something that happened.
         """
         tools = await mcp.list_tools()
-        assert len(tools) == 29, f"Expected 29 tools, got {len(tools)}"
+        assert len(tools) == 21, f"Expected 21 tools, got {len(tools)}"
 
     async def test_every_family_offers_all_three_modes(self) -> None:
         """The point of 0.26.0: the AGENT picks the mode, per call.
@@ -47,14 +47,14 @@ class TestServerRegistration:
         # The pre-0.26.0 spellings. Still registered and still routed; this
         # set and the registrations it names go in 0.29.0 together.
         deprecated = {
-            "safe_fetch_tool",
-            "quarantine_fetch_tool",
-            "safe_read_tool",
-            "quarantine_read_tool",
-            "safe_content_tool",
-            "quarantine_content_tool",
-            "safe_search_tool",
-            "quarantine_search_tool",
+            "block_fetch_tool",
+            "clean_fetch_tool",
+            "block_read_tool",
+            "clean_read_tool",
+            "block_content_tool",
+            "clean_content_tool",
+            "block_search_tool",
+            "clean_search_tool",
         }
         diagnostics = {
             "quarantine_scan_tool",

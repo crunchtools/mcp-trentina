@@ -79,7 +79,7 @@ class Config:
     """Trentina configuration from environment variables.
 
     Requires GEMINI_API_KEY for Layer 2 (Q-Agent) operations.
-    Layer 1 (deterministic sanitization) works without it.
+    Layer 1 (deterministic detection) works without it.
     """
 
     def __init__(self) -> None:

@@ -32,7 +32,7 @@ The egress half of parameter guards: the same allow/deny constraint applied to w
 
 ### [Three-Layer Defense Pipeline](docs/defense-pipeline.md)
 
-Every piece of untrusted content passes through three independent detection layers. Layer 1 strips structural attacks (hidden HTML, invisible Unicode, encoded payloads, exfiltration URLs). Layer 2 runs a Prompt Guard 2 86M classifier to catch instruction overrides. Layer 3 hands sanitized content to a quarantined LLM (Gemini Flash Lite) for semantic analysis — no tools, no memory, minimal blast radius. Each layer catches what the others miss.
+Every piece of untrusted content passes through three independent detection layers. Layer 1 deterministically detects structural attacks (hidden markup, invisible Unicode, encoded payloads, exfiltration URLs) and normalizes a copy for Layer 2 to read. Layer 2 runs a Prompt Guard 2 86M classifier on that copy to catch instruction overrides. Layer 3 hands the original content to a quarantined LLM (Gemini Flash Lite) for semantic analysis — no tools, no memory, minimal blast radius. Each layer catches what the others miss.
 
 ### [Tool Description Compression](docs/compression.md)
 
@@ -48,7 +48,7 @@ When Trentina detects prompt injection in a source, it records the source in a S
 
 ### [Web Content Quarantine Tools](docs/quarantine-tools.md)
 
-Trentina's original capability: safe web fetching, file reading, and web search with prompt injection defense. `safe_fetch` fails on injection. `quarantine_fetch` warns but proceeds, extracting content through the Q-Agent. `quarantine_search` chains Gemini grounding with the full defense pipeline. `quarantine_scan` does pre-flight detection without returning content.
+Trentina's original capability: safe web fetching, file reading, and web search with prompt injection defense. `block_fetch` fails on injection. `clean_fetch` warns but proceeds, extracting content through the Q-Agent. `clean_search` chains Gemini grounding with the full defense pipeline. `quarantine_scan` does pre-flight detection without returning content.
 
 ### [LLM Key Proxying](docs/llm-proxying.md)
 

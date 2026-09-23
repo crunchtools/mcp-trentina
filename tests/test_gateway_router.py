@@ -205,7 +205,7 @@ class TestRouter:
 
         async def fake_internal_list() -> list[dict[str, Any]]:
             return [
-                {"name": "safe_fetch_tool", "description": "", "inputSchema": {}},
+                {"name": "block_fetch_tool", "description": "", "inputSchema": {}},
                 {"name": "quarantine_stats_tool", "description": "", "inputSchema": {}},
             ]
 
@@ -226,8 +226,8 @@ class TestRouter:
         names = sorted(str(t["name"]) for t in resp["result"]["tools"])
         assert names == [
             f"mcp-slack{NAMESPACE_SEP}slack_list_channels",
+            f"web{NAMESPACE_SEP}block_fetch_tool",
             f"web{NAMESPACE_SEP}quarantine_stats_tool",
-            f"web{NAMESPACE_SEP}safe_fetch_tool",
         ]
 
     async def test_tools_call_routes_to_internal_backend(self) -> None:
@@ -265,13 +265,13 @@ class TestRouter:
                     "id": 10,
                     "method": "tools/call",
                     "params": {
-                        "name": f"web{NAMESPACE_SEP}safe_fetch_tool",
+                        "name": f"web{NAMESPACE_SEP}block_fetch_tool",
                         "arguments": {"url": "http://example.com"},
                     },
                 },
             )
 
-        assert called == {"tool": "safe_fetch_tool", "args": {"url": "http://example.com"}}
+        assert called == {"tool": "block_fetch_tool", "args": {"url": "http://example.com"}}
         assert resp["result"]["content"] == [{"type": "text", "text": "fetched"}]
         assert resp["result"]["isError"] is False
 
@@ -993,7 +993,7 @@ class TestProfileContext:
                     "id": 11,
                     "method": "tools/call",
                     "params": {
-                        "name": f"web{NAMESPACE_SEP}safe_fetch_tool",
+                        "name": f"web{NAMESPACE_SEP}block_fetch_tool",
                         "arguments": {},
                     },
                 },

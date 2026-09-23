@@ -20,7 +20,7 @@ the identical bytes with a doctype in front scored ``medium`` and were
 stripped. Same payload, two security behaviours, chosen by the first few
 characters. Removing the sniffer is what this module is for.
 
-COUNTS ONLY; the scan view passes through untouched. The hidden text's WORDS
+COUNTS ONLY; the L2 input passes through untouched. The hidden text's WORDS
 are exactly what L2 should still read — what this stage adds is the
 structural signal that those words were not meant to be seen, which is the
 part no amount of reading the text can recover.
@@ -214,7 +214,7 @@ def detect_hidden_markup(text: str) -> tuple[str, HiddenStats]:
 
     Returns the text unchanged. This is a counting stage, not a stripping one
     — see the module docstring for why the hidden words must survive into the
-    scan view.
+    L2 input.
     """
     stats = HiddenStats()
     concept_field = {

@@ -8,7 +8,7 @@ functions are the missing wall:
 * ``scan_tool_response`` — every ``tools/call`` result from a REMOTE
   backend: text content blocks, resource text, and every string leaf of
   ``structuredContent``, judged as one document. Internal backends are
-  deliberately exempt: their tools (safe_fetch and friends) run the
+  deliberately exempt: their tools (block_fetch and friends) run the
   pipeline at their own ingress — the firewall filters where content
   ENTERS, and scanning the same bytes twice on the way through is cost,
   not defense.
@@ -24,7 +24,7 @@ functions are the missing wall:
   cache ingress closes structurally rather than by a deploy-time flush.
 
 Enforcement here is hardwired ANNOTATE: content is never modified (L1 is a
-tripwire; the owner's rule), a flagged payload gets a ``_trentina_warning``
+owner's rule), a flagged payload gets a ``_trentina_warning``
 sibling field, and every flag lands in the detections table as
 ``source_type="tool_response"`` / ``"tool_description"`` — the score
 distribution that step 7's calibration needs before anything fails closed.
@@ -145,7 +145,7 @@ def reset_verdict_cache() -> None:
 
 def _cache_key(profile: Profile, kind: str, text: str) -> str:
     d = profile.defense
-    cfg = f"{d.l2_threshold}:{d.l3_threshold}"
+    cfg = f"{d.l2_threshold}"
     return hashlib.sha256(f"{kind}:{cfg}:{text}".encode()).hexdigest()
 
 

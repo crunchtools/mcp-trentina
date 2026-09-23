@@ -1,4 +1,4 @@
-"""Decrypt to build the scan view; forward the ciphertext untouched.
+"""Decrypt to build the L2 input; forward the ciphertext untouched.
 
 Everything ``select`` does, plus the one thing that changes what the perimeter
 can actually see. Message bodies in an encrypted room are ciphertext at the
@@ -15,7 +15,7 @@ DELIVERY IS UNTOUCHED. What this processor reads never influences the bytes
    ``_trentina_warning`` key.
 
 DECRYPTION IS READ-ONLY, ADDITIVE AND EPHEMERAL. Recovered plaintext exists
-   only in the scan view. Never forwarded, never written to disk, never logged
+   only in the L2 input. Never forwarded, never written to disk, never logged
    in full. Trentina never writes to the homeserver and holds no Matrix device
    identity.
 
@@ -25,7 +25,7 @@ agent must decrypt for itself, so the proxy cannot deliver what it read — see
 homeserver never sees plaintext and E2EE is kept. Issue #162 proposes a
 bridge that terminates E2EE and delivers the plaintext. If that lands, this
 stops being a document processor at all: it would read exactly what it
-delivers, which is the ordinary pre-processor contract, and the scan view
+delivers, which is the ordinary pre-processor contract, and the L2 input
 would simply be its output.
 
 Two habits worth naming, because both are easy to get wrong:
@@ -48,7 +48,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..channels import Channel, Kind
 from ..jsonwalk import iter_leaves
-from .view import ScanView, ScanViewContext, SkipReason, UndecryptableEvent
+from .view import Selection, SelectionContext, SkipReason, UndecryptableEvent
 
 if TYPE_CHECKING:
     from ..matrix.keybackup import KeyBackupProvider
@@ -79,7 +79,7 @@ class MatrixProcessor:
         self._select = select
         self._keys = keys
 
-    async def extract(self, payload: Any, ctx: ScanViewContext) -> ScanView:
+    async def extract(self, payload: Any, ctx: SelectionContext) -> Selection:
         encrypted: list[dict[str, Any]] = []
         _collect_encrypted(payload, encrypted)
 
@@ -129,7 +129,7 @@ class MatrixProcessor:
         )
         if undecryptable:
             logger.warning(
-                "matrix scanview: %s — %d of %d encrypted event(s) unread",
+                "matrix select: %s — %d of %d encrypted event(s) unread",
                 ctx.path or ctx.source, len(undecryptable), len(encrypted),
             )
         return view
@@ -149,7 +149,7 @@ class MatrixProcessor:
         except Exception as exc:
             # Identity only. Never the ciphertext, never partial plaintext.
             logger.warning(
-                "matrix scanview: decrypt failed for session %s in room %s: %s",
+                "matrix select: decrypt failed for session %s in room %s: %s",
                 session_id, room_id, type(exc).__name__,
             )
             return None

@@ -155,15 +155,25 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
 
 ## Architecture
 
-- `l1/` — Layer 1: the deterministic pipeline that builds the SCAN VIEW, plus
-  module shadow detection. It does not make content safe — it normalizes a
-  copy so L2 and L3 have something stable to judge, and counts what it found.
+- `l1/` — Layer 1: the deterministic pipeline, plus module shadow detection.
+  It does not make content safe — it counts what it found and normalizes a
+  COPY for L2 to read. `PipelineResult` carries exactly two strings and the
+  names say who reads each: `content` is what the agent receives, byte-identical
+  to what arrived; `l2_input` is what L2 reads. L3 reads NEITHER — it gets the
+  original content plus L1's counts as a briefing.
+
+  There is no "scan view" and no "delivery view". Those names were retired in
+  0.29.0 along with `sanitize`/`scanview`: a reader cannot tell from "scan
+  view" which layer consumes it, and "sanitized" claimed the layer made
+  content safe, which it does not and cannot. Layers are L1/L2/L3 in code and
+  in prose, with no invented aliases.
+
   Called `sanitize/` until 0.24.0. FORMAT-AGNOSTIC since 0.28.0: one entry
-  point, `build_scan_view`, which scans whatever it is handed. The
-  `looks_like_html` sniffer and the second `build_scan_view_from_html`
-  pipeline are gone (#172) — the sniffer keyed on a leading `<!DOCTYPE` or
-  `<html>`, so an HTML FRAGMENT took the text path and identical bytes were
-  defended two different ways. `defend()` no longer takes `is_html` either.
+  point, `run_l1`, which scans whatever it is handed. The `looks_like_html`
+  sniffer and the second `build_scan_view_from_html` pipeline are gone (#172)
+  — the sniffer keyed on a leading `<!DOCTYPE` or `<html>`, so an HTML
+  FRAGMENT took the text path and identical bytes were defended two different
+  ways. `defend()` no longer takes `is_html` either.
   - `hidden.py` — content-hiding fingerprints (`display:none`, off-screen
     positioning, same-colour text), counted on EVERY payload rather than
     behind a format guess. Tier 2 of the markup answer; tier 1 is
@@ -172,7 +182,10 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
     table that `preprocess/html.py` imports, so the converter that strips an
     element and the stage that counts one decide by one rule.
   - `shadows.py` — Python stdlib module shadow detection and obfuscation scanning
-- `quarantine/` — Layer 2: Q-Agent (Gemini REST via httpx, NO SDK, NO tools)
+- `quarantine/` — holds BOTH judging layers, which is why the directory name
+  matches neither: `classifier.py` is L2 (Prompt Guard 2, local ONNX) and
+  `agent.py` is L3 (Gemini REST via httpx, NO SDK, NO tools). CLAUDE.md called
+  this "Layer 2: Q-Agent" until 0.29.0, which was simply wrong.
 - `tools/` — Tool implementations called by server.py wrappers
 - `database.py` — SQLite blocklist for cumulative detection memory
 - `perimeter_db.py` — the perimeter's own store, deliberately a second database:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 import pytest
@@ -216,7 +215,6 @@ class TestProfileModel:
         assert d.audit is True
         assert d.audit is True
         assert 0.0 <= d.l2_threshold <= 1.0
-        assert 0.0 <= d.l3_threshold <= 1.0
 
     def test_defense_threshold_bounds(self) -> None:
         with pytest.raises(ValidationError):
@@ -683,32 +681,20 @@ class TestEnforcementModeNames:
 
         assert DefenseConfig().enforcement == "warn"
 
-    @pytest.mark.parametrize(
-        ("old", "new"), [("annotate", "warn"), ("extract", "block")]
-    )
-    def test_the_old_spelling_still_loads(self, old: str, new: str) -> None:
-        """`extract` maps to `block`, NOT to `clean`.
+    @pytest.mark.parametrize("old", ["annotate", "extract"])
+    def test_the_pre_0_25_spellings_are_gone(self, old: str) -> None:
+        """Accepted with a warning from 0.25.0, removed in 0.29.0 as promised.
 
-        Not a downgrade: the gateway has always failed closed on `extract`,
-        so `block` describes what a profile carrying it already does.
-        Mapping it to `clean` — which 0.27.0 refuses at load — would take a
-        running gateway down in order to correct a word.
+        The warning named the release for four minors; this is the release.
+        A profile still carrying one now fails to load, which is loud and
+        recoverable — the alternative was migrating it forever.
         """
+        import pydantic
+
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
-        assert DefenseConfig(enforcement=old).enforcement == new
-
-    def test_the_old_spelling_warns(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """A silent migration is how a config stays wrong until removal day."""
-        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
-
-        with caplog.at_level(logging.WARNING):
-            DefenseConfig(enforcement="annotate")
-        assert any("0.29.0" in r.getMessage() for r in caplog.records), (
-            "the deprecation must name the release that removes it"
-        )
+        with pytest.raises(pydantic.ValidationError):
+            DefenseConfig(enforcement=old)
 
     def test_clean_is_refused_at_load_and_says_why(self) -> None:
         """A config must not name a capability the gateway does not have.

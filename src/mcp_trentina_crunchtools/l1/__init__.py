@@ -1,7 +1,7 @@
-"""L1: the deterministic layer, and the one that builds the scan view.
+"""L1: the deterministic layer, and the one that builds the L2 input.
 
 Deterministic stages, no model, no network. What they produce is a normalized COPY
-for L2 and L3 to read — the scan view — while the delivered bytes stay
+for L2 to read — ``l2_input`` — while the delivered bytes stay
 whatever the call site decided to deliver. Scan-differs-from-deliver is what
 this layer has always done, which is why `preprocess/` is allowed to do it
 too (see `preprocess/base.py`, invariant 2).
@@ -17,15 +17,15 @@ from .hidden import HiddenStats, detect_hidden_markup
 from .pipeline import (
     PipelineResult,
     PipelineStats,
-    build_scan_view,
     risk_level_for_count,
+    run_l1,
 )
 
 __all__ = [
     "HiddenStats",
     "PipelineResult",
     "PipelineStats",
-    "build_scan_view",
     "detect_hidden_markup",
     "risk_level_for_count",
+    "run_l1",
 ]

@@ -62,7 +62,7 @@ def build_warning(
     # ``classify_async`` returns None for that, which used to read as a
     # clean scan — survivable while a verdict expired in fifteen minutes,
     # not survivable now that one is written down.
-    l2_unavailable = bool(verdict.pipeline.scan_view.strip()) and classification is None
+    l2_unavailable = bool(verdict.pipeline.l2_input.strip()) and classification is None
     l3_unavailable = bool(
         verdict.l3_assessment is not None
         and verdict.l3_assessment.get("l3_unavailable")

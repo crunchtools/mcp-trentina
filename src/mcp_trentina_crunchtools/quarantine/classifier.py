@@ -3,7 +3,7 @@
 Embedded in-process inference. No sidecar, no HTTP API, no network calls.
 Synchronous — ONNX inference is CPU-bound (<100ms), not I/O-bound.
 
-The classifier sees sanitized content (post-Layer 1) on the input path,
+The classifier sees the L2 input (post-Layer 1) on the input path,
 and extracted text (post-Layer 3) on the output verification path.
 """
 

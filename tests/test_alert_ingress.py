@@ -137,8 +137,8 @@ def _reset_alert_client() -> Iterator[None]:
     alert_ingress._alert_client = None
 
 
-class TestHandleAlertSanitization:
-    """`_handle_alert` sanitizes the payload before forwarding it."""
+class TestHandleAlertL1:
+    """`_handle_alert` runs L1 over the payload before forwarding it."""
 
     def test_forwards_clean_payload_unchanged(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
@@ -322,7 +322,7 @@ class TestHandleAlertNonJsonAndEdgeCases:
 
 
 class TestHandleAlertHmacSignature:
-    def test_forward_signature_covers_sanitized_body_not_original(
+    def test_forward_signature_covers_the_forwarded_body_not_the_original(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         calls = _mock_forward_http(monkeypatch)

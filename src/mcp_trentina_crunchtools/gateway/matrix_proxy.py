@@ -40,9 +40,9 @@ import httpx
 from starlette.responses import Response, StreamingResponse
 
 from ..channels import Channel
-from ..defense import defend, defend_scan_view
+from ..defense import defend, defend_selection
 from ..matrix.keybackup import KeyBackupProvider
-from ..preprocess import ScanViewContext
+from ..preprocess import SelectionContext
 from ..warning import build_warning
 from .drivers import build_preprocessors
 from .proxy_utils import (
@@ -51,7 +51,7 @@ from .proxy_utils import (
     forward_request_headers,
     normalize_proxy_path,
 )
-from .selection import build_scan_view, describe
+from .selection import describe, run_l1
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -322,7 +322,7 @@ async def _extractor_for(profile: Profile) -> Any:
     """The profile's document processor, built once, with its keys attached.
 
     ``None`` when the profile names no processor, which is the default and
-    means read every leaf — ``build_scan_view`` handles it.
+    means read every leaf — ``run_l1`` handles it.
 
     Cached because the Matrix processor holds a Megolm session cache, and
     rebuilding it per request would throw that away on the path where it
@@ -417,16 +417,16 @@ async def _scan_and_forward(
         # unbounded, which is the stall risk selection itself introduces.
         async with asyncio.timeout(deadline):
             extractor = await _extractor_for(profile)
-            view = await build_scan_view(
+            view = await run_l1(
                 payload,
                 extractor=extractor,
-                ctx=ScanViewContext(
+                ctx=SelectionContext(
                     source=f"matrix:{profile.name}:{path}",
                     profile_name=profile.name,
                     path=path,
                 ),
             )
-            verdict = await defend_scan_view(
+            verdict = await defend_selection(
                 view,
                 source=f"matrix:{profile.name}:{path}",
                 source_type="matrix_sync",

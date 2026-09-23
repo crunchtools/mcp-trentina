@@ -91,9 +91,9 @@ def _build_interface() -> Any:
                     "max_content": config.max_content,
                 },
                 "layers": {
-                    "l1_sanitize": True,
-                    "l2_classifier": is_classifier_available(),
-                    "l3_qagent": config.has_api_key,
+                    "l1": True,
+                    "l2": is_classifier_available(),
+                    "l3": config.has_api_key,
                 },
             })
 
@@ -112,14 +112,14 @@ def _build_interface() -> Any:
 
             config = get_config()
             return json.dumps({
-                "l1_sanitize": {"active": True, "description": "Deterministic sanitization"},
-                "l2_classifier": {
+                "l1": {"active": True, "description": "Deterministic detection"},
+                "l2": {
                     "active": is_classifier_available(),
                     "description": "Prompt Guard 2 classifier",
                 },
-                "l3_qagent": {
+                "l3": {
                     "active": config.has_api_key,
-                    "description": "Gemini Q-Agent",
+                    "description": "Gemini semantic judge",
                     "model": config.model,
                 },
             })

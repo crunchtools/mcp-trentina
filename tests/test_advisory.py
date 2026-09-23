@@ -20,7 +20,7 @@ from mcp_trentina_crunchtools.tools.fetch import (
     _handle_content_type_error,
     _handle_fetch_error,
     _scan_error_body,
-    safe_fetch,
+    block_fetch,
 )
 
 
@@ -324,7 +324,7 @@ class TestBuildAdvisory:
 
 
 class TestSafeFetchAdvisory:
-    """Verify safe_fetch returns advisories instead of errors."""
+    """Verify block_fetch returns advisories instead of errors."""
 
     @pytest.mark.asyncio
     async def test_415_returns_advisory_not_error(
@@ -349,7 +349,7 @@ class TestSafeFetchAdvisory:
             mock_config.return_value.has_api_key = False
             mock_config.return_value.is_trusted_domain.return_value = False
 
-            result = await safe_fetch("https://evil.example.com/")
+            result = await block_fetch("https://evil.example.com/")
 
             assert result["content"] is None
             assert result["security_advisory"]["pattern"] == "suspicious_http_415"
@@ -370,4 +370,4 @@ class TestSafeFetchAdvisory:
             ),
             pytest.raises(FetchError, match="HTTP 404"),
         ):
-            await safe_fetch("https://example.com/missing")
+            await block_fetch("https://example.com/missing")

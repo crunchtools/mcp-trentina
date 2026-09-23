@@ -19,7 +19,7 @@ import httpx
 
 from ..config import get_config
 from ..errors import QuarantineAgentError
-from ..l1.pipeline import build_scan_view
+from ..l1.pipeline import run_l1
 from .prompts import (
     DETECTION_RESPONSE_SCHEMA,
     DETECTION_SYSTEM_PROMPT,
@@ -308,7 +308,7 @@ async def quarantine_extract(
 ) -> dict[str, Any]:
     """Run Q-Agent in extraction mode. Returns structured content.
 
-    Post-extraction: runs extracted_text through Layer 1 build_scan_view()
+    Post-extraction: runs extracted_text through Layer 1 run_l1()
     to strip any injection patterns the Q-Agent may have been tricked
     into embedding in its output.
 
@@ -348,7 +348,7 @@ async def quarantine_extract(
         extracted = parsed.get("extracted_text", "")
         classifier_output_warning = None
         if extracted:
-            result = build_scan_view(extracted)
+            result = run_l1(extracted)
             parsed["extracted_text"] = result.content[:MAX_EXTRACTED_TEXT]
             from .classifier import classify_async
 

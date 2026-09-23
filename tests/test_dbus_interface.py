@@ -28,9 +28,9 @@ class TestEmitRequestEvent:
         bus.subscribe("request_processed", lambda _name, data: received.append(data))
 
         emit_request_event(
-            tool="safe_fetch",
+            tool="block_fetch",
             source="https://example.com",
-            trust_level="trusted-sanitized",
+            trust_level="trusted-l1",
             risk_level="low",
             l1_detections=0,
             l1_suspicious=0,
@@ -42,9 +42,9 @@ class TestEmitRequestEvent:
         )
 
         assert len(received) == 1
-        assert received[0]["tool"] == "safe_fetch"
+        assert received[0]["tool"] == "block_fetch"
         assert received[0]["source"] == "https://example.com"
-        assert received[0]["trust_level"] == "trusted-sanitized"
+        assert received[0]["trust_level"] == "trusted-l1"
         assert received[0]["risk_level"] == "low"
         assert received[0]["l2_label"] == "BENIGN"
         assert received[0]["l2_score"] == 0.02
@@ -61,7 +61,7 @@ class TestEmitRequestEvent:
         start = time.time() - 0.1
 
         emit_request_event(
-            tool="quarantine_fetch",
+            tool="clean_fetch",
             source="https://evil.com",
             trust_level="quarantined",
             risk_level="high",
@@ -130,9 +130,9 @@ class TestDbusInterfaceMethods:
         bus.subscribe("request_processed", lambda _n, d: received.append(d))
 
         emit_request_event(
-            tool="safe_read",
+            tool="block_read",
             source="/tmp/test.txt",
-            trust_level="sanitized-only",
+            trust_level="l1-only",
             risk_level="low",
             l1_detections=0,
             l1_suspicious=0,
@@ -144,7 +144,7 @@ class TestDbusInterfaceMethods:
         )
 
         assert len(received) == 1
-        assert received[0]["tool"] == "safe_read"
+        assert received[0]["tool"] == "block_read"
 
 
 class TestGracefulDegradation:
@@ -198,7 +198,7 @@ class TestEventDataShapes:
         bus.subscribe("request_processed", lambda _n, d: events_captured.append(d))
 
         emit_request_event(
-            tool="quarantine_search",
+            tool="clean_search",
             source="query:test",
             trust_level="quarantined",
             risk_level="low",

@@ -142,16 +142,16 @@ class TestInternalBackend:
         with pytest.raises(BackendCallError, match="not registered"):
             await internal.list_internal_tools()
         with pytest.raises(BackendCallError, match="not registered"):
-            await internal.call_internal_tool("safe_fetch_tool", {})
+            await internal.call_internal_tool("block_fetch_tool", {})
 
     async def test_register_then_listed(self) -> None:
-        server = _FakeServer([_tool("safe_fetch_tool"), _tool("quarantine_stats_tool")])
+        server = _FakeServer([_tool("block_fetch_tool"), _tool("quarantine_stats_tool")])
         internal.register_internal_server(server)
         assert internal.internal_server_registered() is True
 
         tools = await internal.list_internal_tools()
         names = sorted(t["name"] for t in tools)
-        assert names == ["quarantine_stats_tool", "safe_fetch_tool"]
+        assert names == ["block_fetch_tool", "quarantine_stats_tool"]
         sample = tools[0]
         assert "description" in sample
         assert sample["inputSchema"] == {"type": "object", "properties": {}}
@@ -161,7 +161,7 @@ class TestInternalBackend:
         model must serialize to a JSON-able dict, not blow up json.dumps."""
         annotated = _FakeFunctionTool(
             McpTool(
-                name="safe_fetch_tool",
+                name="block_fetch_tool",
                 description="d",
                 inputSchema={"type": "object", "properties": {}},
                 annotations=ToolAnnotations(title="Safe Fetch", readOnlyHint=True),
@@ -179,10 +179,10 @@ class TestInternalBackend:
             structured_content={"answer": 42},
             is_error=False,
         )
-        server = _FakeServer([_tool("safe_fetch_tool")], call_result=result)
+        server = _FakeServer([_tool("block_fetch_tool")], call_result=result)
         internal.register_internal_server(server)
-        call = await internal.call_internal_tool("safe_fetch_tool", {"url": "http://x"})
-        assert server.calls == [("safe_fetch_tool", {"url": "http://x"})]
+        call = await internal.call_internal_tool("block_fetch_tool", {"url": "http://x"})
+        assert server.calls == [("block_fetch_tool", {"url": "http://x"})]
         assert call.content == [{"type": "text", "text": "hello"}]
         assert call.is_error is False
         assert call.structured_content == {"answer": 42}
@@ -191,9 +191,9 @@ class TestInternalBackend:
         result = _FakeResult(
             content=[TextContent(type="text", text="boom")], is_error=True
         )
-        server = _FakeServer([_tool("safe_fetch_tool")], call_result=result)
+        server = _FakeServer([_tool("block_fetch_tool")], call_result=result)
         internal.register_internal_server(server)
-        call = await internal.call_internal_tool("safe_fetch_tool", {})
+        call = await internal.call_internal_tool("block_fetch_tool", {})
         assert call.is_error is True
 
     async def test_list_wraps_failure_in_backendcallerror(self) -> None:
@@ -226,7 +226,7 @@ async def test_real_trentina_server_lists_its_tools() -> None:
         internal._server = saved
 
     names = {t["name"] for t in tools}
-    assert "safe_fetch_tool" in names
+    assert "block_fetch_tool" in names
     assert "quarantine_stats_tool" in names
     for t in tools:
         assert isinstance(t["name"], str) and t["name"]

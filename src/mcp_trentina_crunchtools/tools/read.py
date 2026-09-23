@@ -1,4 +1,4 @@
-"""Read tools — quarantine_read and safe_read."""
+"""Read tools — block_read, warn_read and clean_read."""
 
 from __future__ import annotations
 
@@ -68,8 +68,8 @@ def _validate_file(path: str) -> str:
     return resolved
 
 
-def _build_sanitization_metadata(pipeline_result: PipelineResult) -> dict[str, Any]:
-    """Build the sanitization section of tool response."""
+def _build_l1_metadata(pipeline_result: PipelineResult) -> dict[str, Any]:
+    """Build the L1 section of a tool response."""
     return {
         "input_size": pipeline_result.input_size,
         "output_size": pipeline_result.output_size,
@@ -111,7 +111,7 @@ async def _read_judged(path: str, *, mode: str) -> dict[str, Any]:
 
     pipeline_result = verdict.pipeline
     classification = verdict.classification
-    trust_level = "trusted-sanitized" if is_trusted else "sanitized-only"
+    trust_level = "trusted-l1" if is_trusted else "l1-only"
 
     emit_request_event(
         tool=f"{mode}_read",
@@ -135,7 +135,7 @@ async def _read_judged(path: str, *, mode: str) -> dict[str, Any]:
             "source": "layer1",
             "source_path": resolved,
         },
-        "sanitization": _build_sanitization_metadata(pipeline_result),
+        "l1": _build_l1_metadata(pipeline_result),
     }
 
     # Only `warn` reaches here flagged; `block` raised. Also attached when
@@ -156,12 +156,7 @@ async def warn_read(path: str) -> dict[str, Any]:
     return await _read_judged(path, mode="warn")
 
 
-async def safe_read(path: str) -> dict[str, Any]:
-    """Deprecated spelling of `block_read`. Removed in 0.29.0."""
-    return await block_read(path)
-
-
-async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
+async def clean_read(path: str, prompt: str) -> dict[str, Any]:
     """Read local file with Layer 1 + Layer 2 (Q-Agent) extraction."""
     start_time = time.time()
     config = get_config()
@@ -202,7 +197,7 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
 
     def _emit(trust_level: str) -> None:
         emit_request_event(
-            tool="quarantine_read",
+            tool="clean_read",
             source=resolved,
             trust_level=trust_level,
             risk_level=pipeline_result.stats.risk_level(),
@@ -217,15 +212,15 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
         )
 
     if is_trusted:
-        _emit("trusted-sanitized")
+        _emit("trusted-l1")
         return {
             "content": {"extracted_text": pipeline_result.content},
             "trust": {
-                "level": "trusted-sanitized",
+                "level": "trusted-l1",
                 "source": "layer1",
                 "source_path": resolved,
             },
-            "sanitization": _build_sanitization_metadata(pipeline_result),
+            "l1": _build_l1_metadata(pipeline_result),
             "blocklist_warning": blocklist_warning,
             "classifier_warning": classifier_warning,
         }
@@ -235,15 +230,15 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
             from ..errors import ConfigError
 
             raise ConfigError("GEMINI_API_KEY required and QUARANTINE_FALLBACK=fail")
-        _emit("sanitized-only")
+        _emit("l1-only")
         return {
             "content": {"extracted_text": pipeline_result.content},
             "trust": {
-                "level": "sanitized-only",
+                "level": "l1-only",
                 "source": "layer1-fallback",
                 "source_path": resolved,
             },
-            "sanitization": _build_sanitization_metadata(pipeline_result),
+            "l1": _build_l1_metadata(pipeline_result),
             "blocklist_warning": blocklist_warning,
             "classifier_warning": classifier_warning,
         }
@@ -260,13 +255,8 @@ async def quarantine_read(path: str, prompt: str) -> dict[str, Any]:
             "model": config.model,
             "source_path": resolved,
         },
-        "sanitization": _build_sanitization_metadata(pipeline_result),
+        "l1": _build_l1_metadata(pipeline_result),
         "usage": extraction.get("usage", {}),
         "blocklist_warning": blocklist_warning,
         "classifier_warning": classifier_warning,
     }
-
-
-async def clean_read(path: str, prompt: str) -> dict[str, Any]:
-    """Hand back a Q-Agent extraction rather than the bytes on disk."""
-    return await quarantine_read(path, prompt)

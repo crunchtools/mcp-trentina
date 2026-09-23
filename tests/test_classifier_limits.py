@@ -1,6 +1,6 @@
 """Bounds on Layer 2 scanning.
 
-Regression cover for the 2026-08-22 incident: safe_fetch pulled an 855 KB
+Regression cover for the 2026-08-22 incident: block_fetch pulled an 855 KB
 PDF, decoded the binary as text, and handed ~462k tokens to classify().  The
 unbounded sliding-window loop turned that into ~1,800 ONNX inference passes
 that pegged every core for roughly 90 minutes and wedged the event loop.

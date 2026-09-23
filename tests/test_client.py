@@ -2,7 +2,7 @@
 
 The 2026-08-22 incident started here. fetch_url had no content-type check, so
 an application/pdf body went through resp.text, decoded into 39% replacement
-characters, and was handed to the sanitizer and classifier as if it were
+characters, and was handed to L1 and the classifier as if it were
 prose.
 """
 
@@ -57,7 +57,7 @@ def mock_http(
 
 
 class TestContentTypeAllowlist:
-    """Only text-shaped bodies reach the sanitization pipeline."""
+    """Only text-shaped bodies reach the defense pipeline."""
 
     @pytest.mark.asyncio
     async def test_pdf_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:

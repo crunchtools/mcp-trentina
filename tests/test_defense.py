@@ -150,7 +150,7 @@ class TestProvenanceGate:
         L2 scores it benign, so a score-only gate would skip L3 entirely and
         the payload would walk in. Provenance forces the Q-Agent to look.
         """
-        defense = DefenseConfig(l3_threshold=0.7)
+        defense = DefenseConfig()
         verdict, mocks = await _defend(
             classification=BENIGN_LOW,
             defense=defense,
@@ -172,12 +172,12 @@ class TestProvenanceGate:
     async def test_external_below_threshold_still_runs_l3(self) -> None:
         """No score gate. L3 is the layer built for attacks L2 cannot see,
         so 'L2 found nothing' is the weakest reason to skip it."""
-        defense = DefenseConfig(l3_threshold=0.7)
+        defense = DefenseConfig()
         _, mocks = await _defend(classification=BENIGN_LOW, defense=defense)
         mocks["quarantine_detect"].assert_called_once()
 
     async def test_external_above_threshold_runs_l3(self) -> None:
-        defense = DefenseConfig(l3_threshold=0.7)
+        defense = DefenseConfig()
         _, mocks = await _defend(classification=BENIGN_HIGH, defense=defense)
         mocks["quarantine_detect"].assert_called_once()
 
@@ -185,7 +185,7 @@ class TestProvenanceGate:
         """L1 no longer strips; its detections are a warning, and a warning
         nobody is forced to act on is nothing — so any suspicious L1 hit
         sends the original to the judge, even at a rock-bottom L2 score."""
-        defense = DefenseConfig(l3_threshold=0.99)
+        defense = DefenseConfig()
         _, mocks = await _defend(
             content=L1_HOSTILE, classification=BENIGN_LOW, defense=defense
         )

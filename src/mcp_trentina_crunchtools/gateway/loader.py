@@ -82,7 +82,6 @@ def _build_profile(name: str, body: Any) -> Profile:
     except ValidationError as exc:
         raise ProfileConfigError(f"Profile {name!r}: {exc}") from exc
 
-    _warn_deprecated_defense_keys(name, body)
     _resolve_bearer_token(name, profile)
     _resolve_oauth_client_secret(name, profile)
     _resolve_oauth_audience(name, profile)
@@ -128,31 +127,6 @@ def _check_drivers(name: str, profile: Profile) -> None:
             profile.matrix_ingress.preprocess,
             channel=Channel.MATRIX,
             profile_name=name,
-        )
-
-
-def _warn_deprecated_defense_keys(name: str, body: dict[str, Any]) -> None:
-    """Say so when a profile sets a key that no longer does anything.
-
-    `l3_threshold` gated whether L3 ran. It does not any more — L3 runs on
-    every input the gateway scans — and a config key that silently stopped
-    mattering is exactly what an operator should be told about rather than
-    discover. Retained so `extra="forbid"` does not reject profiles written
-    for 0.9.x; removed in 0.29.0 along with every other alias.
-
-    It said 0.12.0 until 0.27.1, and 0.12.0 shipped fifteen minor releases
-    ago — so the warning told operators the key was already rejected while
-    the loader went on accepting it. A deprecation notice naming a release
-    that has passed is worse than none: it is read as "this already
-    happened", and the reader stops looking.
-    """
-    defense = body.get("defense")
-    if isinstance(defense, dict) and "l3_threshold" in defense:
-        logger.warning(
-            "Profile %r sets defense.l3_threshold, which is ignored — L3 "
-            "runs on every scanned input. Remove the key; it is rejected "
-            "from 0.28.0.",
-            name,
         )
 
 

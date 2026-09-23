@@ -1,4 +1,4 @@
-"""Tests for the directive detection sanitization stage.
+"""Tests for the directive detection stage.
 
 This stage detects and counts; it never modifies the text. The whole-line
 stripping it used to do silently emptied one-line content (a Jira summary, a

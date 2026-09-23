@@ -24,7 +24,7 @@ _VARIATION_SELECTORS = re.compile("[\ufe00-\ufe0f]")
 _UNICODE_TAGS = re.compile("[\U000e0001-\U000e007f]")
 # The gaps are deliberate: \x09 (tab), \x0a (LF) and \x0d (CR) are the
 # whitespace the document is MADE of, and stripping them corrupts the thing
-# being cleaned — code blocks collapse onto one line and the scan view stops
+# being cleaned — code blocks collapse onto one line and the L2 input stops
 # resembling what the agent would have read. CodeQL reads the syntax and not
 # the intent, so it flags this as `py/overly-large-range` (alert #2, dismissed
 # as a false positive). Widening to \x00-\x1f to silence it breaks whitespace

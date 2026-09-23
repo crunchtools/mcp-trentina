@@ -12,7 +12,7 @@ The question it answers: **does the choice of LLM behind the Q-Agent matter?**
 The corpus (`tests/adversarial_corpus.py`) is built to isolate what only Layer 3
 can do. Every attack is written to slip past the cheaper layers:
 
-- **Layer 1** (deterministic sanitization) strips hidden HTML, zero-width
+- **Layer 1** (deterministic detection) counts hidden markup, zero-width
   characters, base64 blobs, markdown-image exfil URLs, and literal delimiter
   tokens. The attacks carry none of those.
 - **Layer 2** (Prompt Guard 2) is trained on instruction-override *syntax*

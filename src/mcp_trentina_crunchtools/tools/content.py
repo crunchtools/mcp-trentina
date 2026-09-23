@@ -1,4 +1,4 @@
-"""Content tools — safe_content, quarantine_content, scan_content, deep_scan_content."""
+"""Content tools — block_content, clean_content, scan_content, deep_scan_content."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from ..defense import advise, defend, enforce_block
 from ..errors import BlockedSourceError, ContentSizeError
 from ..l1.pipeline import (
     PipelineResult,
-    build_scan_view,
+    run_l1,
 )
 from ..quarantine.agent import quarantine_extract
 from ..quarantine.classifier import (
@@ -35,8 +35,8 @@ def _validate_content_size(content: str, max_size: int) -> None:
         raise ContentSizeError(len(content), max_size)
 
 
-def _build_sanitization_metadata(pipeline_result: PipelineResult) -> dict[str, Any]:
-    """Build the sanitization section of tool response."""
+def _build_l1_metadata(pipeline_result: PipelineResult) -> dict[str, Any]:
+    """Build the L1 section of a tool response."""
     return {
         "input_size": pipeline_result.input_size,
         "output_size": pipeline_result.output_size,
@@ -82,7 +82,7 @@ async def _content_judged(
     emit_request_event(
         tool=f"{mode}_content",
         source=chash,
-        trust_level="sanitized-only",
+        trust_level="l1-only",
         risk_level=pipeline_result.stats.risk_level(),
         l1_detections=pipeline_result.stats.total_detections(),
         l1_suspicious=pipeline_result.stats.suspicious_detections(),
@@ -97,11 +97,11 @@ async def _content_judged(
     result: dict[str, Any] = {
         "content": pipeline_result.content,
         "trust": {
-            "level": "sanitized-only",
+            "level": "l1-only",
             "source": "layer1",
             "content_hash": chash,
         },
-        "sanitization": _build_sanitization_metadata(pipeline_result),
+        "l1": _build_l1_metadata(pipeline_result),
     }
 
     warning = build_warning(verdict)
@@ -124,19 +124,12 @@ async def warn_content(
     return await _content_judged(content, content_type, mode="warn")
 
 
-async def safe_content(
-    content: str, content_type: str = "text/plain"
-) -> dict[str, Any]:
-    """Deprecated spelling of `block_content`. Removed in 0.29.0."""
-    return await block_content(content, content_type)
-
-
-async def quarantine_content(
+async def clean_content(
     content: str,
     prompt: str = "Extract the main content.",
     content_type: str = "text/plain",
 ) -> dict[str, Any]:
-    """Sanitize + Q-Agent extraction on inline content.
+    """L1 detection + L3 extraction on inline content.
 
     Warns but proceeds if content hash is in blocklist.
 
@@ -183,7 +176,7 @@ async def quarantine_content(
 
     def _emit(trust_level: str) -> None:
         emit_request_event(
-            tool="quarantine_content",
+            tool="clean_content",
             source=chash,
             trust_level=trust_level,
             risk_level=pipeline_result.stats.risk_level(),
@@ -202,15 +195,15 @@ async def quarantine_content(
             from ..errors import ConfigError
 
             raise ConfigError("GEMINI_API_KEY required and QUARANTINE_FALLBACK=fail")
-        _emit("sanitized-only")
+        _emit("l1-only")
         return {
             "content": {"extracted_text": pipeline_result.content},
             "trust": {
-                "level": "sanitized-only",
+                "level": "l1-only",
                 "source": "layer1-fallback",
                 "content_hash": chash,
             },
-            "sanitization": _build_sanitization_metadata(pipeline_result),
+            "l1": _build_l1_metadata(pipeline_result),
             "blocklist_warning": blocklist_warning,
             "classifier_warning": classifier_warning,
         }
@@ -228,7 +221,7 @@ async def quarantine_content(
             "model": config.model,
             "content_hash": chash,
         },
-        "sanitization": _build_sanitization_metadata(pipeline_result),
+        "l1": _build_l1_metadata(pipeline_result),
         "usage": extraction.get("usage", {}),
         "blocklist_warning": blocklist_warning,
         "classifier_warning": classifier_warning,
@@ -239,7 +232,7 @@ async def scan_content(
     content: str,
     content_type: str = "text/plain",
 ) -> dict[str, Any]:
-    """Three-layer scan on inline content. L2/L3 see sanitized output.
+    """Three-layer scan on inline content. L2/L3 see what L1 produced.
 
     Returns threat assessment only — no content in the response.
     """
@@ -251,10 +244,10 @@ async def scan_content(
     chash = _content_hash(content)
 
     # Published tool surface, discarded explicitly: L1 is format-agnostic and
-    # `content_type` selects nothing (#172). See `quarantine_content`.
+    # `content_type` selects nothing (#172). See `clean_content`.
     del content_type
 
-    l1 = build_scan_view(content)
+    l1 = run_l1(content)
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
@@ -320,10 +313,10 @@ async def deep_scan_content(
     chash = _content_hash(content)
 
     # Published tool surface, discarded explicitly: L1 is format-agnostic and
-    # `content_type` selects nothing (#172). See `quarantine_content`.
+    # `content_type` selects nothing (#172). See `clean_content`.
     del content_type
 
-    l1 = build_scan_view(content)
+    l1 = run_l1(content)
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
@@ -338,7 +331,7 @@ async def deep_scan_content(
         record=False,
         precomputed_l1=PipelineResult(
             content=content,
-            scan_view=content,
+            l2_input=content,
             stats=l1.stats,
             input_size=l1.input_size,
             output_size=l1.output_size,
@@ -378,12 +371,3 @@ async def deep_scan_content(
     )
 
     return result
-
-
-async def clean_content(
-    content: str,
-    prompt: str = "Extract the main content.",
-    content_type: str = "text/plain",
-) -> dict[str, Any]:
-    """Hand back a Q-Agent extraction rather than the content as given."""
-    return await quarantine_content(content, prompt, content_type)

@@ -1,11 +1,11 @@
-"""Tests for unicode sanitization module."""
+"""Tests for the unicode stage."""
 
 from __future__ import annotations
 
 from mcp_trentina_crunchtools.l1.unicode import normalize_unicode
 
 
-class TestUnicodeSanitization:
+class TestUnicodeNormalization:
     """Test zero-width chars, bidi overrides, control chars, NFKC."""
 
     def test_strips_zero_width_chars(self) -> None:

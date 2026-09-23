@@ -4,9 +4,9 @@ Trentina has exactly two kinds of driver, and this module names the third
 thing they share: the ingress each one understands.
 
 * **Guards** decide admission to the trust perimeter. Parameter guards,
-  response guards, and the three-layer scanner. Guards decide; nothing else
-  does. A guard also decides what it READS — see ``scanview/``, which is a
-  guard's read policy and not a separate concept.
+  response guards, and L1/L2/L3. Guards decide; nothing else does. A guard
+  also decides what it READS, which is a guard's read policy and not a
+  separate concept — ``preprocess/view.py`` carries it.
 * **Pre-processors** are everything before that. They run outside the
   perimeter, their output is exactly as untrusted as their input, and
   everything they emit crosses the guards on the way in. See
@@ -21,9 +21,9 @@ checked against that payload. The same argument applies to a pre-processor —
 a reducer tuned for one payload shape, pointed at another, quietly declines
 forever and looks like it is working.
 
-The enum lives here, above both ``preprocess/`` and ``scanview/``, so that
-neither package has to import the other and neither has to import the
-gateway that wires them. ``gateway/drivers.py`` is the single place the
+The enum lives here, above ``preprocess/`` and ``l1/``, so that neither
+package has to import the other and neither has to import the gateway that
+wires them. ``gateway/drivers.py`` is the single place the
 locking is enforced.
 """
 

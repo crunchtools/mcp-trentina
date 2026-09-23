@@ -378,7 +378,7 @@ class TestRouterIntegration:
                     "id": 3,
                     "method": "tools/call",
                     "params": {
-                        "name": f"web{NAMESPACE_SEP}safe_fetch",
+                        "name": f"web{NAMESPACE_SEP}block_fetch",
                         "arguments": {"url": "https://example.com"},
                     },
                 },

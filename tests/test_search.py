@@ -18,9 +18,9 @@ from mcp_trentina_crunchtools.quarantine.agent import (
 )
 from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
 from mcp_trentina_crunchtools.tools.search import (
-    _sanitize_l0_output,
-    quarantine_search,
-    safe_search,
+    _run_l1_on_l0_output,
+    block_search,
+    clean_search,
 )
 
 
@@ -326,29 +326,29 @@ class TestRedirectResolution:
 
 
 
-class TestSanitizeL0Output:
-    """Tests for _sanitize_l0_output()."""
+class TestRunL1OnL0Output:
+    """Tests for _run_l1_on_l0_output()."""
 
     def test_clean_text_passes_through(self) -> None:
         """Clean text and sources pass through with zero detections."""
         sources = [
             {"uri": "https://example.com", "title": "Example Page"}
         ]
-        text_result, sanitized, detections, _stats = _sanitize_l0_output(
+        text_result, scanned, detections, _stats = _run_l1_on_l0_output(
             "Clean text here.", sources
         )
         assert text_result.content == "Clean text here."
-        assert len(sanitized) == 1
-        assert sanitized[0]["uri"] == "https://example.com"
+        assert len(scanned) == 1
+        assert scanned[0]["uri"] == "https://example.com"
         assert detections == 0
 
 
 
 class TestSafeSearch:
-    """Tests for safe_search tool."""
+    """Tests for block_search tool."""
 
     @pytest.mark.asyncio
-    async def test_safe_search_clean(self) -> None:
+    async def test_block_search_clean(self) -> None:
         """Clean results pass L1+L2."""
         mock_raw = {
             "text": "RHEL 10 uses bootc for image-based deployments.",
@@ -375,7 +375,7 @@ class TestSafeSearch:
                 return_value=None,
             ),
         ):
-            result = await safe_search("RHEL 10 bootc")
+            result = await block_search("RHEL 10 bootc")
 
             assert "bootc" in result["text"]
             assert result["query"] == "RHEL 10 bootc"
@@ -384,7 +384,7 @@ class TestSafeSearch:
             assert result["l2_classification"]["label"] == "UNAVAILABLE"
 
     @pytest.mark.asyncio
-    async def test_safe_search_blocks_on_l2(self) -> None:
+    async def test_block_search_blocks_on_l2(self) -> None:
         """MALICIOUS classification raises BlockedSourceError."""
         mock_raw = {
             # Multi-line: strip_directives strips whole lines, so a
@@ -417,25 +417,25 @@ class TestSafeSearch:
             ),
             pytest.raises(BlockedSourceError),
         ):
-            await safe_search("evil query")
+            await block_search("evil query")
 
     @pytest.mark.asyncio
-    async def test_safe_search_blocks_on_l0_failure(self) -> None:
+    async def test_block_search_blocks_on_l0_failure(self) -> None:
         """L0 failure raises BlockedSourceError."""
         with patch(
             "mcp_trentina_crunchtools.tools.search.search_grounded",
             new_callable=AsyncMock,
             side_effect=QuarantineAgentError("HTTP 500"),
         ), pytest.raises(BlockedSourceError):
-            await safe_search("test query")
+            await block_search("test query")
 
 
 
 class TestQuarantineSearch:
-    """Tests for quarantine_search tool."""
+    """Tests for clean_search tool."""
 
     @pytest.mark.asyncio
-    async def test_quarantine_search_full_pipeline(self) -> None:
+    async def test_clean_search_full_pipeline(self) -> None:
         """L0 → resolve → L1 → L2 → L3 completes."""
         mock_raw = {
             "text": "RHEL 10 introduced bootc.",
@@ -478,7 +478,7 @@ class TestQuarantineSearch:
             cfg.model = "gemini-2.5-flash-lite"
             mock_config.return_value = cfg
 
-            result = await quarantine_search(
+            result = await clean_search(
                 "RHEL 10 bootc", "Summarize the results."
             )
 
@@ -489,7 +489,7 @@ class TestQuarantineSearch:
             assert result["classifier_warning"] is None
 
     @pytest.mark.asyncio
-    async def test_quarantine_search_warns_on_l2(self) -> None:
+    async def test_clean_search_warns_on_l2(self) -> None:
         """MALICIOUS adds warning, doesn't fail."""
         mock_raw = {
             "text": "Some suspicious content.",
@@ -531,21 +531,21 @@ class TestQuarantineSearch:
             cfg.model = "gemini-2.5-flash-lite"
             mock_config.return_value = cfg
 
-            result = await quarantine_search("suspicious query", "summarize")
+            result = await clean_search("suspicious query", "summarize")
 
             assert result["classifier_warning"] is not None
             assert "MALICIOUS" in result["classifier_warning"]
             assert result["extraction"]["extracted_text"] == "extracted"
 
     @pytest.mark.asyncio
-    async def test_quarantine_search_l0_failure(self) -> None:
+    async def test_clean_search_l0_failure(self) -> None:
         """L0 error returns empty results (no raise)."""
         with patch(
             "mcp_trentina_crunchtools.tools.search.search_grounded",
             new_callable=AsyncMock,
             side_effect=QuarantineAgentError("HTTP 500"),
         ):
-            result = await quarantine_search("test query", "summarize")
+            result = await clean_search("test query", "summarize")
 
             assert result["text"] == ""
             assert result["sources"] == []
@@ -553,8 +553,8 @@ class TestQuarantineSearch:
             assert "error" in result
 
     @pytest.mark.asyncio
-    async def test_quarantine_search_no_api_key(self) -> None:
-        """Without API key, L3 skipped and sanitized text returned directly."""
+    async def test_clean_search_no_api_key(self) -> None:
+        """Without API key, L3 is skipped and L1's text is returned directly."""
         mock_raw = {
             "text": "Some search results.",
             "sources": [],
@@ -586,7 +586,7 @@ class TestQuarantineSearch:
             cfg.model = "gemini-2.5-flash-lite"
             mock_config.return_value = cfg
 
-            result = await quarantine_search("test query", "summarize")
+            result = await clean_search("test query", "summarize")
 
             assert result["extraction"]["extracted_text"] == "Some search results."
             assert result["trust"]["level"] == "quarantined"

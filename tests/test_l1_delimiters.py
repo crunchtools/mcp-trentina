@@ -1,11 +1,11 @@
-"""Tests for LLM delimiter sanitization module."""
+"""Tests for the LLM delimiter stage."""
 
 from __future__ import annotations
 
 from mcp_trentina_crunchtools.l1.delimiters import normalize_delimiters
 
 
-class TestDelimiterSanitization:
+class TestDelimiterNormalization:
     """Test LLM delimiter stripping."""
 
     def test_strips_im_start(self) -> None:

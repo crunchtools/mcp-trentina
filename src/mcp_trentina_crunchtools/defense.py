@@ -56,7 +56,7 @@ from .jsonwalk import iter_leaves
 from .l1.pipeline import (
     PipelineResult,
     PipelineStats,
-    build_scan_view,
+    run_l1,
 )
 from .quarantine.agent import quarantine_detect
 from .quarantine.classifier import ClassifierResult, classify_async, classify_guarded
@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .gateway.profile import DefenseConfig
-    from .preprocess import ScanView
+    from .preprocess import Selection
 
 
 class Layer(str, Enum):
@@ -133,10 +133,10 @@ def _should_run_l3(*, defense: DefenseConfig | None, l3_gate: bool) -> bool:
     """L3 runs on everything the gateway scans. There is no score gate.
 
     This used to escalate to L3 only on model-output provenance, on a
-    suspicious L1 detection, or on an L2 score at or above ``l3_threshold``.
+    suspicious L1 detection, or on an L2 score at or above a configured gate.
     Clean traffic therefore never reached the judge at all — and because L2
     FLAGS at ``l2_threshold`` (0.3 in production) while escalation needed
-    ``l3_threshold`` (0.7), there was a band that L2 flagged and L3 never
+    that gate (0.7), there was a band that L2 flagged and L3 never
     reviewed.
 
     Gating the semantic judge on the pattern classifier agreeing there is
@@ -158,7 +158,7 @@ def _should_run_l3(*, defense: DefenseConfig | None, l3_gate: bool) -> bool:
     it can never read as a clean scan.
 
     ``l3_gate=False`` is not a policy switch either. Two callers set it,
-    ``advise()`` and ``safe_search``, and both spend L3 on *extraction*
+    ``advise()`` and ``block_search``, and both spend L3 on *extraction*
     rather than detection — the layer still runs, in a different mode.
     """
     # has_api_key is Gemini's; a profile that overrides defense.provider
@@ -247,7 +247,7 @@ async def defend(
             tools report without recording.
         precomputed_l1: L1 already ran elsewhere — pass its result rather than
             running it twice. Structured payloads need this: each leaf gets
-            its own scan view so the JSON can be rebuilt, and only the joined
+            its own L2 input so the JSON can be rebuilt, and only the joined
             text goes to L2/L3.
         l3_context: A short L1 summary handed to the Q-Agent as context.
             Only the alert ingress and scan tools did this before; telling L3
@@ -266,32 +266,32 @@ async def defend(
         A verdict. This function never raises on a detection — see
         `enforce_block()`.
     """
-    # Layer 1: the tripwire. It detects, counts and builds the scan view, and
+    # Layer 1. It detects, counts and builds the L2 input, and
     # never modifies the delivery text (owner's rule, 2026-09-13) — its
-    # transforms produce `scan_view`, the normalized text L2 reads, so
+    # transforms produce `l2_input`, the normalized text L2 reads, so
     # zero-width interleaving and encoded blobs cannot blind the classifier.
     # Disposition belongs to the enforcement mode and the Q-Agent.
     #
     # There is no off switch, and no format hint: L1 scans what it is handed
     # (#172). A profile that could disable it would only be hiding its eyes.
-    pipeline = precomputed_l1 if precomputed_l1 is not None else build_scan_view(content)
+    pipeline = precomputed_l1 if precomputed_l1 is not None else run_l1(content)
 
     # Nothing to judge. A payload whose string leaves are all empty (or a
     # JSON body of pure numbers) has no text for either model to read, and an
     # ONNX pass over "" costs the same as one over real content. L2 reads the
-    # scan view (normalized, so obfuscation cannot blind it); L3 reads the
+    # L2 input (normalized, so obfuscation cannot blind it); L3 reads the
     # original, because the Q-Agent judges best with the evidence intact.
     has_text = bool(pipeline.content.strip())
-    has_scan_text = bool(pipeline.scan_view.strip())
+    has_scan_text = bool(pipeline.l2_input.strip())
 
     classification: ClassifierResult | None = None
     if has_scan_text:
         if guarded:
             classification = await classify_guarded(
-                pipeline.scan_view, source, is_trusted=is_trusted
+                pipeline.l2_input, source, is_trusted=is_trusted
             )
         else:
-            classification = await classify_async(pipeline.scan_view)
+            classification = await classify_async(pipeline.l2_input)
 
     # Either leg flags: the model's own MALICIOUS label (global threshold),
     # or the profile's stricter l2_threshold. The per-profile knob was dead
@@ -439,11 +439,11 @@ def merge_stats(target: PipelineStats, other: PipelineStats) -> None:
             )
 
 
-def build_scan_view_json(
+def run_l1_json(
     value: Any,
     texts: list[str],
     stats: PipelineStats,
-    scan_views: list[str] | None = None,
+    l2_inputs: list[str] | None = None,
 ) -> Any:
     """Recursively inspect every string leaf; the payload comes back unchanged.
 
@@ -455,7 +455,7 @@ def build_scan_view_json(
     Since L1 stopped modifying content there is no rebuild at all — the input
     object is returned as-is. What this produces is the accounting: merged
     stats across every leaf, the original leaf texts (``texts``) joined for
-    L3, and the normalized leaf texts (``scan_views``) joined for L2. Leaves
+    L3, and the normalized leaf texts (``l2_inputs``) joined for L2. Leaves
     are inspected individually but judged as ONE document — a classifier shown
     one field at a time cannot see an instruction split across two of them.
 
@@ -467,11 +467,11 @@ def build_scan_view_json(
     RecursionError, and an exception mid-scan is a fail-open.
     """
     for text in iter_leaves(value):
-        leaf = build_scan_view(text)
+        leaf = run_l1(text)
         merge_stats(stats, leaf.stats)
         texts.append(leaf.content)
-        if scan_views is not None:
-            scan_views.append(leaf.scan_view)
+        if l2_inputs is not None:
+            l2_inputs.append(leaf.l2_input)
     return value
 
 
@@ -531,14 +531,14 @@ async def defend_json(
     JSON from somewhere untrusted.
     """
     texts: list[str] = []
-    scan_views: list[str] = []
+    l2_inputs: list[str] = []
     stats = PipelineStats()
-    rebuilt = build_scan_view_json(payload, texts, stats, scan_views)
+    rebuilt = run_l1_json(payload, texts, stats, l2_inputs)
     joined = "\n".join(texts)
 
     verdict = await _defend_texts(
         texts,
-        scan_views,
+        l2_inputs,
         stats,
         source=source,
         source_type=source_type,
@@ -555,7 +555,7 @@ async def defend_json(
 
 async def _defend_texts(
     texts: list[str],
-    scan_views: list[str],
+    l2_inputs: list[str],
     stats: PipelineStats,
     *,
     source: str,
@@ -571,7 +571,7 @@ async def _defend_texts(
     """Judge an already-collected set of leaf texts as one document.
 
     Shared by ``defend_json``, which collects every leaf, and
-    ``defend_scan_view``, which collects the subset an extractor selected.
+    ``defend_selection``, which collects the subset an extractor selected.
     Leaves are inspected individually but judged as ONE document — a
     classifier shown one field at a time cannot see an instruction split
     across two of them, which is why both callers join rather than loop.
@@ -579,7 +579,7 @@ async def _defend_texts(
     joined = "\n".join(texts)
     pipeline = PipelineResult(
         content=joined,
-        scan_view="\n".join(scan_views),
+        l2_input="\n".join(l2_inputs),
         stats=stats,
         input_size=len(joined),
         output_size=len(joined),
@@ -599,8 +599,8 @@ async def _defend_texts(
     )
 
 
-async def defend_scan_view(
-    view: ScanView,
+async def defend_selection(
+    view: Selection,
     *,
     source: str,
     source_type: str,
@@ -623,13 +623,13 @@ async def defend_scan_view(
     the honest answer to a complete read.
     """
     texts: list[str] = []
-    scan_views: list[str] = []
+    l2_inputs: list[str] = []
     stats = PipelineStats()
     for segment in view.segments:
-        leaf = build_scan_view(segment)
+        leaf = run_l1(segment)
         merge_stats(stats, leaf.stats)
         texts.append(leaf.content)
-        scan_views.append(leaf.scan_view)
+        l2_inputs.append(leaf.l2_input)
 
     briefing = _default_l3_context(stats)
     if view.chars_total and view.coverage < 1.0:
@@ -653,7 +653,7 @@ async def defend_scan_view(
 
     return await _defend_texts(
         texts,
-        scan_views,
+        l2_inputs,
         stats,
         source=source,
         source_type=source_type,

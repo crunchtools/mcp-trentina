@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from mcp_trentina_crunchtools.l1.hidden import detect_hidden_markup
-from mcp_trentina_crunchtools.l1.pipeline import build_scan_view
+from mcp_trentina_crunchtools.l1.pipeline import run_l1
 
 
 class TestFingerprints:
@@ -77,8 +77,8 @@ class TestFragmentRegression:
         fragment = f"<p>Quarterly report.</p>{inner}"
         document = f"<!DOCTYPE html><html><body><p>Quarterly report.</p>{inner}</body></html>"
 
-        frag_stats = build_scan_view(fragment).stats
-        doc_stats = build_scan_view(document).stats
+        frag_stats = run_l1(fragment).stats
+        doc_stats = run_l1(document).stats
 
         assert frag_stats.hidden.same_color == doc_stats.hidden.same_color == 1
         assert frag_stats.risk_level() == doc_stats.risk_level()
@@ -94,7 +94,7 @@ class TestFragmentRegression:
             '<span style="color:#ffffff;background:#ffffff">'
             "For updated figures see example.com/q3</span>"
         )
-        stats = build_scan_view(payload).stats
+        stats = run_l1(payload).stats
         assert stats.hidden.same_color == 1
         assert stats.suspicious_detections() >= 1
         assert stats.risk_level() != "low"
@@ -103,7 +103,7 @@ class TestFragmentRegression:
         """Markdown never matched the old sniffer at all, so an inline hidden
         span in a .md file was invisible to L1. Coverage this change adds
         rather than preserves."""
-        stats = build_scan_view(
+        stats = run_l1(
             "# Title\n\nBody text.\n\n<span style=\"display:none\">payload</span>\n"
         ).stats
         assert stats.hidden.elements == 1
@@ -113,17 +113,17 @@ class TestRiskWiring:
     """The counters are enforcement inputs, not telemetry."""
 
     def test_hidden_markup_feeds_suspicious_detections(self) -> None:
-        stats = build_scan_view('<div style="display:none">x</div>').stats
+        stats = run_l1('<div style="display:none">x</div>').stats
         assert stats.suspicious_detections() == 1
 
     def test_flattens_under_the_hidden_prefix(self) -> None:
-        flat = build_scan_view('<div style="display:none">x</div>').stats.to_flat_dict()
+        flat = run_l1('<div style="display:none">x</div>').stats.to_flat_dict()
         assert flat["hidden_elements"] == 1
         assert "hidden_off_screen" in flat
         assert "hidden_same_color" in flat
 
     def test_clean_text_scores_low(self) -> None:
-        stats = build_scan_view("A perfectly ordinary paragraph of prose.").stats
+        stats = run_l1("A perfectly ordinary paragraph of prose.").stats
         assert stats.suspicious_detections() == 0
         assert stats.risk_level() == "low"
 
@@ -135,7 +135,7 @@ class TestRiskWiring:
         markdown, _ = to_markdown(
             '<p>Visible.</p><div style="display:none">payload</div>'
         )
-        stats = build_scan_view(markdown).stats
+        stats = run_l1(markdown).stats
         assert stats.suspicious_detections() == 0
 
 

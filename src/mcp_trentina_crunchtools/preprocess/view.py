@@ -1,9 +1,9 @@
-"""The scan view: what a reducer read, and an account of what it did not.
+"""What a reducer read, and an account of what it did not.
 
 Types only. The rules live with the processors that apply them — the skip
 grammar in ``select.py``, the decryption posture in ``matrix.py``.
 
-This file was ``scanview/base.py``, the contract of a second driver framework
+This file was the contract of a second driver framework
 that #163 called "guard machinery" and #167 undid. The ruling it rested on —
 that a pre-processor may never open a gap between what is scanned and what is
 delivered — does not survive contact with L1, which has always built a scan
@@ -74,7 +74,7 @@ class UndecryptableEvent:
 
 
 @dataclass(frozen=True)
-class ScanViewContext:
+class SelectionContext:
     """What an extractor may know about the job. Not a policy channel."""
 
     source: str = ""
@@ -83,12 +83,12 @@ class ScanViewContext:
 
 
 @dataclass(frozen=True)
-class ScanView:
+class Selection:
     """What the pipeline will read, and an account of what it will not.
 
-    ``segments`` are RAW strings. Normalisation is ``build_scan_view``'s job and
-    happens once, in the defense layer, so that the delivery view and the
-    judgement view keep being derived in exactly one place.
+    ``segments`` are RAW strings. Normalisation is ``run_l1``'s job and
+    happens once, in the defense layer, so that the delivered bytes and the
+    L2 input keep being derived in exactly one place.
     """
 
     extractor: str
@@ -142,7 +142,7 @@ class DocumentProcessor(Protocol):
     kind: Kind
     channels: frozenset[Channel]
 
-    async def extract(self, payload: Any, ctx: ScanViewContext) -> ScanView:
+    async def extract(self, payload: Any, ctx: SelectionContext) -> Selection:
         """Select what the pipeline should read.
 
         Must not raise on content it cannot handle. Fail open to MORE

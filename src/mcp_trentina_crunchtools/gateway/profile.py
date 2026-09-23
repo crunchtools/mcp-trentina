@@ -16,7 +16,6 @@ import re
 from typing import Any, Literal
 
 from pydantic import (
-    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -67,16 +66,6 @@ ProfileRole = Literal["agent", "operator"]
 #: `_normalize_enforcement`.
 EnforcementMode = Literal["warn", "block"]
 
-#: Pre-0.25.0 enforcement values, accepted with a warning until 0.28.0.
-#:
-#: `extract` maps to `block`, not to `clean`. That is not a downgrade: the
-#: gateway has always failed closed on `extract`, so `block` is a faithful
-#: description of what a profile carrying it already does. Mapping it to a
-#: value that then refuses to load would take a running gateway down to
-#: correct a word.
-_ENFORCEMENT_RENAMES: dict[str, str] = {"annotate": "warn", "extract": "block"}
-
-
 def _normalize_enforcement(block: Any, *, key: str) -> Any:
     """Migrate the old spellings, and refuse `clean` with an explanation.
 
@@ -114,17 +103,9 @@ def _normalize_enforcement(block: Any, *, key: str) -> Any:
             f"the verdict attached) or 'block' (refuse it). The clean_* "
             f"TOOLS are unaffected and continue to work."
         )
-    if old in _ENFORCEMENT_RENAMES:
-        block = dict(block)
-        block["enforcement"] = _ENFORCEMENT_RENAMES[old]
-        logger.warning(
-            "%s: enforcement %r is deprecated and is removed in 0.29.0; "
-            "write %r",
-            key, old, _ENFORCEMENT_RENAMES[old],
-        )
     return block
 
-# Pre-0.21.0 scan_view.extractor names. 'full' is not here: it maps to an
+# Pre-0.21.0 l2_input.extractor names. 'full' is not here: it maps to an
 # empty processor list rather than to a name.
 _EXTRACTOR_RENAMES: dict[str, str] = {"generic": "select"}
 
@@ -599,15 +580,15 @@ class DefenseConfig(BaseModel):
     silent.
 
     There is no cost control for L3 any more, and that is the point. It used
-    to live in `l3_threshold`, which meant clean traffic never reached the
+    to live in an `l3_threshold` key, which meant clean traffic never reached the
     judge — and since L2 FLAGS at `l2_threshold` while escalation needed
-    `l3_threshold`, there was a band L2 flagged that L3 never reviewed.
+    that gate, there was a band L2 flagged that L3 never reviewed.
 
     That was read as satisfying "all three layers, full stop" because it
     removed the per-layer booleans. It did not: a threshold deciding whether
     a layer executes is an off switch with a dial on it. The mandate is that
     L1, L2 and L3 run on every input to the gateway. They do, and
-    `l3_threshold` is ignored.
+    the key no longer exists and a profile setting it fails to load.
 
     What a profile still controls is `l2_threshold` — how suspicious L2 must
     be before it FLAGS, which is a consequence and not an execution — and
@@ -633,17 +614,7 @@ class DefenseConfig(BaseModel):
     @classmethod
     def _check_enforcement(cls, block: Any) -> Any:
         return _normalize_enforcement(block, key="defense")
-        old = block.get("enforcement")
-        if old not in _ENFORCEMENT_RENAMES:
-            return block
-        block = dict(block)
-        block["enforcement"] = _ENFORCEMENT_RENAMES[old]
-        logger.warning(
-            "defense.enforcement: %r is deprecated and is removed in 0.29.0; "
-            "write %r",
-            old, _ENFORCEMENT_RENAMES[old],
-        )
-        return block
+
     l2_threshold: float = Field(
         default=0.5,
         ge=0.0,
@@ -651,18 +622,6 @@ class DefenseConfig(BaseModel):
         description=(
             "L2 (Prompt Guard) score at or above which the content is "
             "flagged, in addition to the model's own MALICIOUS label"
-        ),
-    )
-    l3_threshold: float = Field(
-        default=0.7,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "DEPRECATED and ignored. L3 runs on every input the gateway "
-            "scans, with no score gate. The field is retained for one "
-            "release so profiles written for 0.9.x keep loading "
-            "(extra=forbid would otherwise reject them); it is removed in "
-            "0.12.0. Setting it has no effect."
         ),
     )
     audit: bool = Field(default=True, description="Write detection rows to SQLite")
@@ -702,7 +661,7 @@ class MatrixDecryptConfig(BaseModel):
 
     What it does NOT do is worth stating: Trentina takes no Matrix device
     identity, uploads nothing, and makes only GET requests. Decryption exists
-    to build a scan view. The response forwarded to the client is the
+    to build the L2 input. The response forwarded to the client is the
     upstream ciphertext, untouched.
     """
 
@@ -778,11 +737,12 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
     and a defense change whose default narrows the perimeter is one that lands
     by accident.
 
-    This was ``ScanViewConfig`` with an ``extractor:`` field naming one of
-    full/generic/matrix. ``extractor: full`` is now an empty ``processors``
-    list, because reading everything is what naming nothing means; ``generic``
-    is ``select``. Old spellings still load -- see the validator below -- and
-    are removed in 0.29.0.
+    This was the ``scan_view:`` block with an ``extractor:`` field naming one
+    of full/generic/matrix. ``extractor: full`` became an empty ``processors``
+    list, because reading everything is what naming nothing means, and
+    ``generic`` became ``select``. Those spellings loaded with a warning from
+    0.21.0 and are gone as of 0.29.0: a config still carrying one now fails
+    to load rather than resolving to something the operator did not write.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -811,41 +771,11 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
         description="Matrix E2EE termination. Requires the 'matrix' processor.",
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _accept_the_old_extractor_spelling(cls, block: Any) -> Any:
-        """Load a pre-0.21.0 ``extractor:`` block as a ``processors:`` list.
-
-        An alias cannot do this one: the shape changes from a scalar to a
-        list, and ``full`` maps to the EMPTY list rather than to a name. Every
-        profile model is ``extra="forbid"`` and a profile that fails to load
-        is fatal, so a deployed config carrying the old spelling would take
-        the gateway down on upgrade rather than warn.
-        """
-        if not isinstance(block, dict) or "extractor" not in block:
-            return block
-        block = dict(block)
-        old = block.pop("extractor")
-        if "processors" in block:
-            raise ValueError(
-                "set either 'processors' or the old 'extractor', not both"
-            )
-        logger.warning(
-            "matrix_ingress.scan_view.extractor: %r is deprecated and is "
-            "removed in 0.29.0; write processors: %s",
-            old,
-            [] if old == "full" else [_EXTRACTOR_RENAMES.get(old, old)],
-        )
-        block["processors"] = (
-            [] if old == "full" else [_EXTRACTOR_RENAMES.get(old, old)]
-        )
-        return block
-
     @model_validator(mode="after")
     def _decrypt_needs_the_matrix_processor(self) -> MatrixPreProcessConfig:
         if self.decrypt is not None and "matrix" not in self.processors:
             raise ValueError(
-                "scan_view.decrypt requires processors: [matrix] — the "
+                "l2_input.decrypt requires processors: [matrix] — the "
                 "'select' processor has nowhere to put decrypted text"
             )
         return self
@@ -881,7 +811,6 @@ class MatrixIngressConfig(BaseModel):
     # drops the event from the timeline, not per-response.
     preprocess: MatrixPreProcessConfig = Field(
         default_factory=MatrixPreProcessConfig,
-        validation_alias=AliasChoices("preprocess", "scan_view"),
         description=(
             "How much of a Matrix response the defense pipeline reads. "
             "Defaults to scanning everything, so adopting this is an "

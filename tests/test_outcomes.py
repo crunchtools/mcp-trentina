@@ -44,7 +44,7 @@ class TestClassifyException:
         which is what made a working defense look like a broken tool.
         """
         original = BlockedSourceError("https://evil.test", "2026-09-05")
-        wrapped = BackendCallError("internal tool 'safe_fetch' call failed")
+        wrapped = BackendCallError("internal tool 'block_fetch' call failed")
         wrapped.__cause__ = original
 
         assert classify_exception(wrapped) is Outcome.BLOCKED_DEFENSE
@@ -116,26 +116,26 @@ class TestAuditRecording:
 
     def test_success_is_derived_from_outcome(self, db: Any) -> None:
         """The legacy boolean can never disagree with the taxonomy."""
-        db.record_gateway_call("p", "web", "safe_fetch", Outcome.OK.value, 10)
+        db.record_gateway_call("p", "web", "block_fetch", Outcome.OK.value, 10)
         db.record_gateway_call(
-            "p", "web", "safe_read", Outcome.BLOCKED_DEFENSE.value, 10
+            "p", "web", "block_read", Outcome.BLOCKED_DEFENSE.value, 10
         )
 
         rows = {
             r["tool"]: r["success"]
             for r in db.get_db().execute("SELECT tool, success FROM gateway_calls")
         }
-        assert rows == {"safe_fetch": 1, "safe_read": 0}
+        assert rows == {"block_fetch": 1, "block_read": 0}
 
     def test_blocked_is_separated_from_failed(self, db: Any) -> None:
         """The headline fix: 34 blocks must not read as 34 failures."""
         for _ in range(34):
             db.record_gateway_call(
-                "p", "web", "safe_read", Outcome.BLOCKED_DEFENSE.value, 5
+                "p", "web", "block_read", Outcome.BLOCKED_DEFENSE.value, 5
             )
-        db.record_gateway_call("p", "web", "safe_read", Outcome.OK.value, 5)
+        db.record_gateway_call("p", "web", "block_read", Outcome.OK.value, 5)
         db.record_gateway_call(
-            "p", "web", "safe_read", Outcome.GATEWAY_ERROR.value, 5, "boom"
+            "p", "web", "block_read", Outcome.GATEWAY_ERROR.value, 5, "boom"
         )
 
         entry = db.get_gateway_call_stats(days=1)["by_tool"][0]
@@ -159,7 +159,7 @@ class TestAuditRecording:
         conn.execute(
             "INSERT INTO gateway_calls (timestamp, profile, backend, tool, success, "
             "duration_ms, error_message, outcome) VALUES (?,?,?,?,?,?,?,NULL)",
-            (time.time(), "p", "web", "safe_read", 0, 5, "old"),
+            (time.time(), "p", "web", "block_read", 0, 5, "old"),
         )
         conn.commit()
 
@@ -185,7 +185,7 @@ class TestAuditRecording:
         )
         old.execute(
             "INSERT INTO gateway_calls (timestamp, profile, backend, tool, success, "
-            "duration_ms) VALUES (1, 'p', 'web', 'safe_read', 0, 1)"
+            "duration_ms) VALUES (1, 'p', 'web', 'block_read', 0, 1)"
         )
         old.commit()
         old.close()
@@ -204,7 +204,7 @@ class TestAuditRecording:
 
     def test_reset_clears_rows_and_reports_count(self, db: Any) -> None:
         for _ in range(3):
-            db.record_gateway_call("p", "web", "safe_fetch", Outcome.OK.value, 1)
+            db.record_gateway_call("p", "web", "block_fetch", Outcome.OK.value, 1)
 
         assert db.reset_gateway_calls() == 3
         assert db.get_gateway_call_stats(days=1)["total_calls"] == 0
