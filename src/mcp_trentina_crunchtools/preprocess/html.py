@@ -151,10 +151,10 @@ def to_markdown(html_content: str) -> tuple[str, ConversionStats]:
 def _convert(payload: str) -> tuple[str | None, ConversionStats, str]:
     """Convert, or say why not. Returns (markdown, stats, decline_reason)."""
     stats = ConversionStats()
-    try:
-        soup = BeautifulSoup(payload, "html.parser")
-    except Exception:  # a parser failure is a decline, not a crash
-        return None, stats, "unparseable"
+    # No try/except around the parse. `compose.py` already fails a processor
+    # open, with a logged traceback naming it; swallowing here would trade
+    # that diagnosis for a decline reason that says less.
+    soup = BeautifulSoup(payload, "html.parser")
 
     # The gate that replaces the sniffer. No decision about whether this "is
     # HTML" — only whether there is any markup to convert. Text that merely

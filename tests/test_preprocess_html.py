@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from mcp_trentina_crunchtools.channels import Channel, Kind
@@ -230,8 +232,6 @@ class TestProtocol:
     async def test_does_not_block_the_event_loop(self) -> None:
         """BeautifulSoup is synchronous; a large document must not stall the
         gateway. The parse runs on a worker thread."""
-        import asyncio
-
         ticks = 0
 
         async def tick() -> None:

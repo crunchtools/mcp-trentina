@@ -382,6 +382,12 @@ classification = "gourmand_bug"
 
 [[exceptions]]
 check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/l1/pipeline.py"
+justification = "_run_stages is reported as identical to normalize_unicode in l1/unicode.py. The shared shape is the pipeline's own idiom -- a run of `view, stats.x = stage(view)` assignments -- which is what running a sequence of stages looks like and is the reason the two paths were collapsed into one in #172. normalize_unicode threads its own NFKC passes the same way. Structural collision between a loop-free pipeline and a loop-free transform, not duplication."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/perimeter_db.py"
 justification = "delete_all_verdicts is reported as identical to _sanitize_l0_output in tools/search.py. One truncates a SQLite table, the other strips fields from a dict. They share only a four-statement shape."
 classification = "gourmand_bug"

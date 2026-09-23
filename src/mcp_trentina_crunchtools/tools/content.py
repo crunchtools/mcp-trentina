@@ -35,17 +35,6 @@ def _validate_content_size(content: str, max_size: int) -> None:
         raise ContentSizeError(len(content), max_size)
 
 
-def _run_pipeline(content: str, _content_type: str) -> PipelineResult:
-    """Run the pipeline.
-
-    There is nothing left to select: L1 is format-agnostic and the content
-    type no longer picks a path (#172). The parameter stays so the call sites
-    that have an authoritative ``Content-Type`` keep reading naturally, and so
-    a future processor hint has somewhere to arrive.
-    """
-    return build_scan_view(content)
-
-
 def _build_sanitization_metadata(pipeline_result: PipelineResult) -> dict[str, Any]:
     """Build the sanitization section of tool response."""
     return {
@@ -261,7 +250,11 @@ async def scan_content(
 
     chash = _content_hash(content)
 
-    l1 = _run_pipeline(content, content_type)
+    # Published tool surface, discarded explicitly: L1 is format-agnostic and
+    # `content_type` selects nothing (#172). See `quarantine_content`.
+    del content_type
+
+    l1 = build_scan_view(content)
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
@@ -326,7 +319,11 @@ async def deep_scan_content(
 
     chash = _content_hash(content)
 
-    l1 = _run_pipeline(content, content_type)
+    # Published tool surface, discarded explicitly: L1 is format-agnostic and
+    # `content_type` selects nothing (#172). See `quarantine_content`.
+    del content_type
+
+    l1 = build_scan_view(content)
     layer1_stats = l1.stats.to_flat_dict()
     layer1_risk = l1.stats.risk_level()
     layer1_detections = l1.stats.total_detections()
