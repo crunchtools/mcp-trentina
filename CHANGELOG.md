@@ -10,6 +10,8 @@ under that name.
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-09-22
+
 ### Changed
 - **`preprocess/` is documented as transformation, not reduction — and
   invariant 1 is restated as an asymmetry.** The old wording was "a
