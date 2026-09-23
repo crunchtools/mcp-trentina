@@ -1,5 +1,11 @@
 """Structured — FREE reduction for JSON-shaped tool output.
 
+Also the package's standing example of a transformation the size gate throws
+away: the rewrite re-serializes with ``indent=2`` while the input is often one
+minified line, which is strictly more parseable and strictly larger. When
+indentation costs more than grouping saves, the ``not_smaller`` decline below
+discards that artifact and the minified original ships instead.
+
 Phase 2 of the reduction plan. The sidecar's two dominant decline reasons,
 ``too_few_lines`` and ``reduction_below_floor``, both say the same thing:
 the comparable UNIT is not a line. A Jira search result is one enormous

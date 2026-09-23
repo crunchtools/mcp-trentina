@@ -128,8 +128,10 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
 - `perimeter_db.py` — the perimeter's own store, deliberately a second database:
   verdicts `defend()` reached, so a restart does not re-judge ~210 tool
   descriptions through all three layers before the first `tools/list` answers
-- `preprocess/` — Token reduction, OUTSIDE the perimeter. Makes payloads
-  smaller, never safer; everything it emits still crosses `defend()`.
+- `preprocess/` — Payload transformation, OUTSIDE the perimeter. May subtract
+  but never absolve: it drops, collapses, normalizes and restructures, and
+  everything it emits still crosses `defend()` as untrusted. Reduction is the
+  common case, not the contract.
   - `petit.py` — line grouping via the `petit-log` package (petit itself,
     https://github.com/crunchtools/petit), pinned to `driver="RawEntry"` with
     our own `stopwords`. Both arguments are load-bearing: petit's format

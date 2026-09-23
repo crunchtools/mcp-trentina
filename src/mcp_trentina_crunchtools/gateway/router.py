@@ -452,10 +452,11 @@ async def _assemble_call_result(
     provenance = Provenance.EXTERNAL
     reduce_sidecar: dict[str, Any] | None = None
 
-    # Reduce BEFORE the perimeter, never after. preprocess/base.py invariant
-    # 2: the caller scans the reduced artifact and delivers that artifact, so
-    # what reduction dropped is never judged and never delivered. Reducing
-    # after the scan would hand the agent bytes the wall never saw.
+    # Transform BEFORE the perimeter, never after. preprocess/base.py
+    # invariant 2: the caller scans the transformed artifact and delivers that
+    # artifact, so what a processor dropped is never judged and never
+    # delivered. Transforming after the scan would hand the agent bytes the
+    # wall never saw.
     #
     # Internal tools are excluded for the same reason they skip the scan —
     # they run the pipeline at their own ingress.
@@ -489,9 +490,9 @@ async def _assemble_call_result(
             # Invariant 3: the sidecar travels to L3's briefing too. "This is
             # the 3% that survived reduction" is context a judge should have.
             l3_context=(
-                f"This artifact was reduced by trentina pre-processors "
+                f"This artifact was transformed by trentina pre-processors "
                 f"({reduce_sidecar['bytes_in']} -> {reduce_sidecar['bytes_out']} "
-                f"bytes); it is a sample of a larger payload."
+                f"bytes); where it shrank, it is a sample of a larger payload."
                 if reduce_sidecar
                 else None
             ),

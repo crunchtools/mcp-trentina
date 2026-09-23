@@ -6,13 +6,15 @@ selects goes to L1/L2/L3. Everything it declines is counted and reported but
 never judged.
 
 This is a sibling of ``preprocess/``, not an extension of it, and the
-difference is a safety property rather than taste. A pre-processor reduces a
-payload that is then scanned AND delivered — invariant 2 over there — so
-whatever reduction drops never reaches the agent either, which is what makes
-fingerprint-collision games pointless. An extractor is the inverse: the FULL
-original is delivered while only a subset is scanned, so colliding into a
-skipped bucket delivers your payload unscanned. One Protocol cannot honestly
-carry both readings.
+difference is a safety property rather than taste. A pre-processor transforms
+a payload that is then scanned AND delivered — invariant 2 over there — so
+whatever it drops never reaches the agent either, which is what makes
+fingerprint-collision games pointless. That is why a pre-processor is allowed
+to subtract. An extractor is the inverse: the FULL original is delivered while
+only a subset is scanned, so colliding into a skipped bucket delivers your
+payload unscanned. An extractor therefore may not drop anything at all — it
+selects what is READ, never what is sent. One Protocol cannot honestly carry
+both readings.
 
 Why this exists at all: a measured Matrix initial sync was 68,092 characters
 reaching the classifier, of which 45,552 were Megolm ciphertext, 13,352 were

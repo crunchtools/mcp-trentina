@@ -203,12 +203,16 @@ class ParameterConstraint(BaseModel):
 
 
 class PreProcessConfig(BaseModel):
-    """Token reduction applied to tool responses before the perimeter scan.
+    """Transformation applied to tool responses before the perimeter scan.
 
-    Reduction is not defense (see ``preprocess/base.py``, invariant 1). What
-    this configures is how hard to try to make a payload smaller; what comes
-    out is exactly as untrusted as what went in, and the caller scans the
-    reduced artifact before delivering it.
+    Transformation is not defense (see ``preprocess/base.py``, invariant 1: a
+    pre-processor may subtract, never absolve). What this configures is how
+    hard to try to improve a payload; what comes out is exactly as untrusted
+    as what went in, and the caller scans the transformed artifact before
+    delivering it.
+
+    Every processor available today reduces, and both selection strategies
+    below judge on size — so this reads as a reduction budget in practice.
 
     Resolution is two-level and least-surprise: a tool's entry in the
     backend's ``preprocess_tools`` wins over the profile default, and any

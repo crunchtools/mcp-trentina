@@ -10,7 +10,54 @@ under that name.
 
 ## [Unreleased]
 
+### Changed
+- **`preprocess/` is documented as transformation, not reduction — and
+  invariant 1 is restated as an asymmetry.** The old wording was "a
+  pre-processor never makes a security decision. It only reduces." Both halves
+  were wrong.
+
+  It was never reduction-only. `volatile.normalize()` rewrites timestamps and
+  identifiers into placeholders — the fingerprinting policy invariant 2 rests
+  on — and its size effect is incidental and runs both ways. `structured.py`
+  re-serializes with indentation, which is more parseable and larger.
+
+  And the package filters on every run: `petit` deletes lines, `structured`
+  drops array elements, `email` drops quoted reply chains, with three tests
+  named `test_dropped_*_are_gone` pinning exactly that. Filtering is inherently
+  security-adjacent, so "never makes a security decision" denied what the code
+  does, and that mis-framing ruled out designs it had no business ruling out.
+
+  The real constraint is directional: **a pre-processor may subtract, never
+  absolve.** Dropping is always permitted, because a byte that is deleted
+  reaches no one — which is exactly why colliding a payload into a collapsed
+  group destroys it. What is forbidden is the other direction: never mark
+  content clean, never shorten or skip `defend()`, never let output be trusted
+  more than input. Strictly no weaker, and honest about the package's
+  behaviour.
+
+  Invariant 2 now says out loud that the collision argument depends on
+  DELETION rather than on getting smaller, so a future reshaping processor
+  cannot assume cover it does not have. `scanview/base.py` keeps its sibling
+  contrast coherent against the new wording.
+
+  Documentation only — no identifiers, config keys or behaviour changed, and
+  all 1539 tests pass with no test file edited.
+
 ### Fixed
+- Invariant 3 claimed the pre-processing sidecar "travels two places: the
+  audit log ... and L3's briefing". Only the briefing is real: `router.py`
+  reads the sidecar solely to build L3 context, and
+  `PreProcessOutcome.sidecar()` has no caller in `src/` at all. Now states
+  what is true and marks the audit-log half as intended-but-unbuilt.
+- `PreProcessResult.ratio` documented "1.0 means nothing happened", which is
+  false for a transformation that reshapes without changing length — `applied`
+  is the signal. Also records that `.ratio` itself is unread.
+- The L3 briefing asserted a transformed artifact "is a sample of a larger
+  payload", which is untrue when nothing was dropped. Now conditional on
+  having actually shrunk.
+- `docs/response-guards.md` linked "pre-processors" to `docs/compression.md`,
+  which documents LLM compression of tool *descriptions* — a different
+  feature. Points at the pre-processing section of `docs/token-routing.md`.
 - **Finished the `com.crunchtools.Airlock1` -> `com.crunchtools.Trentina1`
   D-Bus rename, which had been half-applied since the airlock -> trentina
   rename.** `cockpit-trentina.spec` and `trentina.js` were moved to the new
