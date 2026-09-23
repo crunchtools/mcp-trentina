@@ -12,6 +12,10 @@ was never classified was delivered looking exactly like one that came back
 clean. That is the failure this module exists to prevent: a fourth copy would
 have missed it too.
 
+It lived under `gateway/` until 0.26.0, when the `warn_*` tools started
+attaching the same annotation. A module whose whole claim is "built in
+exactly one place" cannot sit inside one of the two places that build it.
+
 The rule the annotation encodes: **a scan that did not fully happen must never
 look like a scan that found nothing.** Flagged content warns, and so does
 content the layers could not completely read — truncated input, an
@@ -28,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from ..defense import DefenseVerdict
+    from .defense import DefenseVerdict
 
 logger = logging.getLogger(__name__)
 

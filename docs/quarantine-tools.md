@@ -2,30 +2,53 @@
 
 Trentina's original capability: safe web fetching, file reading, and web search with prompt injection defense. These tools are exposed through the gateway as the `web` backend (`internal://web`), giving every connected agent access to the defense pipeline for untrusted content.
 
-## Tools
+## Three modes, picked by the agent
 
-| Tool | Layers | Behavior on Detection |
-|------|--------|-----------------------|
-| `safe_fetch` | L1+L2 | **Fails** — returns error, blocks content |
-| `safe_read` | L1+L2 | **Fails** — returns error, blocks content |
-| `safe_search` | L0+L1+L2 | **Fails** — returns error if search results contain injection |
-| `safe_content` | L1+L2+L3 | **Fails** — sanitize inline content, reject on injection |
-| `quarantine_fetch` | L1+L2+L3 | **Warns** — extracts content through Q-Agent, adds warning |
-| `quarantine_read` | L1+L2+L3 | **Warns** — extracts content through Q-Agent, adds warning |
-| `quarantine_search` | L0+L1+L2+L3 | **Warns** — search with full pipeline, structured extraction |
-| `quarantine_content` | L1+L2+L3 | **Warns** — sanitize inline content, extract via Q-Agent |
-| `quarantine_scan` | L1+L2+L3 | **Scan only** — returns threat assessment, no content |
-| `deep_quarantine_scan` | L1+L2+L3 | **Deep scan** — Q-Agent sees raw content for better detection |
-| `deep_scan_content` | L1+L2+L3 | **Deep scan** — inline content, raw to L2/L3 |
-| `quarantine_stats` | — | Configuration, blocklist, and audit summary |
+Every content tool runs **all three layers**. What differs is the *disposition* — what a flagged verdict costs — and since 0.26.0 that choice is the tool's name, so the agent picks it per call.
 
-## Safe vs. Quarantine
+| prefix | on a flag | what you get |
+|---|---|---|
+| `block_*` | refused | the bytes that arrived, or an error — never flagged content |
+| `warn_*` | forwarded | **exactly** the bytes that arrived, plus `_trentina_warning` |
+| `clean_*` | replaced | a Q-Agent extraction, written by a quarantined LLM that read the content |
 
-The two families serve different trust models:
+Four families: `fetch`, `read`, `content`, `search`. Twelve tools.
 
-**Safe tools** are fail-closed. If any defense layer detects injection, the content is blocked and an error is returned. The agent never sees the content. Use these when you'd rather miss the content than risk an injection.
+**`warn_*` is new.** Before 0.26.0 an agent could be refused or handed an LLM rewrite, and nothing in between — so the one posture with the best argument behind it was unreachable from a tool call. A warning that lands in context *ahead of* the payload is the difference between an agent reading hostile content credulously and reading it on guard. It is advisory, not a wall: a convincing enough injection can still talk an agent past its own warning, which is why it is a complement to L1/L2/L3 and not a replacement.
 
-**Quarantine tools** are warn-and-proceed. Detected injection triggers a warning in the response metadata, but the content is still extracted through the Q-Agent and returned. Use these when you need the content even if it might be hostile — the Q-Agent extracts useful information while the injected instructions stay quarantined.
+`warn_*` is also the only mode that satisfies the owner's rule in both directions — *what the agent receives is byte-identical to what entered the perimeter, or nothing at all* — even when the verdict is bad.
+
+Which modes a given profile is offered is the existing `tools_allow` filter. No new permission machinery.
+
+### Choosing
+
+- Acting unsupervised on what you read → `block_*`.
+- Need the real bytes and can weigh a caution — a CVE advisory, a log excerpt, anything that legitimately discusses attacks in the words attacks use → `warn_*`.
+- Want the information and not the page → `clean_*`.
+
+### Deprecated spellings
+
+`safe_*` and `quarantine_*` still work and are removed in **0.28.0**.
+
+| old | new |
+|---|---|
+| `safe_fetch` / `safe_read` / `safe_content` / `safe_search` | `block_*` |
+| `quarantine_fetch` / `quarantine_read` / `quarantine_content` / `quarantine_search` | `clean_*` |
+
+The old names described a *trust model* ("safe", "quarantine") while actually encoding a disposition, and both families always ran all three layers — so the "Layers" column this table used to carry was decoration. The new names say what the mode does.
+
+## Diagnostic tools
+
+These report rather than deliver, and take no mode prefix:
+
+| Tool | Behavior |
+|------|----------|
+| `quarantine_scan` | Threat assessment only — no content returned |
+| `deep_quarantine_scan` | Q-Agent sees raw content for better detection |
+| `scan_content` | Threat assessment on inline text |
+| `deep_scan_content` | Inline content, raw to L2/L3 |
+| `quarantine_scan_dir` | Scan a directory for Python module shadowing |
+| `quarantine_stats` | Configuration, blocklist, and audit summary |
 
 ## Search Tools
 
@@ -35,11 +58,11 @@ The search tools add a Layer 0 step — Gemini grounding with `google_search` �
 L0 (Gemini grounding) → resolve redirects → L1 scan view → L2 classify → L3 Q-Agent
 ```
 
-`safe_search` returns sanitized prose + source URLs. `quarantine_search` adds structured extraction with per-source summaries and relevance scores.
+`block_search` and `warn_search` return grounded prose + source URLs; they differ only in whether a flagged answer is refused or delivered with the reason attached. `clean_search` adds structured extraction with per-source summaries and relevance scores.
 
 ## Content Tools
 
-The content tools (`safe_content`, `quarantine_content`, `deep_scan_content`) operate on inline text rather than fetching from a URL or file. These are useful when content arrives through a channel that isn't a URL — for example, inspecting the body of an MCP tool response, a clipboard paste, or text extracted from another system.
+The content tools (`block_content`, `warn_content`, `clean_content`, `deep_scan_content`) operate on inline text rather than fetching from a URL or file. These are useful when content arrives through a channel that isn't a URL — for example, inspecting the body of an MCP tool response, a clipboard paste, or text extracted from another system.
 
 ## Deep Scan Tools
 
@@ -47,7 +70,7 @@ The deep scan variants (`deep_quarantine_scan`, `deep_scan_content`) send the *u
 
 ## Trust Domains
 
-Trentina supports a trust allowlist for known-safe domains. Trusted domains skip the Q-Agent on `safe_fetch` (L1 only, no model calls). Untrusted domains get the full pipeline:
+Trentina supports a trust allowlist for known-safe domains. Trusted domains skip the Q-Agent on `block_fetch` and `warn_fetch` (L1 only, no model calls). Untrusted domains get the full pipeline:
 
 ```json
 {

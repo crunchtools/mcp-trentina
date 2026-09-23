@@ -27,6 +27,7 @@ from ..quarantine.classifier import (
     join_warnings,
     truncation_warning,
 )
+from ..warning import build_warning
 
 
 def _sanitize_l0_output(
@@ -64,9 +65,17 @@ def _sanitize_l0_output(
     return text_result, scanned_sources, total_detections, merged
 
 
-async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
-    """L0 → resolve → L1 → L2. Fail if injection detected."""
+async def _search_judged(
+    query: str, num_results: int, *, mode: str
+) -> dict[str, Any]:
+    """L0 -> resolve -> L1 -> L2, then dispose of it per `mode`.
+
+    Both modes run the same layers over the same text and deliver the same
+    `text`. `block` raises on either refusal condition; `warn` records the
+    same finding, attaches it, and hands the grounded answer over anyway.
+    """
     start_time = time.time()
+    refusals: list[str] = []
 
     try:
         raw = await search_grounded(query, num_results)
@@ -84,10 +93,10 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
     # the mechanics move to the pipeline.
     if total_l1 >= 3:
         emit_detection_event("L1", f"search:{query}", "high", {"total_l1": total_l1})
-        raise BlockedSourceError(
-            f"search:{query}",
-            f"L1 detected {total_l1} injection vectors in L0 output",
-        )
+        reason = f"L1 detected {total_l1} injection vectors in L0 output"
+        if mode == "block":
+            raise BlockedSourceError(f"search:{query}", reason)
+        refusals.append(reason)
 
     verdict = await defend(
         sanitized_text,
@@ -109,14 +118,16 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
             "classifier_label": classification.label,
             "classifier_score": classification.score,
         })
-        raise BlockedSourceError(
-            f"search:{query}",
+        reason = (
             f"L2 classifier flagged L0 output as MALICIOUS "
-            f"(score: {classification.score:.3f})",
+            f"(score: {classification.score:.3f})"
         )
+        if mode == "block":
+            raise BlockedSourceError(f"search:{query}", reason)
+        refusals.append(reason)
 
     emit_request_event(
-        tool="safe_search",
+        tool=f"{mode}_search",
         source=f"search:{query}",
         trust_level="sanitized-only",
         risk_level="low",
@@ -130,7 +141,7 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
         start_time=start_time,
     )
 
-    return {
+    result: dict[str, Any] = {
         "text": sanitized_text,
         "sources": sanitized_sources,
         "query": query,
@@ -141,6 +152,29 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
         },
         "l0_usage": raw.get("usage", {}),
     }
+
+    # `refusals` is non-empty only under warn: block already raised. It
+    # carries the reason this call WOULD have been refused, which is the
+    # thing the agent needs in order to weigh the answer it is being handed.
+    warning = build_warning(verdict, extras={"refusals": refusals} if refusals else None)
+    if warning is not None:
+        result["_trentina_warning"] = warning
+    return result
+
+
+async def block_search(query: str, num_results: int = 5) -> dict[str, Any]:
+    """Fail closed: a flagged grounded answer raises."""
+    return await _search_judged(query, num_results, mode="block")
+
+
+async def warn_search(query: str, num_results: int = 5) -> dict[str, Any]:
+    """Deliver the grounded answer with the verdict attached."""
+    return await _search_judged(query, num_results, mode="warn")
+
+
+async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
+    """Deprecated spelling of `block_search`. Removed in 0.28.0."""
+    return await block_search(query, num_results)
 
 
 async def quarantine_search(
@@ -237,3 +271,10 @@ async def quarantine_search(
             "classifier_output_warning"
         ),
     }
+
+
+async def clean_search(
+    query: str, prompt: str, num_results: int = 5
+) -> dict[str, Any]:
+    """Hand back a Q-Agent extraction of the grounded answer."""
+    return await quarantine_search(query, prompt, num_results)

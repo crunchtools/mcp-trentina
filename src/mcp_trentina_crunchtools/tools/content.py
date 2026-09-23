@@ -22,6 +22,7 @@ from ..quarantine.classifier import (
     join_warnings,
     truncation_warning,
 )
+from ..warning import build_warning
 from .scan import _build_layer1_context, _build_scan_result, _classifier_result
 
 
@@ -52,11 +53,10 @@ def _build_sanitization_metadata(pipeline_result: PipelineResult) -> dict[str, A
     }
 
 
-async def safe_content(
-    content: str,
-    content_type: str = "text/plain",
+async def _content_judged(
+    content: str, content_type: str, *, mode: str
 ) -> dict[str, Any]:
-    """Sanitize inline content. Fails if injection detected.
+    """Judge inline content with all three layers, dispose of it per `mode`.
 
     Always untrusted — runs L1 + L2 + L3 detection on every call.
     Uses SHA-256 content hash for blocklist.
@@ -83,13 +83,14 @@ async def safe_content(
         is_trusted=False,
         is_html=content_type == "text/html" or looks_like_html(content),
     )
-    enforce_block(verdict, chash)
+    if mode == "block":
+        enforce_block(verdict, chash)
 
     pipeline_result = verdict.pipeline
     classification = verdict.classification
 
     emit_request_event(
-        tool="safe_content",
+        tool=f"{mode}_content",
         source=chash,
         trust_level="sanitized-only",
         risk_level=pipeline_result.stats.risk_level(),
@@ -103,7 +104,7 @@ async def safe_content(
         start_time=start_time,
     )
 
-    return {
+    result: dict[str, Any] = {
         "content": pipeline_result.content,
         "trust": {
             "level": "sanitized-only",
@@ -112,6 +113,32 @@ async def safe_content(
         },
         "sanitization": _build_sanitization_metadata(pipeline_result),
     }
+
+    warning = build_warning(verdict)
+    if warning is not None:
+        result["_trentina_warning"] = warning
+    return result
+
+
+async def block_content(
+    content: str, content_type: str = "text/plain"
+) -> dict[str, Any]:
+    """Fail closed: flagged inline content raises."""
+    return await _content_judged(content, content_type, mode="block")
+
+
+async def warn_content(
+    content: str, content_type: str = "text/plain"
+) -> dict[str, Any]:
+    """Deliver the content as given, with the verdict attached."""
+    return await _content_judged(content, content_type, mode="warn")
+
+
+async def safe_content(
+    content: str, content_type: str = "text/plain"
+) -> dict[str, Any]:
+    """Deprecated spelling of `block_content`. Removed in 0.28.0."""
+    return await block_content(content, content_type)
 
 
 async def quarantine_content(
@@ -346,3 +373,12 @@ async def deep_scan_content(
     )
 
     return result
+
+
+async def clean_content(
+    content: str,
+    prompt: str = "Extract the main content.",
+    content_type: str = "text/plain",
+) -> dict[str, Any]:
+    """Hand back a Q-Agent extraction rather than the content as given."""
+    return await quarantine_content(content, prompt, content_type)
