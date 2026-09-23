@@ -10,6 +10,40 @@ under that name.
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-09-22
+
+### Fixed
+- **Our own documentation published a `profiles.yaml` block that refuses to start the
+  gateway.** `docs/defense-pipeline.md` and `docs/internal/gateway-design.md` showed a
+  `defense:` section with `sanitize`, `classify`, `classify_threshold`, `quarantine`,
+  `quarantine_threshold` and `audit` keys. `DefenseConfig` removed those deliberately
+  (owner's call, 2026-09-13) and is `extra="forbid"`; profile-load failure is fatal. An
+  operator copy-pasting our own docs took the perimeter down, and nothing in CI said a
+  word.
+
+  Two more snippets omitted `auth:` entirely, which `Profile` refuses for a good reason —
+  a profile with no authentication serves its backends to anyone who finds the URL.
+
+### Added
+- **`tests/test_docs_yaml_snippets.py` — every YAML block we publish must load.** This is
+  the actual deliverable; the doc edits are just what makes it pass. It extracts every
+  fenced `yaml` block from `docs/**`, `README.md`, `CLAUDE.md` and `examples/`, feeds the
+  `profiles:` ones through the real loader (env-var indirection included) and validates
+  bare `backends:` blocks per entry.
+
+  A design document may legitimately show config for something unbuilt, so a block can be
+  marked `<!-- trentina:proposed -->`. The marker is *counted*, not merely honoured — the
+  exact set is pinned in the test, so labelling a snippet is a visible edit rather than a
+  quiet way to silence a failure. An escape hatch that costs nothing becomes the fix.
+
+### Changed
+- **`docs/token-routing.md`'s `delegation:` section is marked as not built.** It documents
+  worker-model delegation — `worker_model`, `worker_provider`, `line_threshold`, per-mode
+  prompts — as though it were configuration. No `DelegationConfig` has ever existed; no
+  commit has ever added one. The pre-processing documented above that section is shipped;
+  the delegation design below it is not, and the file gave a reader no way to tell which
+  was which.
+
 ## [0.20.1] - 2026-09-22
 
 ### Changed

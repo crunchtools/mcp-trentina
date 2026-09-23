@@ -96,6 +96,8 @@ inherits from the profile.
 ```yaml
 profiles:
   agent1:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_AGENT1_TOKEN
     preprocess:
       enabled: true
       strategy: auto          # none | chain | best_of | auto
@@ -136,8 +138,17 @@ the original bytes. A reducer must never be able to cost you the response.
 
 ### Profile Schema Extension
 
-Token routing is configured per-profile in `profiles.yaml` under a new `delegation` section:
+> **Not built.** Everything from here to the end of this section is a design, not
+> configuration. No `DelegationConfig` has ever existed in `gateway/profile.py`, and
+> `Profile` is `extra="forbid()"` — a profile carrying a `delegation:` block does not
+> warn, it refuses to start the gateway. The pre-processing described above this section
+> IS shipped; this is the part that is not. Tracked by `tests/test_docs_yaml_snippets.py`,
+> which skips these two blocks by name.
 
+Token routing would be configured per-profile in `profiles.yaml` under a new `delegation`
+section:
+
+<!-- trentina:proposed delegation-schema -->
 ```yaml
 profiles:
   coding-worker:
@@ -187,6 +198,7 @@ profiles:
 
 ### Per-Profile Examples
 
+<!-- trentina:proposed delegation-per-profile -->
 ```yaml
 profiles:
   # Human-supervised IDE agent — light delegation

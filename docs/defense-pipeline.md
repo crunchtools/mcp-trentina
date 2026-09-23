@@ -112,21 +112,36 @@ Defense settings are configured per profile:
 ```yaml
 profiles:
   myagent:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_MYAGENT_TOKEN
     defense:
-      sanitize: true           # L1 — always cheap, default on
-      classify: true           # L2 — Prompt Guard 2 86M
-      classify_threshold: 0.5  # L2 confidence threshold
-      quarantine: true         # L3 — Gemini Q-Agent
+      enforcement: annotate    # what a flag COSTS — annotate | extract | block
+      l2_threshold: 0.5        # how suspicious L2 must be before it flags
 ```
 
-### L3 Cost Control
+**There are no per-layer on/off switches, and that is deliberate.** An earlier schema had
+`sanitize` / `classify` / `quarantine` booleans; production ran `quarantine: false` for months
+without the owner knowing, partly because none of it was wired and partly because three
+unrelated words hid what they controlled. A profile behind Trentina gets all three layers, full
+stop. `DefenseConfig` is `extra="forbid"`, so a config still carrying those keys does not warn —
+it refuses to start.
 
-L3 is the only layer with non-trivial cost (Gemini API tokens). Two controls:
+What a profile controls is a threshold and a consequence:
 
-1. **Per-profile toggle**: `quarantine: false` disables L3 for that profile entirely
-2. **Threshold gating**: L3 only fires when L2 flags content above the threshold — in steady state, L3 contributes near-zero latency and cost
+- **`l2_threshold`** — how suspicious L2 must be before it FLAGS. A flag is a consequence, not
+  an execution: L2 runs either way.
+- **`enforcement`** — what a flag costs. `annotate` delivers the content with a
+  `_trentina_warning` (the calibration mode), `block` refuses it outright, `extract` replaces it
+  with a Q-Agent extraction. `TRENTINA_ENFORCEMENT_OVERRIDE=annotate` is the kill switch.
 
-Autonomous agents that process high volumes can run L1+L2 only (`quarantine: false`). Human-supervised agents can afford L3 since it only fires on suspicious content.
+`l3_threshold` is accepted and ignored. It used to gate whether L3 ran at all, which meant clean
+traffic never reached the judge — and since L2 flagged at `l2_threshold` while escalation needed
+`l3_threshold`, there was a band L2 flagged that L3 never reviewed. L1, L2 and L3 now run on
+every input to the gateway.
+
+A layer that is genuinely unavailable at runtime — no ONNX model, provider down — is a degraded
+state that `/health` reports and `block` mode refuses on. It is never a config option that fails
+silent.
 
 ## Pipeline Flow
 
