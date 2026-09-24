@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import pathlib
+from collections.abc import Iterator
 
 import pytest
 
@@ -52,9 +53,7 @@ def _reset_singletons() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolated_perimeter_store(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _isolated_perimeter_store(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Never let a test write the developer's real perimeter store.
 
     ``scan_tool_list`` persists every verdict it reaches, so without this a
@@ -67,9 +66,7 @@ def _isolated_perimeter_store(
 
 
 @pytest.fixture(autouse=True)
-def _no_ambient_gemini_key(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _no_ambient_gemini_key(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Unit tests must not inherit the shell's GEMINI_API_KEY.
 
     The defense pipeline gates L3 on ``get_config().has_api_key``. With a key
@@ -88,3 +85,19 @@ def _no_ambient_gemini_key(
     config_mod._config = None
     yield
     config_mod._config = None
+
+
+@pytest.fixture
+def env(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[pathlib.Path]:
+    """For tests/mode_harness.py: an L3 key, a private blocklist, fresh config."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("QUARANTINE_DB", str(tmp_path / "trentina.db"))
+    monkeypatch.delenv("QUARANTINE_FALLBACK", raising=False)
+    monkeypatch.delenv("TRENTINA_REQUIRE_L2", raising=False)
+    monkeypatch.delenv("TRENTINA_REQUIRE_L3", raising=False)
+    monkeypatch.setenv("QUARANTINE_TRUST_CONFIG", str(tmp_path / "no-such-trust.json"))
+    config_mod._config = None
+    database_mod._db = None
+    yield tmp_path
+    config_mod._config = None
+    database_mod._db = None

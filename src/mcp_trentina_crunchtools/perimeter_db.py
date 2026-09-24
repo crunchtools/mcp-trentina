@@ -44,15 +44,15 @@ CREATE TABLE IF NOT EXISTS verdict_cache (
 );
 """
 
-# Bump whenever a change could alter what a scan CONCLUDES: a new detector, a
-# retuned L3 prompt, a different L2 model or threshold set. Rows stamped with
-# any other value are swept on load, which is what makes an older perimeter's
-# verdict unusable rather than merely old.
-#
-# "3" since 0.23.0: petit frames before it groups and `structured.py`
-# normalizes with petit's filter, so different bytes survive reduction and a
-# verdict cached under "2" was reached on content this build cannot produce.
-PERIMETER_VERSION = "3"
+PERIMETER_VERSION = "4"
+"""Bump whenever a change could alter what a scan CONCLUDES: a new detector, a
+retuned L3 prompt, a different L2 model or threshold set. Rows stamped with any
+other value are swept on load, so an older perimeter's verdict is unusable
+rather than merely old.
+
+"3" (0.23.0): petit frames before it groups, so different bytes survive
+reduction. "4" (0.31.0): L2 reads the arrived bytes plus L1's normalized copy,
+L3 is briefed with L2's result, and warnings carry L3's finding types."""
 
 
 def get_perimeter_db(db_path: str | None = None) -> sqlite3.Connection:
@@ -82,9 +82,7 @@ def get_all_verdicts(perimeter_version: str) -> dict[str, dict[str, Any] | None]
     ).rowcount
     db.commit()
     if swept > 0:
-        logger.info(
-            "perimeter: swept %d verdict(s) from an older perimeter version", swept
-        )
+        logger.info("perimeter: swept %d verdict(s) from an older perimeter version", swept)
     rows = db.execute(
         "SELECT cache_key, warning_json FROM verdict_cache WHERE perimeter_version = ?",
         (perimeter_version,),
@@ -105,9 +103,7 @@ def get_all_verdicts(perimeter_version: str) -> dict[str, dict[str, Any] | None]
             [(key,) for key in unreadable],
         )
         db.commit()
-        logger.warning(
-            "perimeter: deleted %d unreadable verdict row(s)", len(unreadable)
-        )
+        logger.warning("perimeter: deleted %d unreadable verdict row(s)", len(unreadable))
     return out
 
 

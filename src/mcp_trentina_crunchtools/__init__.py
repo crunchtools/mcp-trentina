@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.30.2"
+__version__ = "0.31.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -161,9 +161,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     from .gateway.matrix_proxy import register_matrix_routes
     from .gateway.sessions import session_registry
 
-    profiles_path = Path(
-        os.environ.get("TRENTINA_PROFILES_PATH", "/etc/trentina/profiles.yaml")
-    )
+    profiles_path = Path(os.environ.get("TRENTINA_PROFILES_PATH", "/etc/trentina/profiles.yaml"))
     logger.info("gateway: loading profiles from %s", profiles_path)
     gateway_config = load_profiles(profiles_path)
 
@@ -189,7 +187,10 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
 
     register_internal_server(mcp_server)
     register_with_fastmcp(
-        mcp_server, gateway_config.profiles, session_registry, oauth_context,
+        mcp_server,
+        gateway_config.profiles,
+        session_registry,
+        oauth_context,
     )
 
     _wire_circuit_notifications(breaker, session_registry, gateway_config.profiles)
@@ -204,10 +205,13 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
 
     if gateway_config.matrix.get("enabled"):
         matrix_upstream = gateway_config.matrix.get(
-            "upstream", "https://matrix-client.matrix.org",
+            "upstream",
+            "https://matrix-client.matrix.org",
         )
         register_matrix_routes(
-            mcp_server, gateway_config.profiles, upstream=matrix_upstream,
+            mcp_server,
+            gateway_config.profiles,
+            upstream=matrix_upstream,
         )
 
     from .gateway.alert_ingress import register_alert_routes
@@ -231,11 +235,13 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     # first tools/list, and that prediction belongs in the journal before the
     # timeout, not in an SSH session after it.
     logger.warning(
-        "startup: caches loaded — %d tool list(s), %d compression(s), "
-        "%d perimeter verdict(s)%s",
-        tool_lists, compressions, verdicts,
-        "" if verdicts else " (COLD: the first tools/list will judge every "
-                            "tool description and may take minutes)",
+        "startup: caches loaded — %d tool list(s), %d compression(s), %d perimeter verdict(s)%s",
+        tool_lists,
+        compressions,
+        verdicts,
+        ""
+        if verdicts
+        else " (COLD: the first tools/list will judge every tool description and may take minutes)",
     )
     set_profiles(gateway_config.profiles)
     # Last, and after every route is wired: this records both the config and
@@ -251,9 +257,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         # profile needs a restart; a delegated-only gateway has no proxy, so
         # reporting True here would let a newly added proxied profile look
         # applied while every request to it 401s.
-        oauth_route_registered=(
-            oauth_context is not None and oauth_context.provider is not None
-        ),
+        oauth_route_registered=(oauth_context is not None and oauth_context.provider is not None),
     )
 
     _warm_classifier()
@@ -286,9 +290,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
                 media_type="text/plain",
             )
 
-        mcp_server.custom_route("/mcp", methods=["GET", "POST", "DELETE"])(
-            legacy_mcp_tombstone
-        )
+        mcp_server.custom_route("/mcp", methods=["GET", "POST", "DELETE"])(legacy_mcp_tombstone)
         logger.info("gateway: legacy /mcp closed (410); MCP app mounted internally")
 
     mcp_server.run(
@@ -360,9 +362,7 @@ class _AdvertiseSecretPost:
 
         await self._inner(scope, receive, capture)
 
-    async def _flush(
-        self, start: dict[str, Any] | None, body: bytes, send: Any
-    ) -> None:
+    async def _flush(self, start: dict[str, Any] | None, body: bytes, send: Any) -> None:
         """Emit the patched document, or the original when it is not ours."""
         if start is None:
             return
@@ -474,9 +474,7 @@ def _harden(route: Any, *, storage: Any) -> Any:
         app = UnauthenticatedWriteGuard(
             app,
             limiter=_limiter(route.path),
-            max_body_bytes=(
-                max_registration_bytes() if route.path == "/register" else None
-            ),
+            max_body_bytes=(max_registration_bytes() if route.path == "/register" else None),
         )
 
     return Route(
@@ -513,9 +511,7 @@ def _confidential_client(
         if client_info.redirect_uris
         else [AnyUrl("http://localhost")]
     )
-    grant_types = list(
-        client_info.grant_types or ["authorization_code", "refresh_token"]
-    )
+    grant_types = list(client_info.grant_types or ["authorization_code", "refresh_token"])
     return ProxyDCRClient(
         client_id=client_info.client_id,
         client_secret=secret,
@@ -529,9 +525,7 @@ def _confidential_client(
     )
 
 
-def _provisioned_clients(
-    profiles: Mapping[str, Profile], scope: str
-) -> dict[str, Any]:
+def _provisioned_clients(profiles: Mapping[str, Profile], scope: str) -> dict[str, Any]:
     """Build the confidential clients declared across the OAuth profiles.
 
     OAuthConfig refuses a half-declared client and the loader fails closed on an
@@ -594,7 +588,8 @@ def _partition_oauth_profiles(
     proxy gets built at all, and which profiles the RFC 8707 resource may pin to.
     """
     delegated = [
-        name for name in enabled
+        name
+        for name in enabled
         if (oauth := profiles[name].oauth) is not None and oauth.issuer is not None
     ]
     proxied = [name for name in enabled if name not in delegated]
@@ -662,22 +657,22 @@ def _delegated_auth(
                 "tokens with that audience, so this profile would accept them"
             )
         if oauth.issuer != GOOGLE_ISSUER:
-            raise ProfileConfigError(
-                f"profile {name!r}: no verifier for issuer {oauth.issuer!r}"
-            )
+            raise ProfileConfigError(f"profile {name!r}: no verifier for issuer {oauth.issuer!r}")
         if profiles[name].role == "operator":
             logger.warning(
                 "gateway: profile %s delegates authentication to %s AND holds "
                 "role=operator — the gateway admin tools are reachable by "
                 "anyone on its allowlist",
-                name, oauth.issuer,
+                name,
+                oauth.issuer,
             )
         seen[audience] = name
         built[name] = DelegatedAuth(
             issuer=oauth.issuer,
             scopes=DELEGATED_SCOPES,
             verifier=GoogleTokeninfoVerifier(
-                audience=audience, profile_name=name,
+                audience=audience,
+                profile_name=name,
             ),
         )
     return built
@@ -702,8 +697,7 @@ def _clear_known_resource(params: Any, allowed: frozenset[str]) -> None:
         normalize_resource_url(url) for url in allowed
     }:
         logger.warning(
-            "gateway: refusing /authorize — resource %s is not a profile on "
-            "this gateway",
+            "gateway: refusing /authorize — resource %s is not a profile on this gateway",
             requested,
         )
         raise AuthorizeError(
@@ -727,9 +721,7 @@ DEFAULT_ALLOWED_REDIRECT_URIS: tuple[str, ...] = (
 )
 
 
-def _allowed_redirect_uris(
-    profiles: Mapping[str, Profile], proxied: list[str]
-) -> list[str]:
+def _allowed_redirect_uris(profiles: Mapping[str, Profile], proxied: list[str]) -> list[str]:
     """Every callback a self-registering client may use on this gateway.
 
     The union of the shipped defaults, each proxied profile's
@@ -766,15 +758,14 @@ def _allowed_redirect_uris(
     logger.info(
         "gateway: %d callback URL(s) allowed for self-registering clients "
         "(%d shipped by default, %d from profile config)",
-        len(unique), len(DEFAULT_ALLOWED_REDIRECT_URIS),
+        len(unique),
+        len(DEFAULT_ALLOWED_REDIRECT_URIS),
         len(unique) - len(DEFAULT_ALLOWED_REDIRECT_URIS),
     )
     return unique
 
 
-def _warn_on_divergent_allowlists(
-    profiles: Mapping[str, Profile], proxied: list[str]
-) -> None:
+def _warn_on_divergent_allowlists(profiles: Mapping[str, Profile], proxied: list[str]) -> None:
     """Warn when proxied profiles are authorized differently.
 
     Every token this proxy issues carries the same audience whichever profile
@@ -961,9 +952,7 @@ def _build_proxy_provider(
             offering it. See RT #1502.
             """
             # Captured before super(), which strips both off the object.
-            requested_method = getattr(
-                client_info, "token_endpoint_auth_method", None
-            )
+            requested_method = getattr(client_info, "token_endpoint_auth_method", None)
             issued_secret = getattr(client_info, "client_secret", None)
             expires_at = getattr(client_info, "client_secret_expires_at", None)
 
@@ -1004,7 +993,8 @@ def _build_proxy_provider(
             logger.info(
                 "gateway: registered confidential OAuth client %s "
                 "(client_secret_post, %d redirect URI(s))",
-                client_info.client_id, len(client_info.redirect_uris or []),
+                client_info.client_id,
+                len(client_info.redirect_uris or []),
             )
 
         def get_routes(self, mcp_path: str | None = None) -> list[Any]:
@@ -1029,7 +1019,8 @@ def _build_proxy_provider(
             """
             return [
                 _harden(
-                    _advertise_secret_post(route), storage=self._client_storage,
+                    _advertise_secret_post(route),
+                    storage=self._client_storage,
                 )
                 for route in super().get_routes(mcp_path)
             ]
@@ -1043,9 +1034,7 @@ def _build_proxy_provider(
     # /authorize with invalid_target.
     resource_profile = sorted(proxied)[0]
     resource_url = f"{base_url}/gateway/{resource_profile}/mcp"
-    gateway_resources = frozenset(
-        f"{base_url}/gateway/{name}/mcp" for name in proxied
-    )
+    gateway_resources = frozenset(f"{base_url}/gateway/{name}/mcp" for name in proxied)
     _GatewayGoogleProvider.gateway_resources = gateway_resources
 
     # The audience of every issued token is `resource_url`, whichever profile
@@ -1092,7 +1081,8 @@ def _build_proxy_provider(
         logger.info(
             "gateway: %d provisioned OAuth client(s): %s "
             "(confidential, client_secret_post enforced)",
-            len(provisioned), ", ".join(sorted(provisioned)),
+            len(provisioned),
+            ", ".join(sorted(provisioned)),
         )
 
     # The issuer FastMCP will advertise in its own authorization-server metadata.
@@ -1106,9 +1096,12 @@ def _build_proxy_provider(
     # protected-resource document names the identical list. See OAuthContext.
     scopes = tuple(provider.required_scopes or [])
     logger.info(
-        "gateway: Google OAuth proxy built for %d profile(s): %s "
-        "(base_url=%s issuer=%s scopes=%s)",
-        len(proxied), ", ".join(sorted(proxied)), base_url, issuer, " ".join(scopes),
+        "gateway: Google OAuth proxy built for %d profile(s): %s (base_url=%s issuer=%s scopes=%s)",
+        len(proxied),
+        ", ".join(sorted(proxied)),
+        base_url,
+        issuer,
+        " ".join(scopes),
     )
     # WARNING, not INFO, for the same reason the cache line is: production runs
     # at TRENTINA_LOG_LEVEL=WARNING, and the one question an operator asks after
@@ -1145,11 +1138,7 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
     from .gateway.app import OAuthContext
 
     profiles = gateway_config.profiles
-    enabled = [
-        name
-        for name, p in profiles.items()
-        if p.oauth is not None and p.oauth.enabled
-    ]
+    enabled = [name for name, p in profiles.items() if p.oauth is not None and p.oauth.enabled]
     if not enabled:
         return None
 
@@ -1160,9 +1149,9 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
     # matching secret is read inside _build_proxy_provider, which is the only
     # thing that uses it.
     client_id = os.environ.get("TRENTINA_OAUTH_GOOGLE_CLIENT_ID", "").strip()
-    base_url = os.environ.get(
-        "TRENTINA_OAUTH_BASE_URL", "https://mcp.crunchtools.com"
-    ).strip().rstrip("/")
+    base_url = (
+        os.environ.get("TRENTINA_OAUTH_BASE_URL", "https://mcp.crunchtools.com").strip().rstrip("/")
+    )
     signing_key = os.environ.get("TRENTINA_OAUTH_JWT_SIGNING_KEY", "").strip() or None
 
     delegated = _delegated_auth(profiles, delegated_names, proxy_client_id=client_id)
@@ -1175,7 +1164,8 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
         # advertise itself as an AS.
         logger.info(
             "gateway: OAuth delegated for %d profile(s): %s (no proxy built)",
-            len(delegated_names), ", ".join(sorted(delegated_names)),
+            len(delegated_names),
+            ", ".join(sorted(delegated_names)),
         )
         return OAuthContext(
             provider=None,
@@ -1186,7 +1176,10 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
         )
 
     provider, issuer, scopes = _build_proxy_provider(
-        profiles, proxied, base_url=base_url, signing_key=signing_key,
+        profiles,
+        proxied,
+        base_url=base_url,
+        signing_key=signing_key,
     )
     return OAuthContext(
         provider=provider,
@@ -1259,15 +1252,12 @@ def _wire_circuit_notifications(
         for profile_name in affected:
             try:
                 loop = asyncio.get_running_loop()
-                task = loop.create_task(
-                    sessions.broadcast_tools_changed(profile_name)
-                )
+                task = loop.create_task(sessions.broadcast_tools_changed(profile_name))
                 pending_tasks.add(task)
                 task.add_done_callback(pending_tasks.discard)
             except RuntimeError:
                 logger.debug(
-                    "gateway: no event loop for notification broadcast "
-                    "(url=%s profile=%s)",
+                    "gateway: no event loop for notification broadcast (url=%s profile=%s)",
                     url,
                     profile_name,
                 )

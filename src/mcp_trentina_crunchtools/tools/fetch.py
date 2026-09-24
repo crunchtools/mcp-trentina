@@ -1,28 +1,20 @@
-"""Fetch tools — clean_fetch and block_fetch."""
+"""Fetch tools — block_fetch, warn_fetch and clean_fetch."""
 
 from __future__ import annotations
 
 import logging
-import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlparse
 
 from ..client import fetch_url
 from ..config import get_config
 from ..database import is_blocked
-from ..dbus_interface import emit_request_event
-from ..defense import advise, defend, enforce_block
+from ..defense import defend
 from ..errors import BlockedSourceError, FetchError, UnsupportedContentTypeError
-from ..quarantine.agent import quarantine_extract
-from ..quarantine.classifier import (
-    join_warnings,
-    truncation_warning,
-)
+from ..modes import Mode
+from ..quarantine.prompts import finding_types
 from ..report import Disposition, build_report
-from ..warning import build_warning
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..l1.pipeline import PipelineResult
+from .judged import judge_and_deliver
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +52,6 @@ async def _scan_error_body(body: str, url: str) -> dict[str, Any]:
         body,
         source=url,
         source_type="url",
-        guarded=False,
         record=False,
         l3_context=(
             "This is an HTTP error response body from a URL the agent tried to "
@@ -71,21 +62,23 @@ async def _scan_error_body(body: str, url: str) -> dict[str, Any]:
         ),
     )
 
-    l1_suspicious = verdict.pipeline.stats.suspicious_detections()
-    l3_detected = bool(
-        verdict.l3_assessment and verdict.l3_assessment.get("injection_detected")
-    )
+    stats = verdict.pipeline.stats
+    assessment = verdict.l3_assessment or {}
+    l3_detected = bool(assessment.get("injection_detected"))
 
+    # Structured fields only. This used to carry the whole L3 assessment,
+    # `summary` included — L3 prose about an attacker-written error body,
+    # delivered to the agent on every 4xx advisory.
     return {
         "is_suspicious": (
-            l1_suspicious > 0 or verdict.l2_label == "MALICIOUS" or l3_detected
+            stats.suspicious_detections() > 0 or verdict.l2_label == "MALICIOUS" or l3_detected
         ),
-        "l1_risk": verdict.pipeline.stats.risk_level(),
-        "l1_suspicious": l1_suspicious,
+        "l1_risk": stats.risk_level(),
+        "l1_suspicious": stats.suspicious_detections(),
         "l2_label": verdict.l2_label,
         "l2_score": verdict.l2_score,
         "l3_detected": l3_detected,
-        "l3_assessment": verdict.l3_assessment,
+        "l3_finding_types": finding_types(assessment),
     }
 
 
@@ -96,7 +89,7 @@ def _build_advisory(
     why_suspicious: str,
     *,
     pipeline_scan: dict[str, Any] | None = None,
-    redirect_chain: list[dict[str, object]] | None = None,
+    redirect_hops: int | None = None,
 ) -> dict[str, Any]:
     """Construct a security advisory response (non-error)."""
     advisory: dict[str, Any] = {
@@ -109,21 +102,22 @@ def _build_advisory(
     }
     if pipeline_scan:
         advisory["pipeline_scan"] = pipeline_scan
-    if redirect_chain:
-        advisory["redirect_chain"] = redirect_chain
+    if redirect_hops:
+        advisory["redirect_hops"] = redirect_hops
 
     return {
         "content": None,
         "security_advisory": advisory,
         "scan": build_report(
-            None, disposition=Disposition.REFUSED, kind="url", ref=url,
+            None,
+            disposition=Disposition.REFUSED,
+            kind="url",
+            ref=url,
         ),
     }
 
 
-async def _handle_fetch_error(
-    url: str, exc: FetchError
-) -> dict[str, Any] | None:
+async def _handle_fetch_error(url: str, exc: FetchError) -> dict[str, Any] | None:
     """Convert suspicious fetch errors to advisories. Returns None if normal."""
     code = exc.status_code
     if code is None:
@@ -161,51 +155,32 @@ async def _handle_fetch_error(
     return None
 
 
-def _handle_content_type_error(
-    url: str, exc: UnsupportedContentTypeError
-) -> dict[str, Any]:
+def _handle_content_type_error(url: str, exc: UnsupportedContentTypeError) -> dict[str, Any]:
     """Convert redirect-to-binary errors to advisories."""
     return _build_advisory(
         url,
         pattern="redirect_to_binary",
-        what_happened=str(exc),
+        # Not str(exc): that carried the attacker-chosen redirect URLs and
+        # content type to the agent, unscanned.
+        what_happened="The URL redirected to a non-text download.",
         why_suspicious=(
             "A page that redirects to a binary download (ZIP, PDF, etc.) "
             "is a known prompt-injection vector. The attacker wants the "
             "agent to download and extract the archive directly."
         ),
-        redirect_chain=exc.redirect_chain,
+        redirect_hops=len(exc.redirect_chain or []),
     )
 
 
-def _build_l1_metadata(pipeline_result: PipelineResult) -> dict[str, Any]:
-    """Build the L1 section of a tool response."""
-    return {
-        "input_size": pipeline_result.input_size,
-        "output_size": pipeline_result.output_size,
-        "stripped": pipeline_result.stats.to_flat_dict(),
-    }
+async def _fetch(url: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
+    """Fetch, then hand the page to the one judging path.
 
-
-async def _fetch_judged(url: str, *, mode: str) -> dict[str, Any]:
-    """Fetch, judge with all three layers, and dispose of it per `mode`.
-
-    `block` and `warn` differ in exactly one decision and nothing else: both
-    run the same layers over the same bytes and both deliver
-    `PipelineResult.content`, which is byte-identical to what arrived. One
-    refuses a flagged verdict; the other delivers it with the verdict
-    attached.
-
-    That is why this is one function with a parameter rather than two
-    functions. The pair is a DISPOSITION choice, and writing it twice is how
-    the two copies end up scanning differently — which is the drift
-    `warning.py` was extracted to stop.
+    The blocklist refuses block and warn before any bytes are fetched; clean
+    proceeds, because clean delivers only a verified extraction, and says so
+    in the warning.
     """
-    start_time = time.time()
-    config = get_config()
-
     blocked = is_blocked(url)
-    if blocked:
+    if blocked and mode is not Mode.CLEAN:
         raise BlockedSourceError(url, blocked["detected_at"])
 
     try:
@@ -220,181 +195,31 @@ async def _fetch_judged(url: str, *, mode: str) -> dict[str, Any]:
         log.warning("redirect-to-binary advisory for %s: %s", url, exc)
         return _handle_content_type_error(url, exc)
 
-    is_trusted = config.is_trusted_domain(url)
-
-    verdict = await defend(
+    return await judge_and_deliver(
         content,
+        mode=mode,
+        family="fetch",
         source=url,
         source_type="url",
-        is_trusted=is_trusted,
+        kind="url",
+        ref=url,
+        prompt=prompt,
+        allowlisted=get_config().is_trusted_domain(url),
+        blocklisted_at=blocked["detected_at"] if blocked else None,
         domain=urlparse(url).hostname,
     )
-    if mode == "block":
-        enforce_block(verdict, url)
-
-    pipeline_result = verdict.pipeline
-    classification = verdict.classification
-    warning = build_warning(verdict)
-    result: dict[str, Any] = {
-        "content": pipeline_result.content,
-        "scan": build_report(
-            verdict,
-            disposition=(
-                Disposition.ANNOTATED if warning is not None else Disposition.DELIVERED
-            ),
-            kind="url",
-            ref=url,
-            allowlisted=is_trusted,
-        ),
-        "l1": _build_l1_metadata(pipeline_result),
-    }
-
-    # Only `warn` can reach this with a flagged verdict — `block` raised.
-    # Attached even when nothing was flagged but something could not be READ:
-    # a scan that did not fully happen must never look like a scan that found
-    # nothing, which is the whole rule `warning.py` encodes.
-    if warning is not None:
-        result["_trentina_warning"] = warning
-
-    emit_request_event(
-        tool=f"{mode}_fetch",
-        source=url,
-        disposition=result["scan"]["disposition"],
-        risk_level=pipeline_result.stats.risk_level(),
-        l1_detections=pipeline_result.stats.total_detections(),
-        l1_suspicious=pipeline_result.stats.suspicious_detections(),
-        l2_label=classification.label if classification else None,
-        l2_score=classification.score if classification else None,
-        input_size=pipeline_result.input_size,
-        output_size=pipeline_result.output_size,
-        stats=pipeline_result.stats.to_flat_dict(),
-        start_time=start_time,
-    )
-
-    return result
 
 
 async def block_fetch(url: str) -> dict[str, Any]:
-    """Fail closed: a flagged URL raises and the agent never sees the bytes."""
-    return await _fetch_judged(url, mode="block")
+    """Refuse a flagged or incompletely judged page; otherwise the exact bytes."""
+    return await _fetch(url, Mode.BLOCK)
 
 
 async def warn_fetch(url: str) -> dict[str, Any]:
-    """Deliver the bytes that arrived, with the verdict attached.
-
-    The mode that did not exist before 0.26.0. An agent could be refused or
-    handed an LLM rewrite, and nothing in between — so the one posture with
-    the best argument behind it, "here is exactly what the server sent and
-    here is why I am uneasy about it", was unreachable from a tool call.
-    """
-    return await _fetch_judged(url, mode="warn")
+    """The exact bytes, with the verdict attached when there is one."""
+    return await _fetch(url, Mode.WARN)
 
 
 async def clean_fetch(url: str, prompt: str) -> dict[str, Any]:
-    """Fetch URL with Layer 1 + Layer 2 (Q-Agent) extraction.
-
-    Warns but proceeds if source is in blocklist.
-    """
-    start_time = time.time()
-    config = get_config()
-
-    blocked = is_blocked(url)
-    blocklist_warning = None
-    if blocked:
-        blocklist_warning = (
-            f"Warning: source previously flagged at {blocked['detected_at']}. "
-            "Proceeding in quarantine mode."
-        )
-
-    try:
-        content, _content_type = await fetch_url(url)
-    except FetchError as exc:
-        advisory = await _handle_fetch_error(url, exc)
-        if advisory:
-            log.warning("security advisory for %s: %s", url, exc)
-            return advisory
-        raise
-    except UnsupportedContentTypeError as exc:
-        log.warning("redirect-to-binary advisory for %s: %s", url, exc)
-        return _handle_content_type_error(url, exc)
-
-    is_trusted = config.is_trusted_domain(url)
-
-    verdict = await advise(content, source=url, source_type="url", is_trusted=is_trusted)
-    pipeline_result = verdict.pipeline
-    classification = verdict.classification
-
-    classifier_warning = None
-    if classification and classification.label == "MALICIOUS":
-        classifier_warning = (
-            f"Layer 2 classifier flagged content as MALICIOUS "
-            f"(score: {classification.score:.3f}). Proceeding in quarantine mode."
-        )
-    classifier_warning = join_warnings(
-        classifier_warning, truncation_warning(classification)
-    )
-
-    def _emit(disposition: str) -> None:
-        emit_request_event(
-            tool="clean_fetch",
-            source=url,
-            disposition=disposition,
-            risk_level=pipeline_result.stats.risk_level(),
-            l1_detections=pipeline_result.stats.total_detections(),
-            l1_suspicious=pipeline_result.stats.suspicious_detections(),
-            l2_label=classification.label if classification else None,
-            l2_score=classification.score if classification else None,
-            input_size=pipeline_result.input_size,
-            output_size=pipeline_result.output_size,
-            stats=pipeline_result.stats.to_flat_dict(),
-            start_time=start_time,
-        )
-
-    if is_trusted:
-        # No extraction happened: an allowlisted source skips the Q-Agent
-        # entirely, so this is the original text and says so.
-        _emit(Disposition.DELIVERED.value)
-        return {
-            "content": {"extracted_text": pipeline_result.content},
-            "scan": build_report(
-                verdict, disposition=Disposition.DELIVERED, kind="url", ref=url,
-                allowlisted=True,
-            ),
-            "l1": _build_l1_metadata(pipeline_result),
-            "blocklist_warning": blocklist_warning,
-            "classifier_warning": classifier_warning,
-        }
-
-    if not config.has_api_key:
-        if config.fallback == "fail":
-            from ..errors import ConfigError
-
-            raise ConfigError("GEMINI_API_KEY required and QUARANTINE_FALLBACK=fail")
-        _emit(Disposition.DELIVERED.value)
-        return {
-            "content": {"extracted_text": pipeline_result.content},
-            "scan": build_report(
-                verdict, disposition=Disposition.DELIVERED, kind="url", ref=url,
-                allowlisted=is_trusted,
-            ),
-            "l1": _build_l1_metadata(pipeline_result),
-            "blocklist_warning": blocklist_warning,
-            "classifier_warning": classifier_warning,
-        }
-
-    truncated = pipeline_result.content[: config.max_content]
-
-    extraction = await quarantine_extract(truncated, prompt)
-
-    _emit(Disposition.EXTRACTED.value)
-    return {
-        "content": extraction.get("content", {}),
-        "scan": build_report(
-            verdict, disposition=Disposition.EXTRACTED, kind="url", ref=url,
-            allowlisted=is_trusted, extracted_by=config.model,
-        ),
-        "l1": _build_l1_metadata(pipeline_result),
-        "usage": extraction.get("usage", {}),
-        "blocklist_warning": blocklist_warning,
-        "classifier_warning": classifier_warning,
-    }
+    """A verified L3 extraction instead of the page."""
+    return await _fetch(url, Mode.CLEAN, prompt)

@@ -1,282 +1,89 @@
 """Search tools — block_search, warn_search and clean_search.
 
-Pipeline: L0 → resolve → L1 → L2 [→ L3]
+Search is a producer like any other. L0 (a grounded model call) writes an
+answer and cites sources; the answer, every title and every URI become ONE
+document, and that document crosses the same three layers as a fetched page.
 
-L0 searches via Gemini grounding (plain text + groundingMetadata).
-Redirect URLs are resolved. L1 reads text + titles. L2 classifies.
-For clean_search, L3 (clean Q-Agent with structured JSON) structures
-what L1 produced into actionable results.
+It used to be special, and special meant weaker: its own recipe, L1 run field
+by field and merged, a private ``total_l1 >= 3`` refusal rule, titles and
+URIs seen by L1 alone, and no L3 at all in block and warn. L0's output is
+model output — written by an LLM after reading whatever the web served it —
+so it is judged with ``Provenance.MODEL_OUTPUT``, never trusted more.
 """
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
-from ..config import get_config
-from ..dbus_interface import emit_detection_event, emit_request_event
-from ..defense import advise, defend, merge_stats
+from ..defense import Provenance
 from ..errors import BlockedSourceError, QuarantineAgentError
-from ..l1.pipeline import PipelineResult, PipelineStats, run_l1
-from ..quarantine.agent import (
-    quarantine_extract,
-    resolve_grounding_urls,
-    search_grounded,
-)
-from ..quarantine.classifier import (
-    join_warnings,
-    truncation_warning,
-)
-from ..report import Disposition, build_report
-from ..warning import build_warning
+from ..modes import Mode
+from ..quarantine.agent import resolve_grounding_urls, search_grounded
+from .judged import judge_and_deliver
 
 
-def _run_l1_on_l0_output(
-    text: str, sources: list[dict[str, str]],
-) -> tuple[PipelineResult, list[dict[str, str | bool]], int, PipelineStats]:
-    """Run L1 on L0's synthesized text and source titles.
-
-    Returns (text_result, scanned_sources, total_detections, merged_stats).
-
-    The merged stats are what let the shared pipeline judge this the same way
-    it judges everything else: L1 ran across several fields here, so the
-    aggregate has to be reassembled before L2 sees the document.
-    """
-    text_result = run_l1(text)
-    merged = PipelineStats()
-    merge_stats(merged, text_result.stats)
-    scanned_sources = []
-    total_detections = text_result.stats.total_detections()
-
-    for source in sources:
-        title_r = run_l1(source.get("title", ""))
-        url_r = run_l1(source.get("uri", ""))
-        merge_stats(merged, title_r.stats)
-        merge_stats(merged, url_r.stats)
-        total_detections += (
-            title_r.stats.total_detections()
-            + url_r.stats.total_detections()
-        )
-        scanned_sources.append({
-            "uri": url_r.content,
-            "title": title_r.content,
-            "redirect_failed": source.get("redirect_failed", False),
-        })
-
-    return text_result, scanned_sources, total_detections, merged
+def _document(text: str, sources: list[dict[str, Any]]) -> str:
+    """The answer plus its citations, as the layers read them."""
+    if not sources:
+        return text
+    cited = "\n".join(f"- [{s['title']}]({s['uri']})" for s in sources)
+    return f"{text}\n\n--- Sources ---\n{cited}"
 
 
-async def _search_judged(
-    query: str, num_results: int, *, mode: str
+async def _search(
+    query: str, num_results: int, mode: Mode, prompt: str | None = None
 ) -> dict[str, Any]:
-    """L0 -> resolve -> L1 -> L2, then dispose of it per `mode`.
-
-    Both modes run the same layers over the same text and deliver the same
-    `text`. `block` raises on either refusal condition; `warn` records the
-    same finding, attaches it, and hands the grounded answer over anyway.
-    """
-    start_time = time.time()
-    refusals: list[str] = []
-
+    """L0, redirect resolution, then the one judging path."""
     try:
         raw = await search_grounded(query, num_results)
     except QuarantineAgentError as exc:
         raise BlockedSourceError(f"search:{query}", str(exc)) from exc
 
-    resolved_sources = await resolve_grounding_urls(raw.get("sources", []))
-    text_result, scanned_sources, total_l1, l1_stats = _run_l1_on_l0_output(
-        raw["text"], resolved_sources
-    )
-    l1_text = text_result.content
+    resolved = await resolve_grounding_urls(raw.get("sources", []))
+    sources = [
+        {
+            "uri": s.get("uri", ""),
+            "title": s.get("title", ""),
+            "redirect_failed": bool(s.get("redirect_failed")),
+        }
+        for s in resolved
+    ]
+    text = raw.get("text", "")
+    family_fields = {"sources": sources, "query": query, "l0_usage": raw.get("usage", {})}
 
-    # block_search blocks on an L1 COUNT, not a risk level — a fifth distinct
-    # L1 policy across the tools. Policy stays with the caller by design; only
-    # the mechanics move to the pipeline.
-    if total_l1 >= 3:
-        emit_detection_event("L1", f"search:{query}", "high", {"total_l1": total_l1})
-        reason = f"L1 detected {total_l1} injection vectors in L0 output"
-        if mode == "block":
-            raise BlockedSourceError(f"search:{query}", reason)
-        refusals.append(reason)
-
-    verdict = await defend(
-        l1_text,
+    return await judge_and_deliver(
+        _document(text, sources),
+        mode=mode,
+        family="search",
         source=f"search:{query}",
         source_type="url",
-        record=False,
-        l3_gate=False,
-        precomputed_l1=PipelineResult(
-            content=l1_text,
-            l2_input=text_result.l2_input,
-            stats=l1_stats,
-            input_size=len(raw["text"]),
-            output_size=len(l1_text),
-        ),
+        kind="search",
+        ref=query,
+        prompt=prompt,
+        provenance=Provenance.MODEL_OUTPUT,
+        delivered=text,
+        extras=family_fields,
+        # clean returns the sources beside the extraction (the extraction
+        # schema has no URLs, and a search answer without links is useless).
+        # They crossed all three layers inside the document.
+        clean_extras=family_fields,
     )
-    classification = verdict.classification
-    if classification and classification.label == "MALICIOUS":
-        emit_detection_event("L2", f"search:{query}", "high", {
-            "classifier_label": classification.label,
-            "classifier_score": classification.score,
-        })
-        reason = (
-            f"L2 classifier flagged L0 output as MALICIOUS "
-            f"(score: {classification.score:.3f})"
-        )
-        if mode == "block":
-            raise BlockedSourceError(f"search:{query}", reason)
-        refusals.append(reason)
-
-    # `refusals` is non-empty only under warn: block already raised. It
-    # carries the reason this call WOULD have been refused, which is the
-    # thing the agent needs in order to weigh the answer it is being handed.
-    warning = build_warning(verdict, extras={"refusals": refusals} if refusals else None)
-    disposition = (
-        Disposition.ANNOTATED if warning is not None else Disposition.DELIVERED
-    )
-
-    emit_request_event(
-        tool=f"{mode}_search",
-        source=f"search:{query}",
-        disposition=disposition.value,
-        risk_level=l1_stats.risk_level(),
-        l1_detections=total_l1,
-        l1_suspicious=l1_stats.suspicious_detections(),
-        l2_label=classification.label if classification else None,
-        l2_score=classification.score if classification else None,
-        input_size=len(raw.get("text", "")),
-        output_size=len(l1_text),
-        stats=l1_stats.to_flat_dict(),
-        start_time=start_time,
-    )
-
-    result: dict[str, Any] = {
-        "text": l1_text,
-        "sources": scanned_sources,
-        "query": query,
-        "scan": build_report(
-            verdict, disposition=disposition, kind="search", ref=query,
-        ),
-        "l1_stats": {"total_detections": total_l1},
-        "l2_classification": {
-            "label": classification.label if classification else "UNAVAILABLE",
-            "score": classification.score if classification else None,
-        },
-        "l0_usage": raw.get("usage", {}),
-    }
-
-    if warning is not None:
-        result["_trentina_warning"] = warning
-    return result
 
 
 async def block_search(query: str, num_results: int = 5) -> dict[str, Any]:
-    """Fail closed: a flagged grounded answer raises."""
-    return await _search_judged(query, num_results, mode="block")
+    """Refuse a flagged or incompletely judged answer; otherwise L0's text."""
+    return await _search(query, num_results, Mode.BLOCK)
 
 
 async def warn_search(query: str, num_results: int = 5) -> dict[str, Any]:
-    """Deliver the grounded answer with the verdict attached."""
-    return await _search_judged(query, num_results, mode="warn")
+    """L0's answer and sources, with the verdict attached when there is one."""
+    return await _search(query, num_results, Mode.WARN)
 
 
 async def clean_search(
-    query: str, prompt: str, num_results: int = 5,
+    query: str,
+    prompt: str,
+    num_results: int = 5,
 ) -> dict[str, Any]:
-    """L0 → resolve → L1 → L2 → L3."""
-    start_time = time.time()
-    config = get_config()
-
-    try:
-        raw = await search_grounded(query, num_results)
-    except QuarantineAgentError as exc:
-        return {
-            "text": "",
-            "sources": [],
-            "extraction": {},
-            "query": query,
-            "error": str(exc),
-        }
-
-    resolved_sources = await resolve_grounding_urls(raw.get("sources", []))
-    text_result, scanned_sources, _total_l1, l1_stats = _run_l1_on_l0_output(
-        raw["text"], resolved_sources
-    )
-    l1_text = text_result.content
-
-    classifier_warning = None
-    verdict = await advise(
-        l1_text,
-        source=f"search:{query}",
-        source_type="url",
-    )
-    classification = verdict.classification
-    if classification and classification.label == "MALICIOUS":
-        classifier_warning = (
-            f"L2 classifier flagged L0 output as MALICIOUS "
-            f"(score: {classification.score:.3f}). L0 may have been "
-            "compromised by poisoned web content. Proceeding to L3."
-        )
-    classifier_warning = join_warnings(
-        classifier_warning, truncation_warning(classification)
-    )
-
-    if config.has_api_key:
-        sources_text = "\n".join(
-            f"- [{s['title']}]({s['uri']})"
-            + (" [redirect failed]" if s.get("redirect_failed") else "")
-            for s in scanned_sources
-        )
-        l3_input = (
-            f"Search results for: {query}\n\n"
-            f"--- Synthesized text ---\n{l1_text}\n\n"
-            f"--- Sources ---\n{sources_text}\n\n"
-            f"--- Instruction ---\n{prompt}"
-        )
-        extraction = await quarantine_extract(l3_input, prompt)
-        disposition = Disposition.EXTRACTED
-    else:
-        # No key, so the Q-Agent never ran and this is L1's text, not an
-        # extraction. Saying `extracted` here is the same lie the old
-        # `trust.level` told, and the other three clean_* tools already
-        # report their fallback as `delivered`.
-        extraction = {
-            "content": {"extracted_text": l1_text},
-            "usage": {},
-        }
-        disposition = Disposition.DELIVERED
-
-    emit_request_event(
-        tool="clean_search",
-        source=f"search:{query}",
-        disposition=disposition.value,
-        risk_level=l1_stats.risk_level(),
-        l1_detections=_total_l1,
-        l1_suspicious=l1_stats.suspicious_detections(),
-        l2_label=classification.label if classification else None,
-        l2_score=classification.score if classification else None,
-        input_size=len(raw.get("text", "")),
-        output_size=len(l1_text),
-        stats=l1_stats.to_flat_dict(),
-        start_time=start_time,
-    )
-
-    return {
-        "text": l1_text,
-        "sources": scanned_sources,
-        "extraction": extraction.get("content", {}),
-        "query": query,
-        "scan": build_report(
-            verdict, disposition=disposition, kind="search", ref=query,
-            extracted_by=(
-                config.model if disposition is Disposition.EXTRACTED else None
-            ),
-        ),
-        "pipeline": "L0 → resolve → L1 → L2 → L3",
-        "l0_usage": raw.get("usage", {}),
-        "l3_usage": extraction.get("usage", {}),
-        "classifier_warning": classifier_warning,
-        "classifier_output_warning": extraction.get(
-            "classifier_output_warning"
-        ),
-    }
+    """A verified L3 extraction of the answer, plus its sources."""
+    return await _search(query, num_results, Mode.CLEAN, prompt)

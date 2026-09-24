@@ -25,6 +25,8 @@ def _verdict(
     classification: ClassifierResult | None = None,
     l3: dict | None = None,
     flagged_by: Layer | None = None,
+    l2_truncated: bool = False,
+    l3_truncated: bool = False,
 ) -> DefenseVerdict:
     pipeline = PipelineResult(
         content=text,
@@ -40,6 +42,8 @@ def _verdict(
         l3_assessment=l3,
         risk_level="low",
         flagged_by=flagged_by,
+        l2_truncated=l2_truncated,
+        l3_truncated=l3_truncated,
     )
 
 
@@ -70,11 +74,7 @@ class TestLayerStates:
 
     def test_l2_complete_when_it_read_everything(self) -> None:
         states = layer_states(
-            _verdict(
-                classification=ClassifierResult(
-                    label="BENIGN", score=0.01, latency_ms=1.0
-                )
-            )
+            _verdict(classification=ClassifierResult(label="BENIGN", score=0.01, latency_ms=1.0))
         )
         assert states["l2"] == LayerState.COMPLETE.value
 
@@ -85,6 +85,20 @@ class TestLayerStates:
     def test_l3_complete_when_it_judged(self) -> None:
         states = layer_states(_verdict(l3={"injection_detected": False}))
         assert states["l3"] == LayerState.COMPLETE.value
+
+    def test_l2_partial_when_it_bailed_at_the_token_count(self) -> None:
+        """block/clean skip the inference entirely: no classification, and
+        that is PARTIAL, not UNAVAILABLE — the model is there."""
+        states = layer_states(_verdict(classification=None, l2_truncated=True))
+        assert states["l2"] == LayerState.PARTIAL.value
+
+    def test_l3_partial_when_it_read_only_max_content(self) -> None:
+        states = layer_states(_verdict(l3={"injection_detected": False}, l3_truncated=True))
+        assert states["l3"] == LayerState.PARTIAL.value
+
+    def test_l3_unavailable_when_no_provider_left_an_assessment(self) -> None:
+        states = layer_states(_verdict(l3=None))
+        assert states["l3"] == LayerState.UNAVAILABLE.value
 
     def test_empty_payload_is_not_applicable_not_clean(self) -> None:
         """Nothing to judge is a third thing, distinct from both 'ran and
@@ -113,9 +127,7 @@ class TestThreeAxesStaySeparate:
     def test_there_is_no_trust_field(self) -> None:
         """Deliberate: content that crossed the perimeter is untrusted, and a
         key named for a property nothing has is worse than no key."""
-        report = build_report(
-            _verdict(), disposition=Disposition.DELIVERED, kind="url", ref="u"
-        )
+        report = build_report(_verdict(), disposition=Disposition.DELIVERED, kind="url", ref="u")
         assert "trust" not in report
         assert "level" not in report
 
@@ -133,15 +145,13 @@ class TestThreeAxesStaySeparate:
 
 
 class TestAllowlisting:
-    """Allowlisting suppresses FLAGS. It does not skip layers, and reporting
-    it as though it did would be the error the old field made."""
+    """Allowlisting never skips a layer, and reporting it as though it did
+    would be the error the old field made."""
 
     def test_an_allowlisted_source_still_reports_every_layer_as_run(self) -> None:
         report = build_report(
             _verdict(
-                classification=ClassifierResult(
-                    label="MALICIOUS", score=0.99, latency_ms=1.0
-                ),
+                classification=ClassifierResult(label="MALICIOUS", score=0.99, latency_ms=1.0),
                 l3={"injection_detected": True},
             ),
             disposition=Disposition.DELIVERED,
@@ -157,9 +167,7 @@ class TestAllowlisting:
         assert report["origin"]["allowlisted"] is True
 
     def test_not_allowlisted_by_default(self) -> None:
-        report = build_report(
-            _verdict(), disposition=Disposition.DELIVERED, kind="url", ref="u"
-        )
+        report = build_report(_verdict(), disposition=Disposition.DELIVERED, kind="url", ref="u")
         assert report["origin"]["allowlisted"] is False
 
 
@@ -177,17 +185,13 @@ class TestDisposition:
 
     def test_no_extraction_means_the_key_is_absent_not_null(self) -> None:
         """A key that is sometimes meaningless gets read as meaningful."""
-        report = build_report(
-            _verdict(), disposition=Disposition.DELIVERED, kind="url", ref="u"
-        )
+        report = build_report(_verdict(), disposition=Disposition.DELIVERED, kind="url", ref="u")
         assert "extracted_by" not in report
 
     def test_a_refusal_before_any_layer_ran_says_not_applicable(self) -> None:
         """The advisory paths refuse a URL on its shape, so there is no
         verdict — and claiming the layers were 'complete' would be a lie
         about work that never happened."""
-        report = build_report(
-            None, disposition=Disposition.REFUSED, kind="url", ref="http://evil"
-        )
+        report = build_report(None, disposition=Disposition.REFUSED, kind="url", ref="http://evil")
         assert report["disposition"] == "refused"
         assert set(report["layers"].values()) == {"not_applicable"}

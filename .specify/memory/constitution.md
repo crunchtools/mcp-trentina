@@ -144,7 +144,7 @@ All tests use mocked httpx — no live API calls. Test categories:
 - Sanitization unit tests (one file per module)
 - Pipeline integration tests
 - Q-Agent tests (mock Gemini responses, verify no function declarations)
-- Scan tests (quarantine_scan)
+- Mode tests: every family × mode runs every layer (test_mode_parity), gaps refuse or warn (test_mode_gaps)
 - File read tests (binary rejection, size limits)
 - Adversarial tests (injection vectors)
 

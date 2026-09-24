@@ -10,6 +10,67 @@ under that name.
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-24
+
+All three layers, always (#187, closes #15). The mode decides what is
+delivered, never which layers run.
+
+### Changed (breaking)
+- **Every family in every mode runs L1, L2 and L3.** Three of six paths had
+  no semantic judge: `clean_*` spent L3 on extraction with no detection
+  verdict (`advise()`), and `block_search`/`warn_search` never called L3.
+  L1 and L2 now run in parallel on the arrived bytes; L2 also reads L1's
+  normalized copy when L1 normalized anything (three zero-width characters
+  split Prompt Guard's tokens while L1 rated them only medium); L3 waits for
+  both and is briefed with both, always including the caveat that a low L2
+  score is not evidence of safety.
+- **`clean_*` runs L3 three times: detect, extract, verify.** L1 and L2 check
+  every delivered string (the title was delivered unchecked), then a third L3
+  pass verifies them. Any objection refuses; a provider error refuses instead
+  of handing back the raw input labelled as an extraction.
+- **block and clean refuse when a layer could not finish; warn delivers and
+  says so** (`modes.py`, shared by the tools and the gateway). An absent layer
+  can be excused with `TRENTINA_REQUIRE_L2=false` / `TRENTINA_REQUIRE_L3=false`;
+  a partial read never can. `QUARANTINE_FALLBACK` is removed and setting it
+  fails startup. Gateway `block` profiles now also refuse when the ONNX model
+  is missing, and withhold tool descriptions they could not fully judge.
+- **The allowlist no longer suppresses flags.** `block_*` on an allowlisted
+  source sends a flagged or partially-read payload to clean instead of
+  refusing it; a failed clean still refuses.
+- **Search is not special.** L0's answer, titles and URLs are one document
+  through the same path, judged as model output. The private `total_l1 >= 3`
+  refusal rule is gone. `clean_search` returns the extraction plus `sources`,
+  never the raw answer, and an L0 failure refuses instead of returning
+  `{"error": ...}`.
+- **Response shape.** clean_* returns `content: {extracted_text, title,
+  confidence}`; `injection_details`, `blocklist_warning`,
+  `classifier_warning` and `classifier_output_warning` are gone, and search's
+  legacy `l1_stats`/`l2_classification` with them. `_trentina_warning` gains
+  `mode`, `l3_risk_level`, `l3_finding_types`, `l3_truncated`, `blocklisted`
+  and `downgraded_to_clean`.
+- **Removed:** `quarantine_scan`, `deep_quarantine_scan`, `scan_content`,
+  `deep_scan_content`, `quarantine_scan_dir`, `Disposition.REPORTED`,
+  `defense.advise`, `defense.enforce_block`, `classify_guarded`, and
+  `defend(is_trusted=, guarded=, l3_gate=, l3_max_chars=)`.
+
+### Added
+- **The `dir` family** (`block_dir`, `warn_dir`, `clean_dir`), replacing
+  `quarantine_scan_dir`. The listing is judged like any payload — file names
+  are attacker-chosen text — and a stdlib-shadowing `.py` file is an L1
+  detection (`ShadowStats`) with critical risk.
+
+### Fixed
+- **No text written by L3 reaches an agent.** Finding types are a closed enum
+  (`prompts.FINDING_TYPES`), normalized again on the way out. The 4xx
+  advisory delivered L3's full assessment including `summary`, and the
+  redirect-to-binary advisory echoed attacker-chosen URLs.
+- **`warn_fetch` raised on a large page** instead of delivering with a
+  warning, because every mode passed `guarded=True`.
+- **`warn_*` blocklisted what it delivered.** Detection rows were written
+  `blocked=1`, so the second `warn_fetch` of a flagged page was refused. Only
+  a `block_*` refusal blocklists now.
+- `PERIMETER_VERSION` 4: cached tool-description verdicts are re-judged once.
+
 ## [0.30.2] - 2026-09-24
 
 ### Fixed

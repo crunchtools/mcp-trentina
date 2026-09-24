@@ -20,6 +20,7 @@ from .directives import DirectiveStats, strip_directives
 from .encoded import EncodedStats, normalize_encoded
 from .exfiltration import ExfiltrationStats, strip_exfiltration
 from .hidden import HiddenStats, detect_hidden_markup
+from .shadows import ShadowStats
 from .unicode import UnicodeStats, normalize_unicode
 
 
@@ -33,6 +34,7 @@ class PipelineStats:
     exfiltration: ExfiltrationStats = field(default_factory=ExfiltrationStats)
     delimiters: DelimiterStats = field(default_factory=DelimiterStats)
     directives: DirectiveStats = field(default_factory=DirectiveStats)
+    shadows: ShadowStats = field(default_factory=ShadowStats)
 
     def to_flat_dict(self) -> dict[str, int]:
         """Flatten all stats into a single dict for serialization."""
@@ -44,11 +46,26 @@ class PipelineStats:
             ("exfiltration", asdict(self.exfiltration)),
             ("delimiters", asdict(self.delimiters)),
             ("directives", asdict(self.directives)),
+            ("shadows", asdict(self.shadows)),
         ]
         for section_name, section_dict in named_sections:
             for key, value in section_dict.items():
                 flat[f"{section_name}_{key}"] = value
         return flat
+
+    def normalized(self) -> bool:
+        """Whether L1's copy for L2 differs from the arrived text by construction.
+
+        These are the stages that REWRITE the L2 copy to undo obfuscation.
+        When any fired, L2 reads both texts: the raw one because it is what
+        arrived, the normalized one because three zero-width characters are
+        enough to split Prompt Guard's tokens while L1 rates them only medium.
+        """
+        return bool(
+            sum(asdict(self.unicode).values())
+            + sum(asdict(self.encoded).values())
+            + sum(asdict(self.delimiters).values())
+        )
 
     def total_detections(self) -> int:
         """Total detections across all stages (informational).
@@ -80,10 +97,17 @@ class PipelineStats:
             + sum(asdict(self.exfiltration).values())
             + sum(asdict(self.delimiters).values())
             + sum(asdict(self.directives).values())
+            + self.shadows.files
+            + self.shadows.obfuscated
         )
 
     def risk_level(self) -> str:
-        """Classify risk based on suspicious detection counts."""
+        """Classify risk based on suspicious detection counts.
+
+        A stdlib shadow is critical on its own; see ``ShadowStats``.
+        """
+        if self.shadows.files:
+            return "critical"
         return risk_level_for_count(self.suspicious_detections())
 
 
@@ -115,11 +139,11 @@ class PipelineResult:
     could judge it. Disposition belongs to the profile's enforcement mode
     and the Q-Agent, not to a regex.
 
-    ``l2_input`` is WHAT L2 READS — the same text with obfuscation
-    normalized away: zero-width characters removed, encoded blobs replaced,
-    delimiter tokens dropped. L2 reads this view so an attacker cannot blind
-    a pattern classifier with the very tricks L1 counts. It is derived
-    deterministically from ``content`` and is never delivered.
+    ``l2_input`` is L1's NORMALIZED COPY — the same text with obfuscation
+    undone: zero-width characters removed, encoded blobs replaced, delimiter
+    tokens dropped. L2 reads it as well as ``content`` whenever a normalizing
+    stage fired, so the very tricks L1 counts cannot blind the classifier;
+    clean's extraction turn reads it too. It is never delivered.
 
     The owner's rule (2026-09-13): what the agent receives is byte-identical
     to what entered the perimeter, or nothing at all.

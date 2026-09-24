@@ -38,7 +38,7 @@ profiles:
     backends:
       web:
         url: "internal://web"
-        tools_allow: ["*"]
+        tools_allow: ["block_*", "clean_*"]   # no warn_* — see Content modes
       gws-personal:
         url: "http://gws-personal:8000/mcp"
         tools_allow:
@@ -50,6 +50,20 @@ profiles:
       enforcement: block      # autonomous agent: flagged content is refused
       l2_threshold: 0.3       # stricter classifier gate
 ```
+
+## Content modes
+
+The `web` backend offers every content family in three modes — `block_*`,
+`warn_*`, `clean_*` — and `tools_allow` decides which a profile gets. All
+three run all three layers; they differ only in what is delivered (see
+[Content Tools](quarantine-tools.md)).
+
+`warn_*` hands over flagged content verbatim with a caution attached. That is
+a **security-researcher grant**: a human reading a CVE advisory needs it; an
+assistant, a coding agent or a swarm almost never does, and an injection that
+can talk an agent past its own warning is the attack it exists to survive.
+Offer it by name to the seat that needs it — `tools_allow: ["block_*",
+"clean_*"]` for everyone else.
 
 ## Roles
 

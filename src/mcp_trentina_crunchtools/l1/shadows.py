@@ -41,6 +41,28 @@ MAX_FILE_SIZE = 500_000
 
 
 @dataclass
+class ShadowStats:
+    """Stdlib-shadowing files in a directory, as L1 counts.
+
+    Unlike every other stage this one reads a DIRECTORY, not text, so the
+    ``dir`` producer runs it and merges the counts into the listing's L1 stats.
+    Both counts are suspicious, and any shadow at all makes L1's risk
+    ``critical``: one ``struct.py`` beside the code an agent is about to run is
+    the whole attack, so there is no count below which it is merely medium.
+    """
+
+    files: int = 0
+    obfuscated: int = 0
+
+    @classmethod
+    def from_result(cls, result: ShadowScanResult) -> ShadowStats:
+        return cls(
+            files=len(result.shadows_found),
+            obfuscated=sum(1 for f in result.shadows_found if f.is_obfuscated),
+        )
+
+
+@dataclass
 class ObfuscationIndicator:
     """A single obfuscation signal found in a file."""
 
@@ -85,11 +107,7 @@ class ShadowScanResult:
     @property
     def risk_level(self) -> str:
         has_obfuscated = any(f.is_obfuscated for f in self.shadows_found)
-        return (
-            "critical" if has_obfuscated
-            else "high" if self.shadows_found
-            else "low"
-        )
+        return "critical" if has_obfuscated else "high" if self.shadows_found else "low"
 
     @property
     def has_shadows(self) -> bool:
@@ -115,65 +133,60 @@ def _scan_for_obfuscation(content: str) -> list[ObfuscationIndicator]:
             continue
 
         if _EXEC_RE.search(stripped):
-            indicators.append(ObfuscationIndicator(
-                "code_execution", "exec/eval/compile call", i
-            ))
+            indicators.append(ObfuscationIndicator("code_execution", "exec/eval/compile call", i))
 
         if _PROCESS_RE.search(stripped):
-            indicators.append(ObfuscationIndicator(
-                "process_spawn", "subprocess/os.system call", i
-            ))
+            indicators.append(ObfuscationIndicator("process_spawn", "subprocess/os.system call", i))
 
         if _DYNAMIC_IMPORT_RE.search(stripped):
-            indicators.append(ObfuscationIndicator(
-                "dynamic_import", "__import__ call", i
-            ))
+            indicators.append(ObfuscationIndicator("dynamic_import", "__import__ call", i))
 
         chr_matches = _CHR_RE.findall(stripped)
         if len(chr_matches) >= 3:
-            indicators.append(ObfuscationIndicator(
-                "char_building", f"{len(chr_matches)} chr() calls on one line", i
-            ))
+            indicators.append(
+                ObfuscationIndicator(
+                    "char_building", f"{len(chr_matches)} chr() calls on one line", i
+                )
+            )
 
         if _INTERNAL_IMPORT_RE.search(stripped):
-            indicators.append(ObfuscationIndicator(
-                "internal_import",
-                "imports from internal (_) module — re-exports real API "
-                "while adding payload",
-                i,
-            ))
+            indicators.append(
+                ObfuscationIndicator(
+                    "internal_import",
+                    "imports from internal (_) module — re-exports real API while adding payload",
+                    i,
+                )
+            )
 
         if _NETWORK_RE.search(stripped):
-            indicators.append(ObfuscationIndicator(
-                "network_access", "network library reference", i
-            ))
+            indicators.append(
+                ObfuscationIndicator("network_access", "network library reference", i)
+            )
 
         if _OBFUSCATION_RE.search(stripped):
-            indicators.append(ObfuscationIndicator(
-                "obfuscation", "encoding/decoding pattern", i
-            ))
+            indicators.append(ObfuscationIndicator("obfuscation", "encoding/decoding pattern", i))
 
     return indicators
 
 
-def _scan_shadow_file(
-    filename: str, module_name: str, path: str
-) -> ShadowFinding:
+def _scan_shadow_file(filename: str, module_name: str, path: str) -> ShadowFinding:
     """Scan a shadow file for obfuscation and return the finding."""
     indicators: list[ObfuscationIndicator] = []
     try:
         size = os.path.getsize(path)
         if size > MAX_FILE_SIZE:
-            indicators.append(ObfuscationIndicator(
-                "size", f"unusually large for a stdlib shadow ({size} bytes)", None
-            ))
+            indicators.append(
+                ObfuscationIndicator(
+                    "size", f"unusually large for a stdlib shadow ({size} bytes)", None
+                )
+            )
         else:
             with open(path, encoding="utf-8", errors="replace") as fh:
                 indicators = _scan_for_obfuscation(fh.read())
     except OSError:
-        indicators.append(ObfuscationIndicator(
-            "unreadable", "shadow file exists but cannot be read", None
-        ))
+        indicators.append(
+            ObfuscationIndicator("unreadable", "shadow file exists but cannot be read", None)
+        )
 
     return ShadowFinding(
         filename=filename,
@@ -202,18 +215,14 @@ def detect_module_shadows(directory: str) -> ShadowScanResult:
             result.files_scanned += 1
             module_name = entry.name[:-3]
             if module_name in STDLIB_MODULES:
-                result.shadows_found.append(
-                    _scan_shadow_file(entry.name, module_name, entry.path)
-                )
+                result.shadows_found.append(_scan_shadow_file(entry.name, module_name, entry.path))
 
         if entry.is_dir():
             init_path = os.path.join(entry.path, "__init__.py")
             if os.path.isfile(init_path) and entry.name in STDLIB_MODULES:
                 result.files_scanned += 1
                 result.shadows_found.append(
-                    _scan_shadow_file(
-                        f"{entry.name}/__init__.py", entry.name, init_path
-                    )
+                    _scan_shadow_file(f"{entry.name}/__init__.py", entry.name, init_path)
                 )
 
     return result

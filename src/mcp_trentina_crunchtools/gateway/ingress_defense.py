@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..defense import Provenance, defend
+from ..modes import gaps_of, warning_blocks
 from ..warning import build_warning
 
 if TYPE_CHECKING:
@@ -76,12 +77,14 @@ def effective_enforcement(profile: Profile) -> str:
             if override != "warn":
                 logger.warning(
                     "%s=%r is the pre-0.25.0 spelling of 'warn'; honouring it",
-                    _OVERRIDE_ENV, override,
+                    _OVERRIDE_ENV,
+                    override,
                 )
             return _OVERRIDE_VALUES[override]
         logger.error(
             "%s=%r is not a valid override (only 'warn' is); ignoring",
-            _OVERRIDE_ENV, override,
+            _OVERRIDE_ENV,
+            override,
         )
     return profile.defense.enforcement
 
@@ -175,6 +178,7 @@ def _cache_put(key: str, value: dict[str, Any] | None, *, persist: bool = False)
     # buys it without the recurring rescan.
     if value is not None and (
         value.get("l3_unavailable")
+        or value.get("l3_truncated")
         or value.get("l2_truncated")
         or value.get("l2_unavailable")
     ):
@@ -197,8 +201,8 @@ def _cache_put(key: str, value: dict[str, Any] | None, *, persist: bool = False)
         # trying: whatever broke the write breaks the next two hundred.
         _persist_broken = True
         logger.warning(
-            "perimeter: cannot write the verdict store; verdicts will not "
-            "survive this restart", exc_info=True,
+            "perimeter: cannot write the verdict store; verdicts will not survive this restart",
+            exc_info=True,
         )
 
 
@@ -248,9 +252,7 @@ def _collect_response_texts(
     return texts, unscannable
 
 
-def _collect_block(
-    block: dict[str, Any], texts: list[str], unscannable: dict[str, int]
-) -> None:
+def _collect_block(block: dict[str, Any], texts: list[str], unscannable: dict[str, int]) -> None:
     btype = block.get("type")
     if btype == "text":
         text = block.get("text")
@@ -320,7 +322,7 @@ async def scan_tool_response(
         defense=profile.defense,
         provenance=provenance,
         l3_context=l3_context,
-        guarded=False,
+        stop_on_partial=enforcement != "warn",
         attribution={
             "profile": profile.name,
             "backend": backend_name,
@@ -331,20 +333,15 @@ async def scan_tool_response(
     )
     warning = build_warning(verdict, unscannable=unscannable)
 
-    # Under block, "we could not finish judging this" is treated
-    # exactly like "this is hostile" — the adversarial review's H1/H3:
-    # padding a response past the classifier's token cap made L2 scan only
-    # the benign head, and an L3 outage answered "clean" — either one used
-    # to walk a payload through block mode.
-    l2_truncated = bool(warning and warning.get("l2_truncated"))
-    l3_unavailable = bool(warning and warning.get("l3_unavailable"))
-    # Deliberately NOT l2_unavailable. A missing ONNX model is a deploy
-    # fault, not an attacker-triggerable one, and folding it in here would
-    # let one bad image refuse every response on every block-mode profile.
-    # It still forbids CACHING the verdict and still warns, so the gap
-    # is visible and does not outlive the fix. Promoting it to a block is a
-    # separate decision with its own blast radius.
-    unjudgeable = l2_truncated or l3_unavailable
+    # Under block, "we could not finish judging this" is treated exactly
+    # like "this is hostile" — the adversarial review's H1/H3: padding a
+    # response past the classifier's token cap made L2 scan only the benign
+    # head, and an L3 outage answered "clean". The rule is modes.Gaps, the
+    # same one the tools use. A missing ONNX model now refuses too, unless
+    # TRENTINA_REQUIRE_L2=false: one rule, and an escape hatch for a bad
+    # image rather than a silent exemption.
+    layer_gaps = gaps_of(verdict)
+    unjudgeable = layer_gaps.blocking()
 
     blocked = False
     # `!= "warn"` rather than `== "block"`, deliberately. `warn` is the only
@@ -366,9 +363,9 @@ async def scan_tool_response(
             )
         if unjudgeable and not verdict.flagged:
             logger.warning(
-                "gateway: refusing incompletely-judged response for "
-                "profile=%s (l2_truncated=%s l3_unavailable=%s)",
-                profile.name, l2_truncated, l3_unavailable,
+                "gateway: refusing incompletely-judged response for profile=%s (%s)",
+                profile.name,
+                layer_gaps,
             )
         warning = {**warning, "blocked": True}
 
@@ -377,9 +374,13 @@ async def scan_tool_response(
         logger.warning(
             "gateway: tool response flagged profile=%s backend=%s tool=%s "
             "risk=%s flagged_by=%s enforcement=%s blocked=%s",
-            profile.name, backend_name, tool_name,
-            warning.get("risk_level"), warning.get("flagged_by"),
-            enforcement, blocked,
+            profile.name,
+            backend_name,
+            tool_name,
+            warning.get("risk_level"),
+            warning.get("flagged_by"),
+            enforcement,
+            blocked,
         )
     return IngressDecision(warning=warning, blocked=blocked)
 
@@ -436,7 +437,6 @@ async def scan_tool_list(
                 source_type="tool_description",
                 defense=profile.defense,
                 provenance=provenance,
-                guarded=False,
                 attribution={
                     "profile": profile.name,
                     "backend": backend_name,
@@ -455,9 +455,10 @@ async def scan_tool_list(
                 # which is how an earlier "the gateway is rescanning
                 # everything" report started.
                 logger.warning(
-                    "gateway: tool description flagged profile=%s backend=%s "
-                    "tool=%s risk=%s",
-                    profile.name, backend_name, tool.get("name"),
+                    "gateway: tool description flagged profile=%s backend=%s tool=%s risk=%s",
+                    profile.name,
+                    backend_name,
+                    tool.get("name"),
                     warning.get("risk_level"),
                 )
             # A poisoned description's whole attack is being READ during tool
@@ -465,12 +466,15 @@ async def scan_tool_list(
             # MCP clients strip before the model sees the schema. So under
             # block/extract the tool is withheld from the list outright —
             # blocking the description IS removing it.
-            if warning.get("flagged_by") and effective_enforcement(profile) in (
-                "block", "extract",
+            # A description that could not be fully judged is withheld under
+            # block exactly like a flagged one: same rule as responses.
+            if effective_enforcement(profile) != "warn" and (
+                warning.get("flagged_by") or warning_blocks(warning)
             ):
                 logger.warning(
                     "gateway: withholding tool %s from profile=%s (enforcement)",
-                    tool.get("name"), profile.name,
+                    tool.get("name"),
+                    profile.name,
                 )
                 continue
             entry = dict(tool)

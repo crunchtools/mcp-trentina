@@ -18,7 +18,6 @@ _config: Config | None = None
 DEFAULT_PROVIDER = "gemini"
 DEFAULT_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_SEARCH_MODEL = "gemini-2.5-flash"
-DEFAULT_FALLBACK = "layer1"
 DEFAULT_MAX_CONTENT = 100_000
 DEFAULT_CLASSIFIER_THRESHOLD = 0.5
 DEFAULT_CLASSIFIER_MODEL_PATH = "/models/prompt-guard-2-86m"
@@ -47,6 +46,22 @@ DEFAULT_OLLAMA_MODEL = "qwen2.5:0.5b"
 SUPPORTED_PROVIDERS = ("gemini", "openai", "anthropic", "ollama")
 
 
+def bool_env(name: str, default: bool) -> bool:
+    """Read a true/false environment variable; anything unrecognised is the default.
+
+    A typo in a security opt-out must not silently open it, so only an
+    explicit false-ish value turns a default-true setting off.
+    """
+    raw = os.environ.get(name, "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw:
+        logger.warning("config: %s=%r is not a boolean — using %s", name, raw, default)
+    return default
+
+
 def int_env(name: str, default: int, *, minimum: int | None = None) -> int:
     """Read an integer environment variable, recovering from a bad value.
 
@@ -68,10 +83,15 @@ def int_env(name: str, default: int, *, minimum: int | None = None) -> int:
         value = int(raw)
     except ValueError:
         logger.warning(
-            "config: %s=%r is not an integer — using %d", name, raw, default,
+            "config: %s=%r is not an integer — using %d",
+            name,
+            raw,
+            default,
         )
         return default if minimum is None else max(minimum, default)
     return value if minimum is None else max(minimum, value)
+
+
 DEFAULT_PROVIDER_FALLBACK: list[str] = []
 
 
@@ -84,7 +104,8 @@ class Config:
 
     def __init__(self) -> None:
         self.provider: str = os.environ.get(
-            "TRENTINA_MODEL_PROVIDER", DEFAULT_PROVIDER,
+            "TRENTINA_MODEL_PROVIDER",
+            DEFAULT_PROVIDER,
         )
 
         raw_key = os.environ.get("GEMINI_API_KEY", "")
@@ -92,15 +113,29 @@ class Config:
         self.openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
         self.anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
         self.ollama_base_url: str = os.environ.get(
-            "OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL,
+            "OLLAMA_BASE_URL",
+            DEFAULT_OLLAMA_BASE_URL,
         )
         self.ollama_model: str = os.environ.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
 
         self.model: str = os.environ.get("QUARANTINE_MODEL", DEFAULT_MODEL)
-        self.search_model: str = os.environ.get(
-            "QUARANTINE_SEARCH_MODEL", DEFAULT_SEARCH_MODEL
-        )
-        self.fallback: str = os.environ.get("QUARANTINE_FALLBACK", DEFAULT_FALLBACK)
+        self.search_model: str = os.environ.get("QUARANTINE_SEARCH_MODEL", DEFAULT_SEARCH_MODEL)
+        if "QUARANTINE_FALLBACK" in os.environ:
+            from .errors import ConfigError
+
+            # Gone as of 0.31.0, and refused rather than ignored: it only ever
+            # governed clean_*, defaulted to failing OPEN, and an operator who
+            # still sets it believes a knob exists that no longer does.
+            raise ConfigError(
+                "QUARANTINE_FALLBACK no longer exists (0.31.0). block_* and clean_* "
+                "now refuse when a layer cannot run; set TRENTINA_REQUIRE_L3=false "
+                "(or TRENTINA_REQUIRE_L2=false) to deliver with a warning instead."
+            )
+        # Constitution-level default: block and clean need a verdict from
+        # every layer. False turns that layer's ABSENCE into a warning; it
+        # never excuses a partial scan and never stops a layer that can run.
+        self.require_l2: bool = bool_env("TRENTINA_REQUIRE_L2", True)
+        self.require_l3: bool = bool_env("TRENTINA_REQUIRE_L3", True)
         self.max_content: int = int(
             os.environ.get("QUARANTINE_MAX_CONTENT", str(DEFAULT_MAX_CONTENT))
         )
@@ -110,6 +145,7 @@ class Config:
         for p in fallback_list:
             if p not in SUPPORTED_PROVIDERS:
                 from .errors import ConfigError
+
                 raise ConfigError(
                     f"Unknown fallback provider {p!r}. Supported: {SUPPORTED_PROVIDERS}"
                 )

@@ -60,9 +60,7 @@ def _agent_stats(scope: CallerScope) -> dict[str, Any]:
         "classifier": {"available": is_classifier_available()},
         "blocklist": get_blocklist_stats(profile=scope.name),
         "gateway_audit": {
-            **get_gateway_call_stats(
-                profile=scope.name, days=GATEWAY_AUDIT_LOOKBACK_DAYS
-            ),
+            **get_gateway_call_stats(profile=scope.name, days=GATEWAY_AUDIT_LOOKBACK_DAYS),
             "column_meanings": COLUMN_MEANINGS,
         },
     }
@@ -90,7 +88,8 @@ async def get_trentina_stats() -> dict[str, Any]:
         "scope": "gateway",
         "config": {
             "model": config.model,
-            "fallback": config.fallback,
+            "require_l2": config.require_l2,
+            "require_l3": config.require_l3,
             "max_content": config.max_content,
             "has_api_key": config.has_api_key,
             "classifier_threshold": config.classifier_threshold,

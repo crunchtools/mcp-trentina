@@ -88,26 +88,3 @@ class ReadInput(BaseModel, extra="forbid"):
             msg = "Path traversal not allowed"
             raise ValueError(msg)
         return v
-
-
-class ScanInput(BaseModel, extra="forbid"):
-    """Input for quarantine_scan."""
-
-    url: str | None = Field(default=None, max_length=MAX_URL_LENGTH)
-    path: str | None = Field(default=None, max_length=MAX_PATH_LENGTH)
-
-    @field_validator("url")
-    @classmethod
-    def validate_url(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith(("http://", "https://")):
-            msg = "URL must start with http:// or https://"
-            raise ValueError(msg)
-        return v
-
-    @field_validator("path")
-    @classmethod
-    def validate_path(cls, v: str | None) -> str | None:
-        if v is not None and ".." in v:
-            msg = "Path traversal not allowed"
-            raise ValueError(msg)
-        return v
