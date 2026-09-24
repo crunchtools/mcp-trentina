@@ -525,6 +525,7 @@ five minutes, which clients report as a timeout.
 
 
 def _judged_before_briefing(warning: dict[str, Any] | None) -> bool:
+    """A cached L3 flag reached without the current ``TOOL_BRIEFING``."""
     return bool(
         warning
         and warning.get("flagged_by") == "L3"
