@@ -9,12 +9,14 @@ agent toward warn for content a layer flagged.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from pydantic import SecretStr, ValidationError
 
+from mcp_trentina_crunchtools.config import get_config
 from mcp_trentina_crunchtools.errors import ModeNotPermittedError
 from mcp_trentina_crunchtools.gateway.backend import BackendCall
 from mcp_trentina_crunchtools.gateway.ingress_defense import IngressDecision
@@ -48,6 +50,28 @@ TOOL = {
         "additionalProperties": False,
     },
 }
+
+
+@pytest.fixture
+def mode_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., None]]:
+    """Set the standalone mode policy and drop the cached config, both ways.
+
+    ``get_config()`` caches, so an env change is invisible until the cache is
+    dropped — and a test that forgets to drop it again hands its policy to
+    the next one.
+    """
+    from mcp_trentina_crunchtools import config as config_mod
+
+    def apply(mode: str | None = None, modes: str | None = None) -> None:
+        for name, value in (("TRENTINA_MODE", mode), ("TRENTINA_MODES", modes)):
+            if value is None:
+                monkeypatch.delenv(name, raising=False)
+            else:
+                monkeypatch.setenv(name, value)
+        config_mod._config = None
+
+    yield apply
+    config_mod._config = None
 
 
 def _profile(
@@ -362,28 +386,21 @@ async def _identity(
 class TestStandalone:
     """No gateway: TRENTINA_MODE / TRENTINA_MODES, both defaulting to block."""
 
-    def test_default_is_block_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from mcp_trentina_crunchtools import config as config_mod
+    def test_default_is_block_only(self, mode_env: Callable[..., None]) -> None:
         from mcp_trentina_crunchtools.modes import current_policy
 
-        monkeypatch.delenv("TRENTINA_MODE", raising=False)
-        monkeypatch.delenv("TRENTINA_MODES", raising=False)
-        config_mod._config = None
+        mode_env()
         policy = current_policy()
         assert policy.allowed == (Mode.BLOCK,)
         with pytest.raises(ModeNotPermittedError):
             policy.resolve("warn")
 
-    def test_a_default_outside_the_set_fails_startup(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from mcp_trentina_crunchtools import config as config_mod
+    def test_a_default_outside_the_set_fails_startup(self, mode_env: Callable[..., None]) -> None:
         from mcp_trentina_crunchtools.errors import ConfigError
 
-        monkeypatch.setenv("TRENTINA_MODE", "warn")
-        monkeypatch.setenv("TRENTINA_MODES", "block,clean")
-        config_mod._config = None
+        mode_env("warn", "block,clean")
         with pytest.raises(ConfigError):
-            config_mod.get_config()
-        config_mod._config = None
+            get_config()
 
 
 @pytest.mark.parametrize(
@@ -391,17 +408,13 @@ class TestStandalone:
     [("clean", ""), ("block", "block,unknown"), ("yolo", "")],
 )
 def test_a_bad_standalone_policy_fails_startup(
-    monkeypatch: pytest.MonkeyPatch, mode: str, modes: str
+    mode_env: Callable[..., None], mode: str, modes: str
 ) -> None:
-    from mcp_trentina_crunchtools import config as config_mod
     from mcp_trentina_crunchtools.errors import ConfigError
 
-    monkeypatch.setenv("TRENTINA_MODE", mode)
-    monkeypatch.setenv("TRENTINA_MODES", modes)
-    config_mod._config = None
+    mode_env(mode, modes)
     with pytest.raises(ConfigError):
-        config_mod.get_config()
-    config_mod._config = None
+        get_config()
 
 
 @pytest.mark.asyncio
@@ -476,59 +489,47 @@ class TestServerTools:
 
     @pytest.mark.parametrize("tool", sorted(FAMILY_TOOLS))
     async def test_omitted_mode_is_the_standalone_default(
-        self, tool: str, monkeypatch: pytest.MonkeyPatch
+        self, tool: str, mode_env: Callable[..., None]
     ) -> None:
-        from mcp_trentina_crunchtools import config as config_mod
 
-        monkeypatch.delenv("TRENTINA_MODE", raising=False)
-        monkeypatch.delenv("TRENTINA_MODES", raising=False)
-        config_mod._config = None
+        mode_env()
         fake = await self._run(tool)
         assert Mode.BLOCK in fake.call_args.args
 
     @pytest.mark.parametrize("tool", sorted(FAMILY_TOOLS))
     async def test_a_mode_outside_the_standalone_policy_never_runs(
-        self, tool: str, monkeypatch: pytest.MonkeyPatch
+        self, tool: str, mode_env: Callable[..., None]
     ) -> None:
-        from mcp_trentina_crunchtools import config as config_mod
 
-        monkeypatch.setenv("TRENTINA_MODES", "block,clean")
-        config_mod._config = None
+        mode_env(modes="block,clean")
         with pytest.raises(Exception, match="trentina_mode"):
             await self._run(tool, trentina_mode="warn")
-        config_mod._config = None
 
     @pytest.mark.parametrize("tool", sorted(FAMILY_TOOLS))
     async def test_clean_carries_the_callers_prompt(
-        self, tool: str, monkeypatch: pytest.MonkeyPatch
+        self, tool: str, mode_env: Callable[..., None]
     ) -> None:
-        from mcp_trentina_crunchtools import config as config_mod
 
-        monkeypatch.setenv("TRENTINA_MODES", "block,clean")
-        config_mod._config = None
+        mode_env(modes="block,clean")
         fake = await self._run(tool, trentina_mode="clean", trentina_prompt="the date")
         assert Mode.CLEAN in fake.call_args.args
         assert "the date" in fake.call_args.args
-        config_mod._config = None
 
     async def test_the_gateway_policy_beats_the_environment(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, mode_env: Callable[..., None]
     ) -> None:
         """Under the gateway the bound profile policy decides, not TRENTINA_MODES."""
-        from mcp_trentina_crunchtools import config as config_mod
         from mcp_trentina_crunchtools.gateway.context import (
             get_current_policy,
             profile_context,
         )
 
-        monkeypatch.setenv("TRENTINA_MODES", "block")
-        config_mod._config = None
+        mode_env(modes="block")
         policy = ModePolicy((Mode.BLOCK, Mode.WARN), Mode.BLOCK)
         with profile_context(_profile(["block", "warn"]), policy):
             fake = await self._run("content_tool", trentina_mode="warn")
         assert Mode.WARN in fake.call_args.args
         assert get_current_policy() is None, "policy leaked past the call"
-        config_mod._config = None
 
 
 @pytest.mark.asyncio
