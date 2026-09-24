@@ -868,3 +868,24 @@ class TestPerCallMode:
             mode=Mode.BLOCK,
         )
         assert not decision.blocked
+
+
+async def test_clean_is_never_served_from_the_verdict_cache() -> None:
+    """clean's extraction is per prompt: a second identical call extracts again."""
+    from mcp_trentina_crunchtools.modes import Mode
+    from mcp_trentina_crunchtools.quarantine.agent import CleanResult
+
+    extract = AsyncMock(return_value=CleanResult(content={"extracted_text": "x"}))
+    with _l3_available_and_clean(), patch(f"{_I}.quarantine_clean", extract):
+        for prompt in ("first", "second"):
+            decision = await scan_tool_response(
+                profile=_profile("nocache"),
+                backend_name="jira",
+                tool_name="jira_get_issue",
+                content_blocks=[{"type": "text", "text": "The window is Tuesday."}],
+                structured_content=None,
+                mode=Mode.CLEAN,
+                prompt=prompt,
+            )
+            assert decision.extraction is not None
+    assert [c.args[1] for c in extract.call_args_list] == ["first", "second"]
