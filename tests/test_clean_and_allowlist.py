@@ -158,7 +158,7 @@ class TestBlocklist:
             with pytest.raises(BlockedSourceError, match="flagged by L2"):
                 await call("fetch", Mode.BLOCK, fakes)
             fakes.classify.return_value = None
-            with pytest.raises(BlockedSourceError, match="detected at"):
+            with pytest.raises(BlockedSourceError, match="on the blocklist"):
                 await call("fetch", Mode.WARN, fakes)
 
     async def test_clean_proceeds_on_a_blocklisted_source_and_says_so(self, env: Path) -> None:

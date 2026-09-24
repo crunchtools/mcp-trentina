@@ -1,7 +1,7 @@
 """Internal-tool backend: trentina's own FastMCP tools as a gateway backend.
 
-Option C folds trentina's native tool surface (block_fetch, clean_*, scan,
-stats, …) into the gateway alongside the remote http(s) MCP backends. A profile
+Option C folds trentina's native tool surface (fetch_tool, read_tool,
+search_tool, stats, …) into the gateway alongside the remote http(s) MCP backends. A profile
 backend whose URL uses the ``internal://<label>`` scheme routes here instead of
 opening a streamable-http session: the whole trentina tool surface becomes one
 backend, namespaced under whatever key the profile gives it (conventionally
@@ -75,9 +75,7 @@ async def _walk_server_tools(server: Any) -> list[Any]:
         # dict on fastmcp 2.x, list on 4.x.
         return list(tools.values()) if hasattr(tools, "values") else list(tools)
 
-    raise AttributeError(
-        f"{type(server).__name__} exposes neither list_tools() nor get_tools()"
-    )
+    raise AttributeError(f"{type(server).__name__} exposes neither list_tools() nor get_tools()")
 
 
 async def list_internal_tools() -> list[dict[str, Any]]:
@@ -96,18 +94,23 @@ async def list_internal_tools() -> list[dict[str, Any]]:
         tools = await _walk_server_tools(_server)
     except Exception as exc:
         logger.warning("gateway: internal list_tools failed err=%s", exc)
-        raise BackendCallError(
-            f"internal list_tools failed: {type(exc).__name__}"
-        ) from exc
+        raise BackendCallError(f"internal list_tools failed: {type(exc).__name__}") from exc
 
     return [_serialize_tool(tool.to_mcp_tool()) for tool in tools]
 
 
-async def call_internal_tool(tool_name: str, arguments: dict[str, Any]) -> BackendCall:
+async def call_internal_tool(
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    modal_arguments: dict[str, Any] | None = None,
+) -> BackendCall:
     """Invoke an trentina tool in-process, returning a BackendCall like the http path.
 
-    Phase 1 returns the tool result verbatim. Phase 2 wraps it in the L1/L2/L3
-    defense pipeline at the router, identically to remote backends.
+    ``modal_arguments`` are the gateway's RESOLVED ``trentina_mode`` and
+    ``trentina_prompt``. They are merged only into a tool that declares them:
+    the admin tools take neither, and passing an undeclared argument would
+    fail the call.
 
     Raises:
         BackendCallError: no server bound, unknown tool, or tool execution error.
@@ -116,11 +119,13 @@ async def call_internal_tool(tool_name: str, arguments: dict[str, Any]) -> Backe
         raise BackendCallError("internal tool backend not registered")
     try:
         tool = await _server.get_tool(tool_name)
-        result = await tool.run(arguments)
+        declared = (getattr(tool, "parameters", None) or {}).get("properties") or {}
+        extra = {
+            k: v for k, v in (modal_arguments or {}).items() if k in declared and v is not None
+        }
+        result = await tool.run({**arguments, **extra})
     except Exception as exc:
-        logger.warning(
-            "gateway: internal call_tool failed tool=%s err=%s", tool_name, exc
-        )
+        logger.warning("gateway: internal call_tool failed tool=%s err=%s", tool_name, exc)
         raise BackendCallError(
             f"internal tool {tool_name!r} call failed: {type(exc).__name__}"
         ) from exc

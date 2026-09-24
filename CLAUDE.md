@@ -81,28 +81,42 @@ scan and takes the gateway down with it.
 
 ## Tools
 
-### Five families, three modes (0.31.0)
+### Five tools, three modes, one policy (0.32.0)
 
 Rules P1–P10 are in `docs/defense-pipeline.md` (Pipeline Flow); the decision
 lives in `modes.py`, the tool-side path in `tools/judged.py`.
 
-Families: `fetch`, `read`, `dir`, `content`, `search`. Every call runs L1 ∥ L2
-on the arrived bytes, then L3 briefed with both. The PREFIX decides delivery,
-never detection; the agent picks it per call and `tools_allow` limits the menu.
+Tools: `fetch_tool`, `read_tool`, `dir_tool`, `content_tool`, `search_tool`.
+Every call runs L1 ∥ L2 on the arrived bytes, then L3 briefed with both. The
+`trentina_mode` ARGUMENT decides delivery, never detection:
 
-- `block_*` — refuses a flag or any blocking gap. Allowlisted → clean instead.
-- `warn_*` — bytes IDENTICAL to what arrived, `_trentina_warning` attached. A
-  security-researcher grant; leave it out of agent profiles.
-- `clean_*` — L3 detect, extract, verify; any objection refuses.
+- `block` — refuses a flag or any blocking gap. Allowlisted → clean instead.
+- `warn` — bytes IDENTICAL to what arrived, `_trentina_warning` attached. A
+  security-researcher grant; leave it out of agent policies.
+- `clean` — L3 detect, extract (guided by `trentina_prompt`), verify; any
+  objection refuses.
+
+Until 0.32.0 the mode was the tool's NAME prefix (#193), so the agent chose
+its own posture and nothing enforced it. Now the policy does:
+
+- Gateway: `defense.modes` per profile (default `[enforcement]`).
+  `gateway/modes_policy.py` STRIPS any `trentina_*` param a backend declares
+  before the perimeter scan, INSERTS the gateway's after it (only when more
+  than one mode is allowed), resolves an omitted mode to `enforcement` BEFORE
+  checking it, and strips both args before forwarding. Every backend's tools
+  get it — `clean` on a proxied response is real now (`scan_tool_response`).
+  Internal tools receive the RESOLVED mode; admin tools (no declared
+  `trentina_mode`) get nothing inserted.
+- Standalone: `TRENTINA_MODE` / `TRENTINA_MODES`, both defaulting to block.
+- Refusals carry `{reason, mode, flagged_by|gaps, alternatives}` —
+  JSON-RPC `error.data` for web tools, `_trentina_refusal` for proxied ones.
+  Flagged → `clean` only, NEVER `warn`; gap-only → `warn`.
 
 No text written by L3 reaches an agent: finding types are a closed enum
-(`prompts.FINDING_TYPES`). The diagnostic scans were removed in 0.31.0;
-`quarantine_scan_dir` became `dir`.
+(`prompts.FINDING_TYPES`).
 
-NOTE the asymmetry: `clean` is a TOOL prefix, not an enforcement mode.
-`defense.enforcement` accepts only `warn` and `block`, and refuses `clean` at
-load. A tool call carries an extraction prompt; a proxied backend response
-does not, which is why the gateway never implemented it.
+NOTE: `defense.enforcement` is the DEFAULT mode and accepts only `warn` and
+`block` — a call that omits the mode carries no extraction prompt.
 
 ### Stats
 - quarantine_stats — role-scoped like the gateway admin tools below: an agent

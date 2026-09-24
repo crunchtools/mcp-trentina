@@ -15,26 +15,34 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from ..modes import ModePolicy
     from .profile import Profile
 
-_current_profile: ContextVar[Profile | None] = ContextVar(
-    "current_profile", default=None
-)
+_current_profile: ContextVar[Profile | None] = ContextVar("current_profile", default=None)
+_current_policy: ContextVar[ModePolicy | None] = ContextVar("current_mode_policy", default=None)
 
 
 @contextmanager
-def profile_context(profile: Profile) -> Iterator[None]:
+def profile_context(profile: Profile, policy: ModePolicy | None = None) -> Iterator[None]:
     """Bind ``profile`` to the current async context for the duration of the block.
 
     Used by the gateway around internal:// tool dispatch. Restoring the
     previous value on exit is what keeps a profile from leaking into a
-    reused async task, including when the tool call raises.
+    reused async task, including when the tool call raises. ``policy`` is
+    the call's mode policy (#193): what a web tool's refusal offers.
     """
     token = _current_profile.set(profile)
+    policy_token = _current_policy.set(policy)
     try:
         yield
     finally:
+        _current_policy.reset(policy_token)
         _current_profile.reset(token)
+
+
+def get_current_policy() -> ModePolicy | None:
+    """The mode policy the gateway bound for this call, or None standalone."""
+    return _current_policy.get()
 
 
 def get_current_profile() -> Profile | None:

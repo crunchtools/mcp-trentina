@@ -72,9 +72,9 @@ class TestResolution:
             {"syslog_tail_tool": ToolPreProcess(strategy="chain")},
         )
         cfg = resolve(p, p.backends["syslog"], "syslog_tail_tool")
-        assert cfg.strategy == "chain"      # overridden
-        assert cfg.target_bytes == 9999     # inherited
-        assert cfg.enabled is True          # inherited
+        assert cfg.strategy == "chain"  # overridden
+        assert cfg.target_bytes == 9999  # inherited
+        assert cfg.enabled is True  # inherited
 
     def test_tool_can_opt_out_of_an_enabled_profile(self) -> None:
         p = _profile(
@@ -181,6 +181,8 @@ class TestRouterOrdering:
             class _D:
                 blocked = False
                 warning = None
+                refusal = None
+                extraction = None
 
             return _D()
 
@@ -211,7 +213,10 @@ class TestDeclineLogLine:
         from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
 
         result = PreProcessResult.declined(
-            "structured", Cost.FREE, "x" * 100, reason="not_smaller",
+            "structured",
+            Cost.FREE,
+            "x" * 100,
+            reason="not_smaller",
             details={"would_be_bytes": 104, "would_be_ratio": 1.04},
         )
         line = _describe_decline(result)
@@ -223,7 +228,10 @@ class TestDeclineLogLine:
         from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
 
         result = PreProcessResult.declined(
-            "petit", Cost.FREE, "x", reason="not_line_structured",
+            "petit",
+            Cost.FREE,
+            "x",
+            reason="not_line_structured",
             details={"lines_in": 1, "bytes_in": 1_645_600},
         )
         line = _describe_decline(result)
@@ -235,6 +243,9 @@ class TestDeclineLogLine:
         from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
 
         result = PreProcessResult.declined(
-            "email", Cost.FREE, "x", reason="not_email",
+            "email",
+            Cost.FREE,
+            "x",
+            reason="not_email",
         )
         assert _describe_decline(result) == "email:not_email"

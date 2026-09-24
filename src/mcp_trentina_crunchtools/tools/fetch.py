@@ -10,11 +10,11 @@ from ..client import fetch_url
 from ..config import get_config
 from ..database import is_blocked
 from ..defense import defend
-from ..errors import BlockedSourceError, FetchError, UnsupportedContentTypeError
+from ..errors import FetchError, UnsupportedContentTypeError
 from ..modes import Mode
 from ..quarantine.prompts import finding_types
 from ..report import Disposition, build_report
-from .judged import judge_and_deliver
+from .judged import blocklisted, judge_and_deliver
 
 log = logging.getLogger(__name__)
 
@@ -172,7 +172,7 @@ def _handle_content_type_error(url: str, exc: UnsupportedContentTypeError) -> di
     )
 
 
-async def _fetch(url: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
+async def fetch_page(url: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
     """Fetch, then hand the page to the one judging path.
 
     The blocklist refuses block and warn before any bytes are fetched; clean
@@ -181,7 +181,7 @@ async def _fetch(url: str, mode: Mode, prompt: str | None = None) -> dict[str, A
     """
     blocked = is_blocked(url)
     if blocked and mode is not Mode.CLEAN:
-        raise BlockedSourceError(url, blocked["detected_at"])
+        raise blocklisted(url, mode, blocked["detected_at"])
 
     try:
         content, _content_type = await fetch_url(url)
@@ -212,14 +212,14 @@ async def _fetch(url: str, mode: Mode, prompt: str | None = None) -> dict[str, A
 
 async def block_fetch(url: str) -> dict[str, Any]:
     """Refuse a flagged or incompletely judged page; otherwise the exact bytes."""
-    return await _fetch(url, Mode.BLOCK)
+    return await fetch_page(url, Mode.BLOCK)
 
 
 async def warn_fetch(url: str) -> dict[str, Any]:
     """The exact bytes, with the verdict attached when there is one."""
-    return await _fetch(url, Mode.WARN)
+    return await fetch_page(url, Mode.WARN)
 
 
 async def clean_fetch(url: str, prompt: str) -> dict[str, Any]:
     """A verified L3 extraction instead of the page."""
-    return await _fetch(url, Mode.CLEAN, prompt)
+    return await fetch_page(url, Mode.CLEAN, prompt)

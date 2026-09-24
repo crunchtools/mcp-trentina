@@ -186,9 +186,7 @@ class TestProfileModel:
 
     def test_parameter_guard_extra_keys_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            ParameterConstraint.model_validate(
-                {"allow": ["*"], "unknown_field": True}
-            )
+            ParameterConstraint.model_validate({"allow": ["*"], "unknown_field": True})
 
     def test_parameter_guard_valid_patterns(self) -> None:
         c = ParameterConstraint(allow=["*@corp.example.com", "you@example.com", "*"])
@@ -395,9 +393,7 @@ profiles:
         with pytest.raises(ProfileConfigError, match="non-empty 'profiles'"):
             load_profiles(cfg)
 
-    def test_header_env_ref_expanded(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_header_env_ref_expanded(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = tmp_path / "profiles.yaml"
         cfg.write_text(
             """
@@ -697,25 +693,18 @@ class TestEnforcementModeNames:
             DefenseConfig(enforcement=old)
 
     def test_clean_is_refused_at_load_and_says_why(self) -> None:
-        """A config must not name a capability the gateway does not have.
+        """`enforcement` is the DEFAULT mode, and clean cannot be a default.
 
-        `clean` as a TOOL works — `clean_fetch` hands the page to the
-        Q-Agent. `clean` as an ENFORCEMENT MODE never has: the gateway has
-        no extraction instruction to work from on a proxied response, since
-        the agent called `jira_get_issue` and not "extract something from
-        this". 0.26.0 gave both the same name and so made a known gap read
-        like a promise.
-
-        Refused at LOAD rather than degraded at runtime, and the message has
-        to explain the FEATURE is missing — pydantic's own "input should be
-        'warn' or 'block'" sends an operator hunting for a typo in a value
-        they read in our documentation.
+        A call that omits the mode carries no extraction prompt either. The
+        message has to say where clean belongs — `modes` — or pydantic's own
+        "input should be 'warn' or 'block'" sends an operator hunting for a
+        typo.
         """
         from pydantic import ValidationError
 
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
-        with pytest.raises(ValidationError, match="not implemented"):
+        with pytest.raises(ValidationError, match="cannot be a default"):
             DefenseConfig(enforcement="clean")
 
     def test_the_alert_ingress_refuses_clean_too(self) -> None:
@@ -724,10 +713,8 @@ class TestEnforcementModeNames:
 
         from mcp_trentina_crunchtools.gateway.profile import AlertIngressConfig
 
-        with pytest.raises(ValidationError, match="not implemented"):
-            AlertIngressConfig(
-                token_env="T", forward_url="http://x:1/h", enforcement="clean"
-            )
+        with pytest.raises(ValidationError, match="cannot be a default"):
+            AlertIngressConfig(token_env="T", forward_url="http://x:1/h", enforcement="clean")
 
     def test_a_bogus_mode_is_still_refused(self) -> None:
         from pydantic import ValidationError

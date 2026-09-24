@@ -55,7 +55,7 @@ ALLOWED_TEXT_EXTENSIONS = frozenset(
 
 
 class FetchInput(BaseModel, extra="forbid"):
-    """Input for clean_fetch and block_fetch."""
+    """Input for fetch_tool."""
 
     url: str = Field(..., min_length=1, max_length=MAX_URL_LENGTH)
     prompt: str = Field(
@@ -73,7 +73,7 @@ class FetchInput(BaseModel, extra="forbid"):
 
 
 class ReadInput(BaseModel, extra="forbid"):
-    """Input for clean_read and block_read."""
+    """Input for read_tool."""
 
     path: str = Field(..., min_length=1, max_length=MAX_PATH_LENGTH)
     prompt: str = Field(

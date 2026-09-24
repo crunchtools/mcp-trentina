@@ -21,7 +21,7 @@ from ..config import get_config
 from ..dbus_interface import emit_request_event
 from ..defense import DefenseVerdict, Provenance, defend
 from ..errors import BlockedSourceError
-from ..modes import Mode, gaps_of
+from ..modes import Mode, gaps_of, refusal_body, refusal_reason
 from ..quarantine.agent import quarantine_clean
 from ..report import Disposition, build_report
 from ..warning import build_warning
@@ -36,6 +36,18 @@ DEFAULT_CLEAN_PROMPT = "Extract the main content."
 for the bytes, so there is no extraction prompt of its own to use."""
 
 
+def blocklisted(source: str, mode: Mode, detected_at: str) -> BlockedSourceError:
+    """block and warn on a blocklisted source, refused before any bytes arrive.
+
+    Offers clean when the policy allows it, because clean is the mode that
+    proceeds on a blocklisted source.
+    """
+    reason = f"on the blocklist since {detected_at}"
+    return BlockedSourceError(
+        source, reason, refusal=refusal_body(reason, mode, flagged_by="blocklist")
+    )
+
+
 def l1_metadata(pipeline: PipelineResult) -> dict[str, Any]:
     """The ``l1`` section of a response: sizes and every stage's counts."""
     return {
@@ -43,29 +55,6 @@ def l1_metadata(pipeline: PipelineResult) -> dict[str, Any]:
         "output_size": pipeline.output_size,
         "stripped": pipeline.stats.to_flat_dict(),
     }
-
-
-def _refusal(verdict: DefenseVerdict) -> str | None:
-    """Why block or clean may not deliver the original, or None.
-
-    The reason names layers and gaps only. It is ours, never the payload's.
-    """
-    if verdict.flagged_by is not None:
-        return f"flagged by {verdict.flagged_by.value}"
-    gaps = gaps_of(verdict)
-    if not gaps.blocking():
-        return None
-    missing = [
-        name
-        for name, present in (
-            ("L2 unavailable", gaps.l2_unavailable),
-            ("L2 read only part of the payload", gaps.l2_truncated),
-            ("L3 unavailable", gaps.l3_unavailable),
-            ("L3 read only part of the payload", gaps.l3_truncated),
-        )
-        if present
-    ]
-    return "not fully judged: " + ", ".join(missing)
 
 
 class _Call:
@@ -109,9 +98,26 @@ class _Call:
             start_time=self.start,
         )
 
-    def refuse(self, verdict: DefenseVerdict, reason: str) -> BlockedSourceError:
+    def refuse(
+        self, verdict: DefenseVerdict, reason: str, *, judged: bool = True
+    ) -> BlockedSourceError:
+        """The refusal, naming the modes this caller may try next.
+
+        ``judged`` is False when the refusal is clean's own extraction turn
+        objecting: then neither the verdict's flag nor its gaps is the reason,
+        and nothing is suggested.
+        """
         self.emit(verdict, Disposition.REFUSED, 0)
-        return BlockedSourceError(self.source, reason)
+        flagged_by = verdict.flagged_by.value if verdict.flagged_by is not None else None
+        refusal = refusal_body(
+            reason,
+            self.mode,
+            flagged_by=flagged_by if judged else None,
+            gaps=gaps_of(verdict) if judged else None,
+        )
+        if not judged:
+            refusal["alternatives"] = []
+        return BlockedSourceError(self.source, reason, refusal=refusal)
 
     def warning(self, verdict: DefenseVerdict, **more: Any) -> dict[str, Any] | None:
         """``_trentina_warning``, or None when the scan completed and found nothing."""
@@ -195,7 +201,8 @@ async def judge_and_deliver(
     if mode is Mode.WARN:
         return _deliver(call, verdict, original, extras)
 
-    reason = _refusal(verdict)
+    flagged_by = verdict.flagged_by.value if verdict.flagged_by is not None else None
+    reason = refusal_reason(flagged_by, gaps_of(verdict))
     if mode is Mode.BLOCK:
         if reason is None:
             return _deliver(call, verdict, original, extras)
@@ -252,7 +259,7 @@ async def _clean(
         detection=verdict.l3_assessment,
     )
     if result.refused_by is not None:
-        raise call.refuse(verdict, f"clean refused: {result.refused_by}")
+        raise call.refuse(verdict, f"clean refused: {result.refused_by}", judged=False)
 
     extraction = result.content
     # A downgraded block keeps block's response shape: `content` is text.

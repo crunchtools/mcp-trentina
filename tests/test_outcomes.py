@@ -117,9 +117,7 @@ class TestAuditRecording:
     def test_success_is_derived_from_outcome(self, db: Any) -> None:
         """The legacy boolean can never disagree with the taxonomy."""
         db.record_gateway_call("p", "web", "block_fetch", Outcome.OK.value, 10)
-        db.record_gateway_call(
-            "p", "web", "block_read", Outcome.BLOCKED_DEFENSE.value, 10
-        )
+        db.record_gateway_call("p", "web", "block_read", Outcome.BLOCKED_DEFENSE.value, 10)
 
         rows = {
             r["tool"]: r["success"]
@@ -130,13 +128,9 @@ class TestAuditRecording:
     def test_blocked_is_separated_from_failed(self, db: Any) -> None:
         """The headline fix: 34 blocks must not read as 34 failures."""
         for _ in range(34):
-            db.record_gateway_call(
-                "p", "web", "block_read", Outcome.BLOCKED_DEFENSE.value, 5
-            )
+            db.record_gateway_call("p", "web", "block_read", Outcome.BLOCKED_DEFENSE.value, 5)
         db.record_gateway_call("p", "web", "block_read", Outcome.OK.value, 5)
-        db.record_gateway_call(
-            "p", "web", "block_read", Outcome.GATEWAY_ERROR.value, 5, "boom"
-        )
+        db.record_gateway_call("p", "web", "block_read", Outcome.GATEWAY_ERROR.value, 5, "boom")
 
         entry = db.get_gateway_call_stats(days=1)["by_tool"][0]
         assert entry["calls"] == 36
@@ -193,9 +187,7 @@ class TestAuditRecording:
         db_mod._db = None
         conn = db_mod.get_db(path)
         try:
-            columns = {
-                r["name"] for r in conn.execute("PRAGMA table_info(gateway_calls)")
-            }
+            columns = {r["name"] for r in conn.execute("PRAGMA table_info(gateway_calls)")}
             assert "outcome" in columns
             preserved = conn.execute("SELECT COUNT(*) AS c FROM gateway_calls")
             assert preserved.fetchone()["c"] == 1
@@ -208,3 +200,15 @@ class TestAuditRecording:
 
         assert db.reset_gateway_calls() == 3
         assert db.get_gateway_call_stats(days=1)["total_calls"] == 0
+
+
+def test_refusal_of_finds_a_nested_refusal() -> None:
+    from mcp_trentina_crunchtools.errors import BlockedSourceError
+    from mcp_trentina_crunchtools.gateway.errors import BackendCallError
+    from mcp_trentina_crunchtools.outcomes import refusal_of
+
+    inner = BlockedSourceError("s", "flagged by L3", refusal={"alternatives": ["clean"]})
+    outer = BackendCallError("wrapped")
+    outer.__cause__ = inner
+    assert refusal_of(outer) == {"alternatives": ["clean"]}
+    assert refusal_of(RuntimeError("x")) is None

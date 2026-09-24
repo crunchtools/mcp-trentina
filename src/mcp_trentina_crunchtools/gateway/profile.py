@@ -66,44 +66,44 @@ ProfileRole = Literal["agent", "operator"]
 #: `_normalize_enforcement`.
 EnforcementMode = Literal["warn", "block"]
 
+#: What an agent may ASK for per call, through the `trentina_mode` argument
+#: the gateway inserts into every tool (#193). `clean` is here and not in
+#: `EnforcementMode` because a call that asks for it carries its own
+#: extraction prompt; a default has none.
+ModeName = Literal["block", "warn", "clean"]
+
+
 def _normalize_enforcement(block: Any, *, key: str) -> Any:
-    """Migrate the old spellings, and refuse `clean` with an explanation.
+    """Refuse `clean` as a default, with an explanation.
 
-    **Why there is no `clean` enforcement mode.** As a TOOL it exists and
-    works: `clean_fetch` hands the page to the Q-Agent and returns what comes
-    back. As an enforcement mode it never has. The gateway shipped `extract`
-    on 2026-09-13 deliberately unimplemented, with a log line saying so,
-    because the config surface was built ahead of the flip.
+    **Why `clean` cannot be the enforcement mode.** Extraction needs a PROMPT.
+    Since 0.32.0 `enforcement` is the DEFAULT an omitted `trentina_mode`
+    resolves to, and a call that omitted the mode carried no prompt either —
+    the agent called `jira_get_issue`, not "extract something from this". A
+    call that asks for clean does carry one (`trentina_prompt`), which is why
+    clean is available per call through `modes` and not here.
 
-    The two are not the same code and cannot trivially be. Extraction needs a
-    PROMPT. On the tool path the agent supplies one. At the gateway the agent
-    called `jira_get_issue`, not "extract something from this", so there is no
-    instruction to extract against — and inventing one means deciding what
-    extraction means for an arbitrary backend's structured response.
-
-    0.26.0 renamed both sides to the word `clean` and so made a known gap read
-    like a promise. A config must not name a capability the gateway does not
-    have, so this refuses it at load.
-
-    Pydantic would refuse it anyway now that it is out of the Literal, but it
-    would say "input should be 'warn' or 'block'" — which tells an operator
-    the word is wrong, not that the FEATURE is missing, and sends them hunting
-    for a typo in a value they read in our own documentation. A profile that
-    fails to load is fatal, so the one line they get has to be the line that
-    explains it.
+    Pydantic would refuse it anyway, but it would say "input should be 'warn'
+    or 'block'" — which tells an operator the word is wrong, not where the
+    word belongs. A profile that fails to load is fatal, so the one line they
+    get has to be the line that explains it.
     """
     if not isinstance(block, dict):
         return block
     old = block.get("enforcement")
     if old == "clean":
         raise ValueError(
-            f"{key}: enforcement 'clean' is not implemented and never has "
-            f"been — the gateway has no extraction instruction to work from "
-            f"on a proxied response. Use 'warn' (deliver the content with "
-            f"the verdict attached) or 'block' (refuse it). The clean_* "
-            f"TOOLS are unaffected and continue to work."
+            f"{key}: enforcement is the DEFAULT mode, and 'clean' cannot be "
+            f"a default — it needs an extraction prompt, which only a call "
+            f"that asks for clean carries. Use 'warn' or 'block' here"
+            + (
+                ", and add 'clean' to `modes` to let the agent choose it per call."
+                if key == "defense"
+                else "."
+            )
         )
     return block
+
 
 # Pre-0.21.0 l2_input.extractor names. 'full' is not here: it maps to an
 # empty processor list rather than to a name.
@@ -192,9 +192,7 @@ class AuthConfig(BaseModel):
     def env_name_is_uppercase_identifier(cls, v: str) -> str:
         """Reject lowercase, leading digits, or non-identifier characters."""
         if not ENV_NAME_RE.match(v):
-            raise ValueError(
-                f"bearer_token_env {v!r} must be an UPPERCASE env-var identifier"
-            )
+            raise ValueError(f"bearer_token_env {v!r} must be an UPPERCASE env-var identifier")
         return v
 
 
@@ -225,9 +223,7 @@ class LlmKeyOverride(BaseModel):
     def env_name_is_uppercase_identifier(cls, v: str | None) -> str | None:
         """Reject lowercase, leading digits, or non-identifier characters."""
         if v is not None and not ENV_NAME_RE.match(v):
-            raise ValueError(
-                f"api_key_env {v!r} must be an UPPERCASE env-var identifier"
-            )
+            raise ValueError(f"api_key_env {v!r} must be an UPPERCASE env-var identifier")
         return v
 
     @field_validator("api_key", mode="before")
@@ -403,8 +399,7 @@ class Backend(BaseModel):
         gt=0,
         le=MAX_LIST_TIMEOUT_SECONDS,
         description=(
-            "Timeout for tools/list metadata fetch "
-            "(streamable-HTTP handshake needs headroom)"
+            "Timeout for tools/list metadata fetch (streamable-HTTP handshake needs headroom)"
         ),
     )
     parameter_guards: dict[str, dict[str, ParameterConstraint]] = Field(
@@ -427,13 +422,19 @@ class Backend(BaseModel):
     validate_output_schema: bool = Field(
         default=True,
         description=(
-            "Validate tool results against the backend's outputSchema "
-            "(disable for buggy backends)"
+            "Validate tool results against the backend's outputSchema (disable for buggy backends)"
         ),
     )
     compress_descriptions: bool = Field(
         default=False,
         description="Compress verbose tool descriptions via LLM at gateway startup",
+    )
+    modes: list[ModeName] | None = Field(
+        default=None,
+        description=(
+            "Optional override of the profile's defense.modes for this one "
+            "backend. Must include the profile's default (enforcement)."
+        ),
     )
     preprocess_tools: dict[str, ToolPreProcess] = Field(
         default_factory=dict,
@@ -461,13 +462,10 @@ class Backend(BaseModel):
             label = v[len(INTERNAL_SCHEME) :]
             if not BACKEND_NAME_RE.match(label):
                 raise ValueError(
-                    f"internal:// URL must carry a slug label "
-                    f"(^[a-z][a-z0-9-]*$): {v!r}"
+                    f"internal:// URL must carry a slug label (^[a-z][a-z0-9-]*$): {v!r}"
                 )
             return v
-        raise ValueError(
-            f"Backend URL must start with http://, https://, or internal://: {v!r}"
-        )
+        raise ValueError(f"Backend URL must start with http://, https://, or internal://: {v!r}")
 
     @property
     def is_internal(self) -> bool:
@@ -504,10 +502,13 @@ class AlertIngressConfig(BaseModel):
         return _normalize_enforcement(block, key="alert_ingress")
 
     token_env: str = Field(
-        ..., description="Env var name whose value is the alert ingress token",
+        ...,
+        description="Env var name whose value is the alert ingress token",
     )
     token: SecretStr | None = Field(
-        default=None, exclude=True, description="Resolved token (load-time only)",
+        default=None,
+        exclude=True,
+        description="Resolved token (load-time only)",
     )
     enforcement: EnforcementMode = Field(
         default="warn",
@@ -526,41 +527,38 @@ class AlertIngressConfig(BaseModel):
         ),
     )
     forward_url: str = Field(
-        ..., description="URL to forward alert payloads to",
+        ...,
+        description="URL to forward alert payloads to",
     )
     forward_secret_env: str | None = Field(
         default=None,
         description="Env var for HMAC secret used to sign forwarded payloads",
     )
     forward_secret: SecretStr | None = Field(
-        default=None, exclude=True, description="Resolved HMAC secret (load-time only)",
+        default=None,
+        exclude=True,
+        description="Resolved HMAC secret (load-time only)",
     )
 
     @field_validator("forward_secret_env")
     @classmethod
     def forward_secret_env_is_uppercase(cls, v: str | None) -> str | None:
         if v is not None and not ENV_NAME_RE.match(v):
-            raise ValueError(
-                f"forward_secret_env {v!r} must be an UPPERCASE env-var identifier"
-            )
+            raise ValueError(f"forward_secret_env {v!r} must be an UPPERCASE env-var identifier")
         return v
 
     @field_validator("token_env")
     @classmethod
     def env_name_is_uppercase_identifier(cls, v: str) -> str:
         if not ENV_NAME_RE.match(v):
-            raise ValueError(
-                f"token_env {v!r} must be an UPPERCASE env-var identifier"
-            )
+            raise ValueError(f"token_env {v!r} must be an UPPERCASE env-var identifier")
         return v
 
     @field_validator("forward_url")
     @classmethod
     def url_must_be_http(cls, v: str) -> str:
         if not v.startswith(("http://", "https://")):
-            raise ValueError(
-                f"forward_url must start with http:// or https://: {v!r}"
-            )
+            raise ValueError(f"forward_url must start with http:// or https://: {v!r}")
         return v
 
 
@@ -600,13 +598,25 @@ class DefenseConfig(BaseModel):
     enforcement: EnforcementMode = Field(
         default="warn",
         description=(
-            "What a flagged tool response becomes. warn: delivered intact "
-            "with a _trentina_warning attached, so the reading agent sees "
-            "the caution before the content. block: refused outright. "
-            "There is no `clean` here — the clean_* TOOLS exist, the "
-            "enforcement mode never has. "
+            "The DEFAULT mode: what a flagged tool response becomes when "
+            "the call does not choose one. warn: delivered intact with a "
+            "_trentina_warning attached. block: refused outright. `clean` "
+            "cannot be the default — it needs the extraction prompt a call "
+            "carries; allow it per call through `modes`. "
             "TRENTINA_ENFORCEMENT_OVERRIDE=warn is the kill switch: it "
             "forces warn everywhere for the night block misfires."
+        ),
+    )
+    modes: list[ModeName] | None = Field(
+        default=None,
+        description=(
+            "The modes this profile's agent may choose per call, on every "
+            "tool of every backend. Unset means [enforcement] alone, and a "
+            "single mode inserts no parameter. With more than one, the "
+            "gateway adds trentina_mode (and trentina_prompt when clean is "
+            "allowed) to each tool's schema and refuses any other value. "
+            "`enforcement` is the default an omitted mode resolves to, and "
+            "must be in this list."
         ),
     )
 
@@ -614,6 +624,28 @@ class DefenseConfig(BaseModel):
     @classmethod
     def _check_enforcement(cls, block: Any) -> Any:
         return _normalize_enforcement(block, key="defense")
+
+    @model_validator(mode="after")
+    def _default_is_permitted(self) -> DefenseConfig:
+        """An omitted mode resolves to `enforcement`, so it must be allowed.
+
+        Refused at LOAD rather than at call: otherwise every call that leaves
+        the mode out is either refused or, worse, resolves to a mode the
+        policy forbids.
+        """
+        if self.modes is None:
+            self.modes = [self.enforcement]
+            return self
+        if not self.modes:
+            raise ValueError("defense.modes must name at least one mode")
+        self.modes = list(dict.fromkeys(self.modes))
+        if self.enforcement not in self.modes:
+            raise ValueError(
+                f"defense.enforcement {self.enforcement!r} is the default an "
+                f"omitted trentina_mode resolves to, so it must be in "
+                f"defense.modes {self.modes}"
+            )
+        return self
 
     l2_threshold: float = Field(
         default=0.5,
@@ -628,16 +660,12 @@ class DefenseConfig(BaseModel):
     provider: str | None = Field(
         default=None,
         description=(
-            "LLM provider override for this profile "
-            "(falls back to TRENTINA_MODEL_PROVIDER)"
+            "LLM provider override for this profile (falls back to TRENTINA_MODEL_PROVIDER)"
         ),
     )
     model: str | None = Field(
         default=None,
-        description=(
-            "LLM model override for this profile "
-            "(falls back to QUARANTINE_MODEL)"
-        ),
+        description=("LLM model override for this profile (falls back to QUARANTINE_MODEL)"),
     )
 
     @field_validator("provider")
@@ -645,9 +673,7 @@ class DefenseConfig(BaseModel):
     def provider_is_supported(cls, v: str | None) -> str | None:
         """If set, must be a known provider name."""
         if v is not None and v not in SUPPORTED_PROVIDERS:
-            raise ValueError(
-                f"Unknown provider {v!r}. Supported: {', '.join(SUPPORTED_PROVIDERS)}"
-            )
+            raise ValueError(f"Unknown provider {v!r}. Supported: {', '.join(SUPPORTED_PROVIDERS)}")
         return v
 
 
@@ -796,10 +822,13 @@ class MatrixIngressConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     token_env: str = Field(
-        ..., description="Env var name whose value is the Matrix proxy token",
+        ...,
+        description="Env var name whose value is the Matrix proxy token",
     )
     token: SecretStr | None = Field(
-        default=None, exclude=True, description="Resolved token (load-time only)",
+        default=None,
+        exclude=True,
+        description="Resolved token (load-time only)",
     )
     # Deliberately NO `enforcement` here, unlike alert_ingress. This path
     # forwards a STREAMED /sync response, and refusing one does not drop a
@@ -936,9 +965,7 @@ class OAuthConfig(BaseModel):
     def client_secret_env_is_uppercase_identifier(cls, v: str | None) -> str | None:
         """Reject lowercase, leading digits, or non-identifier characters."""
         if v is not None and not ENV_NAME_RE.match(v):
-            raise ValueError(
-                f"client_secret_env {v!r} must be an UPPERCASE env-var identifier"
-            )
+            raise ValueError(f"client_secret_env {v!r} must be an UPPERCASE env-var identifier")
         return v
 
     @field_validator("audience_env")
@@ -946,9 +973,7 @@ class OAuthConfig(BaseModel):
     def audience_env_is_uppercase_identifier(cls, v: str | None) -> str | None:
         """Reject lowercase, leading digits, or non-identifier characters."""
         if v is not None and not ENV_NAME_RE.match(v):
-            raise ValueError(
-                f"audience_env {v!r} must be an UPPERCASE env-var identifier"
-            )
+            raise ValueError(f"audience_env {v!r} must be an UPPERCASE env-var identifier")
         return v
 
     @field_validator("issuer")
@@ -975,8 +1000,7 @@ class OAuthConfig(BaseModel):
         if issuer not in SUPPORTED_ISSUERS:
             supported = ", ".join(sorted(SUPPORTED_ISSUERS))
             raise ValueError(
-                f"issuer {issuer!r} has no verifier in this build — "
-                f"supported: {supported}"
+                f"issuer {issuer!r} has no verifier in this build — supported: {supported}"
             )
         return issuer
 
@@ -997,8 +1021,7 @@ class OAuthConfig(BaseModel):
             )
         if self.audience_env is not None and self.issuer is None:
             raise ValueError(
-                "oauth.audience_env is set without oauth.issuer, so it would "
-                "never be consulted"
+                "oauth.audience_env is set without oauth.issuer, so it would never be consulted"
             )
         if self.issuer is not None and not self.enabled:
             raise ValueError(
@@ -1063,9 +1086,7 @@ class OAuthConfig(BaseModel):
             email = raw.strip().lower()
             local, sep, domain = email.partition("@")
             if not sep or not local or "." not in domain:
-                raise ValueError(
-                    f"allowed_emails entry {raw!r} is not an email address"
-                )
+                raise ValueError(f"allowed_emails entry {raw!r} is not an email address")
             normalized.append(email)
         return normalized
 
@@ -1078,7 +1099,6 @@ class OAuthConfig(BaseModel):
                 "to expose an OAuth seat open to any Google account"
             )
         return self
-
 
     @field_validator("allowed_redirect_uris")
     @classmethod
@@ -1113,11 +1133,10 @@ class OAuthConfig(BaseModel):
                     "(loopback clients are already allowed by default)"
                 )
             if "#" in uri:
-                raise ValueError(
-                    f"allowed_redirect_uris entry {uri!r} must not carry a fragment"
-                )
+                raise ValueError(f"allowed_redirect_uris entry {uri!r} must not carry a fragment")
             cleaned.append(uri)
         return cleaned
+
 
 class Profile(BaseModel):
     """One consumer profile: name, auth, backends, defense config."""
@@ -1194,9 +1213,7 @@ class Profile(BaseModel):
 
     @field_validator("llm_keys")
     @classmethod
-    def llm_key_names_match_re(
-        cls, v: dict[str, LlmKeyOverride]
-    ) -> dict[str, LlmKeyOverride]:
+    def llm_key_names_match_re(cls, v: dict[str, LlmKeyOverride]) -> dict[str, LlmKeyOverride]:
         """Each llm_keys dict key must be a provider slug (matches PROVIDER_NAME_RE).
 
         Cross-validation against configured llm_providers happens at wiring time
@@ -1206,6 +1223,20 @@ class Profile(BaseModel):
             if not PROVIDER_NAME_RE.match(name):
                 raise ValueError(f"Provider name {name!r} must match ^[a-z][a-z0-9-]*$")
         return v
+
+    @model_validator(mode="after")
+    def backend_modes_include_default(self) -> Profile:
+        """Same rule as `DefenseConfig._default_is_permitted`, per backend."""
+        default = self.defense.enforcement
+        for name, backend in self.backends.items():
+            if backend.modes is None:
+                continue
+            if default not in backend.modes:
+                raise ValueError(
+                    f"backend {name!r}: modes {backend.modes} must include the "
+                    f"profile default {default!r} (defense.enforcement)"
+                )
+        return self
 
     @model_validator(mode="after")
     def profile_has_an_authentication_method(self) -> Profile:

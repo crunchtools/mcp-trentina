@@ -8,10 +8,10 @@ from typing import Any
 
 from ..config import get_config
 from ..database import is_blocked
-from ..errors import BlockedSourceError, FileReadError
+from ..errors import FileReadError
 from ..models import ALLOWED_TEXT_EXTENSIONS
 from ..modes import Mode
-from .judged import judge_and_deliver
+from .judged import blocklisted, judge_and_deliver
 
 MAX_FILE_SIZE = 2_000_000
 BINARY_CHECK_BYTES = 8192
@@ -58,13 +58,13 @@ def _validate_file(path: str) -> str:
     return resolved
 
 
-async def _read(path: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
+async def read_file(path: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
     """Read one text file, then hand it to the one judging path."""
     resolved = _validate_file(path)
 
     blocked = is_blocked(resolved)
     if blocked and mode is not Mode.CLEAN:
-        raise BlockedSourceError(resolved, blocked["detected_at"])
+        raise blocklisted(resolved, mode, blocked["detected_at"])
 
     with open(resolved, encoding="utf-8", errors="replace") as fh:
         content = fh.read()
@@ -85,14 +85,14 @@ async def _read(path: str, mode: Mode, prompt: str | None = None) -> dict[str, A
 
 async def block_read(path: str) -> dict[str, Any]:
     """Refuse a flagged or incompletely judged file; otherwise the exact bytes."""
-    return await _read(path, Mode.BLOCK)
+    return await read_file(path, Mode.BLOCK)
 
 
 async def warn_read(path: str) -> dict[str, Any]:
     """The bytes on disk, with the verdict attached when there is one."""
-    return await _read(path, Mode.WARN)
+    return await read_file(path, Mode.WARN)
 
 
 async def clean_read(path: str, prompt: str) -> dict[str, Any]:
     """A verified L3 extraction instead of the file."""
-    return await _read(path, Mode.CLEAN, prompt)
+    return await read_file(path, Mode.CLEAN, prompt)

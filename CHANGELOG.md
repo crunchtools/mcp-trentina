@@ -10,6 +10,44 @@ under that name.
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-09-24
+
+The mode is an argument the policy checks, not a name the agent picks (#193).
+
+### Changed (breaking)
+- **Fifteen web tools become five:** `fetch_tool`, `read_tool`, `dir_tool`,
+  `content_tool`, `search_tool`, each taking `trentina_mode` (block, warn,
+  clean) and `trentina_prompt`. The `block_*`/`warn_*`/`clean_*` names are
+  gone; every profile's `tools_allow` that named them must change.
+- **`defense.modes` is the policy.** One line per profile lists the modes its
+  agent may choose, on every tool of every backend; `defense.enforcement` is
+  the default an omitted mode resolves to and must be in the list. Unset,
+  `modes` is `[enforcement]` and nothing changes.
+- **Standalone defaults to block only.** `TRENTINA_MODE` (default `block`) and
+  `TRENTINA_MODES` (default: that one mode); an invalid combination fails
+  startup.
+
+### Added
+- **The gateway inserts `trentina_mode`/`trentina_prompt` into every tool**
+  whose policy offers a choice, after the perimeter scan so its own text is
+  never judged or compressed as a backend's; strips any backend-declared
+  `trentina_*` parameter first; resolves an omitted mode BEFORE checking it;
+  and strips both arguments before forwarding. Refused modes audit as
+  `denied_guard`. Optional narrowing: `modes` per backend, or a parameter
+  guard on `trentina_mode` per tool.
+- **`clean` on proxied responses.** A call with `trentina_mode: clean` gets a
+  verified L3 extraction instead of the backend's response, and
+  `structuredContent` is dropped.
+- **Refusals name what to try next:** `{reason, mode, flagged_by|gaps,
+  alternatives}` as JSON-RPC `error.data` (web tools) or `_trentina_refusal`
+  (proxied), plus one line of text. Flagged → `clean` only, never `warn`;
+  gap-only → `warn`. Until now a refused web tool reached the agent as
+  "call failed: BlockedSourceError".
+
+### Fixed
+- The blocklist refusal told the agent to "use clean_fetch" whatever the
+  family, and a layer refusal was worded "detected at flagged by L2".
+
 ## [0.31.0] - 2026-09-24
 
 All three layers, always (#187, closes #15). The mode decides what is

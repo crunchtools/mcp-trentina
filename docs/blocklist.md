@@ -24,17 +24,17 @@ Each blocklist entry contains:
 
 ### Detection → Blocklist
 
-A source enters the blocklist when `block_*` **refuses** it: any layer flagged it and the source is not allowlisted. The row is keyed by:
+A source enters the blocklist when `block` **refuses** it: any layer flagged it and the source is not allowlisted. The row is keyed by:
 
 - **URLs**: the full URL
 - **Files and directories**: the resolved path
 - **Inline content**: the SHA-256 of the content
 
-`warn_*` and `clean_*` record their detections too, but as observations (`blocked = 0`), so they never feed the blocklist. Until 0.31.0 every row was written blocked, which meant a `warn_fetch` of a flagged page blocklisted it and the next `warn_fetch` of the same page was refused.
+`warn` and `clean` record their detections too, but as observations (`blocked = 0`), so they never feed the blocklist. Until 0.31.0 every row was written blocked, which meant a warn fetch of a flagged page blocklisted it and the next warn fetch of the same page was refused.
 
 ### Blocklist → Refusal
 
-The blocklist is checked before any bytes are fetched. `block_*` and `warn_*` refuse a blocklisted source outright. `clean_*` proceeds — it delivers only a verified extraction — and sets `blocklisted: true` in `_trentina_warning`.
+The blocklist is checked before any bytes are fetched. `block` and `warn` refuse a blocklisted source outright, and the refusal offers `clean` when the caller's policy allows it. `clean` proceeds — it delivers only a verified extraction — and sets `blocklisted: true` in `_trentina_warning`.
 
 ### Viewing the Blocklist
 

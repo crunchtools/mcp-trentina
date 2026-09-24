@@ -56,6 +56,7 @@ def _agent_stats(scope: CallerScope) -> dict[str, Any]:
             "model": defense.model if defense else None,
             "l2_threshold": defense.l2_threshold if defense else None,
             "enforcement": defense.enforcement if defense else None,
+            "modes": defense.modes if defense else None,
         },
         "classifier": {"available": is_classifier_available()},
         "blocklist": get_blocklist_stats(profile=scope.name),
