@@ -545,6 +545,11 @@ async def scan_tool_list(
     the compressor rewrote is LLM output and earns unconditional L3. The
     lists are positionally parallel (compress_tools preserves order and
     length).
+
+    L3 is briefed with ``TOOL_BRIEFING``. Cached verdicts are honoured except
+    an L3 flag that predates the briefing (no matching ``l3_briefing``
+    stamp), which is judged again once and re-cached with the stamp. Clean
+    verdicts and L1/L2 flags stand: the briefing changes only what L3 reads.
     """
     annotated: list[dict[str, Any]] = []
     for tool, before in zip(tools, tools_before_compression, strict=True):

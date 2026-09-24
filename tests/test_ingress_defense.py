@@ -932,3 +932,38 @@ class TestToolDescriptionBriefing:
         assert hit
         assert cached is not None
         assert cached["l3_briefing"] == ing.TOOL_BRIEFING_VERSION
+
+    @pytest.mark.parametrize(
+        ("warning", "rejudge"),
+        [
+            (None, False),
+            ({"flagged_by": "L1"}, False),
+            ({"flagged_by": "L2"}, False),
+            ({"flagged_by": None, "l3_unavailable": True}, False),
+            ({"flagged_by": "L3"}, True),
+            ({"flagged_by": "L3", "l3_briefing": "0"}, True),
+            ({"flagged_by": "L3", "l3_briefing": "CURRENT"}, False),
+        ],
+    )
+    async def test_only_an_unbriefed_l3_flag_is_judged_again(
+        self, warning: dict[str, Any] | None, rejudge: bool
+    ) -> None:
+        from mcp_trentina_crunchtools.gateway import ingress_defense as ing
+
+        if warning is not None and warning.get("l3_briefing") == "CURRENT":
+            warning = {**warning, "l3_briefing": ing.TOOL_BRIEFING_VERSION}
+        assert ing._judged_before_briefing(warning) is rejudge
+
+        tools = [{"name": "t", "description": f"cached case {warning!r}"}]
+        profile = _profile("brief5")
+        key = ing._cache_key(profile, "tool:external", ing._tool_surface_text(tools[0]))
+        ing._cache_put(key, warning)
+        with patch(f"{_I}.defend", new_callable=AsyncMock) as mock_defend:
+            mock_defend.return_value.flagged = False
+            mock_defend.return_value.flagged_by = None
+            mock_defend.return_value.classification = _BENIGN
+            mock_defend.return_value.l3_assessment = {"injection_detected": False}
+            mock_defend.return_value.l2_truncated = False
+            mock_defend.return_value.l3_truncated = False
+            await scan_tool_list(profile, "jira", tools, tools)
+        assert mock_defend.called is rejudge
