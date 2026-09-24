@@ -10,6 +10,17 @@ under that name.
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-09-24
+
+### Fixed
+- **L3 is briefed that a tool definition describes invoking a tool.** With
+  0.32.0 moving four profiles to a `block` default, L3's `tool_invocation`
+  false positives on descriptions (15 on lotor, L2 ≤ 0.004, L1 clean) became
+  withheld tools: `jira_create_issue`, GitHub `list_issues_tool`, and our own
+  `fetch_tool` among them. Only cached verdicts L3 flagged before the
+  briefing are judged again; clean verdicts stand, so there is no cold-start
+  rescan of every description.
+
 ## [0.32.0] - 2026-09-24
 
 The mode is an argument the policy checks, not a name the agent picks (#193).
