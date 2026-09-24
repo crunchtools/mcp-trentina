@@ -127,18 +127,26 @@ async def _search_judged(
             raise BlockedSourceError(f"search:{query}", reason)
         refusals.append(reason)
 
+    # `refusals` is non-empty only under warn: block already raised. It
+    # carries the reason this call WOULD have been refused, which is the
+    # thing the agent needs in order to weigh the answer it is being handed.
+    warning = build_warning(verdict, extras={"refusals": refusals} if refusals else None)
+    disposition = (
+        Disposition.ANNOTATED if warning is not None else Disposition.DELIVERED
+    )
+
     emit_request_event(
         tool=f"{mode}_search",
         source=f"search:{query}",
-        disposition="l1-only",
-        risk_level="low",
+        disposition=disposition.value,
+        risk_level=l1_stats.risk_level(),
         l1_detections=total_l1,
-        l1_suspicious=0,
+        l1_suspicious=l1_stats.suspicious_detections(),
         l2_label=classification.label if classification else None,
         l2_score=classification.score if classification else None,
         input_size=len(raw.get("text", "")),
         output_size=len(l1_text),
-        stats={"total_detections": total_l1},
+        stats=l1_stats.to_flat_dict(),
         start_time=start_time,
     )
 
@@ -146,6 +154,9 @@ async def _search_judged(
         "text": l1_text,
         "sources": scanned_sources,
         "query": query,
+        "scan": build_report(
+            verdict, disposition=disposition, kind="search", ref=query,
+        ),
         "l1_stats": {"total_detections": total_l1},
         "l2_classification": {
             "label": classification.label if classification else "UNAVAILABLE",
@@ -154,10 +165,6 @@ async def _search_judged(
         "l0_usage": raw.get("usage", {}),
     }
 
-    # `refusals` is non-empty only under warn: block already raised. It
-    # carries the reason this call WOULD have been refused, which is the
-    # thing the agent needs in order to weigh the answer it is being handed.
-    warning = build_warning(verdict, extras={"refusals": refusals} if refusals else None)
     if warning is not None:
         result["_trentina_warning"] = warning
     return result

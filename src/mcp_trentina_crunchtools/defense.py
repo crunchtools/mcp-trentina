@@ -157,9 +157,17 @@ def _should_run_l3(*, defense: DefenseConfig | None, l3_gate: bool) -> bool:
     surfaces as ``l3_unavailable`` in the assessment and in the warning, so
     it can never read as a clean scan.
 
-    ``l3_gate=False`` is not a policy switch either. Two callers set it,
-    ``advise()`` and ``block_search``, and both spend L3 on *extraction*
-    rather than detection — the layer still runs, in a different mode.
+    ``l3_gate=False`` has two callers and they are NOT equivalent, though
+    this docstring claimed they were until 0.30.2. ``advise()`` does spend L3
+    on extraction instead of detection, so for ``clean_*`` the layer runs in a
+    different mode. ``_search_judged`` does not: it never calls
+    ``quarantine_extract``, so ``block_search`` and ``warn_search`` get **no
+    L3 at all**. Search is L1 + L2 only, in every mode.
+
+    That is a hole, not a design, and issue #187 closes it. The sentence is
+    corrected here rather than deleted because a comment asserting a layer
+    runs when it does not is exactly the kind of thing that puts a wrong
+    picture of the perimeter in a reader's head.
     """
     # has_api_key is Gemini's; a profile that overrides defense.provider
     # brings its own key (validated at profile load) or is keyless ollama.

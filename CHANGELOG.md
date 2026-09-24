@@ -10,6 +10,24 @@ under that name.
 
 ## [Unreleased]
 
+## [0.30.2] - 2026-09-24
+
+### Fixed
+- **`block_search` and `warn_search` never got the 0.30.0 treatment.** They
+  emitted `disposition="l1-only"` — a trust level retired in 0.30.0, not a
+  valid disposition — hardcoded `risk_level="low"` and `l1_suspicious=0` while
+  the merged `PipelineStats` sat one line above, and carried no `scan` block at
+  all while every other family had one. 0.30.1 fixed exactly this in
+  `clean_search` and missed its sibling.
+- **A docstring in `_should_run_l3` asserted that a layer runs when it does
+  not.** It claimed both `l3_gate=False` callers "spend L3 on extraction
+  rather than detection — the layer still runs, in a different mode." True for
+  `advise()`. False for `_search_judged`, which never calls
+  `quarantine_extract`, so `block_search` and `warn_search` get **no L3 at
+  all**. Corrected rather than deleted, and pointed at #187, which closes the
+  hole: a comment claiming a layer runs when it does not is precisely what
+  puts a wrong picture of the perimeter in a reader's head.
+
 ## [0.30.1] - 2026-09-23
 
 ### Fixed

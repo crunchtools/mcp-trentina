@@ -1,6 +1,6 @@
 [project]
 name = "mcp-trentina-crunchtools"
-version = "0.30.1"
+version = "0.30.2"
 description = "Secure MCP gateway and quarantine for AI agent traffic — three-layer defense against prompt injection"
 requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
