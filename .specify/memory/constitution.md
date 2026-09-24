@@ -1,9 +1,9 @@
 # mcp-trentina-crunchtools Constitution
 
-> **Version:** 1.1.1
+> **Version:** 1.2.0
 > **Ratified:** 2026-09-22
 > **Status:** Active
-> **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.16.0
+> **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.17.0
 > **Profile:** MCP Server
 
 This constitution establishes the core principles, constraints, and workflows that govern all development on mcp-trentina-crunchtools.
@@ -46,18 +46,27 @@ Every change MUST preserve all five security layers.
 - Gourmand AI slop detection gating all PRs
 - No google-genai SDK — architectural enforcement of Q-Agent quarantine
 
-### 2. Two-Layer Defense Architecture
+### 2. Three-Layer Defense
 
-The server implements defense-in-depth against prompt injection:
+Every untrusted payload crosses three independent layers, with no off switch
+per layer (see `docs/defense-pipeline.md`):
 
-- **Layer 1 (Deterministic):** 7-stage sanitization pipeline strips known injection vectors
-- **Layer 2 (Q-Agent):** Quarantined Gemini Flash-Lite LLM for semantic extraction — NO tools, NO memory, NO SDK
+- **L1 (deterministic):** `l1/` counts obfuscation, hidden markup, encoded
+  blobs, exfiltration URLs, delimiters and directives, and builds a normalized
+  copy for L2. It never modifies what the agent receives.
+- **L2 (classifier):** Prompt Guard 2, local ONNX (`quarantine/classifier.py`).
+- **L3 (judge):** a quarantined LLM (`quarantine/agent.py`) — NO tools, NO
+  memory, NO SDK, per-request canary.
 
-The Q-Agent quarantine is enforced architecturally:
-- Raw httpx REST calls to Gemini API (no google-genai SDK)
+The tool prefix (`block_`, `warn_`, `clean_`) decides what is delivered, never
+which layers run. No text written by L3 reaches the agent: findings leave
+the perimeter as closed-enum labels and scores only.
+
+The L3 quarantine is enforced architecturally:
+- Raw httpx REST calls to the provider (no SDK)
 - No function declarations in API requests
 - No memory beyond single request
-- Structured JSON output via Gemini responseSchema
+- Structured JSON output via responseSchema
 
 ### 3. Two-Layer Tool Architecture
 
@@ -78,8 +87,8 @@ The SQLite blocklist is write-accessible by deterministic code ONLY:
 
 Trust decisions are administrator-set, NOT agent-controlled:
 - Server-side JSON config file
-- Trusted domains skip Q-Agent (Layer 1 only) to reduce cost
-- Untrusted sources get full Layer 1 + Layer 2 treatment
+- An allowlisted source still runs all three layers; the allowlist changes
+  what a finding costs, never whether a layer runs
 - A compromised agent cannot override trust levels
 
 ### 6. Three Distribution Channels
@@ -209,8 +218,11 @@ Every code change must pass through these gates in order:
 1. **Lint** — `uv run ruff check src tests`
 2. **Type Check** — `uv run mypy src`
 3. **Tests** — `uv run pytest -v`
-4. **Gourmand** — `gourmand check .`
-5. **Container Build** — push the branch; GHA builds it
+4. **Gourmand** — pre-commit hook, and `Code Quality (Gourmand)` in CI
+5. **Gatehouse** — pre-commit hook on the staged diff, and `Gatehouse review`
+   on every PR. Every finding gets a reply before merge — `fixed in <sha>` or
+   `not a bug: <reason>` — enforced by the `Gatehouse triage` check
+6. **Container Build** — push the branch; GHA builds it
    (`.github/workflows/container.yml`). Never build the image locally: the
    model-export stage needs a gated HuggingFace credential that only CI holds.
 
@@ -265,12 +277,13 @@ Container CI workflows MUST use two separate jobs:
 6. Run all five quality gates
 7. Update CLAUDE.md tool listing
 
-### Adding a New Sanitization Stage
+### Adding a New L1 Stage
 
-1. Create module in `sanitize/` implementing the stage function
-2. Wire it into the sanitization pipeline in `sanitize/__init__.py`
+1. Create module in `l1/` implementing the stage function
+2. Wire it into `_run_stages` in `l1/pipeline.py`, and add its stats to
+   `PipelineStats`
 3. Add unit tests covering normal input and adversarial vectors
-4. Run all five quality gates
+4. Run every quality gate
 
 ---
 
@@ -293,3 +306,4 @@ Container CI workflows MUST use two separate jobs:
 | 1.0.3 | 2026-09-20 | Python floor 3.10+ → 3.11+ (3.10 was uninstallable, issue #100); record httpx2 as the MCP transport client alongside httpx |
 | 1.1.0 | 2026-09-20 | Add Section III "Python version coverage": full matrix from floor to newest, single-version jobs pinned to newest (production's version) |
 | 1.1.1 | 2026-09-22 | Inherit crunchtools/constitution v1.16.0 (XVII: no real-world names, PII or private deployment topology); examples, tests and docs moved to its fictional roster (RT #1504) |
+| 1.2.0 | 2026-09-24 | Inherit v1.17.0 (Gatehouse pre-commit hook + triage). Section 2 rewritten for the three-layer defense it has had since 0.10 — it still described a 7-stage stripping L1 and an L2 extraction agent (Gatehouse critical on #182, unanswered). Allowlist, quality gates and the L1 stage recipe corrected to match the code |

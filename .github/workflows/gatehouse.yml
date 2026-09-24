@@ -24,6 +24,9 @@ name: Gatehouse
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
+  # Re-runs triage on a reply; guard and review are skipped for this event.
+  pull_request_review_comment:
+    types: [created, edited, deleted]
 
 permissions: {}   # default-deny; each job grants only what it needs
 
@@ -35,6 +38,7 @@ jobs:
   # runs the BASE version of this file, a PR can't edit this job to disable it.
   guard:
     name: Protect workflows
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -75,9 +79,21 @@ jobs:
   # Scope GEMINI_API_KEY to this reusable workflow so only it can read the key.
   review:
     name: Gatehouse review
+    if: github.event_name == 'pull_request_target'
     permissions:
       contents: read
       pull-requests: write
-    uses: crunchtools/gatehouse/.github/workflows/review.yml@v0.7.1
+    uses: crunchtools/gatehouse/.github/workflows/review.yml@v0.8.0
     secrets:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+  # ── 3) Every finding answered (constitution XII, v1.17.0) ──────────────────
+  # Fails while any Gatehouse finding has no reply (`fixed in <sha>` or
+  # `not a bug: <reason>`). Runs after the review, and alone on a reply.
+  triage:
+    name: Gatehouse triage
+    needs: review
+    if: always()
+    permissions:
+      pull-requests: read
+    uses: crunchtools/gatehouse/.github/workflows/triage.yml@v0.8.0

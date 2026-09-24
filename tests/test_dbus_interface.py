@@ -12,6 +12,7 @@ from mcp_trentina_crunchtools.dbus_interface import (
     emit_request_event,
 )
 from mcp_trentina_crunchtools.events import reset_event_bus
+from mcp_trentina_crunchtools.report import Disposition
 
 
 class TestEmitRequestEvent:
@@ -30,7 +31,7 @@ class TestEmitRequestEvent:
         emit_request_event(
             tool="block_fetch",
             source="https://example.com",
-            disposition="trusted-l1",
+            disposition=Disposition.DELIVERED.value,
             risk_level="low",
             l1_detections=0,
             l1_suspicious=0,
@@ -44,7 +45,7 @@ class TestEmitRequestEvent:
         assert len(received) == 1
         assert received[0]["tool"] == "block_fetch"
         assert received[0]["source"] == "https://example.com"
-        assert received[0]["disposition"] == "trusted-l1"
+        assert received[0]["disposition"] == "delivered"
         assert received[0]["risk_level"] == "low"
         assert received[0]["l2_label"] == "BENIGN"
         assert received[0]["l2_score"] == 0.02
@@ -63,7 +64,7 @@ class TestEmitRequestEvent:
         emit_request_event(
             tool="clean_fetch",
             source="https://evil.com",
-            disposition="quarantined",
+            disposition=Disposition.EXTRACTED.value,
             risk_level="high",
             l1_detections=3,
             l1_suspicious=1,
@@ -110,11 +111,14 @@ class TestDbusInterfaceMethods:
     """Test D-Bus interface method return data shapes (mocked bus)."""
 
     def test_build_interface_creates_object(self) -> None:
-        with patch.dict("sys.modules", {
-            "dbus_fast": MagicMock(),
-            "dbus_fast.service": MagicMock(),
-            "dbus_fast.aio": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "dbus_fast": MagicMock(),
+                "dbus_fast.service": MagicMock(),
+                "dbus_fast.aio": MagicMock(),
+            },
+        ):
             from mcp_trentina_crunchtools.dbus_interface import _build_interface
 
             interface = _build_interface()
@@ -132,7 +136,7 @@ class TestDbusInterfaceMethods:
         emit_request_event(
             tool="block_read",
             source="/tmp/test.txt",
-            disposition="l1-only",
+            disposition=Disposition.DELIVERED.value,
             risk_level="low",
             l1_detections=0,
             l1_suspicious=0,
@@ -174,10 +178,13 @@ class TestGracefulDegradation:
 
         with (
             patch.object(dbi, "_has_dbus_fast", return_value=True),
-            patch.dict("sys.modules", {
-                "dbus_fast": MagicMock(),
-                "dbus_fast.aio": mock_bus_mod,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "dbus_fast": MagicMock(),
+                    "dbus_fast.aio": mock_bus_mod,
+                },
+            ),
         ):
             await dbi.start_dbus()
 
@@ -200,7 +207,7 @@ class TestEventDataShapes:
         emit_request_event(
             tool="clean_search",
             source="query:test",
-            disposition="quarantined",
+            disposition=Disposition.EXTRACTED.value,
             risk_level="low",
             l1_detections=1,
             l1_suspicious=0,
@@ -213,9 +220,18 @@ class TestEventDataShapes:
 
         d = events_captured[0]
         expected_keys = {
-            "tool", "source", "disposition", "risk_level", "duration_ms",
-            "l1_detections", "l1_suspicious", "l2_label", "l2_score",
-            "input_size", "output_size", "stats",
+            "tool",
+            "source",
+            "disposition",
+            "risk_level",
+            "duration_ms",
+            "l1_detections",
+            "l1_suspicious",
+            "l2_label",
+            "l2_score",
+            "input_size",
+            "output_size",
+            "stats",
         }
         assert expected_keys.issubset(set(d.keys()))
 

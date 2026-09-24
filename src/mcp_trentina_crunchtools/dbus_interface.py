@@ -23,6 +23,7 @@ def _has_dbus_fast() -> bool:
     """Check if dbus-fast is importable."""
     try:
         import dbus_fast  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -81,26 +82,30 @@ def _build_interface() -> Any:
 
             stats = get_blocklist_stats()
             from .config import get_config
+
             config = get_config()
 
-            return json.dumps({
-                "blocklist": stats,
-                "config": {
-                    "model": config.model,
-                    "fallback": config.fallback,
-                    "max_content": config.max_content,
-                },
-                "layers": {
-                    "l1": True,
-                    "l2": is_classifier_available(),
-                    "l3": config.has_api_key,
-                },
-            })
+            return json.dumps(
+                {
+                    "blocklist": stats,
+                    "config": {
+                        "model": config.model,
+                        "fallback": config.fallback,
+                        "max_content": config.max_content,
+                    },
+                    "layers": {
+                        "l1": True,
+                        "l2": is_classifier_available(),
+                        "l3": config.has_api_key,
+                    },
+                }
+            )
 
         @method()
         def GetRecentEvents(self, count: "u") -> "s":  # type: ignore[name-defined]  # noqa: N802, F821
             """Return JSON array of last N events from ring buffer."""
             from .events import get_event_bus
+
             events = get_event_bus().recent_events(count)
             return json.dumps(events)
 
@@ -111,23 +116,26 @@ def _build_interface() -> Any:
             from .quarantine.classifier import is_classifier_available
 
             config = get_config()
-            return json.dumps({
-                "l1": {"active": True, "description": "Deterministic detection"},
-                "l2": {
-                    "active": is_classifier_available(),
-                    "description": "Prompt Guard 2 classifier",
-                },
-                "l3": {
-                    "active": config.has_api_key,
-                    "description": "Gemini semantic judge",
-                    "model": config.model,
-                },
-            })
+            return json.dumps(
+                {
+                    "l1": {"active": True, "description": "Deterministic detection"},
+                    "l2": {
+                        "active": is_classifier_available(),
+                        "description": "Prompt Guard 2 classifier",
+                    },
+                    "l3": {
+                        "active": config.has_api_key,
+                        "description": "Gemini semantic judge",
+                        "model": config.model,
+                    },
+                }
+            )
 
         @method()
         def GetTrustConfig(self) -> "s":  # type: ignore[name-defined]  # noqa: N802, F821
             """Return JSON trust configuration."""
             from .config import get_config
+
             config = get_config()
             return json.dumps(config._trust_config)
 
@@ -190,25 +198,50 @@ def emit_request_event(
     stats: dict[str, int],
     start_time: float | None = None,
 ) -> None:
-    """Convenience: emit a request_processed event."""
+    """Emit ``request_processed``: one event per content-tool call.
+
+    The payload is the event schema; the Cockpit plugin
+    (``cockpit-trentina/trentina.js``) is its reader.
+
+    Args:
+        tool: The tool that ran, e.g. ``block_fetch``.
+        source: URL, resolved path, ``sha256:`` content hash, or
+            ``search:<query>``.
+        disposition: A ``report.Disposition`` value — what the caller did
+            with the content (``delivered``, ``annotated``, ``extracted``,
+            ``refused``). It replaced ``trust_level`` in 0.30.0.
+        risk_level: L1's risk level for the payload.
+        l1_detections: Every L1 count, hygiene included.
+        l1_suspicious: The counts that feed risk scoring.
+        l2_label: ``BENIGN``/``MALICIOUS``, or None when L2 did not run.
+        l2_score: L2's highest window score, or None when L2 did not run.
+        input_size: Bytes that arrived.
+        output_size: Bytes delivered.
+        stats: L1's per-stage counts, flattened.
+        start_time: ``time.time()`` at the start of the call; becomes
+            ``duration_ms`` in the payload (0 when omitted).
+    """
     from .events import get_event_bus
 
     duration_ms = int((time.time() - start_time) * 1000) if start_time else 0
 
-    get_event_bus().emit("request_processed", {
-        "tool": tool,
-        "source": source,
-        "disposition": disposition,
-        "risk_level": risk_level,
-        "duration_ms": duration_ms,
-        "l1_detections": l1_detections,
-        "l1_suspicious": l1_suspicious,
-        "l2_label": l2_label,
-        "l2_score": l2_score,
-        "input_size": input_size,
-        "output_size": output_size,
-        "stats": stats,
-    })
+    get_event_bus().emit(
+        "request_processed",
+        {
+            "tool": tool,
+            "source": source,
+            "disposition": disposition,
+            "risk_level": risk_level,
+            "duration_ms": duration_ms,
+            "l1_detections": l1_detections,
+            "l1_suspicious": l1_suspicious,
+            "l2_label": l2_label,
+            "l2_score": l2_score,
+            "input_size": input_size,
+            "output_size": output_size,
+            "stats": stats,
+        },
+    )
 
 
 def emit_detection_event(
@@ -220,9 +253,12 @@ def emit_detection_event(
     """Convenience: emit a detection_occurred event."""
     from .events import get_event_bus
 
-    get_event_bus().emit("detection_occurred", {
-        "layer": layer,
-        "source": source,
-        "severity": severity,
-        "details": details or {},
-    })
+    get_event_bus().emit(
+        "detection_occurred",
+        {
+            "layer": layer,
+            "source": source,
+            "severity": severity,
+            "details": details or {},
+        },
+    )
