@@ -60,12 +60,12 @@ The defense-in-depth approach means an attack has to evade three fundamentally d
 
 ### Layer 1 — Deterministic Detection
 
-L1 produces two views of one payload and never modifies what the agent receives:
+L1 counts, and never modifies what the agent receives:
 
 - **What the agent receives** (`content`) — the caller's text, untouched. A CVE ticket, a Nagios alert, or a security mail *discusses* attacks in the words attacks use; amputating those lines destroyed exactly the content an ops agent exists to read, and destroyed the evidence before the smarter layers could judge it.
-- **What L2 reads** (`l2_input`) — the same text with obfuscation normalized away: zero-width characters removed, encoded blobs decoded and replaced with markers, fake `<|im_start|>`/`[INST]` delimiter tokens dropped, exfiltration image URLs defanged. **L2 reads this and nothing else**, so an attacker cannot blind the classifier with the very tricks L1 counts.
+- **A normalized copy** (`l2_input`) — the same text with obfuscation undone: zero-width characters removed, encoded blobs decoded, fake `<|im_start|>`/`[INST]` delimiters dropped, exfiltration image URLs defanged. L2 reads it *in addition to* the original whenever L1's normalizing stages fired (three zero-width characters can split Prompt Guard's tokens while L1 rates them only medium), and clean mode's extraction turn reads it.
 
-Detections (hidden markup, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions") feed three places: the risk score, the sidecar warning, and the L3 gate — **any suspicious L1 detection sends the full original to the Q-Agent**, whose briefing says explicitly that nothing was removed and that the flag may be an attack *or* legitimate security content: judge intent, not vocabulary.
+Detections (hidden markup, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions", and — for a directory — Python files that shadow the standard library) feed the risk score, the warning, and L3's briefing.
 
 **L1 is format-agnostic.** It scans what it is handed and makes no judgement about a payload's type. Until 0.28.0 a `looks_like_html` sniffer chose between an HTML pipeline and a text one on a leading `<!DOCTYPE` or `<html>`; an HTML *fragment* — the shape most tool output carries — matched neither, so identical bytes were defended two different ways depending on their first few characters. The fork is gone. Markup is handled in two tiers instead:
 
@@ -86,7 +86,7 @@ Meta's Prompt Guard 2 86M model running on ONNX Runtime (CPU, no GPU required). 
 
 ### Layer 3 — Quarantined LLM (Q-Agent)
 
-A hardened Gemini Flash Lite instance that receives the **original, unmodified content** (with L1's sidecar as its briefing) and judges or extracts while ignoring injected instructions. The Q-Agent is deliberately constrained:
+A hardened Gemini Flash Lite instance that receives the **original, unmodified content** and judges it while ignoring injected instructions. It waits for L1 and L2 and is briefed with both: L1's counts, L2's label and score, and — unconditionally — the caveat that L2 misses social engineering about 40% of the time and exfiltration intent about 20%, so a low score is never evidence of safety. The Q-Agent is deliberately constrained:
 
 - **No tools** — can't execute actions even if manipulated
 - **No memory** — can't be poisoned across sessions
@@ -97,7 +97,7 @@ A hardened Gemini Flash Lite instance that receives the **original, unmodified c
 
 **What it misses:** with the default `QUARANTINE_MODEL` (`gemini-2.5-flash-lite`), the Q-Agent's aggregate catch rate on attacks written to evade both L1 and L2 is 86% (see `benchmarks/results/`), not near-100% — and it drops to 33% on the `detector_meta` category (attacks targeting the detector itself). A stronger `QUARANTINE_MODEL` closes most of that gap; see `docs/benchmark.md` for per-model numbers before treating L3 as a reliable backstop.
 
-**Latency:** 1-2s (Gemini round-trip). **Cost:** Gemini API tokens. **Optional per profile.**
+**Latency:** 1-2s per turn (Gemini round-trip). **Cost:** Gemini API tokens — one call per payload, three in clean mode. **Always runs;** its absence is a gap, never a skip.
 
 ## Coverage Matrix
 
@@ -147,27 +147,41 @@ What a profile controls is a threshold and a consequence:
   `_trentina_warning` (the calibration mode) and `block` refuses it outright.
   `TRENTINA_ENFORCEMENT_OVERRIDE=warn` is the kill switch.
 
-traffic never reached the judge — and since L2 flagged at `l2_threshold` while escalation needed
-a score gate, there was a band L2 flagged that L3 never reviewed. L1, L2 and L3 now run on
-every input to the gateway.
-
-A layer that is genuinely unavailable at runtime — no ONNX model, provider down — is a degraded
-state that `/health` reports and `block` mode refuses on. It is never a config option that fails
-silent.
+A layer that is unavailable at runtime (no ONNX model, provider down) is a degraded state that
+`/health` reports and `block` refuses on. `TRENTINA_REQUIRE_L2=false` / `TRENTINA_REQUIRE_L3=false`
+turn that layer's absence into a warning instead of a refusal; no setting excuses a partial read.
 
 ## Pipeline Flow
 
 ```
-Content in → L1 builds `l2_input` → L2 classify → L3 (if triggered) → Content out
-                                ↓
-                          Score < threshold?
-                          → Pass through with metadata sidecar
-                          Score ≥ threshold?
-                          → L3 re-extraction (quarantine mode)
-                          → Block (safe mode)
+Stage 0  pre-processors (outside the perimeter; subtract, never absolve)
+Stage 1  L1  ∥  L2          both read the payload as it arrived
+Stage 2  L3 detect          waits for both; briefed with both
+Stage 3  the mode decides delivery
 ```
 
-The `safe_*` tools fail-closed on L2 detection. The `quarantine_*` tools warn and proceed, extracting content through L3. Both add detection metadata so the consuming agent can make informed decisions.
+The mode decides what is delivered, never which layers run (`modes.py`):
+
+| mode  | L1 | L2 | L3 detect | L3 extract | L3 verify | delivers |
+|-------|----|----|-----------|------------|-----------|----------|
+| block | ✓ | ✓ | ✓ | — | — | nothing if any layer flagged; else the original |
+| warn  | ✓ | ✓ | ✓ | — | — | the original, plus the verdict |
+| clean | ✓ | ✓ | ✓ | from L1's normalized copy | the extraction | a verified extraction; nothing if verify objects |
+
+Ten rules hold on every path (#187):
+
+1. All three layers fire. No mode, config or source property reduces the count.
+2. L1 and L2 run in parallel on the arrived bytes, so their signals stay independent.
+3. L3 waits for both and sees both findings.
+4. The mode decides delivery, never detection.
+5. Every finding reaches the agent as structure — booleans, scores, closed-enum finding types — never as text L3 wrote. A page can steer the judge into quoting it.
+6. `warn` is a security-researcher grant, almost never right for an assistant, coding agent or swarm.
+7. `clean` runs L3 three times: detect, extract, verify. Verify objecting refuses; there is no fourth turn.
+8. Search is not special: L0's answer, titles and URLs are one document through the same path.
+9. `block` and `clean` require a verdict from every layer; `warn` delivers regardless, loudly. An absent layer can be excused per layer; a partial read cannot.
+10. The allowlist never skips a layer or hides a flag. It turns a block into a clean — and a clean that fails still refuses.
+
+The gateway applies the same rule to proxied responses and tool descriptions under `defense.enforcement` (`warn` or `block`).
 
 ## Related
 

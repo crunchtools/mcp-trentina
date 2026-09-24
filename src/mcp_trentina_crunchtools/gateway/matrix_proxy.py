@@ -65,19 +65,31 @@ logger = logging.getLogger(__name__)
 _DEFAULT_UPSTREAM = "https://matrix-client.matrix.org"
 
 _SYNC_TIMEOUT = httpx.Timeout(
-    connect=10.0, read=120.0, write=10.0, pool=5.0,
+    connect=10.0,
+    read=120.0,
+    write=10.0,
+    pool=5.0,
 )
 
 MATRIX_HTTP_METHODS = [
-    "GET", "POST", "PUT", "DELETE", "OPTIONS",
+    "GET",
+    "POST",
+    "PUT",
+    "DELETE",
+    "OPTIONS",
 ]
 
 # Endpoints whose responses carry room content the agent will read. Event
 # and context fetches are exactly what reply-handling bots do; /search is a
 # POST that returns message bodies.
 _SCANNED_PATH_MARKERS = (
-    "/sync", "/messages", "/event/", "/context/", "/relations",
-    "/notifications", "/search",
+    "/sync",
+    "/messages",
+    "/event/",
+    "/context/",
+    "/relations",
+    "/notifications",
+    "/search",
 )
 
 # Only buffer-and-scan bodies up to this size; a larger one forwards
@@ -122,7 +134,8 @@ async def close_matrix_client() -> None:
 
 
 def _resolve_profile_by_matrix_token(
-    token: str, profiles: dict[str, Profile],
+    token: str,
+    profiles: dict[str, Profile],
 ) -> Profile | None:
     token_bytes = token.encode("utf-8")
     match: Profile | None = None
@@ -155,9 +168,7 @@ def register_matrix_routes(
         )
     upstream = upstream.rstrip("/")
 
-    matrix_profiles = [
-        name for name, p in profiles.items() if p.matrix_ingress is not None
-    ]
+    matrix_profiles = [name for name, p in profiles.items() if p.matrix_ingress is not None]
     if not matrix_profiles:
         logger.warning(
             "matrix_proxy: matrix.enabled is set but no profile has a "
@@ -169,17 +180,22 @@ def register_matrix_routes(
         profile = _resolve_profile_by_matrix_token(token, profiles)
         if profile is None:
             return Response(
-                content="unauthorized", status_code=401, media_type=PLAIN_TEXT,
+                content="unauthorized",
+                status_code=401,
+                media_type=PLAIN_TEXT,
             )
         return await _proxy_matrix(request, upstream, profile)
 
     mcp_server.custom_route(
-        "/matrix/{token}/{path:path}", methods=MATRIX_HTTP_METHODS,
+        "/matrix/{token}/{path:path}",
+        methods=MATRIX_HTTP_METHODS,
     )(matrix_proxy_endpoint)
 
     logger.info(
         "matrix_proxy: registered /matrix/{token}/{path} → %s for %d profile(s): %s",
-        upstream, len(matrix_profiles), ", ".join(matrix_profiles) or "(none)",
+        upstream,
+        len(matrix_profiles),
+        ", ".join(matrix_profiles) or "(none)",
     )
 
 
@@ -188,7 +204,9 @@ def _should_scan(method: str, path: str) -> bool:
 
 
 async def _proxy_matrix(
-    request: Request, upstream: str, profile: Profile,
+    request: Request,
+    upstream: str,
+    profile: Profile,
 ) -> Response:
     """Forward one Matrix Client-Server API request."""
     raw_path = request.path_params.get("path", "")
@@ -196,7 +214,8 @@ async def _proxy_matrix(
     if path is None:
         return Response(
             content="Path traversal rejected",
-            status_code=400, media_type=PLAIN_TEXT,
+            status_code=400,
+            media_type=PLAIN_TEXT,
         )
 
     upstream_url = f"{upstream}/{path}"
@@ -211,7 +230,8 @@ async def _proxy_matrix(
     try:
         resp = await client.send(
             client.build_request(
-                request.method, upstream_url,
+                request.method,
+                upstream_url,
                 headers=fwd_headers,
                 content=request.stream() if has_body else None,
             ),
@@ -220,23 +240,21 @@ async def _proxy_matrix(
     except httpx.TimeoutException:
         return Response(
             content="Matrix upstream timeout",
-            status_code=504, media_type=PLAIN_TEXT,
+            status_code=504,
+            media_type=PLAIN_TEXT,
         )
     except httpx.ConnectError as exc:
         logger.warning("matrix_proxy: connect error: %s", exc)
         return Response(
             content="Matrix upstream unreachable",
-            status_code=502, media_type=PLAIN_TEXT,
+            status_code=502,
+            media_type=PLAIN_TEXT,
         )
 
     resp_headers = filter_response_headers(list(resp.headers.items()))
     ct = resp.headers.get("content-type", "application/json")
 
-    if (
-        resp.status_code == 200
-        and _should_scan(request.method, path)
-        and "json" in ct
-    ):
+    if resp.status_code == 200 and _should_scan(request.method, path) and "json" in ct:
         return await _scan_and_forward(resp, resp_headers, ct, profile, path)
 
     async def stream_body() -> AsyncIterator[bytes]:
@@ -247,8 +265,10 @@ async def _proxy_matrix(
             await resp.aclose()
 
     return StreamingResponse(
-        stream_body(), status_code=resp.status_code,
-        headers=resp_headers, media_type=ct,
+        stream_body(),
+        status_code=resp.status_code,
+        headers=resp_headers,
+        media_type=ct,
     )
 
 
@@ -304,9 +324,7 @@ async def _provider_for(profile: Profile) -> Any:
                 refetch_cooldown_seconds=cfg.refetch_cooldown_seconds,
             )
             await provider.start()
-            logger.warning(
-                "matrix_proxy: key backup ready for profile=%s", profile.name
-            )
+            logger.warning("matrix_proxy: key backup ready for profile=%s", profile.name)
         except Exception:
             logger.exception(
                 "matrix_proxy: key backup unavailable for profile=%s — "
@@ -385,7 +403,8 @@ async def _scan_and_forward(
             # what we have plus the remainder, and say so loudly.
             logger.warning(
                 "matrix_proxy: %s response exceeds %d bytes — forwarded unscanned",
-                path, _MAX_SCAN_BYTES,
+                path,
+                _MAX_SCAN_BYTES,
             )
 
             async def passthrough() -> AsyncIterator[bytes]:
@@ -398,8 +417,10 @@ async def _scan_and_forward(
                     await resp.aclose()
 
             return StreamingResponse(
-                passthrough(), status_code=200,
-                headers=headers, media_type=content_type,
+                passthrough(),
+                status_code=200,
+                headers=headers,
+                media_type=content_type,
             )
     await resp.aclose()
     body = b"".join(chunks)
@@ -450,10 +471,13 @@ async def _scan_and_forward(
         logger.warning(
             "matrix_proxy: scan deadline %.1fs exceeded for %s profile=%s — "
             "forwarding UNSCANNED with a warning",
-            deadline, path, profile.name,
+            deadline,
+            path,
+            profile.name,
         )
-        return _respond(payload, body, headers, content_type,
-                        {"risk_level": "unknown", "scan_timeout": True})
+        return _respond(
+            payload, body, headers, content_type, {"risk_level": "unknown", "scan_timeout": True}
+        )
     except Exception:
         # A parse failure here is attacker-reachable (any room member can
         # ship pathological JSON), so "scan failed" must not mean "clean":
@@ -465,15 +489,16 @@ async def _scan_and_forward(
             path,
         )
         await _text_fallback_scan(body, profile, path)
-        return Response(content=body, status_code=200,
-                        headers=headers, media_type=content_type)
+        return Response(content=body, status_code=200, headers=headers, media_type=content_type)
 
     extras = describe(view, cfg) if (view is not None and cfg is not None) else {}
     warning = build_warning(verdict, extras=extras)
     if verdict.flagged:
         logger.warning(
             "matrix_proxy: flagged %s for profile=%s risk=%s flagged_by=%s",
-            path, profile.name, verdict.risk_level,
+            path,
+            profile.name,
+            verdict.risk_level,
             verdict.flagged_by.value if verdict.flagged_by else None,
         )
     elif warning is not None:
@@ -484,7 +509,8 @@ async def _scan_and_forward(
         # response was delivered indistinguishable from a complete clean one.
         logger.warning(
             "matrix_proxy: incomplete scan of %s for profile=%s — %s",
-            path, profile.name,
+            path,
+            profile.name,
             ",".join(sorted(k for k in warning if k.endswith(("truncated", "unavailable")))),
         )
 
@@ -508,8 +534,7 @@ def _respond(
     if warning is not None and isinstance(payload, dict):
         payload["_trentina_warning"] = warning
         body = json.dumps(payload).encode("utf-8")
-    return Response(content=body, status_code=200,
-                    headers=headers, media_type=content_type)
+    return Response(content=body, status_code=200, headers=headers, media_type=content_type)
 
 
 async def _text_fallback_scan(body: bytes, profile: Profile, path: str) -> None:
@@ -525,14 +550,15 @@ async def _text_fallback_scan(body: bytes, profile: Profile, path: str) -> None:
             source=f"matrix:{profile.name}:{path}",
             source_type="matrix_sync",
             defense=profile.defense,
-            guarded=False,
         )
         if verdict.flagged:
             logger.error(
                 "matrix_proxy: UNPARSEABLE response FLAGGED for profile=%s "
                 "path=%s risk=%s — forwarded (no annotation channel); "
                 "investigate the sender",
-                profile.name, path, verdict.risk_level,
+                profile.name,
+                path,
+                verdict.risk_level,
             )
     except Exception:
         logger.exception("matrix_proxy: text-mode fallback scan failed for %s", path)

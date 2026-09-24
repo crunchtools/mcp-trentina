@@ -3,26 +3,15 @@
 from __future__ import annotations
 
 import os
-import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ..config import get_config
 from ..database import is_blocked
-from ..dbus_interface import emit_request_event
-from ..defense import advise, defend, enforce_block
 from ..errors import BlockedSourceError, FileReadError
 from ..models import ALLOWED_TEXT_EXTENSIONS
-from ..quarantine.agent import quarantine_extract
-from ..quarantine.classifier import (
-    join_warnings,
-    truncation_warning,
-)
-from ..report import Disposition, build_report
-from ..warning import build_warning
-
-if TYPE_CHECKING:
-    from ..l1.pipeline import PipelineResult
+from ..modes import Mode
+from .judged import judge_and_deliver
 
 MAX_FILE_SIZE = 2_000_000
 BINARY_CHECK_BYTES = 8192
@@ -69,192 +58,41 @@ def _validate_file(path: str) -> str:
     return resolved
 
 
-def _build_l1_metadata(pipeline_result: PipelineResult) -> dict[str, Any]:
-    """Build the L1 section of a tool response."""
-    return {
-        "input_size": pipeline_result.input_size,
-        "output_size": pipeline_result.output_size,
-        "stripped": pipeline_result.stats.to_flat_dict(),
-    }
-
-
-async def _read_judged(path: str, *, mode: str) -> dict[str, Any]:
-    """Read, judge with all three layers, dispose of it per `mode`.
-
-    `block` and `warn` run identically and deliver the same bytes; they
-    differ in one decision. See `fetch.py` for why that is a parameter and
-    not a second function.
-    """
-    start_time = time.time()
-    config = get_config()
-
+async def _read(path: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
+    """Read one text file, then hand it to the one judging path."""
     resolved = _validate_file(path)
 
     blocked = is_blocked(resolved)
-    if blocked:
+    if blocked and mode is not Mode.CLEAN:
         raise BlockedSourceError(resolved, blocked["detected_at"])
 
     with open(resolved, encoding="utf-8", errors="replace") as fh:
         content = fh.read()
 
-    is_trusted = config.is_trusted_path(resolved)
-
-    verdict = await defend(
+    return await judge_and_deliver(
         content,
+        mode=mode,
+        family="read",
         source=resolved,
         source_type="file",
-        is_trusted=is_trusted,
-        # read/ decides HTML-ness from the extension as well as the body, which
-        # fetch/ cannot do. Pass the answer rather than let the pipeline guess.
+        kind="file",
+        ref=resolved,
+        prompt=prompt,
+        allowlisted=get_config().is_trusted_path(resolved),
+        blocklisted_at=blocked["detected_at"] if blocked else None,
     )
-    if mode == "block":
-        enforce_block(verdict, resolved)
-
-    pipeline_result = verdict.pipeline
-    classification = verdict.classification
-    warning = build_warning(verdict)
-    disposition = (
-        Disposition.ANNOTATED if warning is not None else Disposition.DELIVERED
-    )
-
-    emit_request_event(
-        tool=f"{mode}_read",
-        source=resolved,
-        disposition=disposition.value,
-        risk_level=pipeline_result.stats.risk_level(),
-        l1_detections=pipeline_result.stats.total_detections(),
-        l1_suspicious=pipeline_result.stats.suspicious_detections(),
-        l2_label=classification.label if classification else None,
-        l2_score=classification.score if classification else None,
-        input_size=pipeline_result.input_size,
-        output_size=pipeline_result.output_size,
-        stats=pipeline_result.stats.to_flat_dict(),
-        start_time=start_time,
-    )
-
-    result: dict[str, Any] = {
-        "content": pipeline_result.content,
-        "scan": build_report(
-            verdict, disposition=disposition, kind="file", ref=resolved,
-            allowlisted=is_trusted,
-        ),
-        "l1": _build_l1_metadata(pipeline_result),
-    }
-
-    # Only `warn` reaches here flagged; `block` raised. Also attached when
-    # nothing flagged but something could not be READ.
-    if warning is not None:
-        result["_trentina_warning"] = warning
-    return result
 
 
 async def block_read(path: str) -> dict[str, Any]:
-    """Fail closed: a flagged file raises and the agent never sees the bytes."""
-    return await _read_judged(path, mode="block")
+    """Refuse a flagged or incompletely judged file; otherwise the exact bytes."""
+    return await _read(path, Mode.BLOCK)
 
 
 async def warn_read(path: str) -> dict[str, Any]:
-    """Deliver the bytes that are on disk, with the verdict attached."""
-    return await _read_judged(path, mode="warn")
+    """The bytes on disk, with the verdict attached when there is one."""
+    return await _read(path, Mode.WARN)
 
 
 async def clean_read(path: str, prompt: str) -> dict[str, Any]:
-    """Read local file with Layer 1 + Layer 2 (Q-Agent) extraction."""
-    start_time = time.time()
-    config = get_config()
-
-    resolved = _validate_file(path)
-
-    blocked = is_blocked(resolved)
-    blocklist_warning = None
-    if blocked:
-        blocklist_warning = (
-            f"Warning: file previously flagged at {blocked['detected_at']}. "
-            "Proceeding in quarantine mode."
-        )
-
-    with open(resolved, encoding="utf-8", errors="replace") as fh:
-        content = fh.read()
-
-    is_trusted = config.is_trusted_path(resolved)
-
-    verdict = await advise(
-        content,
-        source=resolved,
-        source_type="file",
-        is_trusted=is_trusted,
-    )
-    pipeline_result = verdict.pipeline
-    classification = verdict.classification
-
-    classifier_warning = None
-    if classification and classification.label == "MALICIOUS":
-        classifier_warning = (
-            f"Layer 2 classifier flagged content as MALICIOUS "
-            f"(score: {classification.score:.3f}). Proceeding in quarantine mode."
-        )
-    classifier_warning = join_warnings(
-        classifier_warning, truncation_warning(classification)
-    )
-
-    def _emit(disposition: str) -> None:
-        emit_request_event(
-            tool="clean_read",
-            source=resolved,
-            disposition=disposition,
-            risk_level=pipeline_result.stats.risk_level(),
-            l1_detections=pipeline_result.stats.total_detections(),
-            l1_suspicious=pipeline_result.stats.suspicious_detections(),
-            l2_label=classification.label if classification else None,
-            l2_score=classification.score if classification else None,
-            input_size=pipeline_result.input_size,
-            output_size=pipeline_result.output_size,
-            stats=pipeline_result.stats.to_flat_dict(),
-            start_time=start_time,
-        )
-
-    if is_trusted:
-        _emit(Disposition.DELIVERED.value)
-        return {
-            "content": {"extracted_text": pipeline_result.content},
-            "scan": build_report(
-                verdict, disposition=Disposition.DELIVERED, kind="file",
-                ref=resolved, allowlisted=True,
-            ),
-            "l1": _build_l1_metadata(pipeline_result),
-            "blocklist_warning": blocklist_warning,
-            "classifier_warning": classifier_warning,
-        }
-
-    if not config.has_api_key:
-        if config.fallback == "fail":
-            from ..errors import ConfigError
-
-            raise ConfigError("GEMINI_API_KEY required and QUARANTINE_FALLBACK=fail")
-        _emit(Disposition.DELIVERED.value)
-        return {
-            "content": {"extracted_text": pipeline_result.content},
-            "scan": build_report(
-                verdict, disposition=Disposition.DELIVERED, kind="file",
-                ref=resolved, allowlisted=is_trusted,
-            ),
-            "l1": _build_l1_metadata(pipeline_result),
-            "blocklist_warning": blocklist_warning,
-            "classifier_warning": classifier_warning,
-        }
-
-    truncated = pipeline_result.content[: config.max_content]
-    extraction = await quarantine_extract(truncated, prompt)
-
-    _emit(Disposition.EXTRACTED.value)
-    return {
-        "content": extraction.get("content", {}),
-        "scan": build_report(
-            verdict, disposition=Disposition.EXTRACTED, kind="file", ref=resolved,
-            allowlisted=is_trusted, extracted_by=config.model,
-        ),
-        "l1": _build_l1_metadata(pipeline_result),
-        "usage": extraction.get("usage", {}),
-        "blocklist_warning": blocklist_warning,
-        "classifier_warning": classifier_warning,
-    }
+    """A verified L3 extraction instead of the file."""
+    return await _read(path, Mode.CLEAN, prompt)

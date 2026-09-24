@@ -80,7 +80,8 @@ async def close_alert_client() -> None:
 
 
 def _resolve_profile_by_alert_token(
-    token: str, profiles: dict[str, Profile],
+    token: str,
+    profiles: dict[str, Profile],
 ) -> Profile | None:
     token_bytes = token.encode("utf-8")
     match: Profile | None = None
@@ -94,12 +95,11 @@ def _resolve_profile_by_alert_token(
 
 
 def register_alert_routes(
-    mcp_server: Any, profiles: dict[str, Profile],
+    mcp_server: Any,
+    profiles: dict[str, Profile],
 ) -> None:
     """Wire ``POST /alert/{token}`` onto the FastMCP server."""
-    alert_profiles = [
-        name for name, p in profiles.items() if p.alert_ingress is not None
-    ]
+    alert_profiles = [name for name, p in profiles.items() if p.alert_ingress is not None]
     if not alert_profiles:
         logger.info("alert_ingress: no profiles configured, skipping")
         return
@@ -111,23 +111,29 @@ def register_alert_routes(
 
     logger.info(
         "alert_ingress: registered /alert/{token} for %d profile(s): %s",
-        len(alert_profiles), ", ".join(alert_profiles),
+        len(alert_profiles),
+        ", ".join(alert_profiles),
     )
 
 
 async def _handle_alert(
-    request: Request, profiles: dict[str, Profile],
+    request: Request,
+    profiles: dict[str, Profile],
 ) -> Response:
     token = request.path_params.get("token", "")
     if not token:
         return Response(
-            content="missing token", status_code=400, media_type="text/plain",
+            content="missing token",
+            status_code=400,
+            media_type="text/plain",
         )
 
     profile = _resolve_profile_by_alert_token(token, profiles)
     if profile is None:
         return Response(
-            content="unauthorized", status_code=401, media_type="text/plain",
+            content="unauthorized",
+            status_code=401,
+            media_type="text/plain",
         )
 
     if profile.alert_ingress is None:
@@ -135,7 +141,9 @@ async def _handle_alert(
         # alert_ingress is set -- this branch means that invariant broke.
         logger.error("alert_ingress: resolved profile has no alert_ingress config")
         return Response(
-            content="internal error", status_code=500, media_type="text/plain",
+            content="internal error",
+            status_code=500,
+            media_type="text/plain",
         )
     forward_url = profile.alert_ingress.forward_url
 
@@ -148,7 +156,9 @@ async def _handle_alert(
         # client from an attack, so it is logged rather than discarded.
         logger.warning("alert_ingress: could not read request body", exc_info=True)
         return Response(
-            content="bad request body", status_code=400, media_type="text/plain",
+            content="bad request body",
+            status_code=400,
+            media_type="text/plain",
         )
 
     forward_body, risk_level, flagged, counts = await _defend_alert(body, profile)
@@ -157,7 +167,11 @@ async def _handle_alert(
     log_fn = logger.warning if flagged else logger.info
     log_fn(
         "alert_ingress: profile=%s source_ip=%s risk=%s l1_detections=%d payload=%s",
-        profile.name, client_host, risk_level, counts.detections, forward_body[:4000],
+        profile.name,
+        client_host,
+        risk_level,
+        counts.detections,
+        forward_body[:4000],
     )
 
     enforcement = profile.alert_ingress.enforcement
@@ -166,13 +180,13 @@ async def _handle_alert(
         # rather than forwarding the bytes it exists to replace — the same
         # reading the tool path takes.
         logger.warning(
-            "alert_ingress: refusing flagged payload for profile=%s "
-            "(enforcement=%s risk=%s)", profile.name, enforcement, risk_level,
+            "alert_ingress: refusing flagged payload for profile=%s (enforcement=%s risk=%s)",
+            profile.name,
+            enforcement,
+            risk_level,
         )
         return Response(
-            content=json.dumps(
-                {"error": "payload refused by trentina", "risk_level": risk_level}
-            ),
+            content=json.dumps({"error": "payload refused by trentina", "risk_level": risk_level}),
             status_code=403,
             media_type="application/json",
         )
@@ -181,7 +195,9 @@ async def _handle_alert(
     if profile.alert_ingress.forward_secret is not None:
         secret = profile.alert_ingress.forward_secret.get_secret_value()
         sig = hmac.new(
-            secret.encode("utf-8"), forward_body, hashlib.sha256,
+            secret.encode("utf-8"),
+            forward_body,
+            hashlib.sha256,
         ).hexdigest()
         fwd_headers["X-Hub-Signature-256"] = f"sha256={sig}"
 
@@ -195,17 +211,23 @@ async def _handle_alert(
     except httpx.TimeoutException:
         logger.warning("alert_ingress: timeout forwarding to %s", forward_url)
         return Response(
-            content="forward timeout", status_code=504, media_type="text/plain",
+            content="forward timeout",
+            status_code=504,
+            media_type="text/plain",
         )
     except httpx.ConnectError as exc:
         logger.warning("alert_ingress: connect error to %s: %s", forward_url, exc)
         return Response(
-            content="forward unreachable", status_code=502, media_type="text/plain",
+            content="forward unreachable",
+            status_code=502,
+            media_type="text/plain",
         )
 
     logger.info(
         "alert_ingress: forwarded to %s for profile %s (status=%d)",
-        forward_url, profile.name, resp.status_code,
+        forward_url,
+        profile.name,
+        resp.status_code,
     )
 
     return Response(
@@ -216,7 +238,8 @@ async def _handle_alert(
 
 
 async def _defend_alert(
-    body: bytes, profile: Profile,
+    body: bytes,
+    profile: Profile,
 ) -> tuple[bytes, str, bool, _L1Counts]:
     """Run the three-layer defense over an alert payload.
 
@@ -259,7 +282,10 @@ async def _defend_alert(
         # L1 per leaf so the JSON survives; L2/L3 read the joined document, so
         # an instruction split across two fields is still visible.
         verdict = await defend_json(
-            payload, source=source, source_type="alert", defense=defense,
+            payload,
+            source=source,
+            source_type="alert",
+            defense=defense,
         )
         counts = _L1Counts(
             detections=verdict.verdict.pipeline.stats.total_detections(),
@@ -270,12 +296,12 @@ async def _defend_alert(
         final = verdict.verdict
     else:
         text = body.decode("utf-8", errors="replace")
-        # defend(), not advise(): advise shuts the L3 gate, and the text
-        # branch used to get Q-Agent detection before the refactor — losing
-        # it here was a silent downgrade for every non-JSON alert body.
         first = await defend(
-            text, source=source, source_type="alert", defense=defense,
-            guarded=False, record=False,
+            text,
+            source=source,
+            source_type="alert",
+            defense=defense,
+            record=False,
         )
         counts = _L1Counts(
             detections=first.pipeline.stats.total_detections(),

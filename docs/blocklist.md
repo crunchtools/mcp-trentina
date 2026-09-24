@@ -24,22 +24,17 @@ Each blocklist entry contains:
 
 ### Detection → Blocklist
 
-When the defense pipeline detects an injection:
+A source enters the blocklist when `block_*` **refuses** it: any layer flagged it and the source is not allowlisted. The row is keyed by:
 
-1. L2 (classifier) or L3 (Q-Agent) flags the content as malicious
-2. The source identifier is computed:
-   - **URLs**: the full URL
-   - **Files**: the file path
-   - **Inline content**: SHA-256 hash of the content
-3. The source is added to the SQLite blocklist with the detection timestamp and risk level
+- **URLs**: the full URL
+- **Files and directories**: the resolved path
+- **Inline content**: the SHA-256 of the content
 
-### Blocklist → Warning
+`warn_*` and `clean_*` record their detections too, but as observations (`blocked = 0`), so they never feed the blocklist. Until 0.31.0 every row was written blocked, which meant a `warn_fetch` of a flagged page blocklisted it and the next `warn_fetch` of the same page was refused.
 
-On subsequent requests for a blocklisted source:
+### Blocklist → Refusal
 
-1. The source identifier is checked against the blocklist before the defense pipeline runs
-2. If found, a `blocklist_warning` field is added to the response
-3. The content is still processed (quarantine mode) or rejected (safe mode), but the warning tells the consuming agent that this source was previously flagged
+The blocklist is checked before any bytes are fetched. `block_*` and `warn_*` refuse a blocklisted source outright. `clean_*` proceeds — it delivers only a verified extraction — and sets `blocklisted: true` in `_trentina_warning`.
 
 ### Viewing the Blocklist
 

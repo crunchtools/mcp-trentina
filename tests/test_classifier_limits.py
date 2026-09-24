@@ -26,8 +26,6 @@ from mcp_trentina_crunchtools.quarantine.classifier import (
     classifier_status,
     classify,
     classify_async,
-    classify_guarded,
-    truncation_warning,
 )
 
 if TYPE_CHECKING:
@@ -135,23 +133,29 @@ class TestSegmentCap:
 
 
 class TestFailClosed:
-    """Untrusted content that cannot be fully scanned must not read as clean."""
+    """A caller that refuses a partial scan anyway (block, clean) bails early.
+
+    Whether a partial scan is refused is the mode's decision (modes.py); the
+    classifier's part is not to spend inference on a verdict nobody will use.
+    """
 
     @pytest.mark.asyncio
-    async def test_untrusted_truncated_raises(self) -> None:
+    async def test_truncated_raises_when_asked_to(self) -> None:
         with (
             mocked_model(token_count=462_000),
             pytest.raises(UnscannableContentError) as exc,
         ):
-            await classify_guarded(
-                "x" * 855_551, "https://example.com/big.pdf", is_trusted=False
+            await classify_async(
+                "x" * 855_551,
+                fail_on_truncate=True,
+                source="https://example.com/big.pdf",
             )
 
         assert "462000" in str(exc.value)
         assert "example.com/big.pdf" in str(exc.value)
 
     @pytest.mark.asyncio
-    async def test_untrusted_bails_before_running_any_inference(self) -> None:
+    async def test_bails_before_running_any_inference(self) -> None:
         """The verdict is known at the token count; scanning first is wasted CPU.
 
         Letting the ~128 capped passes run before raising gave an attacker a
@@ -161,57 +165,27 @@ class TestFailClosed:
             mocked_model(token_count=462_000) as session,
             pytest.raises(UnscannableContentError),
         ):
-            await classify_guarded("x", "https://evil.test/big", is_trusted=False)
+            await classify_async("x", fail_on_truncate=True, source="https://evil.test/big")
 
         assert session.run.call_count == 0
 
     @pytest.mark.asyncio
-    async def test_trusted_still_scans(self) -> None:
-        """Only the untrusted path short-circuits; trusted content is scanned."""
+    async def test_warn_path_scans_and_marks_truncated(self) -> None:
+        """warn delivers a partial scan with a warning, so it pays for one."""
         with mocked_model(token_count=462_000) as session:
-            await classify_guarded("x", "/srv/trusted/doc", is_trusted=True)
+            result = await classify_async("x" * 855_551)
 
         assert session.run.call_count > 0
-
-    @pytest.mark.asyncio
-    async def test_trusted_truncated_passes_with_flag(self) -> None:
-        """A trusted source is allowed through, but the partial scan is visible."""
-        with mocked_model(token_count=462_000):
-            result = await classify_guarded(
-                "x" * 855_551, "/srv/trusted/doc.txt", is_trusted=True
-            )
-
         assert result is not None
         assert result.truncated is True
 
     @pytest.mark.asyncio
-    async def test_untrusted_within_cap_passes(self) -> None:
+    async def test_within_cap_passes(self) -> None:
         with mocked_model(token_count=4_000):
-            result = await classify_guarded(
-                "normal", "https://example.com/", is_trusted=False
-            )
+            result = await classify_async("normal", fail_on_truncate=True)
 
         assert result is not None
         assert result.truncated is False
-
-
-class TestTruncationWarning:
-    """quarantine_* and scan_* tools surface truncation instead of raising."""
-
-    def test_warning_text_when_truncated(self) -> None:
-        with mocked_model(token_count=462_000):
-            result = classify("x")
-            warning = truncation_warning(result)
-
-        assert warning is not None
-        assert "462000" in warning
-
-    def test_no_warning_when_complete(self) -> None:
-        with mocked_model(token_count=100):
-            assert truncation_warning(classify("x")) is None
-
-    def test_no_warning_when_classifier_unavailable(self) -> None:
-        assert truncation_warning(None) is None
 
 
 class TestAsyncOffload:
@@ -222,7 +196,7 @@ class TestAsyncOffload:
         loop_thread = threading.get_ident()
         seen: list[int] = []
 
-        def record(_text: str) -> None:
+        def record(_text: str, **_kw: object) -> None:
             seen.append(threading.get_ident())
 
         with patch(
@@ -323,9 +297,9 @@ class TestWindowGeometry:
         for pos in range(total - self.GUARD_BAND):
             span_end = pos + self.GUARD_BAND
             assert any(
-                seg_start <= pos and span_end <= seg_end
-                for seg_start, seg_end in segments
+                seg_start <= pos and span_end <= seg_end for seg_start, seg_end in segments
             ), f"a {self.GUARD_BAND}-token span at {pos} is split across every window"
+
 
 class TestPadSegment:
     """Model input is built from token IDs instead of a decode/re-encode round trip."""

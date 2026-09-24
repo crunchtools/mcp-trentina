@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from mcp_trentina_crunchtools.models import FetchInput, ReadInput, ScanInput
+from mcp_trentina_crunchtools.models import FetchInput, ReadInput
 
 
 class TestFetchInput:
@@ -58,28 +58,3 @@ class TestReadInput:
     def test_rejects_extra_fields(self) -> None:
         with pytest.raises(ValidationError):
             ReadInput(path="/tmp/test.md", evil="payload")  # type: ignore[call-arg]
-
-
-class TestScanInput:
-    """Test scan input validation."""
-
-    def test_valid_url(self) -> None:
-        inp = ScanInput(url="https://example.com")
-        assert inp.url == "https://example.com"
-
-    def test_valid_path(self) -> None:
-        inp = ScanInput(path="/tmp/test.md")
-        assert inp.path == "/tmp/test.md"
-
-    def test_rejects_ftp_url(self) -> None:
-        with pytest.raises(ValidationError):
-            ScanInput(url="ftp://evil.com")
-
-    def test_rejects_path_traversal(self) -> None:
-        with pytest.raises(ValidationError):
-            ScanInput(path="../../../etc/passwd")
-
-    def test_both_none_allowed(self) -> None:
-        inp = ScanInput()
-        assert inp.url is None
-        assert inp.path is None

@@ -90,7 +90,8 @@ def _build_interface() -> Any:
                     "blocklist": stats,
                     "config": {
                         "model": config.model,
-                        "fallback": config.fallback,
+                        "require_l2": config.require_l2,
+                        "require_l3": config.require_l3,
                         "max_content": config.max_content,
                     },
                     "layers": {

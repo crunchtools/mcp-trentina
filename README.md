@@ -44,11 +44,11 @@ Every tool call through the gateway is recorded in SQLite with profile, backend,
 
 ### [Cumulative Detection Memory](docs/blocklist.md)
 
-When Trentina detects prompt injection in a source, it records the source in a SQLite blocklist. Future requests for that source trigger an immediate warning — the system remembers what it's seen before. Blocklist entries include the source URL or content hash, detection timestamp, and risk level.
+When `block_*` refuses a source, Trentina records it in a SQLite blocklist, and later `block_*`/`warn_*` requests for it are refused before anything is fetched — the system remembers what it's seen before. Blocklist entries include the source URL or content hash, detection timestamp, and risk level.
 
-### [Web Content Quarantine Tools](docs/quarantine-tools.md)
+### [Content Tools](docs/quarantine-tools.md)
 
-Trentina's original capability: safe web fetching, file reading, and web search with prompt injection defense. `block_fetch` fails on injection. `clean_fetch` warns but proceeds, extracting content through the Q-Agent. `clean_search` chains Gemini grounding with the full defense pipeline. `quarantine_scan` does pre-flight detection without returning content.
+Five families — `fetch` (URL), `read` (file), `dir` (directory listing), `content` (inline text), `search` (web) — each in three modes, picked by the agent per call. Every call runs all three layers; the mode decides only what is delivered. `block_*` refuses flagged or incompletely judged content. `warn_*` delivers the exact bytes with the verdict attached — a security-researcher grant. `clean_*` returns an extraction that L3 wrote and a second L3 pass verified.
 
 ### [LLM Key Proxying](docs/llm-proxying.md)
 
@@ -144,7 +144,8 @@ these variables control the process itself. Profile tokens
 | `OLLAMA_MODEL` | `qwen2.5:0.5b` | Model used when the Ollama provider is selected. See [LLM Key Proxying](docs/llm-proxying.md). |
 | `QUARANTINE_MODEL` | `gemini-2.5-flash-lite` | Model used for quarantine agent (L3) extraction/detection calls. |
 | `QUARANTINE_SEARCH_MODEL` | `gemini-2.5-flash` | Model used for grounded L0 search. |
-| `QUARANTINE_FALLBACK` | `layer1` | Behavior when the LLM provider is unavailable during quarantine processing. |
+| `TRENTINA_REQUIRE_L2` | `true` | `false` lets `block_*`/`clean_*` deliver with a warning when the L2 model is absent, instead of refusing. Never excuses a partial scan. See [Defense Pipeline](docs/defense-pipeline.md). |
+| `TRENTINA_REQUIRE_L3` | `true` | The same for an absent L3 provider. Replaces `QUARANTINE_FALLBACK` (removed in 0.31.0; setting it now fails startup). |
 | `QUARANTINE_MAX_CONTENT` | `100000` | Max characters of content sent to the quarantine LLM per call. See [Token Routing](docs/token-routing.md). |
 | `CLASSIFIER_THRESHOLD` | `0.5` | Malicious-score threshold above which the L2 classifier flags content. |
 | `CLASSIFIER_MODEL_PATH` | `/models/prompt-guard-2-86m` | Filesystem path to the ONNX classifier model. Set to `/models/prompt-guard-2-86m` by the container image. |

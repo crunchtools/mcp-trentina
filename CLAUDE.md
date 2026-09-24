@@ -14,7 +14,10 @@ uv run mcp-trentina-crunchtools
 - `GEMINI_API_KEY` — Required for Layer 2 (Q-Agent)
 - `QUARANTINE_MODEL` — Gemini model for Q-Agent (default: gemini-2.5-flash-lite)
 - `QUARANTINE_SEARCH_MODEL` — Gemini model for L0 search grounding (default: gemini-2.5-flash; must support google_search)
-- `QUARANTINE_FALLBACK` — "layer1" (default) or "fail"
+- `TRENTINA_REQUIRE_L2` / `TRENTINA_REQUIRE_L3` — default true: block and clean
+  refuse when that layer is ABSENT. `false` turns absence into a warning; a
+  partial read is never excused. `QUARANTINE_FALLBACK` was removed in 0.31.0
+  and setting it fails startup.
 - `QUARANTINE_MAX_CONTENT` — Max chars to Q-Agent (default: 100000)
 - `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-trentina/trentina.db)
 - `TRENTINA_PERIMETER_DB` — perimeter verdict store, a SEPARATE database from the
@@ -68,44 +71,38 @@ with input length. Two rules keep that bounded:
 - Input is capped at `CLASSIFIER_MAX_TOKENS`. Past that the result carries
   `truncated=True`. The default sits above what `QUARANTINE_MAX_CONTENT`
   (100k chars ≈ 28k tokens) can produce, so the two limits never fight.
-- A truncated scan of an **untrusted** source raises `UnscannableContentError`
-  rather than reporting BENIGN — `safe_*` tools fail closed. The `quarantine_*`
-  and `scan_*` tools report the partial scan as a warning instead, matching
-  their existing proceed-with-warnings contract.
+- A truncated scan is never reported as BENIGN. block and clean refuse it
+  (`modes.Gaps`), so they pass `fail_on_truncate=True` and skip the inference
+  at the token count; warn scans the head and delivers with `l2_truncated`.
 
-Async callers must use `classify_async` / `classify_guarded`. Calling the
+Async callers must use `classify_async`. Calling the
 synchronous `classify()` from a coroutine blocks the event loop for the whole
 scan and takes the gateway down with it.
 
 ## Tools
 
-### The three modes (0.26.0)
+### Five families, three modes (0.31.0)
 
-Every content tool runs all three layers. The PREFIX is the disposition, and
-the agent picks it per call; `tools_allow` limits which ones a profile is
-offered. Families: `fetch`, `read`, `content`, `search`.
+Rules P1–P10 are in `docs/defense-pipeline.md` (Pipeline Flow); the decision
+lives in `modes.py`, the tool-side path in `tools/judged.py`.
 
-- `block_*` — a flagged verdict raises; the agent never sees the content.
-- `warn_*` — delivers bytes IDENTICAL to what arrived, with
-  `_trentina_warning` attached. New in 0.26.0: there was previously no way to
-  ask for the real bytes plus a caution.
-- `clean_*` — returns a Q-Agent extraction instead of the original.
+Families: `fetch`, `read`, `dir`, `content`, `search`. Every call runs L1 ∥ L2
+on the arrived bytes, then L3 briefed with both. The PREFIX decides delivery,
+never detection; the agent picks it per call and `tools_allow` limits the menu.
 
-`safe_*` = `block_*` and `quarantine_*` = `clean_*`, deprecated, removed in
-0.28.0.
+- `block_*` — refuses a flag or any blocking gap. Allowlisted → clean instead.
+- `warn_*` — bytes IDENTICAL to what arrived, `_trentina_warning` attached. A
+  security-researcher grant; leave it out of agent profiles.
+- `clean_*` — L3 detect, extract, verify; any objection refuses.
+
+No text written by L3 reaches an agent: finding types are a closed enum
+(`prompts.FINDING_TYPES`). The diagnostic scans were removed in 0.31.0;
+`quarantine_scan_dir` became `dir`.
 
 NOTE the asymmetry: `clean` is a TOOL prefix, not an enforcement mode.
 `defense.enforcement` accepts only `warn` and `block`, and refuses `clean` at
 load. A tool call carries an extraction prompt; a proxied backend response
 does not, which is why the gateway never implemented it.
-
-`block_*` now also carries `_trentina_warning` when a scan could not COMPLETE
-but nothing was flagged (L2 unavailable, L3 unavailable). It used to deliver
-that silently.
-
-### Diagnostics (no mode prefix — they report, they do not deliver)
-- quarantine_scan, deep_quarantine_scan, scan_content, deep_scan_content
-- quarantine_scan_dir — scan a directory for Python module shadowing attacks (e.g. struct.py replacing stdlib struct)
 
 ### Stats
 - quarantine_stats — role-scoped like the gateway admin tools below: an agent
@@ -159,8 +156,10 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
   It does not make content safe — it counts what it found and normalizes a
   COPY for L2 to read. `PipelineResult` carries exactly two strings and the
   names say who reads each: `content` is what the agent receives, byte-identical
-  to what arrived; `l2_input` is what L2 reads. L3 reads NEITHER — it gets the
-  original content plus L1's counts as a briefing.
+  to what arrived, and what L2 and L3 detect on; `l2_input` is L1's normalized
+  copy, which L2 reads AS WELL when L1 normalized anything, and which clean's
+  extraction turn reads. L1 also takes a directory's stdlib-shadow counts
+  (`ShadowStats`), merged in by the `dir` producer.
 
   There is no "scan view" and no "delivery view". Those names were retired in
   0.29.0 along with `sanitize`/`scanview`: a reader cannot tell from "scan

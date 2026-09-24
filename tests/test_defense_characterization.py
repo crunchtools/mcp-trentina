@@ -27,14 +27,10 @@ from __future__ import annotations
 
 import inspect
 import json
-from contextlib import ExitStack
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-import pytest
-
-from mcp_trentina_crunchtools.errors import BlockedSourceError
 from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
 
@@ -60,218 +56,17 @@ L1_HOSTILE = (
 )
 
 
-_FETCH = "mcp_trentina_crunchtools.tools.fetch"
 _DEFENSE = "mcp_trentina_crunchtools.defense"
 
 
-def _enter_fetch_patches(
-    stack: ExitStack,
-    *,
-    classification: ClassifierResult | None,
-    trusted: bool,
-    has_api_key: bool,
-    detection: dict[str, Any] | None = None,
-    content: str = "<p>Hello</p>",
-) -> Any:
-    """Patch every seam block_fetch/clean_fetch reaches out through.
-
-    Post-extraction these straddle two modules: the IO and trust decisions
-    still belong to the tool, while the pipeline's own seams (L2, L3, the
-    detection write) now live in defense.py. The split is the point — the
-    assertions below did not move.
-    """
-
-    def pf(name: str, **kw: Any) -> Any:
-        return stack.enter_context(patch(f"{_FETCH}.{name}", **kw))
-
-    def pd(name: str, **kw: Any) -> Any:
-        return stack.enter_context(patch(f"{_DEFENSE}.{name}", **kw))
-
-    pf("fetch_url", return_value=(content, "text/html"))
-    pf("is_blocked", return_value=None)
-    pf("quarantine_extract", return_value={"content": {"extracted_text": "x"}})
-    cfg = pf("get_config")
-    cfg.return_value.is_trusted_domain.return_value = trusted
-    cfg.return_value.has_api_key = has_api_key
-    cfg.return_value.fallback = "warn"
-    cfg.return_value.max_content = 100_000
-
-    pd("classify_guarded", return_value=classification)
-    pd("classify_async", return_value=classification)
-    pd("quarantine_detect", return_value=detection or {"injection_detected": False})
-    pd("emit_detection_event")
-    dcfg = pd("get_config")
-    dcfg.return_value.has_api_key = has_api_key
-    return cfg
-
-
-class TestSafeFetchBlockMatrix:
-    """block_fetch fails closed. Which layer fires, and when does trust excuse it."""
-
-    async def _run(self, **kw: Any) -> Any:
-        from mcp_trentina_crunchtools.tools.fetch import block_fetch
-
-        with ExitStack() as stack:
-            _enter_fetch_patches(stack, **kw)
-            rec = stack.enter_context(patch(f"{_DEFENSE}.record_detection"))
-            try:
-                result = await block_fetch("https://example.com")
-            except BlockedSourceError:
-                return ("blocked", None, rec)
-            else:
-                return ("ok", result, rec)
-
-    async def test_l2_malicious_untrusted_blocks(self) -> None:
-        outcome, _, rec = await self._run(
-            classification=MALICIOUS, trusted=False, has_api_key=False
-        )
-        assert outcome == "blocked"
-        assert rec.call_count == 1
-        assert rec.call_args.kwargs["risk_level"] == "high"
-
-    async def test_l2_malicious_trusted_does_not_block(self) -> None:
-        """Trust excuses L2. This is real today and easy to lose in a rewrite."""
-        outcome, result, rec = await self._run(
-            classification=MALICIOUS, trusted=True, has_api_key=False
-        )
-        assert outcome == "ok"
-        assert result["scan"]["origin"]["allowlisted"] is True
-        assert result["scan"]["layers"]["l2"] == "complete", (
-            "allowlisting suppresses the FLAG; L2 still ran"
-        )
-        rec.assert_not_called()
-
-    async def test_l3_injection_untrusted_blocks(self) -> None:
-        outcome, _, rec = await self._run(
-            classification=BENIGN, trusted=False, has_api_key=True,
-            detection={"injection_detected": True, "risk_level": "critical"},
-        )
-        assert outcome == "blocked"
-        assert rec.call_args.kwargs["risk_level"] == "critical"
-
-    async def test_l3_skipped_without_api_key(self) -> None:
-        """DIVERGENCE: L3 is gated on a global API key, never on
-        quarantine_threshold. profile.defense.quarantine is not consulted."""
-        outcome, _, _ = await self._run(
-            classification=BENIGN, trusted=False, has_api_key=False,
-            detection={"injection_detected": True, "risk_level": "critical"},
-        )
-        assert outcome == "ok"
-
-    async def test_trusted_content_is_still_judged_by_l3(self) -> None:
-        """Until the mandate, trust skipped L3 entirely, so a trusted source
-        carrying a critical injection was delivered without the judge ever
-        looking. Trust still suppresses an L1 flag — a trusted CVE
-        ticket quoting attack syntax is the false positive L1 exists to
-        tolerate — but not a judge that read the content."""
-        outcome, _, _ = await self._run(
-            classification=BENIGN, trusted=True, has_api_key=True,
-            detection={"injection_detected": True, "risk_level": "critical"},
-        )
-        assert outcome == "blocked"
-
-    async def test_l1_alone_blocks_when_high(self) -> None:
-        """safe_* blocks on L1 risk by itself, with L2 benign. quarantine_* does not."""
-        outcome, _, rec = await self._run(
-            classification=BENIGN, trusted=False, has_api_key=False,
-            content=L1_HOSTILE,
-        )
-        assert outcome == "blocked"
-        assert rec.call_args.kwargs["risk_level"] in ("high", "critical")
-
-    async def test_l1_high_but_trusted_does_not_block(self) -> None:
-        outcome, _, _ = await self._run(
-            classification=BENIGN, trusted=True, has_api_key=False,
-            content=L1_HOSTILE,
-        )
-        assert outcome == "ok"
-
-    async def test_layer_precedence_l2_reports_before_l1(self) -> None:
-        """ORDERING: content tripping BOTH L2 and L1-critical records L2.
-
-        The L1 risk check sits last in the function, after L2 and L3. Reordering
-        the layers in defend() would silently change which layer gets the credit
-        in `detections` — and therefore what any future calibration is reading.
-        """
-        outcome, _, rec = await self._run(
-            classification=MALICIOUS, trusted=False, has_api_key=False,
-            content=L1_HOSTILE,
-        )
-        assert outcome == "blocked"
-        assert rec.call_count == 1
-        assessment = rec.call_args.kwargs.get("qagent_assessment") or {}
-        assert assessment.get("classifier_label") == "MALICIOUS", (
-            "L2 must be the reporting layer when both L1 and L2 would fire"
-        )
-
-
-class TestQuarantineFetchWarnsInsteadOfBlocking:
-    async def test_malicious_warns_and_returns(self) -> None:
-        from mcp_trentina_crunchtools.tools.fetch import clean_fetch
-
-        with ExitStack() as stack:
-            _enter_fetch_patches(
-                stack, classification=MALICIOUS, trusted=False, has_api_key=False
-            )
-            result = await clean_fetch(
-                "https://example.com", "Extract the main content."
-            )
-
-        assert result is not None
-        # Assert the warning VALUE, not the key: "classifier_warning": null
-        # contains the substring "warning" and would pass a sloppier check.
-        assert result["classifier_warning"], "quarantine_* must warn rather than raise"
-        assert "MALICIOUS" in result["classifier_warning"]
-
-    async def test_blocklisted_source_warns_rather_than_raising(self) -> None:
-        """block_fetch raises on a blocklisted URL; clean_fetch proceeds."""
-        from mcp_trentina_crunchtools.tools.fetch import clean_fetch
-
-        with (
-            patch("mcp_trentina_crunchtools.tools.fetch.fetch_url",
-                  return_value=("<p>hi</p>", "text/html")),
-            patch("mcp_trentina_crunchtools.tools.fetch.is_blocked",
-                  return_value={"detected_at": "2026-01-01T00:00:00Z"}),
-            patch("mcp_trentina_crunchtools.tools.fetch.get_config") as cfg,
-            patch(f"{_DEFENSE}.classify_async", return_value=BENIGN),
-            patch(f"{_DEFENSE}.get_config") as dcfg,
-        ):
-            dcfg.return_value.has_api_key = False
-            cfg.return_value.is_trusted_domain.return_value = True
-            cfg.return_value.has_api_key = False
-            cfg.return_value.fallback = "warn"
-            result = await clean_fetch(
-                "https://known-bad.example.com", "Extract the main content."
-            )
-
-        assert "blocklist_warning" in json.dumps(result)
-
-
-class TestSafeContentAlwaysUntrusted:
-    async def test_content_is_never_trusted(self) -> None:
-        """DIVERGENCE: block_content hardcodes is_trusted=False.
-
-        fetch consults the domain, read consults the path, content trusts
-        nothing. Inline content has no provenance to appeal to, so this is
-        defensible — but it is a fourth policy in a fourth file, and defend()
-        has to take it as a parameter rather than rediscover it.
-        """
-        from mcp_trentina_crunchtools.tools.content import block_content
-
-        with (
-            patch("mcp_trentina_crunchtools.tools.content.is_blocked",
-                  return_value=None),
-            patch(f"{_DEFENSE}.classify_guarded", return_value=MALICIOUS),
-            patch(f"{_DEFENSE}.record_detection"),
-            patch(f"{_DEFENSE}.emit_detection_event"),
-            patch(f"{_DEFENSE}.get_config") as dcfg,
-            patch("mcp_trentina_crunchtools.tools.content.get_config") as cfg,
-        ):
-            cfg.return_value.has_api_key = False
-            cfg.return_value.max_content = 100_000
-            dcfg.return_value.has_api_key = False
-            with pytest.raises(BlockedSourceError):
-                await block_content("some text", "text/plain")
+# TestSafeFetchBlockMatrix, TestQuarantineFetchWarnsInsteadOfBlocking and
+# TestSafeContentAlwaysUntrusted pinned the per-tool pipelines as they were
+# before the defense module existed. 0.31.0 (#187) changed that behaviour on
+# purpose, which is what this file's DIVERGENCE convention is for: an
+# allowlisted source's L2 flag no longer vanishes, clean detects before it
+# extracts, and every family runs one judging path. The matrix they pinned is
+# now pinned, per family and mode, by tests/test_mode_parity.py,
+# test_mode_gaps.py and test_clean_and_allowlist.py.
 
 
 class TestAlertIngressNowHonoursTheProfile:
@@ -346,9 +141,7 @@ class TestAlertIngressNowHonoursTheProfile:
             _defend_alert,
         )
 
-        partial = ClassifierResult(
-            label="BENIGN", score=0.01, latency_ms=1.0, truncated=True
-        )
+        partial = ClassifierResult(label="BENIGN", score=0.01, latency_ms=1.0, truncated=True)
         body = json.dumps({"host": "host01", "output": "a" * 200})
         with (
             patch(f"{_DEFENSE}.classify_async", return_value=partial),

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -26,7 +25,6 @@ def _reset_classifier_state() -> Any:
     reset_classifier()
     yield
     reset_classifier()
-
 
 
 def _as_deberta(tokenizer: MagicMock) -> None:
@@ -383,242 +381,6 @@ class TestSegmentSplitting:
             assert result.score > 0.9
 
 
-class TestPipelineIntegration:
-    """Test classifier integration in fetch/read/scan pipelines."""
-
-    @pytest.mark.asyncio
-    async def test_block_fetch_blocks_on_classifier_malicious(self) -> None:
-        """block_fetch should raise BlockedSourceError when classifier says MALICIOUS."""
-        from mcp_trentina_crunchtools.errors import BlockedSourceError
-        from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-        from mcp_trentina_crunchtools.tools.fetch import block_fetch
-
-        malicious_result = ClassifierResult(label="MALICIOUS", score=0.95, latency_ms=50.0)
-
-        with (
-            patch(
-                "mcp_trentina_crunchtools.defense.classify_guarded",
-                return_value=malicious_result,
-            ),
-            patch(
-                "mcp_trentina_crunchtools.tools.fetch.fetch_url",
-                return_value=("<p>Hello</p>", "text/html"),
-            ),
-            patch(
-                "mcp_trentina_crunchtools.tools.fetch.is_blocked",
-                return_value=None,
-            ),
-            patch(
-                "mcp_trentina_crunchtools.defense.record_detection",
-            ) as mock_record,
-            patch(
-                "mcp_trentina_crunchtools.tools.fetch.get_config",
-            ) as mock_config,
-        ):
-            mock_config.return_value.is_trusted_domain.return_value = False
-            mock_config.return_value.has_api_key = False
-
-            with pytest.raises(BlockedSourceError):
-                await block_fetch("https://evil.example.com")
-
-            mock_record.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_clean_fetch_warns_on_classifier_malicious(self) -> None:
-        """clean_fetch should add classifier_warning, not block."""
-        from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-        from mcp_trentina_crunchtools.tools.fetch import clean_fetch
-
-        malicious_result = ClassifierResult(label="MALICIOUS", score=0.95, latency_ms=50.0)
-
-        with (
-            patch(
-                "mcp_trentina_crunchtools.defense.classify_async",
-                return_value=malicious_result,
-            ),
-            patch(
-                "mcp_trentina_crunchtools.tools.fetch.fetch_url",
-                return_value=("Normal content", "text/plain"),
-            ),
-            patch(
-                "mcp_trentina_crunchtools.tools.fetch.is_blocked",
-                return_value=None,
-            ),
-            patch(
-                "mcp_trentina_crunchtools.tools.fetch.get_config",
-            ) as mock_config,
-            patch(
-                "mcp_trentina_crunchtools.tools.fetch.quarantine_extract",
-                return_value={
-                    "content": {"extracted_text": "extracted"},
-                    "usage": {},
-                },
-            ),
-        ):
-            mock_config.return_value.is_trusted_domain.return_value = False
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.max_content = 100_000
-            mock_config.return_value.model = "gemini-2.5-flash-lite"
-
-            result = await clean_fetch("https://example.com", "summarize")
-
-            assert result["classifier_warning"] is not None
-            assert "MALICIOUS" in result["classifier_warning"]
-
-    @pytest.mark.asyncio
-    async def test_scan_includes_classifier_result(self) -> None:
-        """quarantine_scan result should include layer2 section."""
-        from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-        from mcp_trentina_crunchtools.tools.scan import quarantine_scan
-
-        benign_result = ClassifierResult(label="BENIGN", score=0.1, latency_ms=30.0)
-
-        with (
-            patch(
-                "mcp_trentina_crunchtools.defense.classify_async",
-                return_value=benign_result,
-            ),
-            patch(
-                "mcp_trentina_crunchtools.tools.scan.fetch_url",
-                return_value=("Clean content", "text/plain"),
-            ),
-            patch(
-                "mcp_trentina_crunchtools.tools.scan.get_config",
-            ) as mock_config,
-        ):
-            mock_config.return_value.has_api_key = False
-            mock_config.return_value.max_content = 100_000
-
-            result = await quarantine_scan(url="https://example.com")
-
-            assert "layer2" in result
-            assert result["layer2"]["available"] is True
-            assert result["layer2"]["result"]["label"] == "BENIGN"
-
-    @pytest.mark.asyncio
-    async def test_graceful_degradation_classifier_unavailable(self) -> None:
-        """Pipeline should work when classifier returns None."""
-        from mcp_trentina_crunchtools.tools.scan import quarantine_scan
-
-        with (
-            patch(
-                "mcp_trentina_crunchtools.defense.classify_async",
-                return_value=None,
-            ),
-            patch(
-                "mcp_trentina_crunchtools.tools.scan.fetch_url",
-                return_value=("Content", "text/plain"),
-            ),
-            patch(
-                "mcp_trentina_crunchtools.tools.scan.get_config",
-            ) as mock_config,
-        ):
-            mock_config.return_value.has_api_key = False
-            mock_config.return_value.max_content = 100_000
-
-            result = await quarantine_scan(url="https://example.com")
-
-            assert "layer2" in result
-            assert result["layer2"]["available"] is False
-            assert result["layer2"]["result"] is None
-
-
-class TestDualModelVerification:
-    """Test classifier verification of Q-Agent output."""
-
-    @pytest.mark.asyncio
-    async def test_output_verification_clean(self) -> None:
-        """Clean Q-Agent output should not add warning."""
-        from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-
-        benign_result = ClassifierResult(label="BENIGN", score=0.05, latency_ms=30.0)
-
-        mock_response = {
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [
-                            {
-                                "text": '{"extracted_text": "Clean article about Python.", '
-                                '"confidence": "high", "injection_detected": false}'
-                            }
-                        ]
-                    }
-                }
-            ],
-            "usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 50},
-        }
-
-        with (
-            patch(
-                "mcp_trentina_crunchtools.quarantine.agent.get_config",
-            ) as mock_config,
-            patch("httpx.AsyncClient") as mock_client_cls,
-            patch(
-                "mcp_trentina_crunchtools.quarantine.classifier.classify",
-                return_value=benign_result,
-            ),
-        ):
-            mock_config.return_value.has_api_key = True
-            mock_config.return_value.api_key.get_secret_value.return_value = "test-key"
-            mock_config.return_value.model = "gemini-2.5-flash-lite"
-
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = mock_response
-            mock_resp.raise_for_status = MagicMock()
-
-            mock_http = MagicMock()
-            mock_http.__aenter__ = AsyncMock(return_value=mock_http)
-            mock_http.__aexit__ = AsyncMock(return_value=None)
-            mock_http.post = AsyncMock(return_value=mock_resp)
-            mock_client_cls.return_value = mock_http
-
-            from mcp_trentina_crunchtools.quarantine.agent import quarantine_extract
-
-            result = await quarantine_extract("test content", "summarize")
-            assert "classifier_output_warning" not in result
-
-    @pytest.mark.asyncio
-    async def test_output_verification_malicious(self) -> None:
-        """Flagged Q-Agent output should add classifier_output_warning."""
-        from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-
-        malicious_result = ClassifierResult(label="MALICIOUS", score=0.95, latency_ms=40.0)
-
-        from mcp_trentina_crunchtools.quarantine.providers.base import ProviderResult
-
-        extract_text = json.dumps({
-            "extracted_text": "test content",
-            "confidence": "high",
-            "injection_detected": False,
-        })
-        mock_prov = MagicMock()
-        mock_prov.generate = AsyncMock(
-            return_value=ProviderResult(text=extract_text, input_tokens=100, output_tokens=50),
-        )
-
-        with (
-            patch(
-                "mcp_trentina_crunchtools.quarantine.agent.get_config",
-            ) as mock_config,
-            patch(
-                "mcp_trentina_crunchtools.quarantine.agent.get_provider",
-                return_value=mock_prov,
-            ),
-            patch(
-                "mcp_trentina_crunchtools.quarantine.classifier.classify",
-                return_value=malicious_result,
-            ),
-        ):
-            mock_config.return_value.fallback = "layer1"
-
-            from mcp_trentina_crunchtools.quarantine.agent import quarantine_extract
-
-            result = await quarantine_extract("test content", "summarize")
-            assert "classifier_output_warning" in result
-            assert "MALICIOUS" in result["classifier_output_warning"]
-
-
 class TestStatsReportsClassifier:
     """Test that stats tool reports classifier availability."""
 
@@ -638,7 +400,6 @@ class TestStatsReportsClassifier:
             ),
         ):
             mock_config.return_value.model = "gemini-2.5-flash-lite"
-            mock_config.return_value.fallback = "layer1"
             mock_config.return_value.max_content = 100_000
             mock_config.return_value.has_api_key = True
             mock_config.return_value.classifier_threshold = 0.5

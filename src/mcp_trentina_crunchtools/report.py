@@ -35,27 +35,21 @@ Three independent facts, never collapsed:
 WHAT IT FOUND is deliberately NOT here. That is ``_trentina_warning``'s job
 and duplicating it would give two answers that can disagree.
 
-ALLOWLISTING SUPPRESSES FLAGS; IT DOES NOT SKIP LAYERS. This distinction was
-invisible under the old field and is worth being loud about: a trusted source
-still runs L1, still runs L2, still runs L3. What ``is_trusted`` does is stop
-an L1 risk level or an L2 label from FLAGGING — see ``defense._decide`` and
-the ``l2_flagged`` computation. So the layer states below stay ``complete``
-for an allowlisted source, and ``origin.allowlisted`` is what explains why a
-detection did not become a refusal. Reporting those layers as "skipped" would
-be the same class of error the old field made.
-
-The one place something genuinely IS skipped: ``clean_*`` on an allowlisted
-source returns the original L1 text without calling the Q-Agent at all, so no
-extraction happens. That used to be reported as ``trusted-l1`` and nothing
-else, which meant an agent that asked for an extraction got the raw page with
-no way to tell. It is now ``disposition: delivered`` rather than
-``extracted``, which says it outright.
+ALLOWLISTING CHANGES WHAT A FINDING COSTS; IT NEVER SKIPS A LAYER OR HIDES A
+FLAG. Since 0.31.0 an allowlisted source runs all three layers and its flags
+stand. What ``origin.allowlisted`` explains is a block that became a clean:
+block_* on an allowlisted source hands a flagged payload to the clean path
+instead of refusing it, and reports ``disposition: extracted``. A clean that
+fails still refuses — allowlisting removes false-positive refusals, it does
+not create a channel that survives the clean pipeline giving up.
 """
 
 from __future__ import annotations
 
 from enum import Enum
 from typing import TYPE_CHECKING, Any
+
+from .modes import gaps_of
 
 if TYPE_CHECKING:
     from .defense import DefenseVerdict
@@ -68,7 +62,8 @@ class LayerState(str, Enum):
     """Ran over the whole input and returned a result."""
 
     PARTIAL = "partial"
-    """Ran, but did not read everything — L2 hitting its token cap."""
+    """Ran, but did not read everything — L2 past its token cap, or L3 past
+    ``QUARANTINE_MAX_CONTENT``."""
 
     UNAVAILABLE = "unavailable"
     """Could not run: no ONNX model for L2, no API key or a provider error
@@ -95,11 +90,6 @@ class Disposition(str, Enum):
     REFUSED = "refused"
     """Nothing delivered. The caller raised."""
 
-    REPORTED = "reported"
-    """No content at all, in either direction — a diagnostic returned findings
-    ABOUT a payload. `quarantine_scan` and friends carry no mode prefix for
-    exactly this reason: they report, they do not deliver."""
-
 
 def layer_states(verdict: DefenseVerdict) -> dict[str, str]:
     """Derive per-layer state from a verdict.
@@ -111,28 +101,27 @@ def layer_states(verdict: DefenseVerdict) -> dict[str, str]:
     came back — ``classify_async`` returns None when the model is missing or
     failed to load, which used to be indistinguishable from a clean scan.
     """
-    has_text = bool(verdict.pipeline.l2_input.strip())
-    classification = verdict.classification
-
-    if not has_text:
-        l2 = LayerState.NOT_APPLICABLE
-    elif classification is None:
-        l2 = LayerState.UNAVAILABLE
-    elif classification.truncated:
-        l2 = LayerState.PARTIAL
-    else:
-        l2 = LayerState.COMPLETE
-
-    assessment = verdict.l3_assessment
-    # No assessment and an assessment that says it could not run are the same
-    # fact from the caller's side: nothing judged this semantically.
-    if not has_text:
-        l3 = LayerState.NOT_APPLICABLE
-    elif assessment is None or assessment.get("l3_unavailable"):
-        l3 = LayerState.UNAVAILABLE
-    else:
-        l3 = LayerState.COMPLETE
-
+    if not verdict.pipeline.content.strip():
+        return {
+            "l1": LayerState.COMPLETE.value,
+            "l2": LayerState.NOT_APPLICABLE.value,
+            "l3": LayerState.NOT_APPLICABLE.value,
+        }
+    gaps = gaps_of(verdict)
+    l2 = (
+        LayerState.UNAVAILABLE
+        if gaps.l2_unavailable
+        else LayerState.PARTIAL
+        if gaps.l2_truncated
+        else LayerState.COMPLETE
+    )
+    l3 = (
+        LayerState.UNAVAILABLE
+        if gaps.l3_unavailable
+        else LayerState.PARTIAL
+        if gaps.l3_truncated
+        else LayerState.COMPLETE
+    )
     return {"l1": LayerState.COMPLETE.value, "l2": l2.value, "l3": l3.value}
 
 
@@ -155,7 +144,8 @@ def build_report(
             ``search``.
         ref: The URL, path, query, or content hash.
         allowlisted: Whether an operator has vouched for this source. It
-            suppresses flags; it does not skip layers.
+            turns a block into a clean; it neither skips a layer nor hides a
+            flag.
         extracted_by: The model that produced an extraction, when there is
             one. Absent otherwise rather than null, because a key that is
             sometimes meaningless is read as meaningful.

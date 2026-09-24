@@ -301,8 +301,7 @@ def classify(
 
     if truncated:
         logger.warning(
-            "Layer 2 scan truncated: %d tokens exceeds cap of %d; "
-            "scanned the first %d only",
+            "Layer 2 scan truncated: %d tokens exceeds cap of %d; scanned the first %d only",
             total_tokens,
             max_tokens,
             max_tokens,
@@ -317,14 +316,17 @@ def classify(
     )
 
 
-async def classify_async(text: str) -> ClassifierResult | None:
+async def classify_async(
+    text: str, *, fail_on_truncate: bool = False, source: str = "content"
+) -> ClassifierResult | None:
     """Run :func:`classify` on a worker thread.
 
     Inference holds the GIL only inside ONNX Runtime's C++ kernels, so
     offloading keeps the asyncio event loop responsive while a scan runs.
     Every async caller should use this instead of calling classify directly.
+    ``fail_on_truncate`` is for callers that refuse a partial scan anyway.
     """
-    return await asyncio.to_thread(classify, text)
+    return await asyncio.to_thread(classify, text, fail_on_truncate=fail_on_truncate, source=source)
 
 
 def classifier_status() -> str:
@@ -336,50 +338,6 @@ def classifier_status() -> str:
     if _loaded:
         return "loaded"
     return "failed" if _load_attempted else "not-loaded"
-
-
-def truncation_warning(scan: ClassifierResult | None) -> str | None:
-    """Warning text when a scan covered only part of its input, else None.
-
-    Used by the quarantine_* and scan_* tools, which surface risk to the
-    caller rather than refusing outright.  The safe_* tools use
-    :func:`classify_guarded` and fail closed instead.
-    """
-    if scan is None or not scan.truncated:
-        return None
-
-    return (
-        f"Layer 2 scanned only the first {get_config().classifier_max_tokens} "
-        f"of {scan.tokens} tokens. Anything past that point was not "
-        "examined for injection."
-    )
-
-
-def join_warnings(*warnings: str | None) -> str | None:
-    """Combine warning strings into one, dropping the empty ones."""
-    present = [w for w in warnings if w]
-    if not present:
-        return None
-    return " ".join(present)
-
-
-async def classify_guarded(
-    text: str, source: str, *, is_trusted: bool
-) -> ClassifierResult | None:
-    """Classify off-thread and fail closed when an untrusted scan is partial.
-
-    Returning BENIGN on a truncated scan of untrusted content would hand an
-    attacker a clean verdict for anything hidden past the token cap, so that
-    case raises instead.  Trusted sources are allowed through with the
-    ``truncated`` flag set for the caller to surface.
-
-    Untrusted input bails at the token count rather than after the scan, so
-    oversized content costs one tokenizer pass instead of ~74 inference
-    passes for a verdict that was never going to be accepted.
-    """
-    return await asyncio.to_thread(
-        classify, text, fail_on_truncate=not is_trusted, source=source
-    )
 
 
 def reset_classifier() -> None:

@@ -131,12 +131,6 @@ justification = "Two findings. PipelineStats.risk_level delegates to risk_level_
 classification = "by_design"
 
 [[exceptions]]
-check = "over_abstraction"
-path = "src/mcp_trentina_crunchtools/tools/scan.py"
-justification = "_risk_order is a dict lookup with a safe default. The name is what makes the comparison at the call site readable."
-classification = "by_design"
-
-[[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/database.py"
 justification = "record_detection, save_compression and save_tool_list write to three different tables with different columns; is_blocked and is_domain_blocked read the same table on different columns. What they share is connect, execute, commit. Collapsing them means passing table and column names into the SQL as strings, which trades readable auditable literal queries for dynamic SQL in a security gateway. Not a trade worth making."
@@ -587,3 +581,9 @@ path = "src/mcp_trentina_crunchtools/gateway/ratelimit.py"
 pattern = "client_address"
 justification = "Shape collision, not duplication. client_address pulls the peer IP out of an ASGI scope so a rate-limit bucket can be keyed on it; reconnect.py's _safe_endpoint strips the path and query off a backend URL so a token in it is never echoed to a caller. Both happen to be guard-then-return-sentinel-then-format in three statements. They share no input type, no output meaning and no reason to change together, so folding them into one function would couple the rate limiter to the reconnect tool for the sake of three lines."
 classification = "gourmand_bug"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/tools/fetch.py"
+justification = "_handle_content_type_error is the redirect-to-binary advisory, the sibling of _handle_fetch_error. It had two callers until 0.31.0 collapsed block/warn/clean onto one _fetch, and test_advisory exercises it directly as a unit: the advisory's shape (no attacker-chosen URLs echoed) is what it pins."
+classification = "by_design"

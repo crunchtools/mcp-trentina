@@ -15,13 +15,12 @@ packages. Three categories are allowed through, each for a stated reason:
   whether a layer is loaded. /health and the stats tool need them and they
   cannot begin a pipeline.
 * Types (`ClassifierResult`) — annotations, no behaviour.
-* `quarantine_extract` — L3 doing the tool's job rather than guarding the door.
-  quarantine_* tools spend the Q-Agent on extraction; that is the product, not
-  a gate. It is listed explicitly so the distinction stays a decision rather
-  than an oversight.
+* `quarantine_clean` — clean mode's turns 2 and 3 (extract, verify), which
+  run AFTER defend() has detected. They are the mode's delivery, not a second
+  detection path; tools reach them only through tools/judged.py.
 
 If you are here because this test failed: you probably want `defend()`,
-`advise()`, or `defend_json()` from mcp_trentina_crunchtools.defense.
+`defend_json()`, or `tools.judged.judge_and_deliver()`.
 """
 
 from __future__ import annotations
@@ -40,7 +39,6 @@ DETECTORS = frozenset(
     {
         "classify",
         "classify_async",
-        "classify_guarded",
         "quarantine_detect",
     }
 )
@@ -118,7 +116,7 @@ class TestOnePipeline:
             "These modules call a detector directly instead of going through "
             "the defense pipeline, which means a second pipeline is forming:\n"
             + "\n".join(f"  {mod}: {', '.join(names)}" for mod, names in offenders.items())
-            + "\n\nUse defend(), advise(), or defend_json() from "
+            + "\n\nUse defend() or defend_json() from "
             "mcp_trentina_crunchtools.defense. If this import genuinely is not "
             "part of a defense decision, add it to EXEMPT with the reason."
         )
@@ -142,5 +140,10 @@ class TestOnePipeline:
         """Callers should never need a detector; these are the ways in."""
         from mcp_trentina_crunchtools import defense
 
-        for name in ("defend", "advise", "defend_json", "enforce_block"):
+        for name in ("defend", "defend_json", "defend_selection"):
             assert hasattr(defense, name), f"defense.{name} is the documented entry point"
+        # advise() skipped detection for clean_*, and enforce_block() was a
+        # policy living beside the pipeline. Both went in 0.31.0 (#187): the
+        # modes live in modes.py and decide delivery only.
+        for gone in ("advise", "enforce_block"):
+            assert not hasattr(defense, gone), f"defense.{gone} is back"

@@ -46,7 +46,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _LLM_TIMEOUT = httpx.Timeout(
-    connect=10.0, read=300.0, write=10.0, pool=5.0,
+    connect=10.0,
+    read=300.0,
+    write=10.0,
+    pool=5.0,
 )
 
 LLM_HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH"]
@@ -76,16 +79,20 @@ class LlmProvider(BaseModel):
 
     enabled: bool = Field(default=False)
     upstream: str = Field(
-        ..., description="Provider base URL (https://...)",
+        ...,
+        description="Provider base URL (https://...)",
     )
     auth_header: str = Field(
-        ..., description="Header name for the API key",
+        ...,
+        description="Header name for the API key",
     )
     auth_prefix: str = Field(
-        default="", description="Prefix before the key value",
+        default="",
+        description="Prefix before the key value",
     )
     api_key_env: str = Field(
-        ..., description="Env var holding the real API key",
+        ...,
+        description="Env var holding the real API key",
     )
     api_key: SecretStr = Field(
         default=SecretStr(""),
@@ -128,8 +135,7 @@ def load_llm_providers(
         key = os.environ.get(provider.api_key_env, "")
         if not key:
             raise ProfileConfigError(
-                f"llm_providers.{name}: env var "
-                f"{provider.api_key_env} not set or empty",
+                f"llm_providers.{name}: env var {provider.api_key_env} not set or empty",
             )
         provider.api_key = SecretStr(key)
         providers[name] = provider
@@ -138,7 +144,8 @@ def load_llm_providers(
         names = ", ".join(sorted(providers))
         logger.info(
             "llm_proxy: loaded %d provider(s): %s",
-            len(providers), names,
+            len(providers),
+            names,
         )
     return providers
 
@@ -186,12 +193,13 @@ def register_llm_routes(
         return await _proxy_llm(request, providers, profiles)
 
     mcp_server.custom_route(
-        "/llm/{provider}/{path:path}", methods=LLM_HTTP_METHODS,
+        "/llm/{provider}/{path:path}",
+        methods=LLM_HTTP_METHODS,
     )(llm_proxy_endpoint)
 
     logger.info(
-        "llm_proxy: registered /llm/{provider}/{path} "
-        "for %d provider(s)", len(providers),
+        "llm_proxy: registered /llm/{provider}/{path} for %d provider(s)",
+        len(providers),
     )
 
 
@@ -214,39 +222,44 @@ async def _proxy_llm(
     if provider is None:
         return Response(
             content="LLM provider not found or disabled",
-            status_code=404, media_type=PLAIN_TEXT,
+            status_code=404,
+            media_type=PLAIN_TEXT,
         )
 
-    profile = resolve_profile_by_token(
-        request.headers.get("authorization"), profiles
-    )
+    profile = resolve_profile_by_token(request.headers.get("authorization"), profiles)
     if profile is None:
         return Response(
             content="Unauthorized",
-            status_code=401, media_type=PLAIN_TEXT,
+            status_code=401,
+            media_type=PLAIN_TEXT,
         )
 
     override = profile.llm_keys.get(provider_name)
     if override is None:
         logger.info(
             "llm_proxy: profile=%s has no key for provider=%s",
-            profile.name, provider_name,
+            profile.name,
+            provider_name,
         )
         return Response(
             content="No API key configured for this provider",
-            status_code=502, media_type=PLAIN_TEXT,
+            status_code=502,
+            media_type=PLAIN_TEXT,
         )
 
     path = normalize_proxy_path(raw_path)
     if path is None:
         return Response(
             content="Path traversal rejected",
-            status_code=400, media_type=PLAIN_TEXT,
+            status_code=400,
+            media_type=PLAIN_TEXT,
         )
 
     logger.info(
         "llm_proxy: profile=%s provider=%s path=%s",
-        profile.name, provider_name, path,
+        profile.name,
+        provider_name,
+        path,
     )
 
     upstream_url = f"{provider.upstream}/{path}"
@@ -257,12 +270,14 @@ async def _proxy_llm(
     for header_name in [h for h in fwd_headers if h.lower() == "authorization"]:
         del fwd_headers[header_name]
     key_value = override.api_key.get_secret_value()
-    fwd_headers[provider.auth_header] = (
-        f"{provider.auth_prefix}{key_value}"
-    )
+    fwd_headers[provider.auth_header] = f"{provider.auth_prefix}{key_value}"
 
     return await _forward_upstream(
-        request, upstream_url, fwd_headers, provider_name, profile,
+        request,
+        upstream_url,
+        fwd_headers,
+        provider_name,
+        profile,
     )
 
 
@@ -280,7 +295,8 @@ async def _forward_upstream(
     try:
         resp = await client.send(
             client.build_request(
-                request.method, upstream_url,
+                request.method,
+                upstream_url,
                 headers=fwd_headers,
                 content=request.stream() if has_body else None,
             ),
@@ -289,16 +305,19 @@ async def _forward_upstream(
     except httpx.TimeoutException:
         return Response(
             content="LLM upstream timeout",
-            status_code=504, media_type=PLAIN_TEXT,
+            status_code=504,
+            media_type=PLAIN_TEXT,
         )
     except httpx.ConnectError as exc:
         logger.warning(
             "llm_proxy: connect error provider=%s: %s",
-            provider_name, exc,
+            provider_name,
+            exc,
         )
         return Response(
             content="LLM upstream unreachable",
-            status_code=502, media_type=PLAIN_TEXT,
+            status_code=502,
+            media_type=PLAIN_TEXT,
         )
 
     return _streaming_response(resp, provider_name, profile)
@@ -310,7 +329,9 @@ _MAX_COMPLETION_SCAN_BYTES = 16 * 1024 * 1024
 
 
 def _streaming_response(
-    resp: httpx.Response, provider_name: str, profile: Profile,
+    resp: httpx.Response,
+    provider_name: str,
+    profile: Profile,
 ) -> StreamingResponse:
     """Stream the provider response through, then judge what streamed.
 
@@ -341,18 +362,26 @@ def _streaming_response(
         finally:
             await resp.aclose()
             _schedule_completion_scan(
-                b"".join(collected), size_seen, provider_name, profile,
+                b"".join(collected),
+                size_seen,
+                provider_name,
+                profile,
             )
 
     ct = resp.headers.get("content-type", "application/json")
     return StreamingResponse(
-        stream_body(), status_code=resp.status_code,
-        headers=resp_headers, media_type=ct,
+        stream_body(),
+        status_code=resp.status_code,
+        headers=resp_headers,
+        media_type=ct,
     )
 
 
 def _schedule_completion_scan(
-    body: bytes, size_seen: int, provider_name: str, profile: Profile,
+    body: bytes,
+    size_seen: int,
+    provider_name: str,
+    profile: Profile,
 ) -> None:
     """Fire-and-forget the post-hoc completion scan; never block the stream."""
     if not body:
@@ -360,7 +389,8 @@ def _schedule_completion_scan(
     if size_seen > _MAX_COMPLETION_SCAN_BYTES:
         logger.warning(
             "llm_proxy: completion from %s exceeded %d bytes — tail unscanned",
-            provider_name, _MAX_COMPLETION_SCAN_BYTES,
+            provider_name,
+            _MAX_COMPLETION_SCAN_BYTES,
         )
 
     async def _scan() -> None:
@@ -374,13 +404,14 @@ def _schedule_completion_scan(
                 source_type="llm_completion",
                 defense=profile.defense,
                 provenance=Provenance.MODEL_OUTPUT,
-                guarded=False,
             )
             if verdict.flagged:
                 logger.warning(
                     "llm_proxy: completion flagged profile=%s provider=%s "
                     "risk=%s flagged_by=%s (already streamed — recorded only)",
-                    profile.name, provider_name, verdict.risk_level,
+                    profile.name,
+                    provider_name,
+                    verdict.risk_level,
                     verdict.flagged_by.value if verdict.flagged_by else None,
                 )
         except Exception:

@@ -26,8 +26,6 @@ import pytest
 from mcp_trentina_crunchtools.defense import (
     Layer,
     Provenance,
-    _should_run_l3,
-    advise,
     defend,
 )
 from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
@@ -53,7 +51,6 @@ def _patches(
         return stack.enter_context(patch(f"{_D}.{name}", **kw))
 
     mocks = {
-        "classify_guarded": p("classify_guarded", return_value=classification),
         "classify_async": p("classify_async", return_value=classification),
         "quarantine_detect": p(
             "quarantine_detect",
@@ -64,16 +61,13 @@ def _patches(
     }
     cfg = p("get_config")
     cfg.return_value.has_api_key = has_api_key
+    cfg.return_value.max_content = 100_000
     mocks["get_config"] = cfg
     return mocks
 
 
 async def _defend(**kw: Any) -> Any:
-    stack_kw = {
-        k: kw.pop(k)
-        for k in ("classification", "detection", "has_api_key")
-        if k in kw
-    }
+    stack_kw = {k: kw.pop(k) for k in ("classification", "detection", "has_api_key") if k in kw}
     with ExitStack() as stack:
         mocks = _patches(stack, **stack_kw)
         verdict = await defend(
@@ -93,14 +87,10 @@ class TestL3RunsOnCleanTraffic:
         mocks["quarantine_detect"].assert_called_once()
 
     @pytest.mark.parametrize("score", [0.0, 0.01, 0.1, 0.29, 0.3, 0.5, 0.69])
-    async def test_every_l2_score_below_the_old_threshold_reaches_l3(
-        self, score: float
-    ) -> None:
+    async def test_every_l2_score_below_the_old_threshold_reaches_l3(self, score: float) -> None:
         """0.7 was the old escalation point. Nothing below it reached L3."""
         cls = ClassifierResult(label="BENIGN", score=score, latency_ms=1.0)
-        _, mocks = await _defend(
-            classification=cls, defense=DefenseConfig()
-        )
+        _, mocks = await _defend(classification=cls, defense=DefenseConfig())
         mocks["quarantine_detect"].assert_called_once()
 
     async def test_the_flagged_but_unjudged_band(self) -> None:
@@ -137,13 +127,25 @@ class TestThresholdCannotSuppressL3:
         with pytest.raises(pydantic.ValidationError):
             DefenseConfig(l3_threshold=1.0)
 
-    async def test_gate_helper_ignores_the_threshold_entirely(self) -> None:
-        """Belt and braces: the decision function takes no score at all now,
-        so there is nothing for a threshold to be compared against."""
-        params = set(inspect.signature(_should_run_l3).parameters)
-        assert params == {"defense", "l3_gate"}, (
-            "a new parameter here is a new way to skip L3 — if one is added, "
-            "it needs a test in this file saying why it is allowed to"
+    def test_no_caller_can_switch_l3_off(self) -> None:
+        """``l3_gate`` let a caller skip detection until 0.31.0, and search
+        used it to skip L3 entirely. No parameter of defend() may do that."""
+        params = set(inspect.signature(defend).parameters)
+        assert params == {
+            "content",
+            "source",
+            "source_type",
+            "defense",
+            "provenance",
+            "domain",
+            "stop_on_partial",
+            "record",
+            "l3_context",
+            "precomputed_l1",
+            "attribution",
+        }, (
+            "a new parameter here may be a new way to skip L3 — if one is "
+            "added, it needs a test in this file saying why it is allowed to"
         )
 
 
@@ -161,20 +163,15 @@ class TestL3RunsRegardlessOfOtherLayers:
         _, mocks = await _defend(provenance=Provenance.MODEL_OUTPUT)
         mocks["quarantine_detect"].assert_called_once()
 
-    async def test_runs_for_trusted_sources(self) -> None:
-        """Trust changes what a finding COSTS, never whether a layer looks."""
-        _, mocks = await _defend(is_trusted=True)
+    async def test_stop_on_partial_does_not_skip_l3(self) -> None:
+        _, mocks = await _defend(stop_on_partial=True)
         mocks["quarantine_detect"].assert_called_once()
 
-    async def test_trusted_content_is_still_flagged_by_l3(self) -> None:
+    async def test_l3_flag_stands(self) -> None:
         verdict, _ = await _defend(
-            is_trusted=True,
             detection={"injection_detected": True, "risk_level": "high"},
         )
-        assert verdict.flagged_by is Layer.L3, (
-            "trust suppresses an L1 flag, not a judge that read the "
-            "content and concluded it is an attack"
-        )
+        assert verdict.flagged_by is Layer.L3
 
 
 class TestTheOnlyPermittedSkips:
@@ -185,8 +182,7 @@ class TestTheOnlyPermittedSkips:
         verdict, mocks = await _defend(has_api_key=False, defense=None)
         mocks["quarantine_detect"].assert_not_called()
         assert verdict.l3_assessment is not None, (
-            "a skipped L3 must leave evidence; None here would read as "
-            "'ran and found nothing'"
+            "a skipped L3 must leave evidence; None here would read as 'ran and found nothing'"
         )
         assert verdict.l3_assessment.get("l3_unavailable") is True
 
@@ -194,28 +190,24 @@ class TestTheOnlyPermittedSkips:
         self,
     ) -> None:
         """A profile bringing its own provider is not 'no provider'."""
-        _, mocks = await _defend(
-            has_api_key=False, defense=DefenseConfig(provider="ollama")
-        )
+        _, mocks = await _defend(has_api_key=False, defense=DefenseConfig(provider="ollama"))
         mocks["quarantine_detect"].assert_called_once()
 
-    async def test_advise_still_opts_out_of_detection_mode(self) -> None:
-        """`advise()` and block_search spend L3 on EXTRACTION instead.
+    async def test_every_mode_detects(self) -> None:
+        """This asserted the OPPOSITE until 0.31.0: that ``advise()`` — the
+        clean_* path — skipped detection, and it called that a design. It
+        was the hole #187 closes. clean now detects first, then extracts and
+        verifies; see tests/test_mode_parity.py for every family and mode."""
+        import mcp_trentina_crunchtools.defense as defense_mod
 
-        This is not a coverage hole and not a policy switch: the layer still
-        runs for those callers, in a different mode. Pinned so that if the
-        opt-out is ever repurposed into a way of skipping L3 entirely, this
-        test has to be deleted on purpose rather than quietly passing.
-        """
-        with ExitStack() as stack:
-            mocks = _patches(stack)
-            await advise(INNOCUOUS, source="s", source_type="url")
-            mocks["quarantine_detect"].assert_not_called()
+        assert not hasattr(defense_mod, "advise")
 
 
 class TestDeprecatedKeyIsRejected:
     async def test_a_profile_setting_l3_threshold_fails_to_load(
-        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Any,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Announced as ignored since 0.12.0, removed in 0.29.0.
 
