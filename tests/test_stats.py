@@ -81,9 +81,7 @@ def gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
 
 
 class TestAgentScope:
-    async def test_the_audit_holds_only_the_callers_calls(
-        self, gateway: dict
-    ) -> None:
+    async def test_the_audit_holds_only_the_callers_calls(self, gateway: dict) -> None:
         with profile_context(gateway["beta"]):
             result = await get_trentina_stats()
 
@@ -91,9 +89,7 @@ class TestAgentScope:
         assert audit["profile_filter"] == "beta"
         assert [e["tool"] for e in audit["by_tool"]] == ["wiki_get_page_tool"]
 
-    async def test_another_profiles_detections_do_not_appear(
-        self, gateway: dict
-    ) -> None:
+    async def test_another_profiles_detections_do_not_appear(self, gateway: dict) -> None:
         """A detection's source is 'profile:backend:tool' — it names names."""
         with profile_context(gateway["beta"]):
             result = await get_trentina_stats()
@@ -102,19 +98,17 @@ class TestAgentScope:
         assert "alpha" not in str(result)
         assert "alpha-secret-intranet.example" not in str(result)
 
-    async def test_the_config_block_is_the_profiles_own_defense(
-        self, gateway: dict
-    ) -> None:
+    async def test_the_config_block_is_the_profiles_own_defense(self, gateway: dict) -> None:
         """The process defaults never described a profile with overrides."""
         with profile_context(gateway["beta"]):
             result = await get_trentina_stats()
 
         assert result["scope"] == "beta"
         assert result["config"]["l2_threshold"] == 0.7
+        # The mode policy it runs under (#193): unset, it is the default alone.
+        assert result["config"]["modes"] == [result["config"]["enforcement"]]
 
-    async def test_no_host_path_and_no_fleet_aggregate(
-        self, gateway: dict
-    ) -> None:
+    async def test_no_host_path_and_no_fleet_aggregate(self, gateway: dict) -> None:
         with profile_context(gateway["beta"]):
             result = await get_trentina_stats()
 
@@ -139,9 +133,7 @@ class TestOperatorScope:
 
 
 class TestUnknownCaller:
-    async def test_a_live_gateway_with_no_caller_gets_nothing(
-        self, gateway: dict
-    ) -> None:
+    async def test_a_live_gateway_with_no_caller_gets_nothing(self, gateway: dict) -> None:
         result = await get_trentina_stats()
 
         assert result["scope"] == "none"

@@ -205,7 +205,8 @@ def emit_request_event(
     (``cockpit-trentina/trentina.js``) is its reader.
 
     Args:
-        tool: The family and mode that ran, e.g. ``block_fetch`` for fetch_tool in block mode.
+        tool: The family and mode that ran, as ``<mode>_<family>``: ``block_fetch``
+            is ``fetch_tool`` in ``block`` mode.
         source: URL, resolved path, ``sha256:`` content hash, or
             ``search:<query>``.
         disposition: A ``report.Disposition`` value — what the caller did
