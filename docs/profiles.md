@@ -38,7 +38,7 @@ profiles:
     backends:
       web:
         url: "internal://web"
-        tools_allow: ["block_*", "clean_*"]   # no warn_* — see Content modes
+        tools_allow: ["*"]
       gws-personal:
         url: "http://gws-personal:8000/mcp"
         tools_allow:
@@ -47,23 +47,64 @@ profiles:
           - draft_gmail_message
         compress_descriptions: true
     defense:
-      enforcement: block      # autonomous agent: flagged content is refused
+      enforcement: block      # the default mode: flagged content is refused
+      modes: [block, clean]   # what the agent may choose per call; no warn
       l2_threshold: 0.3       # stricter classifier gate
 ```
 
 ## Content modes
 
-The `web` backend offers every content family in three modes — `block_*`,
-`warn_*`, `clean_*` — and `tools_allow` decides which a profile gets. All
-three run all three layers; they differ only in what is delivered (see
+`defense.modes` is the policy: which of `block`, `warn` and `clean` the
+profile's agent may choose per call, on **every tool of every backend**. All
+three modes run all three layers; they differ only in what is delivered (see
 [Content Tools](quarantine-tools.md)).
 
-`warn_*` hands over flagged content verbatim with a caution attached. That is
-a **security-researcher grant**: a human reading a CVE advisory needs it; an
+```yaml
+profiles:
+  web-seat:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_WEB_SEAT_TOKEN
+    defense:
+      enforcement: block           # unset modes = [enforcement]: no choice at all
+  coding-agent:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_CODING_AGENT_TOKEN
+    defense:
+      enforcement: block
+      modes: [block, clean]
+  researcher:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_RESEARCHER_TOKEN
+    defense:
+      enforcement: block
+      modes: [block, warn, clean]
+```
+
+With more than one mode, the gateway inserts two arguments into each tool's
+schema: `trentina_mode`, whose enum is exactly the permitted modes, and
+`trentina_prompt` when `clean` is permitted. On a call it resolves an omitted
+mode to `enforcement`, refuses anything outside the policy (`denied_guard` in
+the audit log), and strips both arguments before the backend sees them.
+With one mode nothing is inserted, and every call runs as that mode.
+
+`enforcement` is the default and must be in `modes`; a profile where it is
+not fails to load. It cannot be `clean`: a call that omits the mode carries no
+extraction prompt.
+
+`clean` works on proxied responses too — `jira_get_issue` with
+`trentina_mode: clean` and a prompt returns a verified extraction instead of
+the ticket, and drops `structuredContent`. It costs three L3 calls and is
+lossy for structured data, so grant it where it earns that.
+
+`warn` hands over flagged content verbatim with a caution attached. That is a
+**security-researcher grant**: a human reading a CVE advisory needs it; an
 assistant, a coding agent or a swarm almost never does, and an injection that
 can talk an agent past its own warning is the attack it exists to survive.
-Offer it by name to the seat that needs it — `tools_allow: ["block_*",
-"clean_*"]` for everyone else.
+
+Two optional narrowings, neither needed for the base policy: `modes` on one
+backend overrides the profile's set for that backend (it must include the
+default), and a [parameter guard](parameter-guards.md) on `trentina_mode`
+narrows one tool.
 
 ## Roles
 
@@ -151,7 +192,8 @@ Each profile configures its defense **policy** — never the layers' existence. 
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `enforcement` | string | `warn` | What a flagged response becomes: `warn` (delivered intact + warning — the calibration mode) or `block` (refused — autonomous agents). `clean` is refused at load: the clean_* TOOLS work, the enforcement mode never has |
+| `enforcement` | string | `warn` | The default mode — what a flagged response becomes when the call does not choose: `warn` (delivered intact + warning) or `block` (refused). Cannot be `clean` |
+| `modes` | list | `[enforcement]` | The modes the agent may choose per call — see [Content modes](#content-modes) |
 | `l2_threshold` | float | `0.5` | L2 score at/above which content is flagged, in addition to the model's own MALICIOUS label. Lower = stricter. |
 | `audit` | bool | `true` | Write detection rows to SQLite |
 | `provider` | string | `null` | LLM provider override (`gemini`, `openai`, `anthropic`, `ollama`) |

@@ -1,8 +1,8 @@
 """Outcome taxonomy for gateway audit rows.
 
 A single ``success`` boolean cannot describe what happened to a tool call, and
-reading one as a health signal actively misleads. ``block_fetch`` and
-``block_read`` fail closed by design: when the defense pipeline blocks content
+reading one as a health signal actively misleads. ``fetch_tool`` and
+``read_tool`` in block mode fail closed by design: when the defense pipeline blocks content
 the tool *raises*, which under a boolean schema is indistinguishable from the
 backend being down. An operator reading "2 ok / 34 errors" concludes the tool
 is broken when the truth may be that it blocked 34 hostile pages.
@@ -29,6 +29,7 @@ from .errors import (
     FetchError,
     FileReadError,
     L1Error,
+    ModeNotPermittedError,
     QuarantineAgentError,
     TrentinaError,
     UnscannableContentError,
@@ -96,6 +97,7 @@ FAILED_OUTCOMES: frozenset[Outcome] = frozenset(
 """Genuine failures. This is the health signal."""
 
 _CLASSIFICATION: tuple[tuple[type[BaseException], Outcome], ...] = (
+    (ModeNotPermittedError, Outcome.DENIED_GUARD),
     (BlockedSourceError, Outcome.BLOCKED_DEFENSE),
     (UnscannableContentError, Outcome.BLOCKED_DEFENSE),
     (UnsupportedContentTypeError, Outcome.BLOCKED_DEFENSE),
@@ -117,6 +119,28 @@ content (fail-closed, working as designed), upstream broke, we broke.
 _MAX_CAUSE_DEPTH = 10
 
 
+def cause_chain(exc: BaseException) -> list[BaseException]:
+    """``exc`` and its ``__cause__`` ancestors, depth- and cycle-guarded."""
+    chain: list[BaseException] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and len(chain) < _MAX_CAUSE_DEPTH:
+        if id(current) in seen:
+            break
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__
+    return chain
+
+
+def refusal_of(exc: BaseException) -> dict[str, object] | None:
+    """The structured refusal a tool raised, wherever it sits in the chain."""
+    for err in cause_chain(exc):
+        if isinstance(err, BlockedSourceError):
+            return err.refusal
+    return None
+
+
 def classify_exception(exc: BaseException) -> Outcome:
     """Map a raised exception to an :class:`Outcome`.
 
@@ -134,16 +158,7 @@ def classify_exception(exc: BaseException) -> Outcome:
     upstream, and over-reporting our own bugs would make the one outcome that
     should page someone meaningless.
     """
-    chain: list[BaseException] = []
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and len(chain) < _MAX_CAUSE_DEPTH:
-        if id(current) in seen:
-            break
-        seen.add(id(current))
-        chain.append(current)
-        current = current.__cause__
-
+    chain = cause_chain(exc)
     for err in chain:
         for exc_type, outcome in _CLASSIFICATION:
             if isinstance(err, exc_type):

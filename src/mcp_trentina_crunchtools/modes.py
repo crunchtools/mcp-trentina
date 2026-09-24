@@ -25,13 +25,16 @@ where the payload hides past the cap and the head reads clean.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from .config import get_config
+from .errors import ModeNotPermittedError
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from .defense import DefenseVerdict
 
 
@@ -65,6 +68,17 @@ class Gaps:
             or (self.l3_unavailable and config.require_l3)
         )
 
+    @classmethod
+    def of_warning(cls, warning: dict[str, Any]) -> Gaps:
+        """A cached ``_trentina_warning``'s gaps.
+
+        The gateway caches warnings, not verdicts. Each field is a boolean key
+        of the same name in the warning, so a gap added later is read back
+        without touching this; a key an older perimeter did not write reads
+        as absent.
+        """
+        return cls(**{f.name: bool(warning.get(f.name)) for f in fields(cls)})
+
     def truncated_only(self) -> bool:
         """Every gap is a partial read, none an absent layer.
 
@@ -92,13 +106,105 @@ def gaps_of(verdict: DefenseVerdict) -> Gaps:
     )
 
 
-def warning_blocks(warning: dict[str, Any]) -> bool:
-    """Whether a cached ``_trentina_warning`` describes a blocking gap.
+def refusal_reason(flagged_by: str | None, gaps: Gaps) -> str | None:
+    """Why block or clean may not deliver the original, or None.
 
-    The gateway caches warnings, not verdicts. Each ``Gaps`` field is a
-    boolean key of the same name in the warning, so a gap added later is read
-    back without touching this; a key an older perimeter did not write reads
-    as absent.
+    The reason names layers and gaps only. It is ours, never the payload's.
     """
-    gaps = Gaps(**{f.name: bool(warning.get(f.name)) for f in fields(Gaps)})
-    return gaps.blocking()
+    if flagged_by is not None:
+        return f"flagged by {flagged_by}"
+    if not gaps.blocking():
+        return None
+    missing = [
+        name
+        for name, present in (
+            ("L2 unavailable", gaps.l2_unavailable),
+            ("L2 read only part of the payload", gaps.l2_truncated),
+            ("L3 unavailable", gaps.l3_unavailable),
+            ("L3 read only part of the payload", gaps.l3_truncated),
+        )
+        if present
+    ]
+    return "not fully judged: " + ", ".join(missing)
+
+
+# The per-call mode (#193). The agent asks through `trentina_mode`; a POLICY
+# decides whether it may. Under the gateway the policy is the calling
+# profile's `defense.modes`, bound here around an internal tool call; a
+# standalone server reads TRENTINA_MODE / TRENTINA_MODES.
+
+
+@dataclass(frozen=True)
+class ModePolicy:
+    """Which modes a caller may use, and what an omitted mode means."""
+
+    allowed: tuple[Mode, ...]
+    default: Mode
+
+    @classmethod
+    def of(cls, allowed: Iterable[str], default: str) -> ModePolicy:
+        return cls(tuple(Mode(m) for m in allowed), Mode(default))
+
+    def resolve(self, requested: str | None) -> Mode:
+        """The mode this call runs in. Omission resolves BEFORE the check.
+
+        Checking the requested value and then defaulting would let an omitted
+        mode skip the policy entirely — the parameter-guard trap, where a
+        missing argument is simply not checked.
+        """
+        name = self.default.value if requested is None else str(requested).strip().lower()
+        allowed = [m.value for m in self.allowed]
+        if name not in allowed:
+            raise ModeNotPermittedError(name, allowed)
+        return Mode(name)
+
+    def alternatives(self, current: Mode, cause: str | None) -> list[str]:
+        """What a refused call may try next, under this policy.
+
+        Flagged content is offered clean and NEVER warn: "retry with warn"
+        would be the gateway itself steering the agent to the verbatim bytes
+        the attacker wanted delivered. warn in the policy is a grant for
+        deliberate reading, not the gateway's retry path. Only a refusal for
+        an unfinished read, with nothing found, may point at warn — clean
+        refuses on the same gaps. Whatever is suggested is also what the
+        blocklist lets through: clean proceeds on a blocklisted source.
+
+        ``cause`` is ``"flagged"``, ``"gaps"``, or None for anything else.
+        """
+        candidates = {"flagged": [Mode.CLEAN], "gaps": [Mode.WARN]}.get(cause or "", [])
+        return [m.value for m in candidates if m in self.allowed and m is not current]
+
+
+def current_policy() -> ModePolicy:
+    """The gateway's policy for this call, else the standalone one from the environment."""
+    from .gateway.context import get_current_policy
+
+    bound = get_current_policy()
+    if bound is not None:
+        return bound
+    config = get_config()
+    return ModePolicy.of(config.allowed_modes, config.default_mode)
+
+
+def refusal_body(
+    reason: str,
+    mode: Mode,
+    *,
+    flagged_by: str | None = None,
+    gaps: Gaps | None = None,
+    policy: ModePolicy | None = None,
+) -> dict[str, Any]:
+    """The structured refusal: gateway-authored fields, no payload, no L3 prose."""
+    gap_names = [name for name, present in asdict(gaps).items() if present] if gaps else []
+    cause = "flagged" if flagged_by is not None else "gaps" if gap_names else None
+    policy = policy or current_policy()
+    body: dict[str, Any] = {
+        "reason": reason,
+        "mode": mode.value,
+        "alternatives": policy.alternatives(mode, cause),
+    }
+    if flagged_by is not None:
+        body["flagged_by"] = flagged_by
+    if gap_names:
+        body["gaps"] = gap_names
+    return body

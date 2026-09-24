@@ -30,7 +30,7 @@ def _document(text: str, sources: list[dict[str, Any]]) -> str:
     return f"{text}\n\n--- Sources ---\n{cited}"
 
 
-async def _search(
+async def web_search(
     query: str, num_results: int, mode: Mode, prompt: str | None = None
 ) -> dict[str, Any]:
     """L0, redirect resolution, then the one judging path."""
@@ -72,12 +72,12 @@ async def _search(
 
 async def block_search(query: str, num_results: int = 5) -> dict[str, Any]:
     """Refuse a flagged or incompletely judged answer; otherwise L0's text."""
-    return await _search(query, num_results, Mode.BLOCK)
+    return await web_search(query, num_results, Mode.BLOCK)
 
 
 async def warn_search(query: str, num_results: int = 5) -> dict[str, Any]:
     """L0's answer and sources, with the verdict attached when there is one."""
-    return await _search(query, num_results, Mode.WARN)
+    return await web_search(query, num_results, Mode.WARN)
 
 
 async def clean_search(
@@ -86,4 +86,4 @@ async def clean_search(
     num_results: int = 5,
 ) -> dict[str, Any]:
     """A verified L3 extraction of the answer, plus its sources."""
-    return await _search(query, num_results, Mode.CLEAN, prompt)
+    return await web_search(query, num_results, Mode.CLEAN, prompt)

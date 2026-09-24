@@ -2,9 +2,9 @@
 
 Trentina's content tools put untrusted input through the defense pipeline before an agent sees it. Through the gateway they are the `web` backend (`internal://web`).
 
-## Five families, three modes
+## Five tools, three modes
 
-Every tool runs **all three layers**: L1 and L2 in parallel on the bytes as they arrived, then L3 briefed with both. The mode — the tool's prefix, picked by the agent per call — decides only what is delivered.
+Every tool runs **all three layers**: L1 and L2 in parallel on the bytes as they arrived, then L3 briefed with both. The mode — the `trentina_mode` argument, chosen per call within what the caller's policy permits — decides only what is delivered.
 
 | family | what it produces |
 |---|---|
@@ -14,21 +14,48 @@ Every tool runs **all three layers**: L1 and L2 in parallel on the bytes as they
 | `content` | text the agent hands in |
 | `search` | a grounded web search answer and its sources |
 
-| prefix | on a flag, or a layer that could not finish | what you get |
+| `trentina_mode` | on a flag, or a layer that could not finish | what you get |
 |---|---|---|
-| `block_*` | refused | the bytes that arrived, or an error — never flagged or half-judged content |
-| `warn_*` | delivered, with `_trentina_warning` | **exactly** the bytes that arrived |
-| `clean_*` | extracted (half-judged content is refused) | an extraction L3 wrote and a second L3 pass verified — never the original |
+| `block` | refused | the bytes that arrived, or an error — never flagged or half-judged content |
+| `warn` | delivered, with `_trentina_warning` | **exactly** the bytes that arrived |
+| `clean` | extracted (half-judged content is refused) | an extraction L3 wrote and a second L3 pass verified, guided by `trentina_prompt` — never the original |
 
-Fifteen tools. `quarantine_stats` is the only other tool that touches a verdict, and it reports on the gateway, not on content. The diagnostic scans (`quarantine_scan`, `deep_quarantine_scan`, `scan_content`, `deep_scan_content`) were removed in **0.31.0**: they were a second vocabulary beside the three modes, and every question they answered is answered by `block_*` or `warn_*`. `quarantine_scan_dir` became the `dir` family.
+```
+fetch_tool {url}                                           # the policy default
+fetch_tool {url, trentina_mode: "clean", trentina_prompt: "the release date"}
+fetch_tool {url, trentina_mode: "warn"}                    # only if the policy grants warn
+```
+
+Five tools: `fetch_tool`, `read_tool`, `dir_tool`, `content_tool`, `search_tool`. Until **0.32.0** the mode was part of the tool NAME — fifteen tools — so the agent picked its own security posture and nothing enforced the pick; an injection could argue its way to `warn_fetch`. Now a **policy** decides which values count (#193):
+
+- Through the gateway, the calling profile's `defense.modes` — see [Profiles](profiles.md#content-modes). The gateway applies the same parameter to every backend's tools, not only these.
+- Standalone, `TRENTINA_MODE` (default `block`) and `TRENTINA_MODES` (default: that one mode). A default outside the set, or a default of `clean`, fails startup.
+
+A mode outside the policy is refused before anything runs. An omitted mode resolves to the default *before* the check, so leaving it out cannot skip the policy.
+
+`quarantine_stats` is the only other tool that touches a verdict, and it reports on the gateway, not on content. The diagnostic scans were removed in **0.31.0**.
 
 ### Choosing
 
-- By default → `block_*`.
-- You want the information, not the bytes → `clean_*`.
-- You must read content verbatim that legitimately discusses attacks in the words attacks use — a CVE advisory, an incident log → `warn_*`. It is a **security-researcher grant**: almost never the right mode for an assistant, a coding agent or a swarm, and profiles should leave it out of `tools_allow` unless someone needs it. Treat what it returns as data, never as instructions.
+- By default → `block`.
+- You want the information, not the bytes → `clean`.
+- You must read content verbatim that legitimately discusses attacks in the words attacks use — a CVE advisory, an incident log → `warn`. It is a **security-researcher grant**: almost never the right mode for an assistant, a coding agent or a swarm, and policies should leave it out unless someone needs it. Treat what it returns as data, never as instructions.
 
-`warn_*` is the only mode that satisfies the owner's rule in both directions — *what the agent receives is byte-identical to what entered the perimeter, or nothing at all* — even when the verdict is bad.
+### Refusals name what to try next
+
+A refusal carries a structured body — JSON-RPC `error.data` for these tools, `_trentina_refusal` for a proxied response — and the same thing as one line of text for clients that strip structured fields:
+
+```json
+{"reason": "flagged by L3", "mode": "block", "flagged_by": "L3", "alternatives": ["clean"]}
+```
+
+- **Flagged** (or blocklisted) → `clean`, if the policy allows it. **Never `warn`**: "retry with warn" would be the gateway itself steering the agent to the verbatim bytes an attacker wanted delivered. warn in a policy is a grant for deliberate reading, not a retry path.
+- **Refused only because a layer could not finish**, nothing flagged → `warn`, if allowed. `clean` refuses on the same gaps.
+- Otherwise `[]`. The reason names the layer that objected — "flagged by L3", not "malicious"; a flag can be a false positive.
+
+No payload text and no L3 prose appear in a refusal.
+
+`warn` is the only mode that satisfies the owner's rule in both directions — *what the agent receives is byte-identical to what entered the perimeter, or nothing at all* — even when the verdict is bad.
 
 ### clean runs L3 three times
 
@@ -40,7 +67,7 @@ A provider error at turn 2 or 3 refuses. Until 0.31.0 a provider error handed ba
 
 ### A layer that could not finish
 
-`block_*` and `clean_*` need a verdict from every layer. A layer that is absent (no ONNX model, no L3 provider) refuses unless the operator sets `TRENTINA_REQUIRE_L2=false` or `TRENTINA_REQUIRE_L3=false`, which turns that absence into a warning. A layer that read only *part* of the payload — L2 past its token cap, L3 past `QUARANTINE_MAX_CONTENT` — always refuses: that is the padding attack. `warn_*` delivers in every case and says which layer fell short.
+`block` and `clean` need a verdict from every layer. A layer that is absent (no ONNX model, no L3 provider) refuses unless the operator sets `TRENTINA_REQUIRE_L2=false` or `TRENTINA_REQUIRE_L3=false`, which turns that absence into a warning. A layer that read only *part* of the payload — L2 past its token cap, L3 past `QUARANTINE_MAX_CONTENT` — always refuses: that is the padding attack. `warn` delivers in every case and says which layer fell short.
 
 ## What every response carries
 
@@ -71,13 +98,13 @@ What was *found* is `_trentina_warning`'s job: `flagged_by`, L1 counts, L2's lab
 }
 ```
 
-An allowlisted source runs all three layers and its flags stand. What changes is the cost: `block_*` hands a flagged or partially-read payload to the clean path instead of refusing it, and says so (`disposition: extracted`, `downgraded_to_clean` in the warning). A clean that fails still refuses, and an absent layer still refuses — allowlisting removes false-positive refusals; it does not open a channel that survives the clean pipeline giving up. The realistic threat is a trusted source being compromised.
+An allowlisted source runs all three layers and its flags stand. What changes is the cost: `block` hands a flagged or partially-read payload to the clean path instead of refusing it, and says so (`disposition: extracted`, `downgraded_to_clean` in the warning). A clean that fails still refuses, and an absent layer still refuses — allowlisting removes false-positive refusals; it does not open a channel that survives the clean pipeline giving up. The realistic threat is a trusted source being compromised.
 
 ## Family notes
 
-**search** — L0 is a grounded Gemini call; redirect URLs are resolved. The answer, each source title and each URL become one document through the same path as a fetched page, judged as model output. `block_search`/`warn_search` return the answer plus `sources`; `clean_search` returns the extraction plus `sources`, never the raw answer.
+**search** — L0 is a grounded Gemini call; redirect URLs are resolved. The answer, each source title and each URL become one document through the same path as a fetched page, judged as model output. `block` and `warn` return the answer plus `sources`; `clean` returns the extraction plus `sources`, never the raw answer.
 
-**dir** — the listing (name, type, size per entry, at most 500) is the payload, because file names are attacker-chosen text. A `.py` file that shadows a Python standard-library module (`struct.py`, `os.py`) is an L1 detection with critical risk: run Python in that directory and it imports the attacker's module. `block_dir` refuses it; `warn_dir` names it under `shadows`. File contents are not read — that is `*_read`, one file at a time.
+**dir** — the listing (name, type, size per entry, at most 500) is the payload, because file names are attacker-chosen text. A `.py` file that shadows a Python standard-library module (`struct.py`, `os.py`) is an L1 detection with critical risk: run Python in that directory and it imports the attacker's module. `block` refuses it; `warn` names it under `shadows`. File contents are not read — that is `read_tool`, one file at a time.
 
 **content** — inline text is never allowlisted (it has no provenance), is capped at `QUARANTINE_MAX_CONTENT`, and is blocklisted by SHA-256.
 
@@ -85,7 +112,7 @@ An allowlisted source runs all three layers and its flags stand. What changes is
 
 ## Gateway Integration
 
-Through the gateway these appear as `web__block_fetch_tool`, `web__clean_search_tool`, and so on. `tools_allow` decides which modes a profile is offered.
+Through the gateway these appear as `web__fetch_tool`, `web__search_tool`, and so on. The profile's `defense.modes` decides which modes are offered; `tools_allow` decides which families.
 
 ## Related
 

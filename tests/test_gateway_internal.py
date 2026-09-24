@@ -188,9 +188,7 @@ class TestInternalBackend:
         assert call.structured_content == {"answer": 42}
 
     async def test_call_propagates_is_error(self) -> None:
-        result = _FakeResult(
-            content=[TextContent(type="text", text="boom")], is_error=True
-        )
+        result = _FakeResult(content=[TextContent(type="text", text="boom")], is_error=True)
         server = _FakeServer([_tool("block_fetch_tool")], call_result=result)
         internal.register_internal_server(server)
         call = await internal.call_internal_tool("block_fetch_tool", {})
@@ -226,7 +224,7 @@ async def test_real_trentina_server_lists_its_tools() -> None:
         internal._server = saved
 
     names = {t["name"] for t in tools}
-    assert "block_fetch_tool" in names
+    assert "fetch_tool" in names
     assert "quarantine_stats_tool" in names
     for t in tools:
         assert isinstance(t["name"], str) and t["name"]
@@ -291,9 +289,9 @@ class TestFakeMatchesRealFastMcp:
         """
         from fastmcp import FastMCP
 
-        assert any(
-            hasattr(FastMCP, m) for m in ("list_tools", "get_tools")
-        ), "FastMCP exposes neither list_tools nor get_tools"
+        assert any(hasattr(FastMCP, m) for m in ("list_tools", "get_tools")), (
+            "FastMCP exposes neither list_tools nor get_tools"
+        )
 
         for method in ("get_tool", "custom_route"):
             assert hasattr(FastMCP, method), (

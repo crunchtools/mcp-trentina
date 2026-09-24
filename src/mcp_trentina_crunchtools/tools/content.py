@@ -7,9 +7,9 @@ from typing import Any
 
 from ..config import get_config
 from ..database import is_blocked
-from ..errors import BlockedSourceError, ContentSizeError
+from ..errors import ContentSizeError
 from ..modes import Mode
-from .judged import judge_and_deliver
+from .judged import blocklisted, judge_and_deliver
 
 
 def _content_hash(content: str) -> str:
@@ -17,7 +17,7 @@ def _content_hash(content: str) -> str:
     return f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}"
 
 
-async def _judge_inline(content: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
+async def judge_content(content: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
     """Judge text the agent handed in. It is never allowlisted.
 
     Inline content has no provenance to appeal to: fetch asks the domain,
@@ -31,7 +31,7 @@ async def _judge_inline(content: str, mode: Mode, prompt: str | None = None) -> 
     chash = _content_hash(content)
     blocked = is_blocked(chash)
     if blocked and mode is not Mode.CLEAN:
-        raise BlockedSourceError(chash, blocked["detected_at"])
+        raise blocklisted(chash, mode, blocked["detected_at"])
 
     return await judge_and_deliver(
         content,
@@ -53,13 +53,13 @@ async def _judge_inline(content: str, mode: Mode, prompt: str | None = None) -> 
 async def block_content(content: str, content_type: str = "text/plain") -> dict[str, Any]:
     """Refuse flagged or incompletely judged content; otherwise the same text."""
     del content_type
-    return await _judge_inline(content, Mode.BLOCK)
+    return await judge_content(content, Mode.BLOCK)
 
 
 async def warn_content(content: str, content_type: str = "text/plain") -> dict[str, Any]:
     """The content as given, with the verdict attached when there is one."""
     del content_type
-    return await _judge_inline(content, Mode.WARN)
+    return await judge_content(content, Mode.WARN)
 
 
 async def clean_content(
@@ -69,4 +69,4 @@ async def clean_content(
 ) -> dict[str, Any]:
     """A verified L3 extraction of the content."""
     del content_type
-    return await _judge_inline(content, Mode.CLEAN, prompt)
+    return await judge_content(content, Mode.CLEAN, prompt)

@@ -74,7 +74,7 @@ parameter_guards:
 
 ```yaml
 parameter_guards:
-  block_read_tool:
+  read_tool:
     path:
       allow: ["/data/*", "/tmp/*"]
       deny: ["/etc/shadow", "/etc/passwd", "*.key"]
@@ -84,18 +84,31 @@ parameter_guards:
 
 ```yaml
 parameter_guards:
-  block_fetch_tool:
+  fetch_tool:
     url:
       allow: ["https://*"]
       deny: ["*://evil.com/*", "*://localhost*"]
 ```
+
+### Narrow the mode on one tool
+
+The mode policy is `defense.modes` on the profile ([Content modes](profiles.md#content-modes)); nothing here is needed for it. A guard on `trentina_mode` narrows one tool further:
+
+```yaml
+parameter_guards:
+  send_gmail_message:
+    trentina_mode:
+      allow: ["block"]
+```
+
+The guard is checked against the RESOLVED mode — an omitted `trentina_mode` becomes the profile default first — so leaving the argument out cannot skip it, which is what a guard does with any other absent argument. The tool's schema offers only what survives the guard.
 
 ## Pipeline Position
 
 Parameter guards run after the tool-name allowlist check and before the backend call:
 
 ```
-Parse tool name → Backend exists? → Tool in allowlist? → Parameter guards → Backend call
+Parse tool name → Backend exists? → Tool in allowlist? → Resolve trentina_mode → Parameter guards → Backend call
 ```
 
 A rejected call returns immediately. The backend never sees the request. The error message is terse and does not include the rejected value (to avoid leaking guard configuration to the agent).

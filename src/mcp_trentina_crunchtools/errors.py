@@ -6,6 +6,7 @@ All errors scrub credentials from messages before surfacing to users.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 
 def _scrub_credentials(message: str) -> str:
@@ -54,13 +55,27 @@ class QuarantineAgentError(TrentinaError):
 
 
 class BlockedSourceError(TrentinaError):
-    """Raised when a source is in the SQLite blocklist."""
+    """Refused: flagged, not fully judged, or on the blocklist.
 
-    def __init__(self, source: str, detected_at: str) -> None:
+    ``refusal`` is the structured body the gateway hands the agent as
+    JSON-RPC ``error.data``: why, which layer or gap, and the modes this
+    caller may try next. Gateway-authored fields only — never payload text,
+    never L3 prose.
+    """
+
+    def __init__(self, source: str, reason: str, *, refusal: dict[str, Any] | None = None) -> None:
+        super().__init__(f"Refused {source}: {reason}")
+        self.refusal: dict[str, Any] = refusal or {"reason": reason, "alternatives": []}
+
+
+class ModeNotPermittedError(TrentinaError):
+    """The call asked for a mode the caller's policy does not allow."""
+
+    def __init__(self, mode: str, allowed: list[str]) -> None:
         super().__init__(
-            f"Source blocked: {source} (detected at {detected_at}). "
-            "Use clean_fetch to bypass blocklist."
+            f"Parameter 'trentina_mode' value not in allow list (permitted: {', '.join(allowed)})"
         )
+        self.mode = mode
 
 
 class FileReadError(TrentinaError):
@@ -75,8 +90,7 @@ class ContentSizeError(TrentinaError):
 
     def __init__(self, size: int, max_size: int) -> None:
         super().__init__(
-            f"Content too large: {size} chars (max {max_size}). "
-            "Split content into smaller chunks."
+            f"Content too large: {size} chars (max {max_size}). Split content into smaller chunks."
         )
 
 

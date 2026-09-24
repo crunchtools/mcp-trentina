@@ -497,29 +497,17 @@ class TestEnforcement:
         )
         assert decision.blocked, "an unknown override must not weaken block"
 
-    async def test_anything_that_is_not_warn_fails_closed(self) -> None:
-        """`warn` is the only mode that DELIVERS flagged content.
+    async def test_an_unknown_mode_is_refused_not_delivered(self) -> None:
+        """`warn` is the only mode that DELIVERS flagged content, and a mode
+        nobody implemented must refuse rather than deliver. Since 0.32.0 the
+        mode is a per-call argument, so the unknown value arrives from the
+        AGENT — and is refused before anything runs."""
+        from mcp_trentina_crunchtools.errors import ModeNotPermittedError
+        from mcp_trentina_crunchtools.modes import Mode, ModePolicy
 
-        The disposition is spelled `!= "warn"` rather than `== "block"` on
-        purpose: any mode added later fails closed until somebody implements
-        it. The opposite spelling puts a new mode on the delivering side by
-        default, which is how an unimplemented enforcement mode becomes a
-        hole rather than an outage. Asserted by forcing a value past the
-        model, which the loader itself refuses.
-        """
-        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
-
-        p = _profile("agent2")
-        p.defense = DefenseConfig(enforcement="block")
-        object.__setattr__(p.defense, "enforcement", "some_future_mode")
-        decision = await scan_tool_response(
-            profile=p,
-            backend_name="jira",
-            tool_name="jira_get_issue",
-            content_blocks=[{"type": "text", "text": HOSTILE}],
-            structured_content=None,
-        )
-        assert decision.blocked, "a mode nobody implemented must refuse, not deliver"
+        policy = ModePolicy((Mode.BLOCK, Mode.WARN, Mode.CLEAN), Mode.BLOCK)
+        with pytest.raises(ModeNotPermittedError):
+            policy.resolve("some_future_mode")
 
     def test_layer_toggles_no_longer_exist(self) -> None:
         """The owner's call: a profile behind Trentina gets all three
@@ -806,3 +794,77 @@ class TestBlockWithholdsUnjudgedDescriptions:
         tools = [{"name": "good_tool", "description": "Reads a ticket."}]
         result = await scan_tool_list(_profile(), "jira", tools, tools)
         assert result[0]["_trentina_warning"]["l3_unavailable"] is True
+
+
+class TestPerCallMode:
+    """#193: the call's mode, not the profile's, decides a proxied response."""
+
+    async def test_a_call_asking_block_refuses_under_a_warn_profile(self) -> None:
+        from mcp_trentina_crunchtools.modes import Mode, ModePolicy
+
+        decision = await scan_tool_response(
+            profile=_profile("permode1"),
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=[{"type": "text", "text": HOSTILE}],
+            structured_content=None,
+            mode=Mode.BLOCK,
+            policy=ModePolicy((Mode.BLOCK, Mode.WARN, Mode.CLEAN), Mode.WARN),
+        )
+        assert decision.blocked
+        assert decision.refusal is not None
+        assert decision.refusal["alternatives"] == ["clean"], "flagged must never offer warn"
+
+    async def test_clean_extracts_flagged_content_instead_of_refusing(self) -> None:
+        from mcp_trentina_crunchtools.modes import Mode
+        from mcp_trentina_crunchtools.quarantine.agent import CleanResult
+
+        extract = AsyncMock(return_value=CleanResult(content={"extracted_text": "Tuesday"}))
+        with _l3_available_and_clean(), patch(f"{_I}.quarantine_clean", extract):
+            decision = await scan_tool_response(
+                profile=_profile("permode2"),
+                backend_name="jira",
+                tool_name="jira_get_issue",
+                content_blocks=[{"type": "text", "text": HOSTILE}],
+                structured_content={"secret": "not delivered"},
+                mode=Mode.CLEAN,
+                prompt="when is the window",
+            )
+        assert not decision.blocked
+        assert decision.extraction is not None
+        assert json.loads(decision.extraction) == {"extracted_text": "Tuesday"}
+        assert extract.call_args.args[1] == "when is the window"
+
+    async def test_clean_refuses_what_a_layer_could_not_finish(self) -> None:
+        """Keyless unit env: L3 is absent, which blocks clean exactly as block."""
+        from mcp_trentina_crunchtools.modes import Mode, ModePolicy
+
+        extract = AsyncMock()
+        with patch(f"{_I}.quarantine_clean", extract):
+            decision = await scan_tool_response(
+                profile=_profile("permode3"),
+                backend_name="jira",
+                tool_name="jira_get_issue",
+                content_blocks=[{"type": "text", "text": "The window is Tuesday."}],
+                structured_content=None,
+                mode=Mode.CLEAN,
+                policy=ModePolicy((Mode.BLOCK, Mode.WARN, Mode.CLEAN), Mode.BLOCK),
+            )
+        assert decision.blocked
+        extract.assert_not_called()
+        assert decision.refusal is not None
+        assert decision.refusal["alternatives"] == ["warn"], "gap-only may offer warn"
+
+    async def test_the_kill_switch_beats_the_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from mcp_trentina_crunchtools.modes import Mode
+
+        monkeypatch.setenv("TRENTINA_ENFORCEMENT_OVERRIDE", "warn")
+        decision = await scan_tool_response(
+            profile=_profile("permode4"),
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=[{"type": "text", "text": HOSTILE}],
+            structured_content=None,
+            mode=Mode.BLOCK,
+        )
+        assert not decision.blocked

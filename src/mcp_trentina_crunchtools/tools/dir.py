@@ -22,11 +22,11 @@ from typing import Any
 
 from ..config import get_config
 from ..database import is_blocked
-from ..errors import BlockedSourceError, FileReadError
+from ..errors import FileReadError
 from ..l1.pipeline import run_l1
 from ..l1.shadows import ShadowStats, detect_module_shadows
 from ..modes import Mode
-from .judged import judge_and_deliver
+from .judged import blocklisted, judge_and_deliver
 
 MAX_DIR_ENTRIES = 500
 
@@ -44,7 +44,7 @@ def _entry(entry: os.DirEntry[str]) -> dict[str, Any]:
     return {"name": entry.name, "type": kind, "size": size}
 
 
-async def _dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
+async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
     resolved = str(Path(path).resolve())
     if not os.path.isdir(resolved):
         raise FileReadError(path, "Not a directory")
@@ -56,7 +56,7 @@ async def _dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str, An
 
     blocked = is_blocked(resolved)
     if blocked and mode is not Mode.CLEAN:
-        raise BlockedSourceError(resolved, blocked["detected_at"])
+        raise blocklisted(resolved, mode, blocked["detected_at"])
 
     listing = "\n".join(
         f"{e['name']}\t{e['type']}\t{e['size'] if e['size'] is not None else '-'}" for e in entries
@@ -102,14 +102,14 @@ async def _dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str, An
 
 async def block_dir(path: str) -> dict[str, Any]:
     """Refuse a flagged or shadowed directory; otherwise its listing."""
-    return await _dir(path, Mode.BLOCK)
+    return await list_dir(path, Mode.BLOCK)
 
 
 async def warn_dir(path: str) -> dict[str, Any]:
     """The listing, with the verdict attached when there is one."""
-    return await _dir(path, Mode.WARN)
+    return await list_dir(path, Mode.WARN)
 
 
 async def clean_dir(path: str, prompt: str) -> dict[str, Any]:
     """A verified L3 extraction of the listing, never the names themselves."""
-    return await _dir(path, Mode.CLEAN, prompt)
+    return await list_dir(path, Mode.CLEAN, prompt)

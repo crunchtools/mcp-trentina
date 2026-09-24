@@ -94,6 +94,31 @@ def int_env(name: str, default: int, *, minimum: int | None = None) -> int:
 
 DEFAULT_PROVIDER_FALLBACK: list[str] = []
 
+MODE_NAMES = ("block", "warn", "clean")
+
+
+def _mode_policy_env() -> tuple[str, tuple[str, ...]]:
+    """``TRENTINA_MODE`` and ``TRENTINA_MODES``, refused at startup when wrong.
+
+    Refused rather than defaulted, unlike the tuning knobs: a typo in a
+    security policy that quietly fell back would look exactly like the
+    policy having been applied.
+    """
+    from .errors import ConfigError
+
+    default = os.environ.get("TRENTINA_MODE", "").strip().lower() or "block"
+    raw = os.environ.get("TRENTINA_MODES", "")
+    allowed = tuple(dict.fromkeys(m.strip().lower() for m in raw.split(",") if m.strip()))
+    allowed = allowed or (default,)
+    for name in (default, *allowed):
+        if name not in MODE_NAMES:
+            raise ConfigError(f"unknown trentina mode {name!r}: use {', '.join(MODE_NAMES)}")
+    if default == "clean":
+        raise ConfigError("TRENTINA_MODE cannot be clean: a default carries no extraction prompt")
+    if default not in allowed:
+        raise ConfigError(f"TRENTINA_MODE {default!r} must be in TRENTINA_MODES {list(allowed)}")
+    return default, allowed
+
 
 class Config:
     """Trentina configuration from environment variables.
@@ -127,7 +152,7 @@ class Config:
             # governed clean_*, defaulted to failing OPEN, and an operator who
             # still sets it believes a knob exists that no longer does.
             raise ConfigError(
-                "QUARANTINE_FALLBACK no longer exists (0.31.0). block_* and clean_* "
+                "QUARANTINE_FALLBACK no longer exists (0.31.0). block and clean "
                 "now refuse when a layer cannot run; set TRENTINA_REQUIRE_L3=false "
                 "(or TRENTINA_REQUIRE_L2=false) to deliver with a warning instead."
             )
@@ -136,6 +161,11 @@ class Config:
         # never excuses a partial scan and never stops a layer that can run.
         self.require_l2: bool = bool_env("TRENTINA_REQUIRE_L2", True)
         self.require_l3: bool = bool_env("TRENTINA_REQUIRE_L3", True)
+        # The mode policy when no gateway profile is bound (#193): the agent of
+        # a standalone server may pass trentina_mode, but only from this set,
+        # and an omitted one is TRENTINA_MODE. Both default to block, so an
+        # injection cannot argue a standalone server into warn either.
+        self.default_mode, self.allowed_modes = _mode_policy_env()
         self.max_content: int = int(
             os.environ.get("QUARANTINE_MAX_CONTENT", str(DEFAULT_MAX_CONTENT))
         )

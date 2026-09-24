@@ -31,7 +31,8 @@ from mcp_types.version import (
 from .. import __version__
 from ..database import record_gateway_call
 from ..defense import Provenance
-from ..outcomes import Outcome, classify_exception
+from ..errors import ModeNotPermittedError
+from ..outcomes import Outcome, classify_exception, refusal_of
 from .backend import call_backend_tool, list_backend_tools, on_backend_cache_evict
 from .compress import compress_tools, maybe_trigger_compression
 from .errors import BackendCallError, BackendNotInProfileError
@@ -39,9 +40,18 @@ from .filter import filter_tools
 from .guards import check_parameter_guards, check_response_guards
 from .ingress_defense import scan_tool_list, scan_tool_response
 from .internal import call_internal_tool, list_internal_tools
+from .modes_policy import (
+    MODE_PARAM,
+    PROMPT_PARAM,
+    insert_params,
+    policy_for,
+    resolve_call,
+    strip_params,
+)
 from .transform import transform_response
 
 if TYPE_CHECKING:
+    from ..modes import Mode, ModePolicy
     from .profile import Backend, Profile
 
 logger = logging.getLogger(__name__)
@@ -129,9 +139,7 @@ def _audit(
     error_message: str | None = None,
 ) -> None:
     with contextlib.suppress(Exception):
-        record_gateway_call(
-            profile, backend, tool, outcome.value, duration_ms, error_message
-        )
+        record_gateway_call(profile, backend, tool, outcome.value, duration_ms, error_message)
 
 
 def _ok(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -139,13 +147,27 @@ def _ok(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
 
-def _err(req_id: Any, code: int, message: str) -> dict[str, Any]:
+def _err(
+    req_id: Any, code: int, message: str, detail: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Build a JSON-RPC 2.0 error response."""
-    return {
-        "jsonrpc": "2.0",
-        "id": req_id,
-        "error": {"code": code, "message": message},
-    }
+    error: dict[str, Any] = {"code": code, "message": message}
+    if detail is not None:
+        error["data"] = detail
+    return {"jsonrpc": "2.0", "id": req_id, "error": error}
+
+
+def _refusal_text(refusal: dict[str, Any]) -> str:
+    """One line an agent reads even when a client strips the structured field."""
+    alternatives = refusal.get("alternatives") or []
+    tail = (
+        "Your policy allows retrying with "
+        + " or ".join(f"{MODE_PARAM}={m}" for m in alternatives)
+        + "."
+        if alternatives
+        else "No other mode is available under your policy."
+    )
+    return f"[TRENTINA] Refused ({refusal.get('reason', 'defense')}). {tail}"
 
 
 def _negotiate_protocol_version(requested: Any) -> str:
@@ -196,9 +218,7 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
         return _ok(
             req_id,
             {
-                "protocolVersion": _negotiate_protocol_version(
-                    params.get("protocolVersion")
-                ),
+                "protocolVersion": _negotiate_protocol_version(params.get("protocolVersion")),
                 "capabilities": {"tools": {"listChanged": True}},
                 "serverInfo": {
                     "name": f"mcp-trentina-gateway:{profile.name}",
@@ -241,17 +261,13 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
         # The generation is read HERE, not inside the build: a reload
         # landing between scheduling the task and its first line would
         # otherwise be invisible to it, and the stale aggregate would cache.
-        inflight = asyncio.ensure_future(
-            _single_flight_build(profile, _cache_generation)
-        )
+        inflight = asyncio.ensure_future(_single_flight_build(profile, _cache_generation))
         _profile_inflight[profile.name] = inflight
     aggregated = await inflight
     return _ok(req_id, {"tools": aggregated})
 
 
-async def _single_flight_build(
-    profile: Profile, generation: int
-) -> list[dict[str, Any]]:
+async def _single_flight_build(profile: Profile, generation: int) -> list[dict[str, Any]]:
     """Run one aggregation and drop its in-flight slot when done."""
     try:
         return await _build_profile_tools(profile, generation)
@@ -282,13 +298,26 @@ async def _build_profile_tools(
     await maybe_trigger_compression()
 
     async def _fetch_one(
-        backend_name: str, backend: Backend,
+        backend_name: str,
+        backend: Backend,
     ) -> list[dict[str, Any]]:
         """Fetch, filter, compress, and namespace tools for one backend."""
         if backend.is_internal:
             raw_tools = await list_internal_tools()
         else:
             raw_tools = await list_backend_tools(backend_name, backend)
+        # An internal tool takes a mode only if it declares one: the admin
+        # tools return gateway-authored data that no mode applies to. Every
+        # REMOTE tool takes one, because its response crosses the perimeter.
+        modal = {
+            t.get("name")
+            for t in raw_tools
+            if not backend.is_internal
+            or MODE_PARAM in ((t.get("inputSchema") or {}).get("properties") or {})
+        }
+        # Ours and any backend's, removed BEFORE the scan and compression and
+        # re-inserted after, so gateway text is never judged as backend text.
+        raw_tools = [strip_params(t) for t in raw_tools]
         filtered = filter_tools(raw_tools, backend)
         pre_compress = filtered
         if backend.compress_descriptions:
@@ -302,21 +331,24 @@ async def _build_profile_tools(
         filtered = await scan_tool_list(profile, backend_name, pre_compress, filtered)
         namespaced: list[dict[str, Any]] = []
         for tool in filtered:
-            namespaced_tool = dict(tool)
+            namespaced_tool = (
+                dict(insert_params(tool, policy_for(profile, backend, tool["name"])))
+                if tool.get("name") in modal
+                else dict(tool)
+            )
             namespaced_tool["name"] = f"{backend_name}{NAMESPACE_SEP}{tool['name']}"
             namespaced.append(namespaced_tool)
         return namespaced
 
-    tasks = [
-        _fetch_one(name, backend)
-        for name, backend in profile.backends.items()
-    ]
+    tasks = [_fetch_one(name, backend) for name, backend in profile.backends.items()]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     aggregated: list[dict[str, Any]] = []
     any_hard_failed = False
     for (backend_name, _backend), outcome in zip(
-        profile.backends.items(), results, strict=True,
+        profile.backends.items(),
+        results,
+        strict=True,
     ):
         if isinstance(outcome, BaseException):
             any_hard_failed = True
@@ -376,35 +408,47 @@ async def _route_tools_call(
 
     backend = profile.backends.get(backend_name)
     if backend is None:
-        raise BackendNotInProfileError(
-            f"backend {backend_name!r} not in profile {profile.name!r}"
-        )
+        raise BackendNotInProfileError(f"backend {backend_name!r} not in profile {profile.name!r}")
 
     if not filter_tools([{"name": tool_name}], backend):
         message = f"Tool {tool_name!r} not permitted on backend {backend_name!r}"
         _audit(profile.name, backend_name, tool_name, Outcome.DENIED_ALLOWLIST, 0, message)
         return _err(req_id, JSONRPC_INVALID_PARAMS, message)
 
-    guard_err = check_parameter_guards(tool_name, arguments, backend)
+    # The mode resolves BEFORE any guard reads it: an omitted mode becomes
+    # the default and is checked as that, never skipped as absent.
+    try:
+        policy, mode, prompt, forwarded = resolve_call(profile, backend, tool_name, arguments)
+    except ModeNotPermittedError as exc:
+        _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, str(exc))
+        return _err(req_id, JSONRPC_INVALID_PARAMS, str(exc))
+
+    guard_err = check_parameter_guards(
+        tool_name, {**forwarded, MODE_PARAM: mode.value, PROMPT_PARAM: prompt}, backend
+    )
     if guard_err:
         _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, guard_err)
         return _err(req_id, JSONRPC_INVALID_PARAMS, guard_err)
 
     t0 = time.monotonic()
     try:
-        if backend.is_internal:
-            from .context import profile_context
-
-            with profile_context(profile):
-                call_result = await call_internal_tool(tool_name, arguments)
-        else:
-            call_result = await call_backend_tool(
-                backend_name, backend, tool_name, arguments
-            )
+        call_result = await _dispatch(
+            profile,
+            backend,
+            backend_name,
+            tool_name,
+            forwarded,
+            policy=policy,
+            mode=mode,
+            prompt=prompt,
+        )
     except BackendCallError as exc:
         duration_ms = int((time.monotonic() - t0) * 1000)
         outcome = classify_exception(exc)
         _audit(profile.name, backend_name, tool_name, outcome, duration_ms, str(exc))
+        refusal = refusal_of(exc)
+        if refusal is not None:
+            return _err(req_id, JSONRPC_INTERNAL_ERROR, _refusal_text(refusal), refusal)
         return _err(req_id, JSONRPC_INTERNAL_ERROR, str(exc))
 
     duration_ms = int((time.monotonic() - t0) * 1000)
@@ -421,8 +465,12 @@ async def _route_tools_call(
     )
     if response_err:
         _audit(
-            profile.name, backend_name, tool_name,
-            Outcome.DENIED_RESPONSE_GUARD, duration_ms, response_err,
+            profile.name,
+            backend_name,
+            tool_name,
+            Outcome.DENIED_RESPONSE_GUARD,
+            duration_ms,
+            response_err,
         )
         return _err(req_id, JSONRPC_INVALID_PARAMS, response_err)
 
@@ -430,9 +478,42 @@ async def _route_tools_call(
     _audit(profile.name, backend_name, tool_name, call_outcome, duration_ms)
 
     result = await _assemble_call_result(
-        profile, backend, backend_name, tool_name, call_result
+        profile,
+        backend,
+        backend_name,
+        tool_name,
+        call_result,
+        mode=mode,
+        prompt=prompt,
+        policy=policy,
     )
     return _ok(req_id, result)
+
+
+async def _dispatch(
+    profile: Profile,
+    backend: Backend,
+    backend_name: str,
+    tool_name: str,
+    forwarded: dict[str, Any],
+    *,
+    policy: ModePolicy,
+    mode: Mode,
+    prompt: str | None,
+) -> Any:
+    """Forward the call: in-process for internal://, streamable-http otherwise."""
+    if not backend.is_internal:
+        return await call_backend_tool(backend_name, backend, tool_name, forwarded)
+    from .context import profile_context
+
+    # The internal tools judge their own ingress, so they get the RESOLVED
+    # mode; the bound policy is what their refusals offer as alternatives.
+    with profile_context(profile, policy):
+        return await call_internal_tool(
+            tool_name,
+            forwarded,
+            modal_arguments={MODE_PARAM: mode.value, PROMPT_PARAM: prompt},
+        )
 
 
 async def _assemble_call_result(
@@ -441,6 +522,10 @@ async def _assemble_call_result(
     backend_name: str,
     tool_name: str,
     call_result: Any,
+    *,
+    mode: Mode | None = None,
+    prompt: str | None = None,
+    policy: ModePolicy | None = None,
 ) -> dict[str, Any]:
     """Shape the MCP result and run it through the perimeter.
 
@@ -487,6 +572,9 @@ async def _assemble_call_result(
             content_blocks=content_blocks,
             structured_content=call_result.structured_content,
             provenance=provenance,
+            mode=mode,
+            prompt=prompt,
+            policy=policy,
             # Invariant 3: the sidecar travels to L3's briefing too. "This is
             # the 3% that survived reduction" is context a judge should have.
             l3_context=(
@@ -503,22 +591,44 @@ async def _assemble_call_result(
             # outcome column, not just in an agent's confusion.
             risk = decision.warning.get("risk_level") if decision.warning else "?"
             _audit(
-                profile.name, backend_name, tool_name,
-                Outcome.BLOCKED_DEFENSE, 0,
+                profile.name,
+                backend_name,
+                tool_name,
+                Outcome.BLOCKED_DEFENSE,
+                0,
                 f"response blocked by defense (risk={risk})",
             )
-            return {
-                "content": [{
-                    "type": "text",
-                    "text": (
-                        "[TRENTINA] This tool response was blocked by the "
-                        "defense pipeline. Details are in _trentina_warning; "
-                        "the original content was not delivered."
-                    ),
-                }],
+            refused: dict[str, Any] = {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            _refusal_text(decision.refusal)
+                            if decision.refusal
+                            else "[TRENTINA] This tool response was blocked by the "
+                            "defense pipeline."
+                        )
+                        + " Details are in _trentina_warning; the original "
+                        "content was not delivered.",
+                    }
+                ],
                 "isError": True,
                 "_trentina_warning": decision.warning,
             }
+            if decision.refusal:
+                refused["_trentina_refusal"] = decision.refusal
+            return refused
+        if decision.extraction is not None:
+            # clean: the verified extraction REPLACES the response, and
+            # structuredContent goes with it — clean never re-delivers what
+            # it replaced.
+            result = {
+                "content": [{"type": "text", "text": decision.extraction}],
+                "isError": call_result.is_error,
+            }
+            if decision.warning is not None:
+                result["_trentina_warning"] = decision.warning
+            return result
         if decision.warning is not None:
             result["_trentina_warning"] = decision.warning
             if decision.warning.get("flagged_by"):

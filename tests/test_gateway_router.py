@@ -235,7 +235,7 @@ class TestRouter:
         called: dict[str, Any] = {}
 
         async def fake_internal_call(
-            tool_name: str, arguments: dict[str, Any]
+            tool_name: str, arguments: dict[str, Any], **_: Any
         ) -> BackendCall:
             called["tool"] = tool_name
             called["args"] = arguments
@@ -301,11 +301,15 @@ class TestRouter:
         db_path = str(tmp_path / "audit_test.db")
 
         async def fake_call(
-            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+            _bn: str,
+            _b: Backend,
+            _tn: str,
+            _args: dict[str, Any],
         ) -> BackendCall:
             return BackendCall(
                 content=[{"type": "text", "text": "ok"}],
-                is_error=False, structured_content=None,
+                is_error=False,
+                structured_content=None,
             )
 
         tool_name = f"mcp-slack{NAMESPACE_SEP}slack_list_channels"
@@ -344,7 +348,10 @@ class TestRouter:
         db_path = str(tmp_path / "audit_fail_test.db")
 
         async def fail_call(
-            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+            _bn: str,
+            _b: Backend,
+            _tn: str,
+            _args: dict[str, Any],
         ) -> BackendCall:
             raise BackendCallError("backend down")
 
@@ -468,7 +475,10 @@ class TestRouter:
         secret = "NIGHTJAR ships on a date nobody outside may read"
 
         async def memory_call(
-            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+            _bn: str,
+            _b: Backend,
+            _tn: str,
+            _args: dict[str, Any],
         ) -> BackendCall:
             return BackendCall(
                 content=[{"type": "text", "text": f"NIGHTJAR note: {secret}"}],
@@ -498,12 +508,8 @@ class TestRouter:
                 "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
                 side_effect=memory_call,
             ),
-            patch(
-                "mcp_trentina_crunchtools.gateway.router.transform_response"
-            ) as mock_transform,
-            patch(
-                "mcp_trentina_crunchtools.gateway.router.scan_tool_response"
-            ) as mock_scan,
+            patch("mcp_trentina_crunchtools.gateway.router.transform_response") as mock_transform,
+            patch("mcp_trentina_crunchtools.gateway.router.scan_tool_response") as mock_scan,
             patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
         ):
             mock_cfg.return_value.db_path = str(tmp_path / "denied_response.db")
@@ -536,7 +542,10 @@ class TestRouter:
         """A response the guard does not match is delivered as normal."""
 
         async def memory_call(
-            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+            _bn: str,
+            _b: Backend,
+            _tn: str,
+            _args: dict[str, Any],
         ) -> BackendCall:
             return BackendCall(
                 content=[{"type": "text", "text": "the Trentino route notes"}],
@@ -581,16 +590,17 @@ class TestRouter:
         assert "error" not in resp
         assert "Trentino" in resp["result"]["content"][0]["text"]
 
-    async def test_backend_reported_error_is_not_counted_as_ok(
-        self, tmp_path: Any
-    ) -> None:
+    async def test_backend_reported_error_is_not_counted_as_ok(self, tmp_path: Any) -> None:
         """isError=True previously audited as a success, inflating the ok column."""
         import mcp_trentina_crunchtools.database as db_mod
 
         db_mod._db = None
 
         async def error_call(
-            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+            _bn: str,
+            _b: Backend,
+            _tn: str,
+            _args: dict[str, Any],
         ) -> BackendCall:
             return BackendCall(
                 content=[{"type": "text", "text": "tool blew up"}],
@@ -664,12 +674,16 @@ class TestRouter:
         called: dict[str, Any] = {}
 
         async def fake_call(
-            _bn: str, _b: Backend, _tn: str, _args: dict[str, Any],
+            _bn: str,
+            _b: Backend,
+            _tn: str,
+            _args: dict[str, Any],
         ) -> BackendCall:
             called["tool"] = _tn
             return BackendCall(
                 content=[{"type": "text", "text": "sent"}],
-                is_error=False, structured_content=None,
+                is_error=False,
+                structured_content=None,
             )
 
         p = Profile(
@@ -809,7 +823,8 @@ class TestProfileToolsCache:
         call_count = 0
 
         async def counting_list(
-            _bn: str, _b: Backend,
+            _bn: str,
+            _b: Backend,
         ) -> list[dict[str, Any]]:
             nonlocal call_count
             call_count += 1
@@ -820,18 +835,21 @@ class TestProfileToolsCache:
             side_effect=counting_list,
         ):
             await route_jsonrpc(
-                _profile(), {"jsonrpc": "2.0", "id": 50, "method": "tools/list"},
+                _profile(),
+                {"jsonrpc": "2.0", "id": 50, "method": "tools/list"},
             )
             first_count = call_count
             await route_jsonrpc(
-                _profile(), {"jsonrpc": "2.0", "id": 51, "method": "tools/list"},
+                _profile(),
+                {"jsonrpc": "2.0", "id": 51, "method": "tools/list"},
             )
 
         assert call_count == first_count
 
     async def test_profile_cache_keyed_by_name(self) -> None:
         async def fake_list(
-            _bn: str, _b: Backend,
+            _bn: str,
+            _b: Backend,
         ) -> list[dict[str, Any]]:
             return [{"name": "tool_a", "description": "", "inputSchema": {}}]
 
@@ -852,10 +870,12 @@ class TestProfileToolsCache:
             side_effect=fake_list,
         ):
             await route_jsonrpc(
-                _profile(), {"jsonrpc": "2.0", "id": 54, "method": "tools/list"},
+                _profile(),
+                {"jsonrpc": "2.0", "id": 54, "method": "tools/list"},
             )
             await route_jsonrpc(
-                p2, {"jsonrpc": "2.0", "id": 55, "method": "tools/list"},
+                p2,
+                {"jsonrpc": "2.0", "id": 55, "method": "tools/list"},
             )
 
         assert "testp" in _profile_tools_cache
@@ -871,7 +891,8 @@ class TestProfileToolsCache:
         slack_down = True
 
         async def flaky_list(
-            backend_name: str, _b: Backend,
+            backend_name: str,
+            _b: Backend,
         ) -> list[dict[str, Any]]:
             if backend_name == "mcp-slack" and slack_down:
                 raise BackendCallError("simulated outage")
@@ -882,7 +903,8 @@ class TestProfileToolsCache:
             side_effect=flaky_list,
         ):
             resp1 = await route_jsonrpc(
-                _profile(), {"jsonrpc": "2.0", "id": 56, "method": "tools/list"},
+                _profile(),
+                {"jsonrpc": "2.0", "id": 56, "method": "tools/list"},
             )
             assert "testp" not in _profile_tools_cache
             names1 = [str(t["name"]) for t in resp1["result"]["tools"]]
@@ -890,7 +912,8 @@ class TestProfileToolsCache:
 
             slack_down = False
             resp2 = await route_jsonrpc(
-                _profile(), {"jsonrpc": "2.0", "id": 57, "method": "tools/list"},
+                _profile(),
+                {"jsonrpc": "2.0", "id": 57, "method": "tools/list"},
             )
 
         assert "testp" in _profile_tools_cache
@@ -910,7 +933,8 @@ class TestProfileToolsCache:
         release = asyncio.Event()
 
         async def slow_list(
-            backend_name: str, _b: Backend,
+            backend_name: str,
+            _b: Backend,
         ) -> list[dict[str, Any]]:
             per_backend_calls[backend_name] = per_backend_calls.get(backend_name, 0) + 1
             await release.wait()
@@ -973,7 +997,7 @@ class TestProfileContext:
         seen: dict[str, Any] = {}
 
         async def fake_internal_call(
-            _tool_name: str, _arguments: dict[str, Any]
+            _tool_name: str, _arguments: dict[str, Any], **_: Any
         ) -> BackendCall:
             seen["profile_during_call"] = get_current_profile()
             return BackendCall(

@@ -64,7 +64,7 @@ Backend tools are namespaced with a double-underscore separator to avoid collisi
 slack__slack_search_messages
 github__list_issues_tool
 gws-personal__draft_gmail_message
-web__block_fetch_tool
+web__fetch_tool
 ```
 
 This matches the `mcp__<server>__<tool>` convention that Claude Code and other MCP clients already use.

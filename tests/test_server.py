@@ -11,47 +11,37 @@ class TestServerRegistration:
     """Test that all tools are registered correctly."""
 
     async def test_tool_count(self) -> None:
-        """19: five families in three modes, plus four that deliver no content.
+        """9: one tool per family, plus four that deliver no content.
 
         The count is asserted because every tool definition sits in every
         agent's context on every call. Adding one should be a decision
-        somebody made, not something that happened.
+        somebody made, not something that happened. It was 19 until 0.32.0,
+        when the mode moved from the tool NAME to an argument (#193).
         """
         tools = await mcp.list_tools()
-        assert len(tools) == 19, f"Expected 19 tools, got {len(tools)}"
+        assert len(tools) == 9, f"Expected 9 tools, got {len(tools)}"
 
-    async def test_every_family_offers_all_three_modes(self) -> None:
-        """The agent picks the mode, per call, and a family missing one
-        silently removes a choice."""
-        tools = await mcp.list_tools()
-        names = {t.name for t in tools}
-        missing = [
-            f"{mode}_{family}_tool"
-            for family in FAMILIES
-            for mode in ("block", "warn", "clean")
-            if f"{mode}_{family}_tool" not in names
-        ]
-        assert not missing, f"families missing a mode: {missing}"
+    async def test_every_family_takes_a_mode(self) -> None:
+        """The mode is an argument the policy checks, not a name the agent picks."""
+        tools = {t.name: t for t in await mcp.list_tools()}
+        for family in FAMILIES:
+            props = tools[f"{family}_tool"].parameters["properties"]
+            assert "trentina_mode" in props, family
+            assert "trentina_prompt" in props, family
+            assert "trentina_mode" not in tools[f"{family}_tool"].parameters.get("required", [])
 
     async def test_expected_tools_registered(self) -> None:
-        """Nothing delivers content except a (family, mode) tool (#187).
-
-        The diagnostic scans (quarantine_scan, deep_*, scan_content,
-        quarantine_scan_dir) were a second mental model beside the three
-        modes, and went in 0.31.0; quarantine_scan_dir became the dir family.
-        """
+        """Nothing delivers content except a family tool (#187, #193)."""
         tools = await mcp.list_tools()
         tool_names = {t.name for t in tools}
-        modes = {
-            f"{mode}_{family}_tool" for family in FAMILIES for mode in ("block", "warn", "clean")
-        }
+        families = {f"{family}_tool" for family in FAMILIES}
         admin = {
             "quarantine_stats_tool",
             "cache_flush_tool",
             "reconnect_backend_tool",
             "reload_profiles_tool",
         }
-        assert tool_names == modes | admin
+        assert tool_names == families | admin
 
     def test_server_name(self) -> None:
         assert mcp.name == "mcp-trentina-crunchtools"
