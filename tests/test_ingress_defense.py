@@ -934,19 +934,22 @@ class TestToolDescriptionBriefing:
         assert cached["l3_briefing"] == ing.TOOL_BRIEFING_VERSION
 
     @pytest.mark.parametrize(
-        ("warning", "rejudge"),
+        ("warning", "rejudge", "judged"),
         [
-            (None, False),
-            ({"flagged_by": "L1"}, False),
-            ({"flagged_by": "L2"}, False),
-            ({"flagged_by": None, "l3_unavailable": True}, False),
-            ({"flagged_by": "L3"}, True),
-            ({"flagged_by": "L3", "l3_briefing": "0"}, True),
-            ({"flagged_by": "L3", "l3_briefing": "CURRENT"}, False),
+            (None, False, False),
+            ({"flagged_by": "L1"}, False, False),
+            ({"flagged_by": "L2"}, False, False),
+            # An L3 outage is not a briefing question — but it is never served
+            # from the cache either: _cache_put refuses an incomplete verdict,
+            # so the description is judged again until L3 can finish.
+            ({"flagged_by": None, "l3_unavailable": True}, False, True),
+            ({"flagged_by": "L3"}, True, True),
+            ({"flagged_by": "L3", "l3_briefing": "0"}, True, True),
+            ({"flagged_by": "L3", "l3_briefing": "CURRENT"}, False, False),
         ],
     )
     async def test_only_an_unbriefed_l3_flag_is_judged_again(
-        self, warning: dict[str, Any] | None, rejudge: bool
+        self, warning: dict[str, Any] | None, rejudge: bool, judged: bool
     ) -> None:
         from mcp_trentina_crunchtools.gateway import ingress_defense as ing
 
@@ -966,4 +969,4 @@ class TestToolDescriptionBriefing:
             mock_defend.return_value.l2_truncated = False
             mock_defend.return_value.l3_truncated = False
             await scan_tool_list(profile, "jira", tools, tools)
-        assert mock_defend.called is rejudge
+        assert mock_defend.called is judged
