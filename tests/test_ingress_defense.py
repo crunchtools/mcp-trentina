@@ -1008,3 +1008,28 @@ async def test_redact_is_never_served_from_the_verdict_cache() -> None:
             )
             assert decision.extraction is not None
     assert [c.args[1] for c in extract.call_args_list] == ["first", "second"]
+
+
+async def test_the_backend_briefing_reaches_l3_and_keys_the_cache() -> None:
+    """#204: an operator's context for L3 is part of the verdict, so it is part
+    of the cache key — the same bytes briefed differently are judged again."""
+    detect = AsyncMock(return_value={"injection_detected": False, "risk_level": "low"})
+    briefing = "Operational output from the operator's own hosts."
+    with (
+        patch("mcp_trentina_crunchtools.defense.get_config") as cfg,
+        patch("mcp_trentina_crunchtools.defense.quarantine_detect", detect),
+    ):
+        cfg.return_value.has_api_key = True
+        cfg.return_value.max_content = 100_000
+        for context in (briefing, None, briefing):
+            await scan_tool_response(
+                profile=_profile(),
+                backend_name="podman",
+                tool_name="container_list_tool",
+                content_blocks=[{"type": "text", "text": "abc123 batch sh -c 'echo ...'"}],
+                structured_content=None,
+                l3_context=context,
+            )
+    assert detect.await_count == 2, "the third call is the first's cache hit"
+    assert briefing in detect.await_args_list[0].kwargs["layer1_context"]
+    assert briefing not in detect.await_args_list[1].kwargs["layer1_context"]

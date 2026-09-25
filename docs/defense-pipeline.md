@@ -152,7 +152,9 @@ it refuses to start.
 What a profile controls is a threshold and a consequence:
 
 - **`l2_threshold`** — how suspicious L2 must be before it FLAGS. A flag is a consequence, not
-  an execution: L2 runs either way.
+  an execution: L2 runs either way. The default is 0.5, where the model's own label turns
+  MALICIOUS. Anything lower also flags content the classifier labels BENIGN, so lower it
+  knowingly and measure first (#86).
 - **`enforcement`** — what a flag costs. `flag` delivers the content with a
   `_trentina_warning` (the calibration mode) and `block` refuses it outright.
   `TRENTINA_ENFORCEMENT_OVERRIDE=flag` is the kill switch.

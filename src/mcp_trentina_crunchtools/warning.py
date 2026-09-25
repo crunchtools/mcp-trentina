@@ -41,7 +41,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from .modes import gaps_of
-from .quarantine.prompts import finding_types
+from .quarantine.prompts import RISK_LEVELS, finding_types
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -106,9 +106,6 @@ def build_warning(
     return warning
 
 
-_RISK_LEVELS = ("low", "medium", "high", "critical")
-
-
 def _l3_risk_level(assessment: Mapping[str, Any], unavailable: bool) -> str | None:
     level = assessment.get("risk_level")
-    return level if not unavailable and level in _RISK_LEVELS else None
+    return level if not unavailable and level in RISK_LEVELS else None

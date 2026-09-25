@@ -200,6 +200,11 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
     table that `preprocess/html.py` imports, so the converter that strips an
     element and the stage that counts one decide by one rule.
   - `shadows.py` — Python stdlib module shadow detection and obfuscation scanning
+  - `unicode.py` — strips every invisible character from the L2 copy but
+    COUNTS one only in the context an attack needs (#204): zero-width inside
+    a Latin word, a lone ESC, a run of variation selectors. Whether L2 reads
+    the copy too is `PipelineResult.l2_reads_both()`, keyed on what was
+    stripped, never on the counts.
   - `directives.py` — the exact patterns, named after OpenRouter's guardrail
     (#201). Near-misses matter as much as hits: every pattern has an attack
     and a benign line in `tests/adversarial_corpus.py` (`L1_PATTERN_CASES`),

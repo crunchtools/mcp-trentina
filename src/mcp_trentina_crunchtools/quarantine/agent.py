@@ -412,7 +412,7 @@ async def _output_flagged(strings: dict[str, str]) -> bool:
         if l1.stats.total_detections() and l1.stats.risk_level() in _BLOCKING_RISKS:
             return True
         reads = [text]
-        if l1.stats.normalized():
+        if l1.l2_reads_both():
             reads.append(l1.l2_input)
         results = await asyncio.gather(*(classify_async(r) for r in reads))
         if any(r is not None and r.label == "MALICIOUS" for r in results):

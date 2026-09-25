@@ -33,7 +33,12 @@ CREATE TABLE IF NOT EXISTS detections (
     backend TEXT,
     tool TEXT,
     direction TEXT,
-    provenance TEXT
+    provenance TEXT,
+    flagged_by TEXT,
+    l2_label TEXT,
+    l2_score REAL,
+    l3_verdict TEXT,
+    l3_risk TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_detections_domain ON detections(domain);
@@ -87,6 +92,15 @@ def get_db(db_path: str | None = None) -> sqlite3.Connection:
     return _db
 
 
+_VERDICT_COLUMNS = (
+    ("flagged_by", "TEXT"),
+    ("l2_label", "TEXT"),
+    ("l2_score", "REAL"),
+    ("l3_verdict", "TEXT"),
+    ("l3_risk", "TEXT"),
+)
+
+
 def _migrate(db: sqlite3.Connection) -> None:
     """Apply additive schema migrations to a database created by an older build.
 
@@ -98,9 +112,7 @@ def _migrate(db: sqlite3.Connection) -> None:
     if "outcome" not in columns:
         db.execute("ALTER TABLE gateway_calls ADD COLUMN outcome TEXT")
 
-    detection_columns = {
-        row["name"] for row in db.execute("PRAGMA table_info(detections)")
-    }
+    detection_columns = {row["name"] for row in db.execute("PRAGMA table_info(detections)")}
     # Gateway attribution columns (which profile, which backend and tool,
     # which direction the content was moving, and the provenance the L3
     # gate saw). Nullable — 50 web-shaped legacy rows and the standalone
@@ -108,6 +120,14 @@ def _migrate(db: sqlite3.Connection) -> None:
     for column in ("profile", "backend", "tool", "direction", "provenance"):
         if column not in detection_columns:
             db.execute(f"ALTER TABLE detections ADD COLUMN {column} TEXT")
+        db.commit()
+    # Every layer's opinion on the row, not only the credited one's (#204).
+    # A row credited to L2 used to say nothing about what L3 thought, so how
+    # often L3 disagreed with an L2 flag could not be measured, and that is
+    # the number any rule letting L3 overrule L2 has to be argued from.
+    for column, sql_type in _VERDICT_COLUMNS:
+        if column not in detection_columns:
+            db.execute(f"ALTER TABLE detections ADD COLUMN {column} {sql_type}")
         db.commit()
 
 
@@ -148,21 +168,29 @@ def record_detection(
     direction: str | None = None,
     provenance: str | None = None,
     blocked: bool = True,
+    verdicts: dict[str, Any] | None = None,
 ) -> int:
     """Record a detection. Returns the detection ID.
 
     ``blocked`` was hardcoded 1, which was true when every caller refused
-    flagged content. Annotate-mode gateway rows are observations, not
+    flagged content. Flag-mode gateway rows are observations, not
     blocks, and recording them as blocks would poison both the blocklist
     semantics and step 7's calibration read.
+
+    ``verdicts`` holds every layer's opinion whichever one is credited:
+    ``flagged_by``, ``l2_label``, ``l2_score``, ``l3_verdict`` (``flagged``,
+    ``clean`` or ``unavailable``) and ``l3_risk``. A missing key is NULL.
     """
     db = get_db()
     now = datetime.now(UTC).isoformat()
     cursor = db.execute(
         "INSERT INTO detections (source_type, source, domain, detected_at, "
         "layer1_stats, qagent_assessment, risk_level, blocked, "
-        "profile, backend, tool, direction, provenance) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "profile, backend, tool, direction, provenance, "
+        # The last five in _VERDICT_COLUMNS order, which the values below are
+        # read in; test_database pins the two orders together.
+        "flagged_by, l2_label, l2_score, l3_verdict, l3_risk) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             source_type,
             source,
@@ -177,6 +205,7 @@ def record_detection(
             tool,
             direction,
             provenance,
+            *((verdicts or {}).get(column) for column, _ in _VERDICT_COLUMNS),
         ),
     )
     db.commit()
@@ -204,9 +233,7 @@ def get_blocklist_stats(profile: str | None = None) -> dict[str, Any]:
     clause = " AND profile = ?" if profile else ""
     args: tuple[Any, ...] = (profile,) if profile else ()
 
-    total_query = (
-        "SELECT COUNT(*) as cnt FROM detections WHERE blocked = 1{profile_clause}"
-    )
+    total_query = "SELECT COUNT(*) as cnt FROM detections WHERE blocked = 1{profile_clause}"
     recent_query = (
         "SELECT source_type, source, domain, detected_at, risk_level "
         "FROM detections WHERE blocked = 1{profile_clause} "
@@ -396,9 +423,7 @@ def get_compression_stats() -> dict[str, Any]:
 def get_all_tool_lists() -> dict[str, list[dict[str, Any]]]:
     """Load all cached tool lists as {backend_url: tools_list}."""
     db = get_db()
-    rows = db.execute(
-        "SELECT backend_url, tools_json FROM tool_list_cache"
-    ).fetchall()
+    rows = db.execute("SELECT backend_url, tools_json FROM tool_list_cache").fetchall()
     result: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         result[row["backend_url"]] = json.loads(row["tools_json"])
@@ -406,7 +431,8 @@ def get_all_tool_lists() -> dict[str, list[dict[str, Any]]]:
 
 
 def save_tool_list(
-    backend_url: str, tools: list[dict[str, Any]],
+    backend_url: str,
+    tools: list[dict[str, Any]],
 ) -> None:
     """Persist a tool list to SQLite."""
     db = get_db()

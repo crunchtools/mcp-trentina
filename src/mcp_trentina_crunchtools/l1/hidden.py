@@ -128,8 +128,10 @@ _STYLE_ATTR_RE = re.compile(r"""style\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNOR
 
 # The bare `hidden` boolean attribute: `<div hidden>`, `<div hidden="">`,
 # `<div hidden/>`. Requires a preceding tag open so the English word "hidden"
-# in prose does not count.
-_HIDDEN_ATTR_RE = re.compile(r"<[a-zA-Z][^>]*?\shidden(?=[\s/>=])", re.IGNORECASE)
+# in prose does not count. `[^<>]`, not `[^>]`: with no `>` ahead, the
+# latter rescanned the rest of the payload from every `<`, and 60k characters
+# of `<div ` took seconds (#210). A tag body holds no `<` either.
+_HIDDEN_ATTR_RE = re.compile(r"<[a-zA-Z][^<>]*?\shidden(?=[\s/>=])", re.IGNORECASE)
 
 # `\color{white}`, `\textcolor{#fff}`, `\color{transparent}`, `\phantom{`.
 # White is assumed to be the page: that is the case the attack relies on, and

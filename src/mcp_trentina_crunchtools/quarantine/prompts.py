@@ -77,6 +77,11 @@ EXTRACTION_RESPONSE_SCHEMA = {
     "required": ["extracted_text", "confidence", "injection_detected"],
 }
 
+#: The only risk levels L3 may return, and the only ones that leave the
+#: perimeter as L3's: its schema, the warning and the detection row all read
+#: this one tuple, and anything outside it is treated as absent.
+RISK_LEVELS: tuple[str, ...] = ("low", "medium", "high", "critical")
+
 FINDING_TYPES: tuple[str, ...] = (
     "instruction_override",
     "role_reassignment",
@@ -131,7 +136,7 @@ DETECTION_RESPONSE_SCHEMA = {
         },
         "risk_level": {
             "type": "string",
-            "enum": ["low", "medium", "high", "critical"],
+            "enum": list(RISK_LEVELS),
             "description": "Overall risk level of the scanned content",
         },
         "findings": {

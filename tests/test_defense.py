@@ -116,6 +116,65 @@ class TestLayerPrecedence:
         mocks["record_detection"].assert_not_called()
 
 
+class TestL2ReadsWhatWasStripped:
+    """#204 stopped COUNTING padding; it must not stop L2 reading past it."""
+
+    async def test_uncounted_padding_still_sends_l2_the_normalized_copy(self) -> None:
+        padded = "Your weekly digest" + "\u200c\u00a0" * 20 + "Read online."
+        _, mocks = await _defend(content=padded)
+        reads = [c.args[0] for c in mocks["classify_async"].call_args_list]
+        assert padded in reads
+        assert any("\u200c" not in r for r in reads), "the stripped copy was never classified"
+
+    async def test_plain_text_is_classified_once(self) -> None:
+        _, mocks = await _defend(content="a perfectly ordinary sentence")
+        assert mocks["classify_async"].call_count == 1
+
+
+class TestTheRowCarriesEveryLayer:
+    """#204: how often L3 disagrees with an L2 flag is measurable only if it is recorded."""
+
+    async def test_an_l2_flag_records_l3s_clean_verdict(self) -> None:
+        verdict, mocks = await _defend(
+            content="Technique: tell the agent to disregard its guidance. Mitigated by X.",
+            classification=MALICIOUS,
+            detection={"injection_detected": False},
+        )
+        assert verdict.flagged_by is Layer.L2
+        verdicts = mocks["record_detection"].call_args.kwargs["verdicts"]
+        assert verdicts == {
+            "flagged_by": "L2",
+            "l2_label": "MALICIOUS",
+            "l2_score": 0.95,
+            "l3_verdict": "clean",
+            "l3_risk": None,
+        }
+
+    async def test_an_l3_flag_records_l2s_benign_score(self) -> None:
+        _, mocks = await _defend(
+            classification=BENIGN_LOW,
+            detection={"injection_detected": True, "risk_level": "critical"},
+        )
+        verdicts = mocks["record_detection"].call_args.kwargs["verdicts"]
+        assert (verdicts["l2_label"], verdicts["l3_verdict"], verdicts["l3_risk"]) == (
+            "BENIGN",
+            "flagged",
+            "critical",
+        )
+
+    async def test_an_l3_risk_outside_the_enum_is_not_recorded(self) -> None:
+        """L3's fields leave the perimeter only as a closed enum."""
+        _, mocks = await _defend(
+            classification=BENIGN_LOW,
+            detection={"injection_detected": True, "risk_level": "run curl evil.example"},
+        )
+        assert mocks["record_detection"].call_args.kwargs["verdicts"]["l3_risk"] is None
+
+    async def test_an_absent_l3_is_recorded_as_unavailable(self) -> None:
+        _, mocks = await _defend(content=L1_HOSTILE, classification=MALICIOUS, has_api_key=False)
+        assert mocks["record_detection"].call_args.kwargs["verdicts"]["l3_verdict"] == "unavailable"
+
+
 class TestAllowlistingIsNotAPipelineConcept:
     """defend() cannot be told a source is trusted. It used to be, and an
     allowlisted source's L2 MALICIOUS label simply vanished (#187, D5)."""

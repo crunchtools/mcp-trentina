@@ -290,6 +290,23 @@ class TestPostExtractionL1:
         assert [c.args[0] for c in l1.call_args_list] == ["body", "head"]
 
     @pytest.mark.asyncio
+    async def test_stripped_padding_in_an_extraction_is_classified_both_ways(self) -> None:
+        """#204: uncounted is not unread. Turn 2's output padded with ZWNJs is
+        classified as written and with the padding stripped."""
+        from mcp_trentina_crunchtools.quarantine.agent import _output_flagged
+
+        padded = "summary" + "\u200c\u00a0" * 10 + "end"
+        with patch(
+            "mcp_trentina_crunchtools.quarantine.classifier.classify_async",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as classify:
+            await _output_flagged({"extracted_text": padded})
+        reads = [c.args[0] for c in classify.call_args_list]
+        assert reads[0] == padded
+        assert len(reads) == 2 and "\u200c" not in reads[1]
+
+    @pytest.mark.asyncio
     async def test_clean_text_passes_through(self) -> None:
         extraction_json = {
             "extracted_text": "Clean content with no issues.",

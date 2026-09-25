@@ -139,7 +139,9 @@ PATTERNS: dict[str, re.Pattern[str]] = {
         ("new_role", r"your\s+new\s+role\s+is\b", _I),
         ("as_an_ai_you_must", r"as\s+an\s+ai\s*,?\s+you\s+must", _I),
         # -- DAN / jailbreak. DAN is case-sensitive: "dan" is a name.
-        ("dan_jailbreak", r"\bDAN\b.*\b[Dd]o\s+[Aa]nything\s+[Nn]ow\b", 0),
+        # Bounded, unlike OpenRouter's `.*`: a line of repeated "DAN " made
+        # that rescan the rest of the line from every DAN (#210).
+        ("dan_jailbreak", r"\bDAN\b.{0,300}?\b[Dd]o\s+[Aa]nything\s+[Nn]ow\b", 0),
         ("jailbreak_mode", r"jailbreak(?:ed)?\s+(?:mode|prompt)", _I),
         # -- safety bypass
         (

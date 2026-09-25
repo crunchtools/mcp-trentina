@@ -753,3 +753,22 @@ class TestPushPathEnforcement:
         from mcp_trentina_crunchtools.gateway.profile import MatrixIngressConfig
 
         assert "enforcement" not in MatrixIngressConfig.model_fields
+
+
+class TestL3Briefing:
+    """#204: `Backend.l3_briefing` says what a backend is, in a bounded space."""
+
+    def test_the_limit_is_accepted_and_one_past_it_is_not(self) -> None:
+        from pydantic import ValidationError
+
+        from mcp_trentina_crunchtools.gateway.profile import MAX_L3_BRIEFING_CHARS, Backend
+
+        at_limit = Backend(url="http://ops:8000/mcp", l3_briefing="x" * MAX_L3_BRIEFING_CHARS)
+        assert at_limit.l3_briefing is not None
+        with pytest.raises(ValidationError):
+            Backend(url="http://ops:8000/mcp", l3_briefing="x" * (MAX_L3_BRIEFING_CHARS + 1))
+
+    def test_unset_is_none(self) -> None:
+        from mcp_trentina_crunchtools.gateway.profile import Backend
+
+        assert Backend(url="http://ops:8000/mcp").l3_briefing is None
