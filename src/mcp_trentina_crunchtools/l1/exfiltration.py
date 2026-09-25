@@ -7,6 +7,7 @@ stolen data in the query string, and neither needs the reader to click.
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
@@ -92,7 +93,9 @@ def strip_exfiltration(text: str) -> tuple[str, ExfiltrationStats]:
         urls = (
             m.group(1) or m.group(2) or m.group(3) or "" for m in _SRC_ATTR.finditer(match.group(0))
         )
-        if any(_is_suspicious_url(url) for url in urls):
+        # Judged as the browser will fetch it: `&#x64;ata=` is `data=` once
+        # character references are decoded, and a browser decodes them.
+        if any(_is_suspicious_url(html.unescape(url)) for url in urls):
             stats.exfiltration_urls += 1
             return "[image removed]"
         return match.group(0)
