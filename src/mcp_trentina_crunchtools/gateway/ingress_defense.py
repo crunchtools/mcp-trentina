@@ -569,6 +569,10 @@ def _judged_before_briefing(warning: dict[str, Any] | None) -> bool:
 # on the same description; a backend redeploy made every profile do it at once.
 _inflight: dict[str, asyncio.Task[dict[str, Any] | None]] = {}
 
+# Descriptions judged vs. served from the verdict cache since start — read
+# as a difference by the boot warm-up's summary line.
+perimeter_counts: dict[str, int] = {"judged": 0, "hits": 0}
+
 
 async def _single_flight(
     key: str, work: Callable[[], Coroutine[Any, Any, dict[str, Any] | None]]
@@ -623,6 +627,7 @@ async def _judge_description(
     The detection row carries the profile that STARTED the judgement; a
     profile that joined it shares the verdict and is not recorded twice.
     """
+    perimeter_counts["judged"] += 1
     # A shared description is the gateway's own work, judged as the service
     # identity (#138); the thresholds stay the requester's.
     with service_context(operator):
@@ -678,15 +683,14 @@ async def scan_tool_list(
     stamp), which is judged again once and re-cached with the stamp. Clean
     verdicts and L1/L2 flags stand: the briefing changes only what L3 reads.
     """
-    annotated: list[dict[str, Any]] = []
     # Resolved once per list: the key and the call must name the same judge.
     operator = service_profile()
     judge = judge_of(operator)
-    for tool, before in zip(tools, tools_before_compression, strict=True):
+
+    async def _verdict(tool: dict[str, Any], before: dict[str, Any]) -> dict[str, Any] | None:
         surface = _tool_surface_text(tool)
         if not surface.strip():
-            annotated.append(tool)
-            continue
+            return None
 
         compressed = tool.get("description", "") != before.get("description", "")
         provenance = Provenance.MODEL_OUTPUT if compressed else Provenance.EXTERNAL
@@ -695,21 +699,36 @@ async def scan_tool_list(
         hit, warning = _cache_get(key)
         if hit and _judged_before_briefing(warning):
             hit = False
-        if not hit:
-            warning = await _single_flight(
+        if hit:
+            perimeter_counts["hits"] += 1
+            return warning
+        return await _single_flight(
+            key,
+            functools.partial(
+                _judge_description,
                 key,
-                functools.partial(
-                    _judge_description,
-                    key,
-                    profile,
-                    operator,
-                    backend_name,
-                    tool,
-                    surface,
-                    provenance,
-                ),
-            )
+                profile,
+                operator,
+                backend_name,
+                tool,
+                surface,
+                provenance,
+            ),
+        )
 
+    # Every description at once (#216): the L3 limiter is what paces them,
+    # so the longest tool list no longer sets the time for the whole gateway.
+    # Unbounded on purpose: a few hundred idle coroutines cost nothing, and
+    # a second cap here would only hide work from the limiter's queue.
+    # An exception fails the list as the old sequential loop did. The other
+    # judgements run on and bank their verdicts: they are single-flight
+    # tasks that outlive any one caller by design (#120).
+    verdicts = await asyncio.gather(
+        *(_verdict(t, b) for t, b in zip(tools, tools_before_compression, strict=True))
+    )
+
+    annotated: list[dict[str, Any]] = []
+    for tool, warning in zip(tools, verdicts, strict=True):
         if warning is not None:
             # A poisoned description's whole attack is being READ during tool
             # selection, and a sibling warning key is exactly the part strict

@@ -10,7 +10,29 @@ under that name.
 
 ## [Unreleased]
 
+### Added
+- **Boot warm-up** (#216). Once the event loop serves, a background task
+  builds every profile's `tools/list` aggregate, so a cold perimeter store
+  (a new image, a `PERIMETER_VERSION` bump) is judged before a client asks.
+  A client that connects mid-warm-up joins the build in flight. The startup
+  log reports its duration and how many descriptions were judged vs. cached.
+- **Adaptive L3 concurrency** (#216). A backend's tool descriptions are
+  judged together, not one at a time. Every L3 call waits in a FIFO queue in
+  front of its (provider, model), and user-facing calls go before warm-up
+  work. The limit adjusts itself the way TCP's does: slow start, then +1 per
+  window, halved on a 429 and paused for the provider's `Retry-After`. It
+  finds each provider's ceiling instead of being configured with one.
+  `TRENTINA_L3_CONCURRENCY_START` (4) and `TRENTINA_L3_CONCURRENCY_MAX` (64)
+  bound it. L2 scans are capped by `TRENTINA_L2_CONCURRENCY` (2).
+
 ### Changed
+- **A 429 waits instead of failing** (#216). A throttled L3 call retries on
+  the same provider once the limiter's pause ends, for up to
+  `TRENTINA_L3_THROTTLE_BUDGET` seconds (20; the warm-up allows 300), before
+  moving down the fallback chain. It used to fall back, or, with a single
+  provider, become an "L3 unavailable" gap at once. A 503 or a timeout still
+  falls back immediately. Drivers now keep the provider's `Retry-After`, and
+  compression shares the same limiter.
 - **One judgement per tool description in flight** (#120). Concurrent
   `tools/list` calls that miss the cache on the same description now share
   one `defend()` run, including across profiles with the same thresholds and

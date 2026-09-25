@@ -22,6 +22,7 @@ import httpx
 from ..config import get_config
 from ..errors import QuarantineAgentError
 from ..l1.pipeline import run_l1
+from .limiter import THROTTLE_STATUS, limited_generate, throttle_budget
 from .prompts import (
     DETECTION_RESPONSE_SCHEMA,
     DETECTION_SYSTEM_PROMPT,
@@ -143,7 +144,7 @@ async def _call_with_fallback(
     last_exc: QuarantineAgentError | None = None
     for i, (name, key) in enumerate(chain):
         try:
-            return await _call_gemini(
+            return await _call_throttle_aware(
                 content=content,
                 system_prompt=system_prompt,
                 response_schema=response_schema,
@@ -172,6 +173,34 @@ async def _call_with_fallback(
                 )
 
     raise QuarantineAgentError(f"all providers exhausted: {[n for n, _ in chain]}") from last_exc
+
+
+async def _call_throttle_aware(**kwargs: Any) -> tuple[dict[str, Any], str]:
+    """``_call_gemini`` on one provider, waiting out its 429s within the budget.
+
+    A throttle is the provider asking for time, not failing, so the same
+    provider is asked again once its limiter's pause ends — unless that pause
+    would outlast the budget, and then the 429 goes to the fallback chain.
+    Each provider gets the whole budget, counted from its first 429: time
+    spent on a slow first attempt is not time spent waiting.
+    """
+    loop = asyncio.get_running_loop()
+    deadline: float | None = None
+    while True:
+        try:
+            return await _call_gemini(**kwargs)
+        except QuarantineAgentError as exc:
+            if exc.status_code != THROTTLE_STATUS:
+                raise
+            if deadline is None:
+                deadline = loop.time() + throttle_budget()
+            if loop.time() + (exc.retry_after or 0.0) >= deadline:
+                raise
+            logger.info(
+                "provider %s throttled; retrying in %.1fs",
+                kwargs.get("provider_name"),
+                exc.retry_after or 0.0,
+            )
 
 
 def _build_request_body(
@@ -283,7 +312,8 @@ async def _call_gemini(
         else:
             provider = get_provider(provider_name)
 
-    provider_result = await provider.generate(
+    provider_result = await limited_generate(
+        provider,
         system_prompt=prompted,
         user_content=user_text,
         response_schema=response_schema,

@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from ...errors import QuarantineAgentError
-from .base import Provider, ProviderResult
+from .base import Provider, ProviderResult, status_error
 
 ANTHROPIC_API_BASE = "https://api.anthropic.com/v1"
 ANTHROPIC_TIMEOUT = 60.0
@@ -88,9 +88,7 @@ class AnthropicProvider(Provider):
             )
 
         except httpx.HTTPStatusError as exc:
-            raise QuarantineAgentError(
-                f"HTTP {exc.response.status_code}", status_code=exc.response.status_code
-            ) from exc
+            raise status_error(exc) from exc
         except httpx.TimeoutException as exc:
             raise QuarantineAgentError("Request timed out") from exc
         except httpx.RequestError as exc:

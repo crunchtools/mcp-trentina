@@ -100,6 +100,7 @@ def get_provider(
                 "Supported: gemini, openai, anthropic, ollama"
             )
 
+    provider.judge = (resolved_provider, provider.model)
     _provider_cache[cache_key] = provider
     logger.info(
         "provider: initialized %s (model=%s, key=%s)",

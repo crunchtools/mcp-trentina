@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from ..config import get_config
+from ..config import get_config, int_env
 from ..errors import UnscannableContentError
 
 logger = logging.getLogger(__name__)
@@ -326,7 +326,35 @@ async def classify_async(
     Every async caller should use this instead of calling classify directly.
     ``fail_on_truncate`` is for callers that refuse a partial scan anyway.
     """
-    return await asyncio.to_thread(classify, text, fail_on_truncate=fail_on_truncate, source=source)
+    gate = _l2_gate()
+    await gate.acquire()
+    # The permit follows the THREAD, not this coroutine: a cancelled caller
+    # leaves the scan running, and releasing on cancel would let the next
+    # scan start beside it and break the bound.
+    scan = asyncio.ensure_future(
+        asyncio.to_thread(classify, text, fail_on_truncate=fail_on_truncate, source=source)
+    )
+    scan.add_done_callback(lambda _done: gate.release())
+    return await asyncio.shield(scan)
+
+
+_gate: tuple[asyncio.AbstractEventLoop, asyncio.Semaphore] | None = None
+
+
+def _l2_gate() -> asyncio.Semaphore:
+    """Bound concurrent scans, so a burst cannot oversubscribe the cores.
+
+    Each scan already runs ``CLASSIFIER_THREADS`` intra-op threads; the boot
+    warm-up hands L2 hundreds of descriptions at once (#216), and running
+    them all together is slower than running them a few at a time. One
+    semaphore per event loop, because a semaphore binds to the loop it
+    first waits on.
+    """
+    global _gate
+    loop = asyncio.get_running_loop()
+    if _gate is None or _gate[0] is not loop:
+        _gate = (loop, asyncio.Semaphore(int_env("TRENTINA_L2_CONCURRENCY", 2, minimum=1)))
+    return _gate[1]
 
 
 def classifier_status() -> str:

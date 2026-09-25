@@ -260,7 +260,16 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
     cached = _profile_tools_cache.get(profile.name)
     if cached is not None:
         return _ok(req_id, {"tools": cached})
+    aggregated = await ensure_profile_build(profile)
+    return _ok(req_id, {"tools": aggregated})
 
+
+def ensure_profile_build(profile: Profile) -> asyncio.Future[list[dict[str, Any]]]:
+    """The profile's aggregate build in flight, started if there is none.
+
+    The one place a build is scheduled, so a client's tools/list and the boot
+    warm-up (#216) join the same task instead of racing two.
+    """
     inflight = _profile_inflight.get(profile.name)
     if inflight is None:
         # The generation is read HERE, not inside the build: a reload
@@ -270,8 +279,7 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
             _single_flight_build(profile, _cache_generation.get(profile.name, 0))
         )
         _profile_inflight[profile.name] = inflight
-    aggregated = await inflight
-    return _ok(req_id, {"tools": aggregated})
+    return inflight
 
 
 async def _single_flight_build(profile: Profile, generation: int) -> list[dict[str, Any]]:

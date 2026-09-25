@@ -128,6 +128,38 @@ Benchmarked against 105 test cases across 10 attack categories (Prompt Guard 2 2
 
 The key insight: classifiers are excellent at what they were trained for (instruction overrides) and categorically blind to what they weren't (social engineering, exfiltration). The Q-Agent covers the gap. No single model — classifier or LLM — handles everything.
 
+### Pacing L3: the adaptive limiter
+
+L3 is the only layer paced by someone else. Every provider call
+(`quarantine/limiter.py`) waits in a FIFO queue in front of the
+(provider, model) it goes to, shared by user-facing scans, the perimeter,
+compression and the boot warm-up. User-facing calls are granted a slot before
+warm-up work, so hundreds of tool descriptions judged at boot never make a
+`tools/call` wait behind them.
+
+The limit is found, not configured, by AIMD, the rule TCP uses:
+
+- slow start doubles it per window until the provider first throttles;
+- after that it grows by one per window of successes;
+- a 429 halves it, once per congestion epoch, so a burst of 429s from requests
+  that were in flight together counts once, and pauses new requests for the
+  provider's `Retry-After`.
+
+A throttled call is retried on the same provider after the pause, within
+`TRENTINA_L3_THROTTLE_BUDGET`, and only then falls back. A 503 or a timeout is
+an outage, not a capacity signal: it moves down the fallback chain at once and
+leaves the limit alone.
+
+### Boot warm-up
+
+On a cold perimeter store, the first `tools/list` has to judge every tool
+description. `gateway/warmup.py` starts that work from the FastMCP lifespan as
+soon as the event loop serves, through the same single-flight build a client's
+`tools/list` uses (`router.ensure_profile_build`). A client that connects
+mid-warm-up joins it instead of starting its own. The warm-up logs one summary
+line: its duration, profiles, tools, descriptions judged vs. cached, and each
+judge's final limit and throttle count.
+
 ## Configuration
 
 Defense settings are configured per profile:

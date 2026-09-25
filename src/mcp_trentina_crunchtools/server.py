@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import contextlib
+from typing import TYPE_CHECKING, Any
 
 from fastmcp import FastMCP
 
@@ -20,8 +21,26 @@ from .tools import (
     web_search,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_server: FastMCP[Any]) -> AsyncIterator[dict[str, Any]]:
+    """Run the gateway's boot warm-up (#216) once the event loop serves.
+
+    Imported here, not at module top: a standalone server never loads the
+    gateway, and should not pay for importing it.
+    """
+    from .gateway.warmup import trentina_lifespan
+
+    async with trentina_lifespan() as state:
+        yield state
+
+
 mcp = FastMCP(
     "mcp-trentina-crunchtools",
+    lifespan=_lifespan,
     # Sourced from the package, never a literal: this sat at "0.4.0" through
     # every release up to 0.7.0, so every client that asked the server its
     # version got a three-year-old answer.

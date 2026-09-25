@@ -338,7 +338,7 @@ class TestRetryLogic:
         mock_prov = MagicMock()
         mock_prov.generate = AsyncMock(
             side_effect=[
-                QuarantineAgentError("HTTP 503"),
+                QuarantineAgentError("HTTP 503", status_code=503),
                 self._success_result(),
             ]
         )
@@ -358,7 +358,7 @@ class TestRetryLogic:
         mock_prov = MagicMock()
         mock_prov.generate = AsyncMock(
             side_effect=[
-                QuarantineAgentError("HTTP 429"),
+                QuarantineAgentError("HTTP 429", status_code=429),
                 self._success_result(),
             ]
         )
@@ -377,7 +377,7 @@ class TestRetryLogic:
     async def test_gives_up_after_max_retries(self) -> None:
         mock_prov = MagicMock()
         mock_prov.generate = AsyncMock(
-            side_effect=QuarantineAgentError("HTTP 503"),
+            side_effect=QuarantineAgentError("HTTP 503", status_code=503),
         )
         with (
             patch(
