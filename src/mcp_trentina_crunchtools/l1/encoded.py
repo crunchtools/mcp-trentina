@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 
 _INSTRUCTION_PATTERN = re.compile(
-    r"\b(ignore|forget|disregard|override|you are now|new instruction|"
+    r"\b(ignore|forget|disregard|override|bypass|reveal|you are now|new instruction|"
     r"system prompt|execute|eval\s*\(|import\s*\(|require\s*\(|"
     r"api.?key|password|secret|curl\s|wget\s|rm\s+-|sudo\s)",
     re.IGNORECASE,

@@ -200,6 +200,12 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
     table that `preprocess/html.py` imports, so the converter that strips an
     element and the stage that counts one decide by one rule.
   - `shadows.py` — Python stdlib module shadow detection and obfuscation scanning
+  - `directives.py` — the exact patterns, named after OpenRouter's guardrail
+    (#201). Near-misses matter as much as hits: every pattern has an attack
+    and a benign line in `tests/adversarial_corpus.py` (`L1_PATTERN_CASES`),
+    kept out of `CORPUS` because that is the semantic L3 benchmark.
+  - `evasion.py` — undoes scrambles, one-edit typos and character spacing,
+    then asks the exact patterns again. A typo alone is never a detection.
 - `quarantine/` — holds BOTH judging layers, which is why the directory name
   matches neither: `classifier.py` is L2 (Prompt Guard 2, local ONNX) and
   `agent.py` is L3 (Gemini REST via httpx, NO SDK, NO tools). CLAUDE.md called

@@ -31,6 +31,33 @@ The modes take OpenRouter's names: Flag, Redact, Block (#200).
 - Modes are declared strictest first, OpenRouter's precedence:
   block > redact > flag. The `initialize` instructions list them in that order.
 
+### Added
+- **L1 takes OpenRouter's and OWASP's prompt-injection patterns** (#201).
+  Directive detection grows from 8 patterns to 38, named as OpenRouter names
+  them: instruction override, developer/admin mode, system override, prompt
+  extraction, role manipulation, DAN, safety bypass, and tag and role
+  spoofing. The delimiter stage adds Llama 3's `<|eot_id|>`-family tokens and
+  DeepSeek's fullwidth-pipe tokens, the decoded-payload check adds `bypass`
+  and `reveal`, image exfiltration covers HTML `<img src>` as well as
+  Markdown, and KaTeX `\color{white}` text counts as hidden.
+- **Evasions are undone before the patterns run again** (`l1/evasion.py`):
+  scrambled middles, one-edit typos, character spacing and long character
+  repeats. A line counts when the rewrite completes an exact pattern, or
+  when it carries two misspelled keywords with at least one scrambled; a
+  single typo never counts. These lines count as
+  `directives_evasions_detected`.
+- Every pattern has an attack and a benign near-miss in
+  `tests/adversarial_corpus.py`, and OWASP's test list is taken wholesale.
+  All of it is detected.
+
+### Changed
+- The bare `you are now a` pattern is replaced by OpenRouter's
+  `identity_hijack`, which needs a malicious modifier within 40 characters,
+  so "you are now a member of the team" no longer counts.
+- Measured on 31k journal lines, host `podman`/`systemctl`/`ps` output, and
+  this repository's docs and source, the new patterns add no detections. L1
+  costs ~55 ms per 100k characters, up from ~20 ms.
+
 ### Deprecated
 - **[DEPRECATED] `warn` and `clean` will be removed in v0.36.0. Use `flag` and
   `redact` instead.** Until then they are accepted wherever a mode is read:

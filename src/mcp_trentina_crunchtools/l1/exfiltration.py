@@ -1,7 +1,13 @@
-"""Exfiltration URL detection — strip suspicious markdown images used for data theft."""
+"""Exfiltration URL detection — strip suspicious images used for data theft.
+
+Markdown ``![](url)`` and, since #201, HTML ``<img src=url>`` (OWASP's
+example). Either one renders as a request to the attacker's server with the
+stolen data in the query string, and neither needs the reader to click.
+"""
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
@@ -19,6 +25,17 @@ _EXFIL_PARAM_NAMES = frozenset(
 )
 
 _MD_IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+# The tag, then every `src=` in it, any suspicious one counting: a decoy in
+# another attribute's value (`alt="x src=/safe.png"`) cannot stand in for the
+# real source. `src` follows whitespace or a slash (`<img/src=...>` is fetched)
+# but never a hyphen (`data-src` is not). Quoted values are skipped, so a `>`
+# inside one does not end the tag; the alternatives start on disjoint
+# characters, so there is nothing to backtrack between.
+_HTML_IMAGE_PATTERN = re.compile(r"""<img\b(?:[^>"']|"[^"]*"|'[^']*')*>""", re.IGNORECASE)
+_SRC_ATTR = re.compile(
+    r"""[\s/]src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""",
+    re.IGNORECASE,
+)
 
 MAX_SUSPICIOUS_URL_LENGTH = 500
 MAX_QUERY_VALUE_LENGTH = 100
@@ -61,7 +78,7 @@ def _is_suspicious_url(url: str) -> bool:
 
 
 def strip_exfiltration(text: str) -> tuple[str, ExfiltrationStats]:
-    """Detect and remove markdown images with suspicious exfiltration URLs."""
+    """Detect and remove markdown and HTML images with suspicious exfiltration URLs."""
     stats = ExfiltrationStats()
 
     def _replace_image(match: re.Match[str]) -> str:
@@ -72,5 +89,17 @@ def strip_exfiltration(text: str) -> tuple[str, ExfiltrationStats]:
             return f"[image: {alt}]" if alt else "[image removed]"
         return match.group(0)
 
+    def _replace_html_image(match: re.Match[str]) -> str:
+        urls = (
+            m.group(1) or m.group(2) or m.group(3) or "" for m in _SRC_ATTR.finditer(match.group(0))
+        )
+        # Judged as the browser will fetch it: `&#x64;ata=` is `data=` once
+        # character references are decoded, and a browser decodes them.
+        if any(_is_suspicious_url(html.unescape(url)) for url in urls):
+            stats.exfiltration_urls += 1
+            return "[image removed]"
+        return match.group(0)
+
     cleaned = _MD_IMAGE_PATTERN.sub(_replace_image, text)
+    cleaned = _HTML_IMAGE_PATTERN.sub(_replace_html_image, cleaned)
     return cleaned, stats
