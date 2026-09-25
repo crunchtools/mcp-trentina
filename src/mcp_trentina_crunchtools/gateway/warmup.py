@@ -57,7 +57,9 @@ async def warm_all() -> None:
 async def _warm(profiles: list[Profile]) -> None:
     judged, hits = perimeter_counts["judged"], perimeter_counts["hits"]
     started = time.monotonic()
-    logger.info("warm-up: judging tool descriptions for %d profiles", len(profiles))
+    # WARNING, like the startup cache line: production runs at WARNING, and
+    # these two lines are what an operator reads after a cold restart.
+    logger.warning("warm-up: judging tool descriptions for %d profiles", len(profiles))
 
     # Each build task copies this context, so its L3 calls queue as
     # background work. A client that joins one mid-flight shares that.
@@ -78,7 +80,7 @@ async def _warm(profiles: list[Profile]) -> None:
         else:
             tools += len(outcome)
 
-    logger.info(
+    logger.warning(
         "warm-up: done in %.1fs — profiles=%d tools=%d judged=%d cached=%d l3=%s",
         time.monotonic() - started,
         len(profiles),

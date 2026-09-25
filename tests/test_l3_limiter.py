@@ -410,3 +410,30 @@ class TestStaleThrottleExtendsPause:
         lim.release(second, Outcome.THROTTLED, retry_after=60.0)  # stale epoch, longer pause
         with pytest.raises(QuarantineAgentError):
             await waiter
+
+
+class TestGoogleRetryInfo:
+    def _error(self, body: object, headers: dict[str, str] | None = None) -> QuarantineAgentError:
+        request = httpx.Request("POST", "https://example.invalid")
+        response = httpx.Response(429, json=body, headers=headers or {}, request=request)
+        return status_error(httpx.HTTPStatusError("throttled", request=request, response=response))
+
+    def test_gemini_retry_delay_from_the_body(self) -> None:
+        body = {
+            "error": {
+                "status": "RESOURCE_EXHAUSTED",
+                "details": [
+                    {"@type": "type.googleapis.com/google.rpc.QuotaFailure"},
+                    {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "50.5s"},
+                ],
+            }
+        }
+        assert self._error(body).retry_after == 50.5
+
+    def test_header_wins_over_body(self) -> None:
+        body = {"error": {"details": [{"@type": "google.rpc.RetryInfo", "retryDelay": "50s"}]}}
+        assert self._error(body, {"Retry-After": "3"}).retry_after == 3.0
+
+    def test_no_hint_anywhere(self) -> None:
+        assert self._error({"error": {"message": "slow down"}}).retry_after is None
+        assert self._error(["not", "a", "dict"]).retry_after is None

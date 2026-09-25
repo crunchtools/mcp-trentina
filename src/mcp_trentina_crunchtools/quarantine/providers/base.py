@@ -80,10 +80,31 @@ def parse_retry_after(value: str | None, now: float | None = None) -> float | No
 
 
 def status_error(exc: httpx.HTTPStatusError) -> QuarantineAgentError:
-    """The Q-Agent error for a non-2xx response, keeping the provider's Retry-After."""
+    """The Q-Agent error for a non-2xx response, keeping how long to wait.
+
+    Retry-After when the provider sends one. Gemini does not: it puts the wait
+    in the body, as a ``google.rpc.RetryInfo`` detail ("retryDelay": "50s").
+    """
     code = exc.response.status_code
-    return QuarantineAgentError(
-        f"HTTP {code}",
-        status_code=code,
-        retry_after=parse_retry_after(exc.response.headers.get("retry-after")),
-    )
+    retry_after = parse_retry_after(exc.response.headers.get("retry-after"))
+    if retry_after is None:
+        retry_after = _google_retry_delay(exc.response)
+    return QuarantineAgentError(f"HTTP {code}", status_code=code, retry_after=retry_after)
+
+
+def _google_retry_delay(response: httpx.Response) -> float | None:
+    """The retryDelay of a Google RetryInfo error detail, in seconds."""
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    error = body.get("error") if isinstance(body, dict) else None
+    details = error.get("details") if isinstance(error, dict) else None
+    for detail in details if isinstance(details, list) else []:
+        if not isinstance(detail, dict) or not str(detail.get("@type", "")).endswith(
+            "google.rpc.RetryInfo"
+        ):
+            continue
+        delay = str(detail.get("retryDelay", "")).removesuffix("s")
+        return parse_retry_after(delay)
+    return None
