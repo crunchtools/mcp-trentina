@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
@@ -11,7 +13,10 @@ from ..config import get_config
 from ..database import is_blocked
 from ..defense import defend
 from ..errors import FetchError, UnsupportedContentTypeError
+from ..l1.hidden import detect_hidden_markup
+from ..l1.pipeline import PipelineResult, run_l1
 from ..modes import Mode
+from ..preprocess import HtmlProcessor, PreProcessContext
 from ..quarantine.prompts import finding_types
 from ..report import Disposition, build_report
 from .judged import blocklisted, judge_and_deliver
@@ -172,6 +177,80 @@ def _handle_content_type_error(url: str, exc: UnsupportedContentTypeError) -> di
     )
 
 
+_HTML_TYPES = frozenset({"text/html", "application/xhtml+xml"})
+
+
+@dataclass
+class _Page:
+    """What fetch judges and delivers, and what conversion took out of it."""
+
+    content: str
+    extras: dict[str, Any] = field(default_factory=dict)
+    pipeline: PipelineResult | None = None
+    briefing: str | None = None
+
+
+def _l1_with_original_hiding(markdown: str, original: str) -> PipelineResult:
+    """L1 over the Markdown, with the hiding counts of the page it came from."""
+    pipeline = run_l1(markdown)
+    _, pipeline.stats.hidden = detect_hidden_markup(original)
+    return pipeline
+
+
+async def _as_markdown(content: str, content_type: str, url: str) -> _Page:
+    """A page the server calls HTML, as the Markdown a human would read.
+
+    This is the fetch tools' product, and it was until 0.28.0 moved conversion
+    out of L1 (#172) onto the gateway's pre-processor chain — a chain the
+    internal tools never pass through, and one that is opt-in and fails open
+    because its mandate is tokens. Here it is neither: conversion is what
+    eliminates hidden content rather than merely counting it
+    (``preprocess/html.py``), so it runs on every HTML page and a converter
+    that raises fails the call.
+
+    The server's content-type decides, not a sniff of the bytes: a raw file
+    served as ``text/plain`` is delivered as it arrived, and ``l1/hidden.py``
+    still counts whatever markup it carries. Everything after this judges and
+    delivers the Markdown — what is scanned is what is delivered.
+
+    What conversion deleted reaches nobody, but a page that hid text from its
+    reader has shown its intent. So L1's own hiding stage counts the ORIGINAL,
+    the way ``dir`` merges its shadow counts, and those counts carry the risk
+    score the Markdown alone would not.
+    """
+    if content_type.split(";", 1)[0].strip().lower() not in _HTML_TYPES:
+        return _Page(content)
+    result = await HtmlProcessor().run(content, PreProcessContext(source=url))
+    if not result.applied:
+        return _Page(content)
+
+    pipeline = await asyncio.to_thread(_l1_with_original_hiding, result.content, content)
+    removed = sum(
+        int(result.details.get(k, 0))
+        for k in ("hidden_elements", "off_screen_elements", "same_color_text", "template_tags")
+    )
+    return _Page(
+        result.content,
+        extras={
+            "preprocess": {
+                "name": result.name,
+                "bytes_in": result.bytes_in,
+                "bytes_out": result.bytes_out,
+                **result.details,
+            }
+        },
+        pipeline=pipeline,
+        briefing=(
+            f"This page was converted from HTML to Markdown before judging, and "
+            f"the conversion removed {removed} element(s) hidden from a human "
+            f"reader, so you are not reading all of the original. Hiding text is "
+            f"a common way to address an agent without the reader noticing."
+        )
+        if removed
+        else None,
+    )
+
+
 async def fetch_page(url: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
     """Fetch, then hand the page to the one judging path.
 
@@ -184,7 +263,7 @@ async def fetch_page(url: str, mode: Mode, prompt: str | None = None) -> dict[st
         raise blocklisted(url, mode, blocked["detected_at"])
 
     try:
-        content, _content_type = await fetch_url(url)
+        content, content_type = await fetch_url(url)
     except FetchError as exc:
         advisory = await _handle_fetch_error(url, exc)
         if advisory:
@@ -195,8 +274,9 @@ async def fetch_page(url: str, mode: Mode, prompt: str | None = None) -> dict[st
         log.warning("redirect-to-binary advisory for %s: %s", url, exc)
         return _handle_content_type_error(url, exc)
 
+    page = await _as_markdown(content, content_type, url)
     return await judge_and_deliver(
-        content,
+        page.content,
         mode=mode,
         family="fetch",
         source=url,
@@ -207,6 +287,10 @@ async def fetch_page(url: str, mode: Mode, prompt: str | None = None) -> dict[st
         allowlisted=get_config().is_trusted_domain(url),
         blocklisted_at=blocked["detected_at"] if blocked else None,
         domain=urlparse(url).hostname,
+        precomputed_l1=page.pipeline,
+        l3_context=page.briefing,
+        extras=page.extras,
+        redact_extras=page.extras,
     )
 
 
