@@ -29,7 +29,7 @@ Authentication is **mandatory**:
 | Authenticated profile has no `llm_keys` entry for `{provider}` | `502` |
 | Authenticated profile has a key for `{provider}` | Inject the profile's key, forward |
 
-The caller's `Authorization` header is never forwarded upstream. Trentina's own Q-Agent is unaffected — it calls providers directly (not through `/llm/`) and continues to use the global `GEMINI_API_KEY`.
+The caller's `Authorization` header is never forwarded upstream. Trentina's own Q-Agent does not go through `/llm/`; it calls providers directly, but with the same `llm_keys`. Judging a profile's tool response bills that profile's key. Judging a shared tool description, or compressing one, is the gateway's own work, and bills the operator's key ([operator.md](operator.md#service-identity)). The global `GEMINI_API_KEY` applies only when no operator is declared.
 
 ### What This Buys You
 

@@ -13,9 +13,12 @@ Profiles are defined in YAML, typically at `/etc/trentina/profiles.yaml` or wher
 ```yaml
 profiles:
   agent2:
-    role: operator          # default: agent (see Roles)
+    role: operator          # default: agent (see Roles and operator.md)
     auth:
       bearer_token_env: TRENTINA_PROFILE_AGENT2_TOKEN
+    llm_keys:               # the operator pays for the gateway's own model calls
+      gemini:
+        api_key_env: TRENTINA_OPERATOR_GEMINI_API_KEY
     backends:
       web:
         url: "internal://web"
@@ -121,8 +124,12 @@ through the gateway's own admin tools — `cache_flush`, `reconnect_backend`,
 | `reconnect_backend` | a backend in its own profile, with the tool count it would see | the name wherever it is configured, and who shares it |
 | `reload_profiles` | validates the whole file, applies its own section | applies the whole file and the gateway-wide settings |
 
-Omit `role` and the profile is an agent. Give it to the seat a human drives,
-not to an autonomous agent.
+Omit `role` and the profile is an agent. There is at most one operator, and it
+belongs to the **Operator agent**: the agent that installs, configures and runs
+Trentina. Every other agent, supervised or not, is a tenant and stays
+`role: agent`. The operator is also the gateway's service identity, so the
+gateway's own model calls run on its key. [operator.md](operator.md) covers the
+whole seat.
 
 An agent profile is not told what it cannot act on. Another profile's backend
 names, allowlist deltas, guarded parameter names, call volumes and blocked URLs

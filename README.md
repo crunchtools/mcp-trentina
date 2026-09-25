@@ -18,6 +18,10 @@ Four ways a client can prove who it is, chosen per profile: a static bearer toke
 
 Each consumer — Claude Code, Hermes, OpenClaw, or any MCP client — gets its own profile with independent tool access, defense settings, and authentication. Your human-supervised agent can have full tool access while your autonomous agent gets a locked-down subset, all through the same gateway.
 
+### [Operator Profile](docs/operator.md)
+
+Trentina is built to be run by an agent. One profile, `role: operator`, is the Operator agent's seat. It installs and configures the gateway, reloads it, and administers it through Trentina's own admin tools. It is also the gateway's service identity: compression and perimeter judgement of shared tool descriptions run on the operator's model and bill the operator's key. They never run on whichever tenant happens to sort first.
+
 ### [Tool Allowlists & Denylists](docs/tool-filtering.md)
 
 Control which tools each agent can even see. Tools not in the allowlist are stripped from `tools/list` responses before they reach the consumer — they never enter the agent's context window. Supports exact names and glob patterns (`delete*`, `*_gmail_*`). Reduces both context cost and attack surface.
@@ -112,6 +116,7 @@ export TRENTINA_PROFILE_MYAGENT_TOKEN=your-token
 | [MCP Gateway](docs/gateway.md) | Architecture, routing, namespacing |
 | [Authentication](docs/authentication.md) | Static bearer, OAuth proxy, delegated issuers |
 | [Per-Agent Profiles](docs/profiles.md) | Profile schema, multi-agent setup |
+| [Operator Profile](docs/operator.md) | The Operator agent's seat, service identity |
 | [Tool Filtering](docs/tool-filtering.md) | Allowlists, denylists, glob patterns |
 | [Parameter Guards](docs/parameter-guards.md) | Per-tool argument validation |
 | [Response Guards](docs/response-guards.md) | Per-tool result validation (egress) |

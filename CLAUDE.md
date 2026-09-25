@@ -128,6 +128,18 @@ rewrite, not their span substitution. Precedence: block > redact > flag.
   profile gets its own audit rows, its own detections and the defense settings
   it runs under; an operator gets the gateway.
 
+### Operator profile / service identity (#138)
+
+Trentina is AI-native: an Operator agent installs and configures it, and
+`role: operator` is that agent's seat (`docs/operator.md`). At most one per
+file, and it must hold `llm_keys` for its own provider (`loader._check_operator`).
+The gateway's own model calls — compression, perimeter L3 over tool
+descriptions, anything added later — run AS the operator via
+`gateway/service.py` (`service_context()` binds it; the Q-Agent resolves key and
+model from the bound profile). No operator: env-global, logged at startup.
+Verdict keys carry the judging (provider, model) except for the env default,
+which keeps the pre-#137 spelling so persisted verdicts stay reachable.
+
 ### Gateway admin
 
 All four are scoped by the calling profile's `role` (`gateway/scope.py`, and

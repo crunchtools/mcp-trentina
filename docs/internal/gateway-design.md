@@ -116,9 +116,12 @@ looks applied, and changes nothing.
 ```yaml
 profiles:
   agent2:
-    role: operator                      # default: agent — see docs/profiles.md#roles
+    role: operator                      # default: agent — see docs/operator.md
     auth:
       bearer_token_env: TRENTINA_GATEWAY_AGENT2_TOKEN
+    llm_keys:                           # service identity: pays for compression + perimeter L3
+      gemini:
+        api_key_env: TRENTINA_GATEWAY_AGENT2_GEMINI_API_KEY
     backends:
       web:                              # trentina's own tools, in-process
         url: internal://web

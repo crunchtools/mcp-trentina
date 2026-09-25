@@ -73,9 +73,7 @@ class SessionRegistry:
     _sessions: dict[str, Session] = field(default_factory=dict)
     _profile_index: dict[str, set[str]] = field(default_factory=dict)
     _notification_callback: Any = field(default=None)
-    _subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = field(
-        default_factory=dict
-    )
+    _subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = field(default_factory=dict)
     _tombstones: dict[str, Tombstone] = field(default_factory=dict)
 
     def set_notification_callback(self, callback: Any) -> None:
@@ -95,15 +93,11 @@ class SessionRegistry:
         pushes onto.  The GET SSE handler drains it and must call
         :meth:`unsubscribe` when the stream closes.
         """
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(
-            maxsize=SUBSCRIBER_QUEUE_MAXSIZE
-        )
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_MAXSIZE)
         self._subscribers.setdefault(session_id, set()).add(queue)
         return queue
 
-    def unsubscribe(
-        self, session_id: str, queue: asyncio.Queue[dict[str, Any]]
-    ) -> None:
+    def unsubscribe(self, session_id: str, queue: asyncio.Queue[dict[str, Any]]) -> None:
         """Deregister an SSE stream's queue (call on stream close/disconnect)."""
         subs = self._subscribers.get(session_id)
         if subs is None:
@@ -160,8 +154,7 @@ class SessionRegistry:
         self._profile_index.setdefault(profile_name, set()).add(session_id)
 
         logger.info(
-            "sessions: created session=%s profile=%s (active=%d/%d, ttl=%.0fs) "
-            "census=%s",
+            "sessions: created session=%s profile=%s (active=%d/%d, ttl=%.0fs) census=%s",
             session_id[:8],
             profile_name,
             len(self._profile_index.get(profile_name, set())),
@@ -173,20 +166,26 @@ class SessionRegistry:
 
     def census(self) -> dict[str, int]:
         """Live session count per profile, for tracking accumulation over time."""
-        return {
-            pname: len(ids) for pname, ids in self._profile_index.items() if ids
-        }
+        return {pname: len(ids) for pname, ids in self._profile_index.items() if ids}
 
-    def explain_missing(self, session_id: str) -> str:
+    def explain_missing(self, session_id: str, for_profile: str | None) -> str:
         """Describe why ``session_id`` is not in the registry.
 
         Turns an otherwise opaque 404 into a cause: TTL expiry, eviction under
         the per-profile cap, an explicit client teardown, or a session this
         process never issued at all (typically a client that outlived a
         gateway restart).
+
+        ``for_profile`` scopes the answer to a caller (#137). The full text
+        names the session's owner and its lifetime, which is fine in the
+        operator's journal and is not fine in a response: presenting another
+        profile's session id would learn that profile's name. So a tombstone
+        that belongs to someone else reads exactly like one that never
+        existed. Required, so no caller gets the unscoped text by omission:
+        only the operator's journal passes None, explicitly.
         """
         tomb = self._tombstones.get(session_id)
-        if tomb is None:
+        if tomb is None or (for_profile is not None and tomb.profile_name != for_profile):
             return (
                 "never issued by this gateway process — client predates a "
                 "gateway restart, or is using a session from another process"
@@ -225,9 +224,7 @@ class SessionRegistry:
         ids = self._profile_index.get(profile_name, set())
         return [self._sessions[sid] for sid in ids if sid in self._sessions]
 
-    def profiles_for_backend_url(
-        self, url: str, all_profiles: dict[str, Any]
-    ) -> list[str]:
+    def profiles_for_backend_url(self, url: str, all_profiles: dict[str, Any]) -> list[str]:
         """Return profile names whose backends include the given URL."""
         affected: list[str] = []
         for pname, profile in all_profiles.items():
@@ -259,9 +256,7 @@ class SessionRegistry:
 
             if self._notification_callback is not None:
                 try:
-                    await self._notification_callback(
-                        session.session_id, notification
-                    )
+                    await self._notification_callback(session.session_id, notification)
                     delivered = True
                 except Exception:
                     logger.warning(
@@ -276,8 +271,7 @@ class SessionRegistry:
                     delivered = True
                 except asyncio.QueueFull:
                     logger.warning(
-                        "sessions: subscriber queue full, dropped "
-                        "listChanged for session=%s",
+                        "sessions: subscriber queue full, dropped listChanged for session=%s",
                         session.session_id[:8],
                     )
 
@@ -285,8 +279,7 @@ class SessionRegistry:
                 notified += 1
         if notified:
             logger.info(
-                "sessions: broadcast tools/listChanged to %d session(s) "
-                "for profile=%s",
+                "sessions: broadcast tools/listChanged to %d session(s) for profile=%s",
                 notified,
                 profile_name,
             )

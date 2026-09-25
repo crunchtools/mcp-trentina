@@ -94,6 +94,31 @@ def _is_retryable(exc: QuarantineAgentError) -> bool:
     return "timed out" in msg or "unreachable" in msg
 
 
+def resolve_profile_llm(
+    profile: Profile, provider_name: str | None = None
+) -> tuple[str, SecretStr | None, str | None]:
+    """The (provider, api_key, model) a profile's model calls run on.
+
+    The profile's own key is mandatory — its absence is a hard error, so one
+    profile can never silently bill against another's key or the global one.
+    Ollama is the sole exception: it is keyless. The model is None when the
+    profile does not override it, and ``get_provider`` supplies the default.
+
+    One rule for every caller: the Q-Agent, and the gateway's centralized work
+    running as the operator (``gateway/service.py``, #138).
+    """
+    resolved = provider_name or profile.defense.provider or get_config().provider
+    if resolved == "ollama":
+        return resolved, None, profile.defense.model
+    llm_keys = getattr(profile, "llm_keys", {})
+    if resolved not in llm_keys:
+        raise QuarantineAgentError(
+            f"Profile {profile.name!r} has no API key configured for provider "
+            f"{resolved!r}. Add llm_keys.{resolved} to the profile configuration."
+        )
+    return resolved, llm_keys[resolved].api_key, profile.defense.model
+
+
 async def _call_with_fallback(
     content: str,
     system_prompt: str,
@@ -108,17 +133,7 @@ async def _call_with_fallback(
     profile = get_current_profile()
 
     if profile is not None:
-        primary_name = profile.defense.provider or get_config().provider
-        if primary_name == "ollama":
-            primary_key = None
-        else:
-            llm_keys = getattr(profile, "llm_keys", {})
-            if primary_name not in llm_keys:
-                raise QuarantineAgentError(
-                    f"Profile {profile.name!r} has no API key configured for provider "
-                    f"{primary_name!r}. Add llm_keys.{primary_name} to the profile configuration."
-                )
-            primary_key = llm_keys[primary_name].api_key
+        primary_name, primary_key, _model = resolve_profile_llm(profile)
     else:
         primary_name = get_config().provider
         primary_key = None  # get_provider() resolves global key
@@ -252,20 +267,7 @@ async def _call_gemini(
         model = None
 
         if profile is not None:
-            resolved_provider = provider_name or profile.defense.provider or get_config().provider
-
-            if resolved_provider == "ollama":
-                api_key = None
-            else:
-                if resolved_provider not in profile.llm_keys:
-                    raise QuarantineAgentError(
-                        f"Profile {profile.name!r} has no API key configured for provider "
-                        f"{resolved_provider!r}. Add llm_keys.{resolved_provider} to the "
-                        f"profile configuration."
-                    )
-                api_key = profile.llm_keys[resolved_provider].api_key
-
-            model = profile.defense.model
+            resolved_provider, api_key, model = resolve_profile_llm(profile, provider_name)
             logger.info(
                 "quarantine: profile=%s using dedicated key for provider=%s model=%s",
                 profile.name,
