@@ -192,6 +192,11 @@ class TestInstructions:
         text = mode_instructions(_profile(["block"], backend={"modes": ["block", "warn"]}))
         assert "warn returns it verbatim" in text
 
+    def test_one_sentence_per_mode(self) -> None:
+        """The modes are joined with '; ', so no mode's text may contain one."""
+        text = mode_instructions(_profile(["block", "warn", "clean"]))
+        assert text.count("; ") == 2
+
     async def test_initialize_carries_them(self) -> None:
         p = _profile(["block", "warn", "clean"])
         resp = await route_jsonrpc(p, {"jsonrpc": "2.0", "id": 1, "method": "initialize"})
