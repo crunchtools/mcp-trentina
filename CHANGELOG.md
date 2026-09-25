@@ -10,6 +10,37 @@ under that name.
 
 ## [Unreleased]
 
+The operator profile becomes the gateway's service identity (#138, #137).
+
+### Changed (breaking)
+- **At most one `role: operator` per `profiles.yaml`, and it must hold
+  `llm_keys` for its own provider** (Ollama excepted). Either violation
+  refuses the file at load. On a reload the running config stays in force.
+  See `docs/operator.md`.
+
+### Changed
+- **Centralized model calls run as the operator.** Description compression
+  and perimeter L3 over tool descriptions now use the operator's provider,
+  model and key. Before, compression used the first profile in file order
+  with the env-global key, and the perimeter used the env-global key. With no
+  operator declared, calls fall back to the env-global path, and a startup
+  line says so.
+- **Verdict cache keys carry the judging model** (#137). A verdict reached by
+  one model is no longer served to a profile judged by another. Verdicts from
+  the env-default model keep their old keys, so no persisted verdict is lost.
+- **Cache invalidation is per profile** (#137). One profile's flush or reload
+  no longer discards other profiles' in-flight `tools/list` builds, and a
+  circuit-breaker change rebuilds only the profiles that hold that backend.
+- `SessionRegistry.explain_missing(..., for_profile=)` describes another
+  profile's session as never issued, so a client-facing explanation can't
+  reveal who owned it (#137).
+
+### Docs
+- New `docs/operator.md`. Trentina is meant to be installed and configured by
+  an Operator agent, and the operator profile is that agent's seat.
+  `docs/profiles.md` no longer says to keep the role away from autonomous
+  agents.
+
 ## [0.35.0] - 2026-09-24
 
 The modes take OpenRouter's names: Flag, Redact, Block (#200).

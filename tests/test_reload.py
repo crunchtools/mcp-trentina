@@ -65,6 +65,8 @@ BASE_YAML = """\
 profiles:
   alpha:
     role: operator
+    defense:
+      provider: ollama  # the operator runs the gateway's own calls; keyless
     auth:
       bearer_token_env: TEST_ALPHA_TOKEN
     backends:
@@ -452,7 +454,11 @@ class TestAgentScope:
     async def test_a_profile_cannot_apply_its_own_promotion(self, profiles_path: Path) -> None:
         """Promotion costs an operator reload or a restart, never one call."""
         profiles_path.write_text(
-            BASE_YAML.replace("  beta:\n    auth:", "  beta:\n    role: operator\n    auth:"),
+            # alpha steps down in the same edit: two operators is a load error.
+            BASE_YAML.replace("  alpha:\n    role: operator\n", "  alpha:\n").replace(
+                "  beta:\n    auth:",
+                "  beta:\n    role: operator\n    defense:\n      provider: ollama\n    auth:",
+            ),
             encoding="utf-8",
         )
 
@@ -838,3 +844,38 @@ class TestCacheBehaviour:
             assert await build == ["jira__jira_delete_issue"]
 
         assert "alpha" not in _profile_tools_cache
+
+
+class TestServiceIdentityMoves:
+    """Every profile's descriptions are judged on the operator's model (#138)."""
+
+    async def test_a_new_operator_model_invalidates_every_profile(
+        self, profiles_path: Path
+    ) -> None:
+        _profile_tools_cache["beta"] = []
+        profiles_path.write_text(
+            BASE_YAML.replace(
+                "      provider: ollama  # the operator runs the gateway's own calls; keyless\n",
+                "      provider: ollama\n      model: another-model\n",
+            ),
+            encoding="utf-8",
+        )
+
+        result = await _reload_as("alpha")
+
+        assert result["service_identity_moved"] is True
+        # beta's own section did not change; its verdicts' judge did.
+        assert "beta" in result["caches_invalidated"]
+        assert "beta" not in _profile_tools_cache
+
+    async def test_an_unrelated_edit_leaves_the_others_cached(self, profiles_path: Path) -> None:
+        _profile_tools_cache["beta"] = []
+        profiles_path.write_text(
+            BASE_YAML.replace("tools_deny: []", 'tools_deny: ["jira_delete*"]', 1),
+            encoding="utf-8",
+        )
+
+        result = await _reload_as("alpha")
+
+        assert result["service_identity_moved"] is False
+        assert "beta" in _profile_tools_cache

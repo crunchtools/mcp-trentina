@@ -135,9 +135,7 @@ class TestProfileLookup:
         p2.auth.bearer_token = SecretStr("t")
 
         profiles = {"alice": p1, "bob": p2}
-        affected = registry.profiles_for_backend_url(
-            "http://slack:8005/mcp", profiles
-        )
+        affected = registry.profiles_for_backend_url("http://slack:8005/mcp", profiles)
         assert affected == ["alice"]
 
     def test_no_profiles_for_unknown_url(self, registry: SessionRegistry) -> None:
@@ -276,7 +274,7 @@ class TestDisconnectDiagnostics:
         sid = registry.create_session("alice")
         time.sleep(0.02)
         assert registry.get_session(sid) is None
-        assert REASON_TTL_EXPIRED in registry.explain_missing(sid)
+        assert REASON_TTL_EXPIRED in registry.explain_missing(sid, None)
 
     def test_evicted_session_is_explained_as_eviction(self) -> None:
         registry = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=2)
@@ -286,7 +284,7 @@ class TestDisconnectDiagnostics:
         time.sleep(0.01)
         registry.create_session("alice")
         assert registry.get_session(first) is None
-        assert REASON_EVICTED in registry.explain_missing(first)
+        assert REASON_EVICTED in registry.explain_missing(first, None)
 
     def test_ttl_and_eviction_are_distinguishable(self) -> None:
         """The whole point: a 404 must name which limit killed the session."""
@@ -299,18 +297,18 @@ class TestDisconnectDiagnostics:
         time.sleep(0.02)
         idle.get_session(expired)
 
-        assert REASON_EVICTED in registry.explain_missing(evicted)
-        assert REASON_TTL_EXPIRED in idle.explain_missing(expired)
+        assert REASON_EVICTED in registry.explain_missing(evicted, None)
+        assert REASON_TTL_EXPIRED in idle.explain_missing(expired, None)
 
     def test_client_delete_is_explained(self) -> None:
         registry = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
         sid = registry.create_session("alice")
         registry.delete_session(sid)
-        assert REASON_CLIENT_DELETE in registry.explain_missing(sid)
+        assert REASON_CLIENT_DELETE in registry.explain_missing(sid, None)
 
     def test_unknown_session_reports_never_issued(self) -> None:
         registry = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
-        assert "never issued" in registry.explain_missing("deadbeef" * 4)
+        assert "never issued" in registry.explain_missing("deadbeef" * 4, None)
 
     def test_tombstones_are_bounded(self) -> None:
         registry = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=1)

@@ -33,6 +33,8 @@ YAML = f"""\
 profiles:
   alpha:
     role: operator
+    defense:
+      provider: ollama  # the operator runs the gateway's own calls; keyless
     auth:
       bearer_token_env: TEST_ALPHA_TOKEN
     backends:
@@ -70,9 +72,7 @@ def gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
 
 
 class TestAgentScope:
-    async def test_no_argument_flushes_only_the_callers_backends(
-        self, gateway: dict
-    ) -> None:
+    async def test_no_argument_flushes_only_the_callers_backends(self, gateway: dict) -> None:
         with profile_context(gateway["beta"]):
             result = await cache_flush()
 
@@ -81,9 +81,7 @@ class TestAgentScope:
         assert WORK_URL in _tool_list_cache
         assert "beta" not in _profile_tools_cache
 
-    async def test_a_backend_in_another_profile_is_refused(
-        self, gateway: dict
-    ) -> None:
+    async def test_a_backend_in_another_profile_is_refused(self, gateway: dict) -> None:
         """The substring bug, as the caller would have hit it."""
         with profile_context(gateway["beta"]):
             result = await cache_flush("gw-work")
@@ -99,9 +97,7 @@ class TestAgentScope:
         assert result["flushed"] == "nothing"
         assert PERSONAL_URL in _tool_list_cache
 
-    async def test_no_other_profile_is_named_or_counted(
-        self, gateway: dict
-    ) -> None:
+    async def test_no_other_profile_is_named_or_counted(self, gateway: dict) -> None:
         """It used to report how many other profiles were still warm."""
         with profile_context(gateway["beta"]):
             result = await cache_flush()
@@ -109,9 +105,7 @@ class TestAgentScope:
         assert "alpha" not in str(result)
         assert "gw-work" not in str(result)
 
-    async def test_the_callers_aggregate_goes_but_the_others_stays(
-        self, gateway: dict
-    ) -> None:
+    async def test_the_callers_aggregate_goes_but_the_others_stays(self, gateway: dict) -> None:
         """A shared backend's eviction is felt; another profile's cache is not
         cleared by the caller's own flush of a backend it alone holds."""
         with profile_context(gateway["beta"]):
@@ -141,9 +135,7 @@ class TestOperatorScope:
         assert result["evicted"] == 0
         assert len(_tool_list_cache) == 3
 
-    async def test_a_name_in_another_profile_is_reachable(
-        self, gateway: dict
-    ) -> None:
+    async def test_a_name_in_another_profile_is_reachable(self, gateway: dict) -> None:
         with profile_context(gateway["alpha"]):
             result = await cache_flush("gw-personal")
 
@@ -152,9 +144,7 @@ class TestOperatorScope:
 
 
 class TestUnknownCaller:
-    async def test_a_live_gateway_with_no_caller_flushes_nothing(
-        self, gateway: dict
-    ) -> None:
+    async def test_a_live_gateway_with_no_caller_flushes_nothing(self, gateway: dict) -> None:
         result = await cache_flush()
 
         assert result["flushed"] == "nothing"

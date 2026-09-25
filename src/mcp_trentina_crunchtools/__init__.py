@@ -159,6 +159,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     from .gateway.llm_proxy import load_llm_providers, register_llm_routes
     from .gateway.loader import register_active_config
     from .gateway.matrix_proxy import register_matrix_routes
+    from .gateway.service import log_service_identity
     from .gateway.sessions import session_registry
 
     profiles_path = Path(os.environ.get("TRENTINA_PROFILES_PATH", "/etc/trentina/profiles.yaml"))
@@ -244,6 +245,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         else " (COLD: the first tools/list will judge every tool description and may take minutes)",
     )
     set_profiles(gateway_config.profiles)
+    log_service_identity(gateway_config.profiles)
     # Last, and after every route is wired: this records both the config and
     # the facts about what got wired that a later reload has to respect. See
     # tools/reload.py — without it, an edit to profiles.yaml costs a restart,
@@ -1230,7 +1232,7 @@ def _wire_circuit_notifications(
     active sessions for those profiles.
     """
     from .gateway.circuit import State
-    from .gateway.router import reset_profile_tools_cache
+    from .gateway.router import invalidate_profile_cache
 
     pending_tasks: set[asyncio.Task[int]] = set()
 
@@ -1246,9 +1248,13 @@ def _wire_circuit_notifications(
         if not should_notify:
             return
 
-        reset_profile_tools_cache()
-
+        # Only the profiles that hold this backend. Wiping every aggregate
+        # (#137) made one backend's flap cost every other profile a rebuild.
+        # Read from config, not from the built aggregates, so a build already
+        # in flight for an affected profile is disowned as well.
         affected = sessions.profiles_for_backend_url(url, dict(profiles))
+        for profile_name in affected:
+            invalidate_profile_cache(profile_name)
         for profile_name in affected:
             try:
                 loop = asyncio.get_running_loop()

@@ -30,6 +30,8 @@ YAML = """\
 profiles:
   alpha:
     role: operator
+    defense:
+      provider: ollama  # the operator runs the gateway's own calls; keyless
     auth:
       bearer_token_env: TEST_ALPHA_TOKEN
     backends:

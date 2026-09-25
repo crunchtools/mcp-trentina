@@ -74,21 +74,23 @@ _profile_backend_urls: dict[str, set[str]] = {}
 
 _profile_inflight: dict[str, asyncio.Task[list[dict[str, Any]]]] = {}
 
-# Bumped by every invalidation. An aggregation already in flight captured the
-# Profile object as it was when it started, so after a config reload its
-# result is stale before it is written. The callers waiting on that build
-# still get it — it was current when they asked — but it must not land in the
-# cache, where the NEXT caller would read it as fresh. Popping the cache key
-# alone does not cover this: the in-flight task writes after the pop.
-_cache_generation = 0
+# Bumped per profile by every invalidation of it. An in-flight aggregation
+# built from the pre-reload Profile: its waiters still get it, but it must not
+# land in the cache after the pop, where the NEXT caller would read it fresh.
+# Per profile, not global (#137): one counter meant a tenant's cache_flush
+# discarded every neighbour's in-flight build as well.
+_cache_generation: dict[str, int] = {}
+
+
+def _bump(profile_name: str) -> None:
+    _cache_generation[profile_name] = _cache_generation.get(profile_name, 0) + 1
 
 
 def _on_backend_evicted(url: str) -> None:
     """Clear any profile cache whose backend set includes this URL."""
-    global _cache_generation
     for name, urls in list(_profile_backend_urls.items()):
         if url in urls:
-            _cache_generation += 1
+            _bump(name)
             _profile_tools_cache.pop(name, None)
             _profile_backend_urls.pop(name, None)
 
@@ -115,8 +117,7 @@ def invalidate_profile_cache(profile_name: str) -> bool:
     no longer in force. Returns whether a cached aggregate was actually
     dropped — a profile nobody has listed yet has nothing to invalidate.
     """
-    global _cache_generation
-    _cache_generation += 1
+    _bump(profile_name)
     _profile_backend_urls.pop(profile_name, None)
     return _profile_tools_cache.pop(profile_name, None) is not None
 
@@ -265,7 +266,9 @@ async def _route_tools_list(profile: Profile, req_id: Any) -> dict[str, Any]:
         # The generation is read HERE, not inside the build: a reload
         # landing between scheduling the task and its first line would
         # otherwise be invisible to it, and the stale aggregate would cache.
-        inflight = asyncio.ensure_future(_single_flight_build(profile, _cache_generation))
+        inflight = asyncio.ensure_future(
+            _single_flight_build(profile, _cache_generation.get(profile.name, 0))
+        )
         _profile_inflight[profile.name] = inflight
     aggregated = await inflight
     return _ok(req_id, {"tools": aggregated})
@@ -298,7 +301,7 @@ async def _build_profile_tools(
     omitting it means "as of now".
     """
     if generation is None:
-        generation = _cache_generation
+        generation = _cache_generation.get(profile.name, 0)
     await maybe_trigger_compression()
 
     async def _fetch_one(
@@ -369,7 +372,7 @@ async def _build_profile_tools(
             continue
         aggregated.extend(outcome)
 
-    if not any_hard_failed and generation == _cache_generation:
+    if not any_hard_failed and generation == _cache_generation.get(profile.name, 0):
         _profile_tools_cache[profile.name] = aggregated
         _profile_backend_urls[profile.name] = {
             b.url for b in profile.backends.values() if not b.is_internal

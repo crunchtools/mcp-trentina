@@ -15,9 +15,12 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..database import get_all_compressions, save_compression
+from ..quarantine.agent import resolve_profile_llm
 from ..quarantine.providers import get_provider
+from .service import service_profile
 
 if TYPE_CHECKING:
+    from ..quarantine.providers.base import Provider
     from .profile import Backend, Profile
 
 logger = logging.getLogger(__name__)
@@ -160,10 +163,19 @@ async def precompress_all(
     """Pre-compress descriptions for all compression-enabled backends.
 
     Best-effort: each backend is independent. A failure in one backend
-    does not affect others. Deduplicates by URL. Uses the first profile's
-    defense.provider for each unique backend URL.
+    does not affect others. Deduplicates by URL.
+
+    The model call runs as the service identity (``service.py``, #138): one
+    provider, one model, one bill, whatever order the profiles are in. It
+    used to take the first profile's ``defense.provider`` per URL.
+
+    The backend's tools/list is still FETCHED with the headers of the first
+    profile that holds it. That is a deliberate exception, not an omission:
+    it is a backend call rather than a model call, the operator may not hold
+    the backend at all, and the tool-list cache is keyed by URL on the same
+    assumption — any holder's credentials return the same list.
     """
-    seen_urls: dict[str, str | None] = {}
+    seen_urls: set[str] = set()
     stats: dict[str, int] = {}
 
     for profile in profiles.values():
@@ -174,16 +186,15 @@ async def precompress_all(
                 continue
             if backend.url in seen_urls:
                 continue
-            seen_urls[backend.url] = profile.defense.provider
+            seen_urls.add(backend.url)
 
             try:
-                count = await _precompress_backend(
-                    backend_name, backend, provider_name=profile.defense.provider,
-                )
+                count = await _precompress_backend(backend_name, backend)
                 stats[backend_name] = count
             except Exception:
                 logger.warning(
-                    "compress: backend %s failed, skipping", backend_name,
+                    "compress: backend %s failed, skipping",
+                    backend_name,
                     exc_info=True,
                 )
             await asyncio.sleep(DELAY_BETWEEN_BACKENDS)
@@ -217,11 +228,7 @@ def _store_result(batch: list[tuple[str, str]], h: str, compressed_text: str) ->
     return True
 
 
-async def _precompress_backend(
-    backend_name: str,
-    backend: Backend,
-    provider_name: str | None = None,
-) -> int:
+async def _precompress_backend(backend_name: str, backend: Backend) -> int:
     """Fetch tools from one backend, compress uncached descriptions."""
     from .backend import list_backend_tools
 
@@ -242,7 +249,7 @@ async def _precompress_backend(
         if i > 0:
             await asyncio.sleep(DELAY_BETWEEN_BATCHES)
         batch = uncached[i : i + BATCH_SIZE]
-        results = await _compress_batch_with_fallback(batch, provider_name=provider_name)
+        results = await _compress_batch_with_fallback(batch)
         for h, text in results:
             if _store_result(batch, h, text):
                 compressed_count += 1
@@ -254,10 +261,9 @@ async def _precompress_backend(
 
 async def _compress_batch_with_fallback(
     batch: list[tuple[str, str]],
-    provider_name: str | None = None,
 ) -> list[tuple[str, str]]:
     """Try batch compression, fall back to one-at-a-time on failure."""
-    results = await _call_compress_model(batch, provider_name=provider_name)
+    results = await _call_compress_model(batch)
     if results:
         return results
 
@@ -268,16 +274,24 @@ async def _compress_batch_with_fallback(
     all_results: list[tuple[str, str]] = []
     for item in batch:
         await asyncio.sleep(1)
-        single = await _call_compress_model([item], provider_name=provider_name)
+        single = await _call_compress_model([item])
         all_results.extend(single)
     return all_results
 
 
+def _service_provider() -> Provider:
+    """The provider the service identity runs on, or the env-global one."""
+    operator = service_profile()
+    if operator is None:
+        return get_provider()
+    name, api_key, model = resolve_profile_llm(operator)
+    return get_provider(name, api_key=api_key, model=model)
+
+
 async def _call_compress_model(
     items: list[tuple[str, str]],
-    provider_name: str | None = None,
 ) -> list[tuple[str, str]]:
-    """Call the configured provider to compress a batch of descriptions.
+    """Call the service identity's provider to compress a batch of descriptions.
 
     Retries up to MAX_RETRIES times on transient errors with exponential
     backoff. Returns [(hash, compressed_text)] for successful compressions,
@@ -288,7 +302,7 @@ async def _call_compress_model(
 
     for attempt in range(MAX_RETRIES):
         try:
-            provider = get_provider(provider_name)
+            provider = _service_provider()
             provider_result = await provider.generate(
                 system_prompt=COMPRESS_SYSTEM_PROMPT,
                 user_content=user_content,
@@ -305,7 +319,10 @@ async def _call_compress_model(
                 delay = RETRY_BASE_DELAY * (2**attempt)
                 logger.info(
                     "compress: provider error, retry %d/%d in %.0fs: %s",
-                    attempt + 1, MAX_RETRIES, delay, exc,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
+                    exc,
                 )
                 await asyncio.sleep(delay)
                 continue
@@ -326,5 +343,3 @@ def _parse_compress_response(parsed: dict[str, Any]) -> list[tuple[str, str]]:
         for item in compressed_list
         if isinstance(item, dict) and "id" in item and "text" in item
     ]
-
-

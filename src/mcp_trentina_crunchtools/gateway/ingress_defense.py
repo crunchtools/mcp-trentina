@@ -63,6 +63,7 @@ from ..modes import (
 )
 from ..quarantine.agent import quarantine_redact
 from ..warning import build_warning
+from .service import judge_of, service_context, service_profile
 
 if TYPE_CHECKING:
     from .profile import Profile
@@ -169,9 +170,28 @@ def reset_verdict_cache() -> None:
     _persist_broken = False
 
 
-def _cache_key(profile: Profile, kind: str, text: str) -> str:
+def _cache_key(profile: Profile, kind: str, text: str, judge: tuple[str, str]) -> str:
+    """The verdict key: what was judged, under which thresholds, by which model.
+
+    ``profile`` supplies the thresholds — a profile's gate stays its own.
+    ``judge`` is the (provider, model) L3 ran on (#137): without it, a verdict
+    one model reached was served to a profile running another.
+
+    The judge is written into the key ONLY when it differs from the env
+    default. Every key persisted before #137 was judged by the env default —
+    the tools/list path had no profile bound, and every lotor profile ran the
+    default — so that judge keeps the old spelling and the stored verdicts
+    stay reachable. Spelling it out would have cost a cold, minutes-long
+    re-judgement of every description on the first boot of this version.
+
+    The provider fallback chain can let a different model answer one call;
+    that verdict is still filed under the primary judge. The chain is
+    gateway-wide config, so this cannot carry a verdict across profiles.
+    """
     d = profile.defense
     cfg = f"{d.l2_threshold}"
+    if judge != judge_of(None):
+        cfg = f"{cfg}:{judge[0]}/{judge[1]}"
     return hashlib.sha256(f"{kind}:{cfg}:{text}".encode()).hexdigest()
 
 
@@ -338,6 +358,7 @@ async def scan_tool_response(
         profile,
         f"response:{mode.value}:{provenance.value}:{briefing}",
         joined + json.dumps(unscannable, sort_keys=True),
+        judge_of(profile),
     )
     # redact is not served from the cache: its extraction is per prompt, and
     # the extraction's briefing needs the verdict itself, not its warning.
@@ -556,6 +577,7 @@ async def scan_tool_list(
     verdicts and L1/L2 flags stand: the briefing changes only what L3 reads.
     """
     annotated: list[dict[str, Any]] = []
+    judge = judge_of(service_profile())
     for tool, before in zip(tools, tools_before_compression, strict=True):
         surface = _tool_surface_text(tool)
         if not surface.strip():
@@ -565,26 +587,29 @@ async def scan_tool_list(
         compressed = tool.get("description", "") != before.get("description", "")
         provenance = Provenance.MODEL_OUTPUT if compressed else Provenance.EXTERNAL
 
-        key = _cache_key(profile, f"tool:{provenance.value}", surface)
+        key = _cache_key(profile, f"tool:{provenance.value}", surface, judge)
         hit, warning = _cache_get(key)
         if hit and _judged_before_briefing(warning):
             hit = False
         if not hit:
-            verdict = await defend(
-                surface,
-                source=f"{profile.name}:{backend_name}:{tool.get('name', '?')}",
-                source_type="tool_description",
-                defense=profile.defense,
-                provenance=provenance,
-                l3_context=TOOL_BRIEFING,
-                attribution={
-                    "profile": profile.name,
-                    "backend": backend_name,
-                    "tool": str(tool.get("name", "?")),
-                    "direction": "tool_list",
-                    "blocked": effective_mode(profile) is Mode.BLOCK,
-                },
-            )
+            # A shared description is the gateway's own work, judged as the
+            # service identity (#138); the thresholds stay the requester's.
+            with service_context():
+                verdict = await defend(
+                    surface,
+                    source=f"{profile.name}:{backend_name}:{tool.get('name', '?')}",
+                    source_type="tool_description",
+                    defense=profile.defense,
+                    provenance=provenance,
+                    l3_context=TOOL_BRIEFING,
+                    attribution={
+                        "profile": profile.name,
+                        "backend": backend_name,
+                        "tool": str(tool.get("name", "?")),
+                        "direction": "tool_list",
+                        "blocked": effective_mode(profile) is Mode.BLOCK,
+                    },
+                )
             warning = build_warning(verdict)
             if warning is not None and warning.get("flagged_by") == "L3":
                 warning["l3_briefing"] = TOOL_BRIEFING_VERSION
