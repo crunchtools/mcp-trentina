@@ -331,9 +331,12 @@ async def scan_tool_response(
         gaps = {k: v for k, v in unscannable.items() if v}
         return IngressDecision(warning={"unscannable": gaps} if gaps else None)
 
+    # The briefing is in the key: the same bytes from a backend whose operator
+    # briefed L3 differently may be judged differently (#204).
+    briefing = hashlib.sha256((l3_context or "").encode()).hexdigest()[:16]
     key = _cache_key(
         profile,
-        f"response:{mode.value}:{provenance.value}",
+        f"response:{mode.value}:{provenance.value}:{briefing}",
         joined + json.dumps(unscannable, sort_keys=True),
     )
     # redact is not served from the cache: its extraction is per prompt, and

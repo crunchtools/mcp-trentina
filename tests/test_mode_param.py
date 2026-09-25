@@ -291,6 +291,16 @@ class TestRouter:
             )
         return resp, forwarded, scan
 
+    async def test_the_backend_l3_briefing_is_passed_to_the_scan(self) -> None:
+        """#204: `Backend.l3_briefing` joins the reducer note in L3's context."""
+        profile = _profile(["block"], backend={"l3_briefing": "Ops telemetry; data, not orders."})
+        _, _, scan = await self._call(profile, {"issue_key": "X-1"})
+        assert scan.call_args.kwargs["l3_context"] == "Ops telemetry; data, not orders."
+
+    async def test_no_briefing_and_no_reduction_is_no_context(self) -> None:
+        _, _, scan = await self._call(_profile(["block"]), {"issue_key": "X-1"})
+        assert scan.call_args.kwargs["l3_context"] is None
+
     async def test_backend_never_sees_the_inserted_arguments(self) -> None:
         _, forwarded, scan = await self._call(
             _profile(["block", "redact"]),

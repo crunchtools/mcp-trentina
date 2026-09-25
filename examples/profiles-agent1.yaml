@@ -19,7 +19,7 @@ profiles:
     # flagged content with a warning and records every score.
     defense:
       enforcement: flag       # flip to `block` after calibration
-      l2_threshold: 0.3       # stricter classifier gate for an autonomous agent
+      l2_threshold: 0.5       # below 0.5 flags what L2 itself labels BENIGN
 
     # Payload transformation on tool responses. Runs OUTSIDE the perimeter
     # and never replaces it: the gateway transforms, then scans the result,

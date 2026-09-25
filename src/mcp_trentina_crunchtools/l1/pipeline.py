@@ -21,7 +21,7 @@ from .encoded import EncodedStats, normalize_encoded
 from .exfiltration import ExfiltrationStats, strip_exfiltration
 from .hidden import HiddenStats, detect_hidden_markup
 from .shadows import ShadowStats
-from .unicode import UnicodeStats, normalize_unicode
+from .unicode import UnicodeStats, normalize_unicode, strips_anything
 
 
 @dataclass
@@ -155,6 +155,16 @@ class PipelineResult:
     stats: PipelineStats
     input_size: int
     output_size: int
+
+    def l2_reads_both(self) -> bool:
+        """Whether L2 must read ``l2_input`` as well as ``content``.
+
+        True when a normalizing stage rewrote the copy, whether or not what
+        it rewrote was counted: the counts rate risk (#204 stopped counting
+        padding and terminal escapes), while a stripped character is a token
+        boundary the classifier would otherwise never see removed.
+        """
+        return self.stats.normalized() or strips_anything(self.content)
 
 
 def _run_stages(content: str, stats: PipelineStats) -> PipelineResult:

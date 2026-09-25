@@ -62,7 +62,7 @@ from .l1.pipeline import (
 )
 from .quarantine.agent import quarantine_detect
 from .quarantine.classifier import ClassifierResult, classify_async
-from .quarantine.prompts import L2_BLINDSPOT_CAVEAT
+from .quarantine.prompts import L2_BLINDSPOT_CAVEAT, RISK_LEVELS
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +184,33 @@ def _decide(
         return Layer.L1, l1_risk, None
 
     return None, l1_risk, None
+
+
+def _layer_verdicts(
+    flagged_by: Layer,
+    classification: ClassifierResult | None,
+    l3_assessment: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """What every layer said, for the detection row, whichever one is credited."""
+    l3_verdict: str | None = None
+    l3_risk: str | None = None
+    if l3_assessment is not None and l3_assessment.get("l3_unavailable"):
+        l3_verdict = "unavailable"
+    elif l3_assessment is not None and l3_assessment.get("injection_detected"):
+        l3_verdict = "flagged"
+        # A closed enum, like every L3 field that leaves the perimeter: the
+        # row is read back by quarantine_stats, which an agent can call.
+        risk = l3_assessment.get("risk_level")
+        l3_risk = risk if risk in RISK_LEVELS else None
+    elif l3_assessment is not None:
+        l3_verdict = "clean"
+    return {
+        "flagged_by": flagged_by.value,
+        "l2_label": classification.label if classification else None,
+        "l2_score": classification.score if classification else None,
+        "l3_verdict": l3_verdict,
+        "l3_risk": l3_risk,
+    }
 
 
 def build_l3_briefing(
@@ -318,7 +345,7 @@ async def defend(
     else:
         pipeline = run_l1(content)
 
-    if has_text and pipeline.stats.normalized() and pipeline.l2_input.strip():
+    if has_text and pipeline.l2_reads_both() and pipeline.l2_input.strip():
         normalized, normalized_truncated = await _classify(
             pipeline.l2_input, source, stop_on_partial=stop_on_partial
         )
@@ -379,6 +406,7 @@ async def defend(
                     direction=attr.get("direction"),
                     provenance=provenance.value,
                     blocked=bool(attr.get("blocked", True)),
+                    verdicts=_layer_verdicts(flagged_by, classification, l3_assessment),
                 )
             emit_detection_event(
                 flagged_by.value,

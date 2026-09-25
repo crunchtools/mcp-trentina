@@ -583,15 +583,24 @@ async def _assemble_call_result(
             mode=mode,
             prompt=prompt,
             policy=policy,
-            # Invariant 3: the sidecar travels to L3's briefing too. "This is
+            # The operator's word on what this backend returns (#204), then
+            # invariant 3: the sidecar travels to L3's briefing too. "This is
             # the 3% that survived reduction" is context a judge should have.
-            l3_context=(
-                f"This artifact was transformed by trentina pre-processors "
-                f"({reduce_sidecar['bytes_in']} -> {reduce_sidecar['bytes_out']} "
-                f"bytes); where it shrank, it is a sample of a larger payload."
-                if reduce_sidecar
-                else None
-            ),
+            l3_context="\n".join(
+                note
+                for note in (
+                    backend.l3_briefing,
+                    (
+                        f"This artifact was transformed by trentina pre-processors "
+                        f"({reduce_sidecar['bytes_in']} -> {reduce_sidecar['bytes_out']} "
+                        f"bytes); where it shrank, it is a sample of a larger payload."
+                    )
+                    if reduce_sidecar
+                    else None,
+                )
+                if note
+            )
+            or None,
         )
         if decision.blocked:
             # The content never reaches the agent; the warning does. Audited

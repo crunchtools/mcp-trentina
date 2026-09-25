@@ -177,7 +177,7 @@ profiles:
       # ... narrower backend set
     defense:
       enforcement: block            # autonomous: a flagged response is refused outright
-      l2_threshold: 0.3             # flags earlier than agent2 — nobody is watching
+      l2_threshold: 0.5             # below 0.5 flags what L2 itself labels BENIGN
 ```
 
 ### Allowlist semantics
