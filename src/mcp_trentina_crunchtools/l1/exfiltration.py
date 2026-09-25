@@ -24,12 +24,17 @@ _EXFIL_PARAM_NAMES = frozenset(
 )
 
 _MD_IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-# Each alternative is a negated class up to its own delimiter, so hostile
-# markup cannot make this backtrack. `src` must follow whitespace or a slash
-# (`<img/src=...>` is markup a browser recovers and fetches), never a hyphen:
-# `data-src` is a lazy-load hint the browser never fetches from.
-_HTML_IMAGE_PATTERN = re.compile(
-    r"""<img\b[^>]*?[\s/]src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>""",
+# The tag, then every `src=` inside it. Every one, because a decoy in another
+# attribute's value (`alt="x src=/safe.png"`) would otherwise stand in for the
+# real source. Suspicious if ANY is: counting a src that sits inside a quoted
+# value is over-detection on contrived markup and costs a count, never the
+# delivered bytes. `src` follows whitespace or a slash (`<img/src=...>` is
+# recovered and fetched by browsers), never a hyphen: `data-src` is a
+# lazy-load hint that is never fetched. Every class is negated up to its own
+# delimiter, so hostile markup cannot make either pattern backtrack.
+_HTML_IMAGE_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+_SRC_ATTR = re.compile(
+    r"""[\s/]src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""",
     re.IGNORECASE,
 )
 
@@ -86,8 +91,10 @@ def strip_exfiltration(text: str) -> tuple[str, ExfiltrationStats]:
         return match.group(0)
 
     def _replace_html_image(match: re.Match[str]) -> str:
-        url = match.group(1) or match.group(2) or match.group(3) or ""
-        if _is_suspicious_url(url):
+        urls = (
+            m.group(1) or m.group(2) or m.group(3) or "" for m in _SRC_ATTR.finditer(match.group(0))
+        )
+        if any(_is_suspicious_url(url) for url in urls):
             stats.exfiltration_urls += 1
             return "[image removed]"
         return match.group(0)

@@ -60,7 +60,8 @@ PATTERNS: dict[str, re.Pattern[str]] = {
             r"forget\s+(?:all\s+)?(?:previous|prior|above)\s+" + _TARGETS,
             _I,
         ),
-        ("new_instructions", r"new\s+instructions?:", _I),
+        # Also "new instruction is to ...", which OpenRouter's colon-only form misses.
+        ("new_instructions", r"new\s+instructions?(?::|\s+(?:is|are)\s+to\b)", _I),
         (
             "do_not_follow",
             r"do\s+not\s+follow\s+(?:the\s+)?(?:system|developer|previous|original)",
