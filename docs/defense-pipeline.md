@@ -143,7 +143,8 @@ The limit is found, not configured, by AIMD, the rule TCP uses:
 - after that it grows by one per window of successes;
 - a 429 halves it, once per congestion epoch, so a burst of 429s from requests
   that were in flight together counts once, and pauses new requests for the
-  provider's `Retry-After`.
+  provider's `Retry-After`, or, when the provider sends none, for the
+  limiter's own backoff (1s doubling to 30s, with jitter).
 
 A throttled call is retried on the same provider after the pause, within
 `TRENTINA_L3_THROTTLE_BUDGET`, and only then falls back. A 503 or a timeout is

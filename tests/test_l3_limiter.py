@@ -377,3 +377,18 @@ class TestPauseRefusesQueuedCallers:
             l3_throttle_budget.reset(token)
         lim.release(held, Outcome.THROTTLED, retry_after=0.3)
         await asyncio.wait_for(waiter, timeout=2)
+
+
+class TestRefusedWaitersArePruned:
+    async def test_refused_waiters_leave_the_queue(self) -> None:
+        lim = AdaptiveLimiter(JUDGE, start=1, ceiling=1)
+        held = await lim.acquire()
+        token = l3_throttle_budget.set(5.0)
+        try:
+            waiters = [asyncio.ensure_future(lim.acquire()) for _ in range(3)]
+            await _settle()
+        finally:
+            l3_throttle_budget.reset(token)
+        lim.release(held, Outcome.THROTTLED, retry_after=60.0)
+        await asyncio.gather(*waiters, return_exceptions=True)
+        assert not any(lim._waiters[p] for p in Priority)

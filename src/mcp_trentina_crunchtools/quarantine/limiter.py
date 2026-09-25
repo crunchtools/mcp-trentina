@@ -201,8 +201,11 @@ class AdaptiveLimiter:
     def _refuse_waiters_past_budget(self) -> None:
         """Fail queued callers whose budget the current pause outlasts."""
         pause = self.resume_in()
-        for fut, budget in list(self._budgets.items()):
-            if pause > budget and not fut.done():
+        refused = {fut for fut, budget in self._budgets.items() if pause > budget}
+        if not refused:
+            return
+        for fut in refused:
+            if not fut.done():
                 fut.set_exception(
                     QuarantineAgentError(
                         f"{self.name} paused for throttling",
@@ -210,6 +213,11 @@ class AdaptiveLimiter:
                         retry_after=pause,
                     )
                 )
+        # One pass per queue, so a long pause cannot pile up dead futures.
+        for priority in Priority:
+            self._waiters[priority] = collections.deque(
+                f for f in self._waiters[priority] if f not in refused
+            )
 
     def _pump(self) -> None:
         """Grant queued waiters the free slots, foreground first."""
