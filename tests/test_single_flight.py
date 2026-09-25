@@ -41,11 +41,13 @@ class _GatedDefend:
 
     def __init__(self, fail: bool = False) -> None:
         self.calls = 0
+        self.attributed: list[str] = []
         self.gate = asyncio.Event()
         self.fail = fail
 
-    async def __call__(self, *_a: Any, **_k: Any) -> Any:
+    async def __call__(self, *_a: Any, **kwargs: Any) -> Any:
         self.calls += 1
+        self.attributed.append(kwargs["attribution"]["profile"])
         await self.gate.wait()
         if self.fail:
             raise RuntimeError("L3 fell over")
@@ -71,6 +73,8 @@ class TestCoalescing:
             await asyncio.gather(first, second)
 
         assert defend.calls == len(TOOLS)
+        # The detection row names the profile that started each judgement.
+        assert defend.attributed == ["alpha"] * len(TOOLS)
 
     async def test_different_thresholds_are_different_judgements(self) -> None:
         """The key is the coalescing unit: a stricter gate is its own verdict."""
