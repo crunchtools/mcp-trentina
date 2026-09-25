@@ -70,6 +70,12 @@ def _scramble_key(word: str) -> tuple[str, str, str, int] | None:
 
 _SCRAMBLES = {k: w for w in SCRAMBLE_TARGETS if (k := _scramble_key(w)) is not None}
 
+# Nothing longer than the longest keyword plus one edit can be a misspelling
+# of one. Checked before any per-word work: a 100k-character base64 run is one
+# "word", and its deletion neighbourhood alone would be 100k strings of 100k
+# characters each.
+_MAX_WORD_LEN = max(len(k) for k in KEYWORDS) + 1
+
 
 def _deletions(word: str) -> set[str]:
     return {word[:i] + word[i + 1 :] for i in range(len(word))}
@@ -107,29 +113,38 @@ def within_one_edit(a: str, b: str) -> bool:
     return any(long_[:i] + long_[i + 1 :] == short for i in range(len(long_)))
 
 
-# Both are memoized per word. Ops output repeats its vocabulary heavily, and
-# the cache is bounded, so a payload of unique junk words costs a lookup miss
-# and nothing else.
-@lru_cache(maxsize=8192)
 def scrambled_keyword(word: str) -> str | None:
     """The target ``word`` is a middle-letter scramble of, or None. Not the word itself."""
-    lowered = word.lower()
-    key = _scramble_key(lowered)
-    target = _SCRAMBLES.get(key) if key else None
-    return target if target is not None and target != lowered else None
+    # The length check is out here, not in the memoized body: a cache keyed
+    # on 100k-character words keeps 8192 of them alive.
+    return None if len(word) > _MAX_WORD_LEN else _scrambled(word.lower())
 
 
-@lru_cache(maxsize=8192)
 def corrected_keyword(word: str) -> str | None:
     """The keyword ``word`` misspells by one edit or a scramble, or None.
 
     None too when the word is already a keyword, or is close to two of them
     and so says nothing about which one was meant.
     """
-    lowered = word.lower()
+    return None if len(word) > _MAX_WORD_LEN else _corrected(word.lower())
+
+
+# Memoized per word. Ops output repeats its vocabulary heavily, and the cache
+# is bounded in entries and, through the length check above, in entry size.
+@lru_cache(maxsize=8192)
+def _scrambled(lowered: str) -> str | None:
+    """``scrambled_keyword`` for a lower-cased word already known to be short."""
+    key = _scramble_key(lowered)
+    target = _SCRAMBLES.get(key) if key else None
+    return target if target is not None and target != lowered else None
+
+
+@lru_cache(maxsize=8192)
+def _corrected(lowered: str) -> str | None:
+    """``corrected_keyword`` for a lower-cased word already known to be short."""
     if lowered in KEYWORDS:
         return None
-    scrambled = scrambled_keyword(lowered)
+    scrambled = _scrambled(lowered)
     if scrambled is not None:
         return scrambled
     if len(lowered) < _MIN_FUZZY_LEN - 1:

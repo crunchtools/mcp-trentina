@@ -587,3 +587,17 @@ check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/tools/fetch.py"
 justification = "_handle_content_type_error is the redirect-to-binary advisory, the sibling of _handle_fetch_error. It had two callers until 0.31.0 collapsed block/warn/clean onto one _fetch, and test_advisory exercises it directly as a unit: the advisory's shape (no attacker-chosen URLs echoed) is what it pins."
 classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/l1/evasion.py"
+pattern = "_corrected"
+justification = "The split is the cache boundary. corrected_keyword rejects words longer than any keyword before the lru_cache sees them; inlining would put the length check inside the memoized body, where a cache keyed on 100k-character words keeps 8192 of them alive (a Gatehouse finding on #208)."
+classification = "by_design"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/schema_compact.py"
+pattern = "_compact"
+justification = "Not a copy: _compact walks a JSON schema and _corrected in l1/evasion.py corrects a misspelled keyword. The two share only a shape, a chain of guard-clause early returns, which the similarity check scores as 100% identical."
+classification = "gourmand_bug"

