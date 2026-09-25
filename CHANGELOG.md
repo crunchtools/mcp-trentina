@@ -26,6 +26,16 @@ under that name.
   bound it. L2 scans are capped by `TRENTINA_L2_CONCURRENCY` (2).
 
 ### Fixed
+- **fetch delivered raw HTML.** 0.28.0 moved HTML-to-Markdown conversion out
+  of L1 onto the gateway's pre-processor chain, which the internal tools never
+  pass through, so `fetch_tool` delivered markup, hidden elements included,
+  where it used to deliver the page a human reads. fetch now converts any page
+  its server calls `text/html` or `application/xhtml+xml`, before judging,
+  and fails the call if the converter raises. The response carries a
+  `preprocess` section with what conversion removed. L1's hiding counts come
+  from the original page, so a page that hid text still reaches L3 as
+  suspicious, and L3 is told the Markdown is not the whole original.
+
 L1 detection gaps, found by adversarial testing (#179, three reported and
 first fixed by @politerealism).
 - **Hidden by a `<style>`-block class.** An element with `class="h"` hidden by
