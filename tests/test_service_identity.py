@@ -230,6 +230,11 @@ class TestPerimeterRunsAsTheOperator:
             await ing.scan_tool_list(profiles["tenant"], "b", tools, tools)
 
         assert seen == ["ops", "ops"]
+        # ...and the verdicts are filed under the same judge that reached them.
+        for tool in tools:
+            surface = ing._tool_surface_text(tool)
+            filed = ing._cache_key(profiles["tenant"], "tool:external", surface, judge_of(first))
+            assert filed in ing._verdicts
 
     def test_description_verdicts_are_keyed_by_the_operators_model(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
