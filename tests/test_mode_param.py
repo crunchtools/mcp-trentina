@@ -9,6 +9,7 @@ agent toward warn for content a layer flagged.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterator
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -24,6 +25,7 @@ from mcp_trentina_crunchtools.gateway.modes_policy import (
     MODE_PARAM,
     PROMPT_PARAM,
     insert_params,
+    mode_instructions,
     policy_for,
     strip_params,
 )
@@ -143,8 +145,8 @@ class TestSchema:
     def test_the_enum_is_exactly_the_policy(self) -> None:
         tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.CLEAN), Mode.BLOCK))
         props = tool["inputSchema"]["properties"]
-        assert props[MODE_PARAM]["enum"] == ["block", "clean"]
-        assert props[MODE_PARAM]["default"] == "block"
+        assert props[MODE_PARAM] == {"type": "string", "enum": ["block", "clean"]}
+        assert props[PROMPT_PARAM] == {"type": "string"}
         assert PROMPT_PARAM in props
         assert MODE_PARAM not in tool["inputSchema"]["required"]
         assert MODE_PARAM not in TOOL["inputSchema"]["properties"], "input mutated"
@@ -157,6 +159,12 @@ class TestSchema:
         tool = insert_params(TOOL, ModePolicy((Mode.CLEAN,), Mode.BLOCK))
         assert MODE_PARAM in tool["inputSchema"]["required"]
 
+    def test_inserted_text_is_the_enum_alone(self) -> None:
+        """#198: the explanation lives in `initialize`, not on 372 tools."""
+        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.WARN, Mode.CLEAN), Mode.BLOCK))
+        inserted = {k: tool["inputSchema"]["properties"][k] for k in (MODE_PARAM, PROMPT_PARAM)}
+        assert len(json.dumps(inserted, separators=(",", ":"))) < 120
+
     def test_a_backend_declared_mode_is_stripped(self) -> None:
         declared = {
             "name": "x",
@@ -168,6 +176,28 @@ class TestSchema:
         stripped = strip_params(declared)
         assert list(stripped["inputSchema"]["properties"]) == ["a"]
         assert stripped["inputSchema"]["required"] == ["a"]
+
+
+class TestInstructions:
+    def test_one_mode_says_nothing(self) -> None:
+        assert mode_instructions(_profile(["block"])) == ""
+
+    def test_the_profile_modes_and_default_are_stated_once(self) -> None:
+        text = mode_instructions(_profile(["block", "clean"]))
+        assert "Omitted, it is block." in text
+        assert "clean returns" in text and PROMPT_PARAM in text
+        assert "warn" not in text
+
+    def test_a_backend_widening_the_policy_is_explained(self) -> None:
+        text = mode_instructions(_profile(["block"], backend={"modes": ["block", "warn"]}))
+        assert "warn returns it verbatim" in text
+
+    async def test_initialize_carries_them(self) -> None:
+        p = _profile(["block", "warn", "clean"])
+        resp = await route_jsonrpc(p, {"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+        text = resp["result"]["instructions"]
+        assert text.startswith("trentina gateway, profile=agent.")
+        assert text.endswith(mode_instructions(p))
 
 
 class TestAlternatives:
