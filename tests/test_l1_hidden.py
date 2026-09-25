@@ -124,6 +124,21 @@ class TestStyleBlockClasses:
         _, stats = detect_hidden_markup('<div style="display:n\\6f ne">x</div>')
         assert stats.elements == 1
 
+    def test_escape_terminated_by_crlf(self) -> None:
+        _, stats = detect_hidden_markup('<div style="display:n\\6f\r\nne">x</div>')
+        assert stats.elements == 1
+
+    @pytest.mark.parametrize(
+        "markup",
+        [
+            '<style>.h{display:none}</style><div class="&#104;">x</div>',
+            '<div style="&#100;isplay:none">x</div>',
+        ],
+    )
+    def test_character_references_are_decoded(self, markup: str) -> None:
+        _, stats = detect_hidden_markup(markup)
+        assert stats.elements == 1
+
     def test_out_of_range_escape_does_not_raise(self) -> None:
         _, stats = detect_hidden_markup('<div style="color:\\110000 ;\\d800 ">x</div>')
         assert stats.elements == 0

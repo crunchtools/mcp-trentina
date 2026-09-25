@@ -116,8 +116,9 @@ class TestConversion:
         assert "visible" in markdown
 
     def test_nested_templates_are_stripped(self) -> None:
-        markdown, _ = to_markdown("<template>a<template>b</template></template><p>c</p>")
+        markdown, stats = to_markdown("<template>a<template>b</template></template><p>c</p>")
         assert markdown.strip() == "c"
+        assert stats.template_tags == 2
 
     def test_an_inline_override_does_not_unhide_a_class(self) -> None:
         """Deliberate, see `class_declarations`: both are read, neither wins."""

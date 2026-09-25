@@ -33,6 +33,7 @@ was written to end (#167).
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass, field
 
@@ -158,8 +159,9 @@ _CSS_NOISE_RE = re.compile(
     r"""/\*.*?(?:\*/|\Z)|"(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?""",
     re.DOTALL,
 )
-# `\\6f ` (hex, one optional trailing space) or `\\x` (a literal character).
-_CSS_ESCAPE_RE = re.compile(r"\\(?:([0-9a-fA-F]{1,6})[ \t\n]?|(.))", re.DOTALL)
+# `\\6f ` (hex, then one optional whitespace, CRLF counting as one) or `\\x`
+# (a literal character).
+_CSS_ESCAPE_RE = re.compile(r"\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|(.))", re.DOTALL)
 _MAX_CODE_POINT = 0x10FFFF
 _SURROGATES = range(0xD800, 0xE000)
 # An escaped ASCII character that is not an identifier character (`.a\\,b`
@@ -468,7 +470,8 @@ def detect_hidden_markup(text: str) -> tuple[str, HiddenStats]:
     for seen, match in enumerate(_STYLE_ATTR_RE.finditer(text)):
         if seen >= _MAX_STYLE_ATTRS:
             break
-        style = (match.group(1) or match.group(2) or match.group(3) or "").lower()
+        # Character references decoded, as the browser does: `&#100;isplay`.
+        style = html.unescape(match.group(1) or match.group(2) or match.group(3) or "").lower()
         if not style:
             continue
         concept = classify_style(style)
@@ -483,7 +486,7 @@ def detect_hidden_markup(text: str) -> tuple[str, HiddenStats]:
         for seen, match in enumerate(_CLASS_ATTR_RE.finditer(text)):
             if seen >= _MAX_STYLE_ATTRS:
                 break
-            classes = match.group(1) or match.group(2) or match.group(3) or ""
+            classes = html.unescape(match.group(1) or match.group(2) or match.group(3) or "")
             concept = classify_style(class_style(classes, declarations))
             if concept is not None:
                 name = concept_field[concept]
