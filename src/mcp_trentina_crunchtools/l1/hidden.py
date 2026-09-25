@@ -346,6 +346,9 @@ class ClassStyle:
 
     Only the trigger substrings and the colours, never the declarations
     themselves, so its size is bounded however many rules name the class.
+    ``triggers`` holds the predicate substrings its declarations contained;
+    ``colors`` and ``backgrounds`` the normalized hex values, oldest first,
+    at most ``_MAX_COLORS`` each.
     """
 
     triggers: set[str] = field(default_factory=set)
