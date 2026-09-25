@@ -11,6 +11,12 @@ under that name.
 ## [Unreleased]
 
 ### Changed
+- **One judgement per tool description in flight** (#120). Concurrent
+  `tools/list` calls that miss the cache on the same description now share
+  one `defend()` run, including across profiles with the same thresholds and
+  judge. The work outlives a caller that disconnects, so its verdict is still
+  banked. A failure reaches every waiter and caches nothing. The boot-time
+  warm-up from #105 is split out to #216.
 - **A stale session's 404 is a JSON-RPC error** (#104): code `-32001`, which
   matches the TypeScript SDK's server, and a message that gives the cause and
   says to re-initialize. It used to be a bare text line. The explanation is

@@ -9,7 +9,7 @@ import re
 from typing import Any
 
 
-def _scrub_credentials(message: str) -> str:
+def scrub_credentials(message: str) -> str:
     """Remove API keys and tokens from error messages."""
     return re.sub(
         r"(key|token|secret|password|authorization)[=:\s]+\S+",
@@ -23,7 +23,7 @@ class TrentinaError(Exception):
     """Base error for all trentina operations."""
 
     def __init__(self, message: str) -> None:
-        super().__init__(_scrub_credentials(message))
+        super().__init__(scrub_credentials(message))
 
 
 class FetchError(TrentinaError):
