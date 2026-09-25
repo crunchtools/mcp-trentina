@@ -868,6 +868,24 @@ class TestServiceIdentityMoves:
         assert "beta" in result["caches_invalidated"]
         assert "beta" not in _profile_tools_cache
 
+    async def test_a_new_operator_model_notifies_every_profiles_sessions(
+        self, profiles_path: Path
+    ) -> None:
+        """Withheld tools may come back, or go, under the new judge."""
+        sid = session_registry.create_session("beta")
+        queue = session_registry.subscribe(sid)
+        profiles_path.write_text(
+            BASE_YAML.replace(
+                "      provider: ollama  # the operator runs the gateway's own calls; keyless\n",
+                "      provider: ollama\n      model: another-model\n",
+            ),
+            encoding="utf-8",
+        )
+
+        await _reload_as("alpha")
+
+        assert queue.get_nowait()["method"] == "notifications/tools/listChanged"
+
     async def test_an_unrelated_edit_leaves_the_others_cached(self, profiles_path: Path) -> None:
         _profile_tools_cache["beta"] = []
         profiles_path.write_text(

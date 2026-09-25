@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from ..config import get_config
@@ -63,15 +64,29 @@ def service_profile() -> Profile | None:
     return find_operator(active.config.profiles) if active is not None else None
 
 
+class _Unresolved(Enum):
+    """``service_context``'s default: "resolve the operator yourself"."""
+
+    TOKEN = 0
+
+
 @contextmanager
-def service_context() -> Iterator[Profile | None]:
+def service_context(
+    operator: Profile | _Unresolved | None = _Unresolved.TOKEN,
+) -> Iterator[Profile | None]:
     """Run the enclosed model calls as the service identity.
 
     Binds the operator profile for the block and yields it. With no operator
     it binds NOTHING — explicitly None, so a tenant bound further up the stack
     cannot leak into the gateway's own work — and the env-global path applies.
+
+    A caller that already resolved the operator passes it in. That caller has
+    usually keyed something on ``judge_of(operator)``, and resolving again here
+    would let a reload between the two file a verdict under one judge that
+    another one reached.
     """
-    operator = service_profile()
+    if isinstance(operator, _Unresolved):
+        operator = service_profile()
     token = _current_profile.set(operator)
     try:
         yield operator

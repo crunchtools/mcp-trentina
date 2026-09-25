@@ -577,7 +577,9 @@ async def scan_tool_list(
     verdicts and L1/L2 flags stand: the briefing changes only what L3 reads.
     """
     annotated: list[dict[str, Any]] = []
-    judge = judge_of(service_profile())
+    # Resolved once per list: the key and the call must name the same judge.
+    operator = service_profile()
+    judge = judge_of(operator)
     for tool, before in zip(tools, tools_before_compression, strict=True):
         surface = _tool_surface_text(tool)
         if not surface.strip():
@@ -594,7 +596,7 @@ async def scan_tool_list(
         if not hit:
             # A shared description is the gateway's own work, judged as the
             # service identity (#138); the thresholds stay the requester's.
-            with service_context():
+            with service_context(operator):
                 verdict = await defend(
                     surface,
                     source=f"{profile.name}:{backend_name}:{tool.get('name', '?')}",

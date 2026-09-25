@@ -156,6 +156,29 @@ class TestServiceContext:
                 assert get_current_profile() is None
             assert get_current_profile() is profiles["tenant"]
 
+    def test_an_explicit_operator_is_bound_without_resolving_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        profiles = _live(tmp_path, monkeypatch, _TENANT, _OPERATOR)
+        chosen = profiles["tenant"]  # any Profile: the point is it is not re-resolved
+
+        with (
+            patch("mcp_trentina_crunchtools.gateway.service.service_profile") as resolve,
+            service_context(chosen) as bound,
+        ):
+            assert bound is chosen
+            assert get_current_profile() is chosen
+        resolve.assert_not_called()
+
+    def test_an_explicit_none_binds_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        profiles = _live(tmp_path, monkeypatch, _TENANT, _OPERATOR)
+
+        with profile_context(profiles["tenant"]), service_context(None) as bound:
+            assert bound is None
+            assert get_current_profile() is None
+
     def test_standalone_has_no_service_profile(self) -> None:
         assert service_profile() is None
 
@@ -181,6 +204,37 @@ class TestPerimeterRunsAsTheOperator:
             await ing.scan_tool_list(profiles["tenant"], "b", tools, tools)
 
         assert seen == ["ops"]
+
+    async def test_a_reload_mid_scan_does_not_split_key_and_judge(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The operator is resolved once per list; a later resolution is ignored."""
+        profiles = _live(tmp_path, monkeypatch, _TENANT, _OPERATOR)
+        first, second = profiles["ops"], profiles["tenant"]
+        seen: list[str | None] = []
+
+        async def fake_defend(*_a: Any, **_k: Any) -> Any:
+            bound = get_current_profile()
+            seen.append(bound.name if bound else None)
+            return MagicMock(flagged=False)
+
+        with (
+            patch.object(ing, "service_profile", side_effect=[first, second, second]),
+            patch.object(ing, "defend", fake_defend),
+            patch.object(ing, "build_warning", return_value=None),
+        ):
+            tools = [
+                {"name": "a", "description": "Lists things."},
+                {"name": "b", "description": "Counts things."},
+            ]
+            await ing.scan_tool_list(profiles["tenant"], "b", tools, tools)
+
+        assert seen == ["ops", "ops"]
+        # ...and the verdicts are filed under the same judge that reached them.
+        for tool in tools:
+            surface = ing._tool_surface_text(tool)
+            filed = ing._cache_key(profiles["tenant"], "tool:external", surface, judge_of(first))
+            assert filed in ing._verdicts
 
     def test_description_verdicts_are_keyed_by_the_operators_model(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
