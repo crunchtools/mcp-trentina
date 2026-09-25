@@ -200,6 +200,39 @@ def scrambled_with_company(line: str) -> bool:
     return scrambled and misspelled >= 2
 
 
+# The short words injection phrases put between keywords, for splitting a run
+# that was spaced a letter at a time and so kept no word breaks of its own.
+_FILLERS = frozenset(
+    {"a", "all", "any", "the", "my", "your", "our", "its", "me", "of", "and", "to", "now", "you"}
+)
+_SEGMENT_VOCAB = KEYWORDS | _FILLERS
+_MAX_SEGMENT_INPUT = 200
+
+
+def _segmented(joined: str) -> str:
+    """``joined`` split into keywords and fillers if it is made of nothing else.
+
+    ``i g n o r e a l l p r e v i o u s`` collapses to ``ignoreallprevious``,
+    which no pattern matches. Splitting it back needs a vocabulary, and the
+    only words worth recovering are the ones the patterns are built from.
+    Fewest pieces wins; text that is not entirely vocabulary is left as it is.
+    """
+    lowered = joined.lower()
+    if len(lowered) > _MAX_SEGMENT_INPUT:
+        return joined
+    longest = max(len(w) for w in _SEGMENT_VOCAB)
+    best: list[list[str] | None] = [[]] + [None] * len(lowered)
+    for end in range(1, len(lowered) + 1):
+        for start in range(max(0, end - longest), end):
+            prefix = best[start]
+            if prefix is not None and lowered[start:end] in _SEGMENT_VOCAB:
+                candidate = [*prefix, lowered[start:end]]
+                if best[end] is None or len(candidate) < len(best[end] or []):
+                    best[end] = candidate
+    words = best[-1]
+    return " ".join(words) if words else joined
+
+
 def collapsed_spacing(line: str) -> str | None:
     """``line`` with character-spaced runs and long character repeats collapsed.
 
@@ -211,6 +244,6 @@ def collapsed_spacing(line: str) -> str | None:
     repeated = _REPEATED_CHAR_RE.search(line) is not None
     if not (spaced or repeated):
         return None
-    collapsed = _SPACED_RUN_RE.sub(lambda m: m.group(0).replace(" ", ""), line)
+    collapsed = _SPACED_RUN_RE.sub(lambda m: _segmented(m.group(0).replace(" ", "")), line)
     collapsed = _REPEATED_CHAR_RE.sub(r"\1", collapsed)
     return re.sub(r"\s{2,}", " ", collapsed)

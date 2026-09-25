@@ -42,8 +42,10 @@ The modes take OpenRouter's names: Flag, Redact, Block (#200).
   Markdown, and KaTeX `\color{white}` text counts as hidden.
 - **Evasions are undone before the patterns run again** (`l1/evasion.py`):
   scrambled middles, one-edit typos, character spacing and long character
-  repeats. A typo alone is never a detection, only a typo that completes an
-  exact pattern. These lines count as `directives_evasions_detected`.
+  repeats. A line counts when the rewrite completes an exact pattern, or
+  when it carries two misspelled keywords with at least one scrambled; a
+  single typo never counts. These lines count as
+  `directives_evasions_detected`.
 - Every pattern has an attack and a benign near-miss in
   `tests/adversarial_corpus.py`, and OWASP's test list is taken wholesale.
   All of it is detected.
