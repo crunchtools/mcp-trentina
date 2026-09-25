@@ -241,7 +241,7 @@ class TestProtocolVersionNegotiation:
         "requested",
         [
             "2026-07-28",  # the modern per-request-envelope era: real, not a
-                           # handshake revision, so not reachable this way
+            # handshake revision, so not reachable this way
             "1999-01-01",
             "",
             None,
@@ -270,9 +270,7 @@ class TestProtocolVersionNegotiation:
         registry or the gateway becomes undialable.
         """
         for requested in (*HANDSHAKE_PROTOCOL_VERSIONS, "2026-07-28", "nonsense"):
-            assert (
-                _negotiate_protocol_version(requested) in HANDSHAKE_PROTOCOL_VERSIONS
-            )
+            assert _negotiate_protocol_version(requested) in HANDSHAKE_PROTOCOL_VERSIONS
 
 
 class TestStreamableHTTPDelete:
@@ -558,11 +556,13 @@ class TestBackwardsCompatibility:
         assert resp.status_code == 400
 
     def test_tools_call_dispatch(self) -> None:
-        mock_route = AsyncMock(return_value={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {"content": [{"type": "text", "text": "ok"}], "isError": False},
-        })
+        mock_route = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {"content": [{"type": "text", "text": "ok"}], "isError": False},
+            }
+        )
         with patch(
             "mcp_trentina_crunchtools.gateway.app.route_jsonrpc",
             mock_route,
@@ -582,3 +582,26 @@ class TestBackwardsCompatibility:
                 headers=AUTH,
             )
             assert resp.status_code == 200
+
+
+class TestCircuitInvalidatesOnlyHolders:
+    """A backend's flap rebuilds the profiles that hold it, not everyone (#137)."""
+
+    @pytest.mark.asyncio
+    async def test_unaffected_profiles_aggregate_survives(self) -> None:
+        from mcp_trentina_crunchtools.gateway import router
+
+        holder = _make_profile()  # backend http://mcp-slack:8000/mcp
+        bystander = holder.model_copy(update={"name": "bob", "backends": {}})
+        profiles = {"alice": holder, "bob": bystander}
+        sessions = SessionRegistry(session_ttl=300.0, max_sessions_per_profile=10)
+        cb = CircuitBreaker(failure_threshold=2, cooldown_seconds=0.01)
+        _wire_circuit_notifications(cb, sessions, profiles)
+        router._profile_tools_cache["alice"] = []
+        router._profile_tools_cache["bob"] = []
+
+        cb.record_failure("http://mcp-slack:8000/mcp")
+        cb.record_failure("http://mcp-slack:8000/mcp")
+
+        assert "alice" not in router._profile_tools_cache
+        assert "bob" in router._profile_tools_cache

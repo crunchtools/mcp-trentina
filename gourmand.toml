@@ -10,10 +10,6 @@ excluded_paths = [
     "dist/**",
     "build/**",
     "uv.lock",
-    # Deliberately adversarial: a working attack simulation and its fixtures
-    # (#81). Grading it as product code is noise, and a finding that describes
-    # its patterns works against what it exists to demonstrate.
-    "demo/**",
 ]
 
 [output]
