@@ -176,27 +176,33 @@ class AdaptiveLimiter:
 
     def _throttle(self, epoch: int, retry_after: float | None) -> None:
         self.throttles += 1
+        paused_until = self._pause_until
         now = asyncio.get_running_loop().time()
         if retry_after is not None:
             self._pause_until = max(self._pause_until, now + max(_MIN_PAUSE, retry_after))
-        if epoch != self.epoch:
-            # Started before the last decrease: already accounted for.
-            return
-        self.epoch += 1
-        self.slow_start = False
-        self._window = 0
-        self.limit = max(1.0, self.limit / 2)
-        if retry_after is None:
-            self._backoff = min(_MAX_PAUSE, max(_DEFAULT_PAUSE, self._backoff * 2))
-            pause = self._backoff * _JITTER.uniform(1.0, 1.25)
-            self._pause_until = max(self._pause_until, now + pause)
-        logger.warning(
-            "l3 limiter: %s throttled — limit now %d, pausing %.1fs",
-            self.name,
-            self._cap(),
-            self.resume_in(),
-        )
-        self._refuse_waiters_past_budget()
+        # Only a result from the current epoch is a new congestion signal;
+        # one that started before the last decrease is already accounted for,
+        # though its Retry-After still counts.
+        if epoch == self.epoch:
+            self.epoch += 1
+            self.slow_start = False
+            self._window = 0
+            self.limit = max(1.0, self.limit / 2)
+            if retry_after is None:
+                self._backoff = min(_MAX_PAUSE, max(_DEFAULT_PAUSE, self._backoff * 2))
+                pause = self._backoff * _JITTER.uniform(1.0, 1.25)
+                self._pause_until = max(self._pause_until, now + pause)
+            logger.warning(
+                "l3 limiter: %s throttled — limit now %d, pausing %.1fs",
+                self.name,
+                self._cap(),
+                self.resume_in(),
+            )
+        # Queued callers are re-checked only when the pause got longer: that
+        # is the only change that can put one past its budget, and it keeps a
+        # burst of 429s from re-scanning the queue once per response.
+        if self._pause_until > paused_until:
+            self._refuse_waiters_past_budget()
 
     def _refuse_waiters_past_budget(self) -> None:
         """Fail queued callers whose budget the current pause outlasts."""

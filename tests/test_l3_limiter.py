@@ -392,3 +392,21 @@ class TestRefusedWaitersArePruned:
         lim.release(held, Outcome.THROTTLED, retry_after=60.0)
         await asyncio.gather(*waiters, return_exceptions=True)
         assert not any(lim._waiters[p] for p in Priority)
+
+
+class TestStaleThrottleExtendsPause:
+    async def test_a_stale_429_that_lengthens_the_pause_refuses_waiters(self) -> None:
+        lim = AdaptiveLimiter(JUDGE, start=2, ceiling=2)
+        first, second = await lim.acquire(), await lim.acquire()
+        token = l3_throttle_budget.set(5.0)
+        try:
+            waiter = asyncio.ensure_future(lim.acquire())
+            await _settle()
+        finally:
+            l3_throttle_budget.reset(token)
+        lim.release(first, Outcome.THROTTLED, retry_after=1.0)  # fits the budget
+        await _settle()
+        assert not waiter.done()
+        lim.release(second, Outcome.THROTTLED, retry_after=60.0)  # stale epoch, longer pause
+        with pytest.raises(QuarantineAgentError):
+            await waiter
