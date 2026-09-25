@@ -59,6 +59,13 @@ The modes take OpenRouter's names: Flag, Redact, Block (#200).
   costs ~55 ms per 100k characters, up from ~20 ms.
 
 ### Fixed
+- **Four L1 regexes were quadratic on unclosed markup** (#210), a denial of
+  service on the always-on path: the `hidden`-attribute fingerprint (60k
+  characters of `<div ` took ~4 s, 125k of `<img ` ~20 s), Markdown images
+  (90k of `![x` ~7 s), and two added in this release, HTML images and
+  `dan_jailbreak`. Markdown and HTML images are now single-pass scanners,
+  the others are bounded; every stage stays under 0.2 s on 100k characters
+  of any repeated prefix, and a test pins each shape.
 - **L1 counts attacks, not characters** (#204). Coloured logs (an ESC per
   line), document exports (`\x0b` soft returns), newsletters padded with
   ZWNJs and emoji (a variation selector each) were rated `high` or

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import sqlite3
 from unittest.mock import patch
 
@@ -156,3 +157,9 @@ class TestEveryLayersVerdict:
         database._migrate(conn)
         columns = {r["name"] for r in conn.execute("PRAGMA table_info(detections)")}
         assert {"flagged_by", "l2_label", "l2_score", "l3_verdict", "l3_risk"} <= columns
+
+    def test_the_insert_names_the_verdict_columns_in_tuple_order(self) -> None:
+        """Values are bound positionally from _VERDICT_COLUMNS; the INSERT must agree."""
+        source = inspect.getsource(database.record_detection)
+        names = ", ".join(column for column, _ in database._VERDICT_COLUMNS)
+        assert f"{names})" in source

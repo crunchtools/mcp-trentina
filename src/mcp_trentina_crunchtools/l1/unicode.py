@@ -55,12 +55,13 @@ _UNICODE_TAGS = re.compile("[\U000e0001-\U000e007f]")
 # silently: nothing raises, the text just comes out wrong.
 _CONTROL_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
-# A zero-width run with an ASCII letter on each side. ASCII, because the
-# scripts where ZWJ and ZWNJ are orthography are not ASCII, and an injection
-# aimed at an English-reading model splits English words. The soft hyphen is
-# excluded: inside a word is exactly where hyphenation puts it.
-_IN_WORD_ZERO_WIDTH = re.compile(
-    "(?<=[A-Za-z])[\u200b\u200c\u200d\u200e\u200f\u2060\u2063\ufeff]+(?=[A-Za-z])"
+# A run of invisible characters with an ASCII letter on each side. ASCII,
+# because the scripts where ZWJ and ZWNJ are orthography are not ASCII, and an
+# injection aimed at an English-reading model splits English words. The soft
+# hyphen belongs to the run, so `ig\u200b\u00adnore` is still one split word,
+# but it is not counted: inside a word is exactly where hyphenation puts it.
+_IN_WORD_INVISIBLE = re.compile(
+    "(?<=[A-Za-z])[\u200b\u200c\u200d\u200e\u200f\u2060\u2063\ufeff\u00ad]+(?=[A-Za-z])"
 )
 # Counted as control characters: everything in _CONTROL_CHARS but the two
 # whitespace characters, \x0b (vertical tab) and \x0c (form feed).
@@ -101,7 +102,9 @@ def normalize_unicode(text: str) -> tuple[str, UnicodeStats]:
     """Strip invisible unicode characters and normalize with NFKC."""
     stats = UnicodeStats()
 
-    stats.zero_width_chars = sum(len(m.group(0)) for m in _IN_WORD_ZERO_WIDTH.finditer(text))
+    stats.zero_width_chars = sum(
+        len(m.group(0).replace("\u00ad", "")) for m in _IN_WORD_INVISIBLE.finditer(text)
+    )
     stats.bidi_overrides = len(_BIDI_CHARS.findall(text))
     stats.variation_selectors = sum(len(m.group(0)) - 1 for m in _SELECTOR_RUN.finditer(text))
     stats.unicode_tags = len(_UNICODE_TAGS.findall(text))

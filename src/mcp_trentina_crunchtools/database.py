@@ -187,6 +187,8 @@ def record_detection(
         "INSERT INTO detections (source_type, source, domain, detected_at, "
         "layer1_stats, qagent_assessment, risk_level, blocked, "
         "profile, backend, tool, direction, provenance, "
+        # The last five in _VERDICT_COLUMNS order, which the values below are
+        # read in; test_database pins the two orders together.
         "flagged_by, l2_label, l2_score, l3_verdict, l3_risk) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
