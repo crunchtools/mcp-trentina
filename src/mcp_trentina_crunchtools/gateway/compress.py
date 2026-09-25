@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from ..database import get_all_compressions, save_compression
 from ..errors import QuarantineAgentError
 from ..quarantine.agent import resolve_profile_llm
-from ..quarantine.limiter import limited_generate
+from ..quarantine.limiter import THROTTLE_STATUS, limited_generate
 from ..quarantine.providers import get_provider
 from .service import service_profile
 
@@ -320,7 +320,7 @@ async def _call_compress_model(
             if status in _RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES - 1:
                 # A 429's wait is the limiter's pause, which the next
                 # acquire already honours; only an outage needs our own.
-                delay = 0.0 if status == 429 else RETRY_BASE_DELAY * (2**attempt)
+                delay = 0.0 if status == THROTTLE_STATUS else RETRY_BASE_DELAY * (2**attempt)
                 logger.info(
                     "compress: provider error, retry %d/%d in %.0fs: %s",
                     attempt + 1,

@@ -332,3 +332,17 @@ class TestJudgeStamp:
         monkeypatch.delenv("QUARANTINE_MODEL", raising=False)
         get_config()
         assert get_provider(name, model=model).judge == expected
+
+
+class TestGrantedThenCancelled:
+    async def test_a_slot_granted_to_a_cancelled_caller_is_returned(self) -> None:
+        lim = AdaptiveLimiter(JUDGE, start=1, ceiling=1)
+        held = await lim.acquire()
+        waiter = asyncio.ensure_future(lim.acquire())
+        await _settle()
+        lim.release(held, Outcome.FAILED)  # grants the slot to the waiter...
+        waiter.cancel()  # ...which is cancelled before it resumes
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert lim.in_flight == 0
+        lim.release(await asyncio.wait_for(lim.acquire(), timeout=1), Outcome.OK)
