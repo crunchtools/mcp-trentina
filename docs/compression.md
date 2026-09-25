@@ -111,6 +111,29 @@ The `quarantine_stats` tool includes compression metrics:
 }
 ```
 
+## Schema compaction
+
+Descriptions are prose; inputSchemas are mostly pydantic boilerplate, and they
+are compacted deterministically with no model and no cache
+(`gateway/schema_compact.py`). Three rules:
+
+- `anyOf: [X, {type: null}]` with `default: null` on an optional property becomes X.
+- `default: null` on any other optional property is dropped.
+- `$schema` is dropped.
+
+Compaction only **tightens**: every argument set valid under the served schema
+is valid under the backend's. The agent loses the explicit `null`, and omitting
+the property is still valid. `additionalProperties: false` is kept, because
+dropping it would loosen the schema and invite arguments the backend refuses.
+
+It runs after the perimeter scan. Because it only deletes, every string the
+agent reads was already judged, so the verdict cache is untouched and enabling
+it re-judges nothing. It is on by default; `compact_schemas: false` on a
+backend turns it off.
+
+Measured on the lotor tool cache (800 tools, 26 backends): 519k → 461k schema
+characters, 11%, about 15k tokens.
+
 ## Related
 
 - [Tool Filtering](tool-filtering.md) — the first layer of context reduction (removing tools entirely)

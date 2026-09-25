@@ -48,6 +48,7 @@ from .modes_policy import (
     resolve_call,
     strip_params,
 )
+from .schema_compact import compact_tool
 from .transform import transform_response
 
 if TYPE_CHECKING:
@@ -329,6 +330,10 @@ async def _build_profile_tools(
         # ingress. Internal tools are included: their DESCRIPTIONS are still
         # a poisoning surface even though their responses defend themselves.
         filtered = await scan_tool_list(profile, backend_name, pre_compress, filtered)
+        # After the scan, not before: compaction only deletes, so what the
+        # agent reads is a subset of what was judged and no verdict changes.
+        if backend.compact_schemas:
+            filtered = [compact_tool(t) for t in filtered]
         namespaced: list[dict[str, Any]] = []
         for tool in filtered:
             namespaced_tool = (

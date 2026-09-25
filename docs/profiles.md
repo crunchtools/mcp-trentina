@@ -28,6 +28,7 @@ profiles:
         tools_allow: ["*"]
         tools_deny: ["delete*"]
         compress_descriptions: true
+        # compact_schemas: true   (default — see compression.md#schema-compaction)
     defense:
       enforcement: warn
       l2_threshold: 0.5
