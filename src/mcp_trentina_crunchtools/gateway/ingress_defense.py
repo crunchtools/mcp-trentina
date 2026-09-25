@@ -43,6 +43,8 @@ once, and not what a restart pays for.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -66,6 +68,8 @@ from ..warning import build_warning
 from .service import judge_of, service_context, service_profile
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+
     from .profile import Profile
 
 logger = logging.getLogger(__name__)
@@ -167,6 +171,7 @@ def reset_verdict_cache() -> None:
     """Clear the in-memory cache without touching the store (for testing)."""
     global _persist_broken
     _verdicts.clear()
+    _inflight.clear()
     _persist_broken = False
 
 
@@ -558,6 +563,95 @@ def _judged_before_briefing(warning: dict[str, Any] | None) -> bool:
     )
 
 
+# One judgement per key in flight (#120). Two clients listing tools at the
+# same moment used to miss the cache together and both run the whole pipeline
+# on the same description; a backend redeploy made every profile do it at once.
+_inflight: dict[str, asyncio.Task[dict[str, Any] | None]] = {}
+
+
+async def _single_flight(
+    key: str, work: Callable[[], Coroutine[Any, Any, dict[str, Any] | None]]
+) -> dict[str, Any] | None:
+    """Run ``work`` once per ``key``; every concurrent caller gets its result.
+
+    Anything that should happen once per judgement — the cache write, the
+    journal line — belongs inside ``work``, not in the callers: the caller
+    that started it may be long gone by the time it finishes.
+
+    The work is its own task and each caller awaits it through ``shield``: a
+    caller that disconnects or times out leaves the judgement running and its
+    verdict banked, rather than cancelling it for everyone and starting over on
+    the next reconnect. A failure reaches every waiter and caches nothing —
+    ``_cache_put`` already refuses degraded verdicts, and an exception never
+    reaches it.
+    """
+    task = _inflight.get(key)
+    if task is None:
+        task = asyncio.ensure_future(work())
+        _inflight[key] = task
+        task.add_done_callback(functools.partial(_settle, key))
+    return await asyncio.shield(task)
+
+
+def _settle(key: str, task: asyncio.Task[dict[str, Any] | None]) -> None:
+    """Free the key, and surface a failure no waiter stayed to see."""
+    if _inflight.get(key) is task:
+        del _inflight[key]
+    if not task.cancelled() and (exc := task.exception()) is not None:
+        logger.warning("perimeter: judgement failed for key=%s: %r", key[:12], exc)
+
+
+async def _judge_description(
+    key: str,
+    profile: Profile,
+    operator: Profile | None,
+    backend_name: str,
+    tool: dict[str, Any],
+    surface: str,
+    provenance: Provenance,
+) -> dict[str, Any] | None:
+    """Judge one tool definition, cache the verdict, and return its warning.
+
+    The detection row carries the profile that STARTED the judgement; a
+    profile that joined it shares the verdict and is not recorded twice.
+    """
+    # A shared description is the gateway's own work, judged as the service
+    # identity (#138); the thresholds stay the requester's.
+    with service_context(operator):
+        verdict = await defend(
+            surface,
+            source=f"{profile.name}:{backend_name}:{tool.get('name', '?')}",
+            source_type="tool_description",
+            defense=profile.defense,
+            provenance=provenance,
+            l3_context=TOOL_BRIEFING,
+            attribution={
+                "profile": profile.name,
+                "backend": backend_name,
+                "tool": str(tool.get("name", "?")),
+                "direction": "tool_list",
+                "blocked": effective_mode(profile) is Mode.BLOCK,
+            },
+        )
+    warning = build_warning(verdict)
+    if warning is not None and warning.get("flagged_by") == "L3":
+        warning["l3_briefing"] = TOOL_BRIEFING_VERSION
+    _cache_put(key, warning, persist=True)
+    if warning is not None:
+        # Here, once per judgement, and never on a cache hit: logging hits
+        # made the journal read as though nothing were cached at all, which
+        # is how an earlier "the gateway is rescanning everything" report
+        # started.
+        logger.warning(
+            "gateway: tool description flagged profile=%s backend=%s tool=%s risk=%s",
+            profile.name,
+            backend_name,
+            tool.get("name"),
+            warning.get("risk_level"),
+        )
+    return warning
+
+
 async def scan_tool_list(
     profile: Profile,
     backend_name: str,
@@ -594,42 +688,21 @@ async def scan_tool_list(
         if hit and _judged_before_briefing(warning):
             hit = False
         if not hit:
-            # A shared description is the gateway's own work, judged as the
-            # service identity (#138); the thresholds stay the requester's.
-            with service_context(operator):
-                verdict = await defend(
+            warning = await _single_flight(
+                key,
+                functools.partial(
+                    _judge_description,
+                    key,
+                    profile,
+                    operator,
+                    backend_name,
+                    tool,
                     surface,
-                    source=f"{profile.name}:{backend_name}:{tool.get('name', '?')}",
-                    source_type="tool_description",
-                    defense=profile.defense,
-                    provenance=provenance,
-                    l3_context=TOOL_BRIEFING,
-                    attribution={
-                        "profile": profile.name,
-                        "backend": backend_name,
-                        "tool": str(tool.get("name", "?")),
-                        "direction": "tool_list",
-                        "blocked": effective_mode(profile) is Mode.BLOCK,
-                    },
-                )
-            warning = build_warning(verdict)
-            if warning is not None and warning.get("flagged_by") == "L3":
-                warning["l3_briefing"] = TOOL_BRIEFING_VERSION
-            _cache_put(key, warning, persist=True)
+                    provenance,
+                ),
+            )
 
         if warning is not None:
-            if not hit:
-                # Only on a fresh judgement. Logging cache hits as well made
-                # the journal read as though nothing were cached at all,
-                # which is how an earlier "the gateway is rescanning
-                # everything" report started.
-                logger.warning(
-                    "gateway: tool description flagged profile=%s backend=%s tool=%s risk=%s",
-                    profile.name,
-                    backend_name,
-                    tool.get("name"),
-                    warning.get("risk_level"),
-                )
             # A poisoned description's whole attack is being READ during tool
             # selection, and a sibling warning key is exactly the part strict
             # MCP clients strip before the model sees the schema. So under
