@@ -262,6 +262,10 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
   - `drivers.py` — the ONE registry. A configured name becomes a driver, for
     either role, with one channel lock and one parity test. Two registries
     here is what left the pre-processor table with no channel lock at all.
+  - `schema_compact.py` — drops null branches, null defaults and `$schema`
+    from served inputSchemas, AFTER the perimeter scan. Tighten-only, and a
+    subset of the judged strings, so it changes no verdict. Per backend
+    `compact_schemas`, default on.
   - `transform.py` — the pre-processor call site on the tool path (was
     `reduce.py`; the contract is transformation, not reduction).
   - `selection.py` — the call site on the Matrix path. Runs the document

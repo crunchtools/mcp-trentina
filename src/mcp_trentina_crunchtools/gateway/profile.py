@@ -429,6 +429,14 @@ class Backend(BaseModel):
         default=False,
         description="Compress verbose tool descriptions via LLM at gateway startup",
     )
+    compact_schemas: bool = Field(
+        default=True,
+        description=(
+            "Strip null branches, null defaults and $schema from served "
+            "inputSchemas (see gateway/schema_compact.py). Only tightens what "
+            "the agent reads, so it is on by default; disable per backend."
+        ),
+    )
     modes: list[ModeName] | None = Field(
         default=None,
         description=(
