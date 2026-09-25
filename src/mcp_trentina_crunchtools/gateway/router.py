@@ -44,6 +44,7 @@ from .modes_policy import (
     MODE_PARAM,
     PROMPT_PARAM,
     insert_params,
+    mode_instructions,
     policy_for,
     resolve_call,
     strip_params,
@@ -216,6 +217,11 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
     params = request.get("params") or {}
 
     if method == "initialize":
+        # The mode explanation is said here once, not on every tool (#198).
+        instructions = (
+            f"trentina gateway, profile={profile.name}. Tool names are "
+            f"namespaced as <backend>{NAMESPACE_SEP}<tool>. {mode_instructions(profile)}"
+        ).rstrip()
         return _ok(
             req_id,
             {
@@ -225,10 +231,7 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
                     "name": f"mcp-trentina-gateway:{profile.name}",
                     "version": __version__,
                 },
-                "instructions": (
-                    f"trentina gateway, profile={profile.name}. Tool names are "
-                    f"namespaced as <backend>{NAMESPACE_SEP}<tool>."
-                ),
+                "instructions": instructions,
             },
         )
 

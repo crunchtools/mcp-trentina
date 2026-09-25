@@ -10,6 +10,29 @@ under that name.
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-09-24
+
+### Changed (schema contract)
+- **The mode explanation is said once, in `initialize` instructions** (#198).
+  Every tool whose policy offers more than one mode repeated ~380 characters
+  describing block, warn and clean — 141k chars (~35k tokens) per session on
+  josui's 372 tools. The inserted properties are now the enum alone
+  (`{"type": "string", "enum": [...]}`, plus `trentina_prompt: {"type":
+  "string"}` when clean is allowed), about 100 chars. The per-property
+  `default` annotation is gone too, which is why this is a minor rather than a
+  patch: a client that read the default from the schema must now read it from
+  the instructions. Resolution is unchanged — an omitted mode still resolves
+  server-side to `enforcement` — and a tool whose policy excludes the default
+  still marks `trentina_mode` required.
+
+## [0.33.0] - 2026-09-24
+
+### Added
+- **Served inputSchemas are compacted, tighten-only** (#199): the pydantic
+  null branch, stray null defaults and `$schema` are dropped after the
+  perimeter scan, so no verdict changes. About 15k tokens across 800 tools on
+  lotor. `compact_schemas: false` opts a backend out.
+
 ## [0.32.1] - 2026-09-24
 
 ### Fixed
