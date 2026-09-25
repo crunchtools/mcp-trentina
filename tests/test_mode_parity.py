@@ -2,7 +2,7 @@
 
 The drift this guards against was real and silent. Until 0.31.0, clean_*
 spent L3 on extraction and got no detection verdict, and block_search and
-warn_search never called L3 at all — three of six delivery paths without a
+flag_search never called L3 at all — three of six delivery paths without a
 semantic judge, each one a copy that had wandered from the others. Nothing
 failed: every path returned something plausible. So this test does not ask
 whether a response looks right. It counts which layers ran and which L3
@@ -10,11 +10,11 @@ turns fired, for every (family, mode) cell, against the real pipeline.
 
 The mode decides delivery, never detection:
 
-| mode  | L1 | L2 | L3 detect | L3 extract | L3 verify | delivers            |
-|-------|----|----|-----------|------------|-----------|---------------------|
-| block | 1  | 1  | 1         | —          | —         | the original        |
-| warn  | 1  | 1  | 1         | —          | —         | the original        |
-| clean | 1  | 1  | 1         | 1          | 1         | a verified extract  |
+| mode   | L1 | L2 | L3 detect | L3 extract | L3 verify | delivers            |
+|--------|----|----|-----------|------------|-----------|---------------------|
+| block  | 1  | 1  | 1         | —          | —         | the original        |
+| flag   | 1  | 1  | 1         | —          | —         | the original        |
+| redact | 1  | 1  | 1         | 1          | 1         | a verified extract  |
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ async def test_every_cell_runs_every_layer(env: Path, family: str, mode: Mode) -
     assert fakes.classify.await_count == 1, f"{family}/{mode.value}: L2"
     assert fakes.detect.await_count == 1, f"{family}/{mode.value}: L3 detect"
 
-    cleans = mode is Mode.CLEAN
+    cleans = mode is Mode.REDACT
     assert fakes.extract.await_count == int(cleans), f"{family}/{mode.value}: t2"
     assert fakes.verify.await_count == int(cleans), f"{family}/{mode.value}: t3"
 
@@ -63,10 +63,10 @@ async def test_every_cell_runs_every_layer(env: Path, family: str, mode: Mode) -
 
 
 @pytest.mark.parametrize("family", FAMILIES)
-async def test_block_and_warn_deliver_the_same_bytes(env: Path, family: str) -> None:
+async def test_block_and_flag_deliver_the_same_bytes(env: Path, family: str) -> None:
     with layers(env) as fakes:
         blocked = await call(family, Mode.BLOCK, fakes)
-        warned = await call(family, Mode.WARN, fakes)
+        warned = await call(family, Mode.FLAG, fakes)
     assert blocked["content"] == warned["content"]
 
 
@@ -76,7 +76,7 @@ async def test_l3_detect_is_briefed_with_l1_and_l2(env: Path, family: str) -> No
     from mcp_trentina_crunchtools.quarantine.prompts import L2_BLINDSPOT_CAVEAT
 
     with layers(env) as fakes:
-        await call(family, Mode.WARN, fakes)
+        await call(family, Mode.FLAG, fakes)
     briefing = fakes.detect.call_args.kwargs["layer1_context"]
     assert "Layer 1" in briefing
     assert "Layer 2 labelled it BENIGN" in briefing
@@ -86,7 +86,7 @@ async def test_l3_detect_is_briefed_with_l1_and_l2(env: Path, family: str) -> No
 async def test_search_judges_titles_and_uris_too(env: Path) -> None:
     """They used to reach L1 only. Now they are part of the judged document."""
     with layers(env) as fakes:
-        await call("search", Mode.WARN, fakes)
+        await call("search", Mode.FLAG, fakes)
     judged = fakes.detect.call_args.args[0]
     assert "https://example.com/a" in judged
     assert "[A]" in judged

@@ -14,7 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from mcp_trentina_crunchtools.errors import BlockedSourceError, ContentSizeError
-from mcp_trentina_crunchtools.tools.content import block_content, clean_content, warn_content
+from mcp_trentina_crunchtools.tools.content import block_content, flag_content, redact_content
 
 from .mode_harness import layers
 
@@ -54,14 +54,14 @@ async def test_content_type_selects_nothing(env: Path, content_type: str) -> Non
     """L1 is format-agnostic (#172); the parameter survives as tool surface."""
     html = "<!DOCTYPE html><p>Hello</p>"
     with layers(env) as fakes:
-        result = await warn_content(html, content_type)
+        result = await flag_content(html, content_type)
     assert result["content"] == html
     assert fakes.classify.call_args_list[0].args[0] == html
 
 
 async def test_the_origin_is_the_hash_and_never_allowlisted(env: Path) -> None:
     with layers(env):
-        result = await clean_content("hello", "Extract.")
+        result = await redact_content("hello", "Extract.")
     assert result["scan"]["origin"] == {
         "kind": "content",
         "ref": _hash("hello"),

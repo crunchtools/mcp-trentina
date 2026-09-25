@@ -1,4 +1,4 @@
-"""Read tools — block_read, warn_read and clean_read."""
+"""Read tools — block_read, flag_read and redact_read."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ async def read_file(path: str, mode: Mode, prompt: str | None = None) -> dict[st
     resolved = _validate_file(path)
 
     blocked = is_blocked(resolved)
-    if blocked and mode is not Mode.CLEAN:
+    if blocked and mode is not Mode.REDACT:
         raise blocklisted(resolved, mode, blocked["detected_at"])
 
     with open(resolved, encoding="utf-8", errors="replace") as fh:
@@ -88,11 +88,11 @@ async def block_read(path: str) -> dict[str, Any]:
     return await read_file(path, Mode.BLOCK)
 
 
-async def warn_read(path: str) -> dict[str, Any]:
+async def flag_read(path: str) -> dict[str, Any]:
     """The bytes on disk, with the verdict attached when there is one."""
-    return await read_file(path, Mode.WARN)
+    return await read_file(path, Mode.FLAG)
 
 
-async def clean_read(path: str, prompt: str) -> dict[str, Any]:
+async def redact_read(path: str, prompt: str) -> dict[str, Any]:
     """A verified L3 extraction instead of the file."""
-    return await read_file(path, Mode.CLEAN, prompt)
+    return await read_file(path, Mode.REDACT, prompt)

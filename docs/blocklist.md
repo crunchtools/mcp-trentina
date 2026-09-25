@@ -30,11 +30,11 @@ A source enters the blocklist when `block` **refuses** it: any layer flagged it 
 - **Files and directories**: the resolved path
 - **Inline content**: the SHA-256 of the content
 
-`warn` and `clean` record their detections too, but as observations (`blocked = 0`), so they never feed the blocklist. Until 0.31.0 every row was written blocked, which meant a warn fetch of a flagged page blocklisted it and the next warn fetch of the same page was refused.
+`flag` and `redact` record their detections too, but as observations (`blocked = 0`), so they never feed the blocklist. Until 0.31.0 every row was written blocked, which meant a flag fetch of a flagged page blocklisted it and the next flag fetch of the same page was refused.
 
 ### Blocklist → Refusal
 
-The blocklist is checked before any bytes are fetched. `block` and `warn` refuse a blocklisted source outright, and the refusal offers `clean` when the caller's policy allows it. `clean` proceeds — it delivers only a verified extraction — and sets `blocklisted: true` in `_trentina_warning`.
+The blocklist is checked before any bytes are fetched. `block` and `flag` refuse a blocklisted source outright, and the refusal offers `redact` when the caller's policy allows it. `redact` proceeds — it delivers only a verified extraction — and sets `blocklisted: true` in `_trentina_warning`.
 
 ### Viewing the Blocklist
 

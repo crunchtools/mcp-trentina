@@ -51,11 +51,7 @@ def get_provider(
         case "gemini":
             from .gemini import GeminiProvider
 
-            key_value = (
-                api_key.get_secret_value()
-                if api_key
-                else config.api_key.get_secret_value()
-            )
+            key_value = api_key.get_secret_value() if api_key else config.api_key.get_secret_value()
             if not key_value:
                 raise QuarantineAgentError("GEMINI_API_KEY not configured")
             provider: Provider = GeminiProvider(
@@ -66,24 +62,18 @@ def get_provider(
         case "openai":
             from .openai import OpenAIProvider
 
-            key_value = (
-                api_key.get_secret_value() if api_key else config.openai_api_key
-            )
+            key_value = api_key.get_secret_value() if api_key else config.openai_api_key
             if not key_value:
                 raise QuarantineAgentError("OPENAI_API_KEY not configured")
             default_model = (
-                resolved_model
-                if resolved_model != _DEFAULT_GEMINI_MODEL
-                else "gpt-4o-mini"
+                resolved_model if resolved_model != _DEFAULT_GEMINI_MODEL else "gpt-4o-mini"
             )
             provider = OpenAIProvider(api_key=key_value, model=default_model)
 
         case "anthropic":
             from .anthropic import AnthropicProvider
 
-            key_value = (
-                api_key.get_secret_value() if api_key else config.anthropic_api_key
-            )
+            key_value = api_key.get_secret_value() if api_key else config.anthropic_api_key
             if not key_value:
                 raise QuarantineAgentError("ANTHROPIC_API_KEY not configured")
             default_model = (
@@ -97,9 +87,7 @@ def get_provider(
             from .ollama import OllamaProvider
 
             default_model = (
-                resolved_model
-                if resolved_model != _DEFAULT_GEMINI_MODEL
-                else config.ollama_model
+                resolved_model if resolved_model != _DEFAULT_GEMINI_MODEL else config.ollama_model
             )
             provider = OllamaProvider(
                 model=default_model,

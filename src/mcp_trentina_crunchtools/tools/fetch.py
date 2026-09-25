@@ -1,4 +1,4 @@
-"""Fetch tools — block_fetch, warn_fetch and clean_fetch."""
+"""Fetch tools — block_fetch, flag_fetch and redact_fetch."""
 
 from __future__ import annotations
 
@@ -175,12 +175,12 @@ def _handle_content_type_error(url: str, exc: UnsupportedContentTypeError) -> di
 async def fetch_page(url: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
     """Fetch, then hand the page to the one judging path.
 
-    The blocklist refuses block and warn before any bytes are fetched; clean
-    proceeds, because clean delivers only a verified extraction, and says so
+    The blocklist refuses block and flag before any bytes are fetched; redact
+    proceeds, because redact delivers only a verified extraction, and says so
     in the warning.
     """
     blocked = is_blocked(url)
-    if blocked and mode is not Mode.CLEAN:
+    if blocked and mode is not Mode.REDACT:
         raise blocklisted(url, mode, blocked["detected_at"])
 
     try:
@@ -215,11 +215,11 @@ async def block_fetch(url: str) -> dict[str, Any]:
     return await fetch_page(url, Mode.BLOCK)
 
 
-async def warn_fetch(url: str) -> dict[str, Any]:
+async def flag_fetch(url: str) -> dict[str, Any]:
     """The exact bytes, with the verdict attached when there is one."""
-    return await fetch_page(url, Mode.WARN)
+    return await fetch_page(url, Mode.FLAG)
 
 
-async def clean_fetch(url: str, prompt: str) -> dict[str, Any]:
+async def redact_fetch(url: str, prompt: str) -> dict[str, Any]:
     """A verified L3 extraction instead of the page."""
-    return await fetch_page(url, Mode.CLEAN, prompt)
+    return await fetch_page(url, Mode.REDACT, prompt)

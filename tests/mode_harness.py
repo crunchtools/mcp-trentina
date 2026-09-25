@@ -25,16 +25,16 @@ from mcp_trentina_crunchtools.tools import (
     block_fetch,
     block_read,
     block_search,
-    clean_content,
-    clean_dir,
-    clean_fetch,
-    clean_read,
-    clean_search,
-    warn_content,
-    warn_dir,
-    warn_fetch,
-    warn_read,
-    warn_search,
+    flag_content,
+    flag_dir,
+    flag_fetch,
+    flag_read,
+    flag_search,
+    redact_content,
+    redact_dir,
+    redact_fetch,
+    redact_read,
+    redact_search,
 )
 
 if TYPE_CHECKING:
@@ -59,24 +59,24 @@ EXTRACTION: dict[str, Any] = {
 }
 
 FAMILIES = ("fetch", "read", "dir", "content", "search")
-MODES = (Mode.BLOCK, Mode.WARN, Mode.CLEAN)
+MODES = (Mode.BLOCK, Mode.FLAG, Mode.REDACT)
 
 _TOOLS = {
     ("fetch", Mode.BLOCK): block_fetch,
-    ("fetch", Mode.WARN): warn_fetch,
-    ("fetch", Mode.CLEAN): clean_fetch,
+    ("fetch", Mode.FLAG): flag_fetch,
+    ("fetch", Mode.REDACT): redact_fetch,
     ("read", Mode.BLOCK): block_read,
-    ("read", Mode.WARN): warn_read,
-    ("read", Mode.CLEAN): clean_read,
+    ("read", Mode.FLAG): flag_read,
+    ("read", Mode.REDACT): redact_read,
     ("dir", Mode.BLOCK): block_dir,
-    ("dir", Mode.WARN): warn_dir,
-    ("dir", Mode.CLEAN): clean_dir,
+    ("dir", Mode.FLAG): flag_dir,
+    ("dir", Mode.REDACT): redact_dir,
     ("content", Mode.BLOCK): block_content,
-    ("content", Mode.WARN): warn_content,
-    ("content", Mode.CLEAN): clean_content,
+    ("content", Mode.FLAG): flag_content,
+    ("content", Mode.REDACT): redact_content,
     ("search", Mode.BLOCK): block_search,
-    ("search", Mode.WARN): warn_search,
-    ("search", Mode.CLEAN): clean_search,
+    ("search", Mode.FLAG): flag_search,
+    ("search", Mode.REDACT): redact_search,
 }
 
 
@@ -195,6 +195,6 @@ async def call(family: str, mode: Mode, fakes: Layers) -> dict[str, Any]:
         "content": fakes.payload,
         "search": "maintenance window",
     }[family]
-    if mode is Mode.CLEAN:
+    if mode is Mode.REDACT:
         return await tool(arg, "Extract the facts.")
     return await tool(arg)

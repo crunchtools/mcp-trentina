@@ -42,11 +42,11 @@ Everything entering through the gateway is judged at its ingress — the firewal
 - **LLM completions** through the proxy, judged post-stream (`llm_completion`).
 - **Alert webhooks** (`alert`), and the standalone web tools (`safe_*`, `quarantine_*`).
 
-**The mode is per call, the policy per profile.** `defense.modes` lists what the agent may choose through `trentina_mode`, which the gateway inserts into every tool; `defense.enforcement` is the default an omitted mode resolves to — `warn` (content delivered intact with a `_trentina_warning`) or `block` (flagged responses refused). See [Profiles](profiles.md#content-modes). `TRENTINA_ENFORCEMENT_OVERRIDE=warn` is the kill switch, and beats the call's own choice.
+**The mode is per call, the policy per profile.** `defense.modes` lists what the agent may choose through `trentina_mode`, which the gateway inserts into every tool; `defense.enforcement` is the default an omitted mode resolves to — `flag` (content delivered intact with a `_trentina_warning`) or `block` (flagged responses refused). See [Profiles](profiles.md#content-modes). `TRENTINA_ENFORCEMENT_OVERRIDE=flag` is the kill switch, and beats the call's own choice.
 
-`clean` cannot be the enforcement mode, because `enforcement` is the default an omitted `trentina_mode` resolves to, and a call that omits the mode carries no extraction prompt. It is available per call through `defense.modes` since 0.32.0: the call supplies `trentina_prompt`, which is what a proxied response lacked. `extract`, its pre-0.25.0 spelling, loads as `block`.
+`redact` cannot be the enforcement mode, because `enforcement` is the default an omitted `trentina_mode` resolves to, and a call that omits the mode carries no extraction prompt. It is available per call through `defense.modes` since 0.32.0: the call supplies `trentina_prompt`, which is what a proxied response lacked. `extract`, its pre-0.25.0 spelling, loads as `block`.
 
-The PUSH paths set it themselves, because no agent is waiting to be asked: `alert_ingress.enforcement` defaults to `warn`, so a Nagios page forwards with the caution attached. The Matrix path has no setting on purpose — refusing a streamed `/sync` response breaks the client's sync loop rather than dropping a message.
+The PUSH paths set it themselves, because no agent is waiting to be asked: `alert_ingress.enforcement` defaults to `flag`, so a Nagios page forwards with the caution attached. The Matrix path has no setting on purpose — refusing a streamed `/sync` response breaks the client's sync loop rather than dropping a message.
 
 **Content is never silently modified.** L1 detects; it does not censor. What the agent receives is byte-identical to what entered the perimeter, or (under `block`) nothing plus the warning. Transformation belongs to the pre-processors, which run OUTSIDE the perimeter and whose output crosses the pipeline like anything else — HTML→Markdown conversion is one of them, and it is the fetch tools' product rather than a security edit.
 
@@ -63,7 +63,7 @@ The defense-in-depth approach means an attack has to evade three fundamentally d
 L1 counts, and never modifies what the agent receives:
 
 - **What the agent receives** (`content`) — the caller's text, untouched. A CVE ticket, a Nagios alert, or a security mail *discusses* attacks in the words attacks use; amputating those lines destroyed exactly the content an ops agent exists to read, and destroyed the evidence before the smarter layers could judge it.
-- **A normalized copy** (`l2_input`) — the same text with obfuscation undone: zero-width characters removed, encoded blobs decoded, fake `<|im_start|>`/`[INST]` delimiters dropped, exfiltration image URLs defanged. L2 reads it *in addition to* the original whenever L1's normalizing stages fired (three zero-width characters can split Prompt Guard's tokens while L1 rates them only medium), and clean mode's extraction turn reads it.
+- **A normalized copy** (`l2_input`) — the same text with obfuscation undone: zero-width characters removed, encoded blobs decoded, fake `<|im_start|>`/`[INST]` delimiters dropped, exfiltration image URLs defanged. L2 reads it *in addition to* the original whenever L1's normalizing stages fired (three zero-width characters can split Prompt Guard's tokens while L1 rates them only medium), and redact mode's extraction turn reads it.
 
 Detections (hidden markup, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions", and — for a directory — Python files that shadow the standard library) feed the risk score, the warning, and L3's briefing.
 
@@ -97,7 +97,7 @@ A hardened Gemini Flash Lite instance that receives the **original, unmodified c
 
 **What it misses:** with the default `QUARANTINE_MODEL` (`gemini-2.5-flash-lite`), the Q-Agent's aggregate catch rate on attacks written to evade both L1 and L2 is 86% (see `benchmarks/results/`), not near-100% — and it drops to 33% on the `detector_meta` category (attacks targeting the detector itself). A stronger `QUARANTINE_MODEL` closes most of that gap; see `docs/benchmark.md` for per-model numbers before treating L3 as a reliable backstop.
 
-**Latency:** 1-2s per turn (Gemini round-trip). **Cost:** Gemini API tokens — one call per payload, three in clean mode. **Always runs;** its absence is a gap, never a skip.
+**Latency:** 1-2s per turn (Gemini round-trip). **Cost:** Gemini API tokens — one call per payload, three in redact mode. **Always runs;** its absence is a gap, never a skip.
 
 ## Coverage Matrix
 
@@ -128,7 +128,7 @@ profiles:
     auth:
       bearer_token_env: TRENTINA_PROFILE_MYAGENT_TOKEN
     defense:
-      enforcement: warn        # what a flag COSTS — warn | block
+      enforcement: flag        # what a flag COSTS — flag | block
       l2_threshold: 0.5        # how suspicious L2 must be before it flags
 ```
 
@@ -143,9 +143,9 @@ What a profile controls is a threshold and a consequence:
 
 - **`l2_threshold`** — how suspicious L2 must be before it FLAGS. A flag is a consequence, not
   an execution: L2 runs either way.
-- **`enforcement`** — what a flag costs. `warn` delivers the content with a
+- **`enforcement`** — what a flag costs. `flag` delivers the content with a
   `_trentina_warning` (the calibration mode) and `block` refuses it outright.
-  `TRENTINA_ENFORCEMENT_OVERRIDE=warn` is the kill switch.
+  `TRENTINA_ENFORCEMENT_OVERRIDE=flag` is the kill switch.
 
 A layer that is unavailable at runtime (no ONNX model, provider down) is a degraded state that
 `/health` reports and `block` refuses on. `TRENTINA_REQUIRE_L2=false` / `TRENTINA_REQUIRE_L3=false`
@@ -160,13 +160,13 @@ Stage 2  L3 detect          waits for both; briefed with both
 Stage 3  the mode decides delivery
 ```
 
-The mode decides what is delivered, never which layers run (`modes.py`):
+The mode decides what is delivered, never which layers run (`modes.py`). The names are OpenRouter's guardrail actions, but `redact` rewrites through L3 rather than substituting spans — see [Content Tools](quarantine-tools.md#the-names-are-openrouters).
 
-| mode  | L1 | L2 | L3 detect | L3 extract | L3 verify | delivers |
-|-------|----|----|-----------|------------|-----------|----------|
+| mode | L1 | L2 | L3 detect | L3 extract | L3 verify | delivers |
+|------|----|----|-----------|------------|-----------|----------|
 | block | ✓ | ✓ | ✓ | — | — | nothing if any layer flagged; else the original |
-| warn  | ✓ | ✓ | ✓ | — | — | the original, plus the verdict |
-| clean | ✓ | ✓ | ✓ | from L1's normalized copy | the extraction | a verified extraction; nothing if verify objects |
+| flag | ✓ | ✓ | ✓ | — | — | the original, plus the verdict |
+| redact | ✓ | ✓ | ✓ | from L1's normalized copy | the extraction | a verified extraction; nothing if verify objects |
 
 Ten rules hold on every path (#187):
 
@@ -175,13 +175,13 @@ Ten rules hold on every path (#187):
 3. L3 waits for both and sees both findings.
 4. The mode decides delivery, never detection.
 5. Every finding reaches the agent as structure — booleans, scores, closed-enum finding types — never as text L3 wrote. A page can steer the judge into quoting it.
-6. `warn` is a security-researcher grant, almost never right for an assistant, coding agent or swarm.
-7. `clean` runs L3 three times: detect, extract, verify. Verify objecting refuses; there is no fourth turn.
+6. `flag` is a security-researcher grant, almost never right for an assistant, coding agent or swarm.
+7. `redact` runs L3 three times: detect, extract, verify. Verify objecting refuses; there is no fourth turn.
 8. Search is not special: L0's answer, titles and URLs are one document through the same path.
-9. `block` and `clean` require a verdict from every layer; `warn` delivers regardless, loudly. An absent layer can be excused per layer; a partial read cannot.
-10. The allowlist never skips a layer or hides a flag. It turns a block into a clean — and a clean that fails still refuses.
+9. `block` and `redact` require a verdict from every layer; `flag` delivers regardless, loudly. An absent layer can be excused per layer; a partial read cannot.
+10. The allowlist never skips a layer or hides a flag. It turns a block into a redact — and a redact that fails still refuses.
 
-The gateway applies the same rule to proxied responses and tool descriptions under `defense.enforcement` (`warn` or `block`).
+The gateway applies the same rule to proxied responses and tool descriptions under `defense.enforcement` (`flag` or `block`).
 
 ## Related
 

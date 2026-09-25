@@ -1,4 +1,4 @@
-"""Content tools — block_content, warn_content and clean_content."""
+"""Content tools — block_content, flag_content and redact_content."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ async def judge_content(content: str, mode: Mode, prompt: str | None = None) -> 
 
     chash = _content_hash(content)
     blocked = is_blocked(chash)
-    if blocked and mode is not Mode.CLEAN:
+    if blocked and mode is not Mode.REDACT:
         raise blocklisted(chash, mode, blocked["detected_at"])
 
     return await judge_and_deliver(
@@ -56,17 +56,17 @@ async def block_content(content: str, content_type: str = "text/plain") -> dict[
     return await judge_content(content, Mode.BLOCK)
 
 
-async def warn_content(content: str, content_type: str = "text/plain") -> dict[str, Any]:
+async def flag_content(content: str, content_type: str = "text/plain") -> dict[str, Any]:
     """The content as given, with the verdict attached when there is one."""
     del content_type
-    return await judge_content(content, Mode.WARN)
+    return await judge_content(content, Mode.FLAG)
 
 
-async def clean_content(
+async def redact_content(
     content: str,
     prompt: str = "Extract the main content.",
     content_type: str = "text/plain",
 ) -> dict[str, Any]:
     """A verified L3 extraction of the content."""
     del content_type
-    return await judge_content(content, Mode.CLEAN, prompt)
+    return await judge_content(content, Mode.REDACT, prompt)

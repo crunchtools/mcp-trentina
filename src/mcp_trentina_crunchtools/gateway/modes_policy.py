@@ -1,6 +1,6 @@
 """The per-call mode, inserted into every tool the gateway serves (#193).
 
-A profile's `defense.modes` is the policy: which of block, warn and clean its
+A profile's `defense.modes` is the policy: which of block, flag and redact its
 agent may choose, on every tool of every backend. The gateway puts that choice
 where the agent can make it, and nowhere else:
 
@@ -38,8 +38,8 @@ INSERTED_PARAMS = (MODE_PARAM, PROMPT_PARAM)
 
 _MODE_TEXT = {
     Mode.BLOCK: "block refuses flagged or incompletely judged content",
-    Mode.CLEAN: f"clean returns a verified extraction, guided by {PROMPT_PARAM}",
-    Mode.WARN: "warn returns it verbatim with the verdict attached, to be treated as data",
+    Mode.REDACT: f"redact returns a verified extraction, guided by {PROMPT_PARAM}",
+    Mode.FLAG: "flag returns it verbatim with the verdict attached, to be treated as data",
 }
 
 
@@ -97,7 +97,7 @@ def _inserted_properties(policy: ModePolicy) -> dict[str, Any]:
     props: dict[str, Any] = {
         MODE_PARAM: {"type": "string", "enum": [m.value for m in policy.allowed]}
     }
-    if Mode.CLEAN in policy.allowed:
+    if Mode.REDACT in policy.allowed:
         props[PROMPT_PARAM] = {"type": "string"}
     return props
 

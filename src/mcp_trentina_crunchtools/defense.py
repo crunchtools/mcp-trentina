@@ -30,7 +30,7 @@ would refuse the content and which could not finish. It does not raise, and
 it does not choose policy.
 
 `modes.py` decides *what to do about it*, for the tools and the gateway
-alike: block refuses, warn delivers with the verdict, clean extracts. The
+alike: block refuses, flag delivers with the verdict, redact extracts. The
 mode decides delivery, never detection.
 
 ## Why it lives at package root
@@ -141,7 +141,7 @@ def _l3_provider_configured(defense: DefenseConfig | None) -> bool:
     L3 used to be skippable by caller (``l3_gate``) and, before that, gated
     on an L2 score. Both were off switches with a dial on them. What is left
     is the one thing no caller controls: no provider configured. That surfaces
-    as ``l3_unavailable`` in the verdict, and block and clean refuse on it
+    as ``l3_unavailable`` in the verdict, and block and redact refuse on it
     unless ``TRENTINA_REQUIRE_L3=false``.
     """
     # has_api_key is Gemini's; a profile that overrides defense.provider
@@ -245,7 +245,7 @@ async def _classify(
     """Run L2 off the event loop. Returns (classification, truncated).
 
     ``stop_on_partial`` is for callers that refuse a partial scan anyway
-    (block and clean): the token count decides before any inference runs,
+    (block and redact): the token count decides before any inference runs,
     which spares ~74 passes on an oversized payload. It yields
     ``(None, True)``, never a made-up score.
     """
@@ -286,7 +286,7 @@ async def defend(
         defense: Per-profile thresholds. None means built-in defaults.
         provenance: EXTERNAL, or MODEL_OUTPUT for L0 and pre-processor output.
         stop_on_partial: The caller refuses a partial L2 scan anyway (block
-            and clean), so skip the inference a truncated scan would cost.
+            and redact), so skip the inference a truncated scan would cost.
         record: Write the detection row and emit the D-Bus event.
         l3_context: Caller-specific context, appended to the standard
             briefing.
@@ -294,7 +294,7 @@ async def defend(
             and the ``dir`` producer merges shadow counts into it.
         attribution: Detection-row columns. ``blocked`` must say whether this
             caller REFUSED the content: ``is_blocked`` reads that column, so a
-            warn caller writing ``blocked=1`` blocklists what it delivered.
+            flag caller writing ``blocked=1`` blocklists what it delivered.
 
     Returns:
         A verdict. This function never raises on a detection.

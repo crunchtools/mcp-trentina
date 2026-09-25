@@ -30,7 +30,7 @@ profiles:
         compress_descriptions: true
         # compact_schemas: true   (default — see compression.md#schema-compaction)
     defense:
-      enforcement: warn
+      enforcement: flag
       l2_threshold: 0.5
 
   agent1:
@@ -49,13 +49,13 @@ profiles:
         compress_descriptions: true
     defense:
       enforcement: block      # the default mode: flagged content is refused
-      modes: [block, clean]   # what the agent may choose per call; no warn
+      modes: [block, redact]   # what the agent may choose per call; no flag
       l2_threshold: 0.3       # stricter classifier gate
 ```
 
 ## Content modes
 
-`defense.modes` is the policy: which of `block`, `warn` and `clean` the
+`defense.modes` is the policy: which of `block`, `flag` and `redact` the
 profile's agent may choose per call, on **every tool of every backend**. All
 three modes run all three layers; they differ only in what is delivered (see
 [Content Tools](quarantine-tools.md)).
@@ -72,32 +72,32 @@ profiles:
       bearer_token_env: TRENTINA_PROFILE_CODING_AGENT_TOKEN
     defense:
       enforcement: block
-      modes: [block, clean]
+      modes: [block, redact]
   researcher:
     auth:
       bearer_token_env: TRENTINA_PROFILE_RESEARCHER_TOKEN
     defense:
       enforcement: block
-      modes: [block, warn, clean]
+      modes: [block, flag, redact]
 ```
 
 With more than one mode, the gateway inserts two arguments into each tool's
 schema: `trentina_mode`, whose enum is exactly the permitted modes, and
-`trentina_prompt` when `clean` is permitted. On a call it resolves an omitted
+`trentina_prompt` when `redact` is permitted. On a call it resolves an omitted
 mode to `enforcement`, refuses anything outside the policy (`denied_guard` in
 the audit log), and strips both arguments before the backend sees them.
 With one mode nothing is inserted, and every call runs as that mode.
 
 `enforcement` is the default and must be in `modes`; a profile where it is
-not fails to load. It cannot be `clean`: a call that omits the mode carries no
+not fails to load. It cannot be `redact`: a call that omits the mode carries no
 extraction prompt.
 
-`clean` works on proxied responses too — `jira_get_issue` with
-`trentina_mode: clean` and a prompt returns a verified extraction instead of
+`redact` works on proxied responses too — `jira_get_issue` with
+`trentina_mode: redact` and a prompt returns a verified extraction instead of
 the ticket, and drops `structuredContent`. It costs three L3 calls and is
 lossy for structured data, so grant it where it earns that.
 
-`warn` hands over flagged content verbatim with a caution attached. That is a
+`flag` hands over flagged content verbatim with a caution attached. That is a
 **security-researcher grant**: a human reading a CVE advisory needs it; an
 assistant, a coding agent or a swarm almost never does, and an injection that
 can talk an agent past its own warning is the attack it exists to survive.
@@ -193,15 +193,15 @@ Each profile configures its defense **policy** — never the layers' existence. 
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `enforcement` | string | `warn` | The default mode — what a flagged response becomes when the call does not choose: `warn` (delivered intact + warning) or `block` (refused). Cannot be `clean` |
+| `enforcement` | string | `flag` | The default mode — what a flagged response becomes when the call does not choose: `flag` (delivered intact + warning) or `block` (refused). Cannot be `redact` |
 | `modes` | list | `[enforcement]` | The modes the agent may choose per call — see [Content modes](#content-modes) |
 | `l2_threshold` | float | `0.5` | L2 score at/above which content is flagged, in addition to the model's own MALICIOUS label. Lower = stricter. |
 | `audit` | bool | `true` | Write detection rows to SQLite |
 | `provider` | string | `null` | LLM provider override (`gemini`, `openai`, `anthropic`, `ollama`) |
 
-An autonomous agent runs `enforcement: block` with a strict `l2_threshold`; a human-supervised agent runs `warn`. `TRENTINA_ENFORCEMENT_OVERRIDE=warn` is the global kill switch for the night a block threshold misfires.
+An autonomous agent runs `enforcement: block` with a strict `l2_threshold`; a human-supervised agent runs `flag`. `TRENTINA_ENFORCEMENT_OVERRIDE=flag` is the global kill switch for the night a block threshold misfires.
 
-`annotate` and `extract` are the pre-0.25.0 spellings. They still load, with a warning naming the release that removed in 0.29.0. `annotate` becomes `warn`; `extract` becomes `block`, which is what it already did — it shipped unimplemented and always failed closed.
+`warn` and `clean` are the pre-0.35.0 spellings of `flag` and `redact` ([why](quarantine-tools.md#the-names-are-openrouters)). **[DEPRECATED]** They still load, with a warning, and will be removed in 0.36.0. `annotate` and `extract`, the pre-0.25.0 spellings, were removed in 0.29.0.
 
 The `provider` field lets each profile use a different LLM for L3 Q-Agent operations and tool description compression. When omitted, the profile uses the global `TRENTINA_MODEL_PROVIDER` environment variable. All provider API keys must be present in the environment regardless of which profiles use them.
 

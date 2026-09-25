@@ -96,8 +96,12 @@ class KeyBackupProvider:
         self._room_fetched_at: dict[str, float] = {}
         self._inflight: dict[str, asyncio.Future[None]] = {}
         self._stats = {
-            "hits": 0, "misses": 0, "fetches": 0, "fetch_errors": 0,
-            "unwrap_errors": 0, "cooldown_skips": 0,
+            "hits": 0,
+            "misses": 0,
+            "fetches": 0,
+            "fetch_errors": 0,
+            "unwrap_errors": 0,
+            "cooldown_skips": 0,
         }
 
     async def start(self) -> None:
@@ -111,8 +115,7 @@ class KeyBackupProvider:
         algorithm = version_info.get("algorithm")
         if algorithm != BACKUP_ALGORITHM:
             raise KeyBackupError(
-                f"backup algorithm is {algorithm!r}, expected "
-                f"{BACKUP_ALGORITHM!r}"
+                f"backup algorithm is {algorithm!r}, expected {BACKUP_ALGORITHM!r}"
             )
         self._version = str(version_info["version"])
         self._decryptor = backup_decryptor(self._private)
@@ -127,7 +130,8 @@ class KeyBackupProvider:
             )
         logger.warning(
             "matrix keybackup: version %s verified, algorithm %s",
-            self._version, algorithm,
+            self._version,
+            algorithm,
         )
 
     def cached_session(self, session_id: str) -> Any | None:
@@ -182,9 +186,7 @@ class KeyBackupProvider:
             if not future.done():
                 future.set_result(None)
             self._stats["fetch_errors"] += 1
-            logger.warning(
-                "matrix keybackup: fetch failed for room %s: %s", room_id, exc
-            )
+            logger.warning("matrix keybackup: fetch failed for room %s: %s", room_id, exc)
         finally:
             self._inflight.pop(room_id, None)
             self._room_fetched_at[room_id] = time.monotonic()
@@ -198,16 +200,16 @@ class KeyBackupProvider:
         imported = 0
         for session_id, payload in sessions.items():
             try:
-                unwrapped = unwrap_session_data(
-                    self._decryptor, payload["session_data"]
-                )
+                unwrapped = unwrap_session_data(self._decryptor, payload["session_data"])
                 session = import_session(unwrapped["session_key"])
             except Exception as exc:
                 # Identity only, never key material or ciphertext.
                 self._stats["unwrap_errors"] += 1
                 logger.warning(
                     "matrix keybackup: cannot import session %s in room %s: %s",
-                    session_id, room_id, type(exc).__name__,
+                    session_id,
+                    room_id,
+                    type(exc).__name__,
                 )
                 continue
             self._sessions[(room_id, session_id)] = _Entry(session, now)
@@ -217,7 +219,9 @@ class KeyBackupProvider:
             self._sessions.popitem(last=False)
         logger.warning(
             "matrix keybackup: room %s — imported %d of %d session(s)",
-            room_id, imported, len(sessions),
+            room_id,
+            imported,
+            len(sessions),
         )
 
     async def _get(self, path: str, params: dict[str, str] | None = None) -> Any:

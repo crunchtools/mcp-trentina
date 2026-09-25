@@ -37,11 +37,11 @@ and duplicating it would give two answers that can disagree.
 
 ALLOWLISTING CHANGES WHAT A FINDING COSTS; IT NEVER SKIPS A LAYER OR HIDES A
 FLAG. Since 0.31.0 an allowlisted source runs all three layers and its flags
-stand. What ``origin.allowlisted`` explains is a block that became a clean:
-block_* on an allowlisted source hands a flagged payload to the clean path
-instead of refusing it, and reports ``disposition: extracted``. A clean that
+stand. What ``origin.allowlisted`` explains is a block that became a redact:
+block_* on an allowlisted source hands a flagged payload to the redact path
+instead of refusing it, and reports ``disposition: extracted``. A redact that
 fails still refuses — allowlisting removes false-positive refusals, it does
-not create a channel that survives the clean pipeline giving up.
+not create a channel that survives the redact pipeline giving up.
 """
 
 from __future__ import annotations
@@ -144,7 +144,7 @@ def build_report(
             ``search``.
         ref: The URL, path, query, or content hash.
         allowlisted: Whether an operator has vouched for this source. It
-            turns a block into a clean; it neither skips a layer nor hides a
+            turns a block into a redact; it neither skips a layer nor hides a
             flag.
         extracted_by: The model that produced an extraction, when there is
             one. Absent otherwise rather than null, because a key that is

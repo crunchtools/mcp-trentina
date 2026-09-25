@@ -196,7 +196,7 @@ class TestTheOnlyPermittedSkips:
     async def test_every_mode_detects(self) -> None:
         """This asserted the OPPOSITE until 0.31.0: that ``advise()`` — the
         clean_* path — skipped detection, and it called that a design. It
-        was the hole #187 closes. clean now detects first, then extracts and
+        was the hole #187 closes. redact now detects first, then extracts and
         verifies; see tests/test_mode_parity.py for every family and mode."""
         import mcp_trentina_crunchtools.defense as defense_mod
 

@@ -136,9 +136,7 @@ def test_main_sse_forwards_log_level(monkeypatch: pytest.MonkeyPatch) -> None:
     _run_with_gateway — that call site needs its own coverage."""
     monkeypatch.setenv("TRENTINA_LOG_LEVEL", "WARNING")
     monkeypatch.delenv("TRENTINA_GATEWAY_ENABLED", raising=False)
-    monkeypatch.setattr(
-        "sys.argv", ["mcp-trentina-crunchtools", "--transport", "sse", "--no-dbus"]
-    )
+    monkeypatch.setattr("sys.argv", ["mcp-trentina-crunchtools", "--transport", "sse", "--no-dbus"])
     mock_mcp = MagicMock()
 
     with (
@@ -215,16 +213,10 @@ class TestStartupCacheVisibility:
             ),
             caplog.at_level(logging.WARNING, logger="mcp_trentina_crunchtools"),
         ):
-            _run_with_gateway(
-                mock_server, host="127.0.0.1", port=8019, log_level="WARNING"
-            )
-        return "\n".join(
-            r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING
-        )
+            _run_with_gateway(mock_server, host="127.0.0.1", port=8019, log_level="WARNING")
+        return "\n".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
 
-    def test_summary_is_visible_at_warning(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_summary_is_visible_at_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         logged = self._boot(caplog, verdicts=331)
         assert "331 perimeter verdict(s)" in logged
         assert "26 tool list(s)" in logged
@@ -238,8 +230,6 @@ class TestStartupCacheVisibility:
         logged = self._boot(caplog, verdicts=0)
         assert "COLD" in logged
 
-    def test_a_warm_cache_does_not_cry_wolf(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_a_warm_cache_does_not_cry_wolf(self, caplog: pytest.LogCaptureFixture) -> None:
         logged = self._boot(caplog, verdicts=331)
         assert "COLD" not in logged

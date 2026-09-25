@@ -14,7 +14,7 @@ uv run mcp-trentina-crunchtools
 - `GEMINI_API_KEY` — Required for Layer 2 (Q-Agent)
 - `QUARANTINE_MODEL` — Gemini model for Q-Agent (default: gemini-2.5-flash-lite)
 - `QUARANTINE_SEARCH_MODEL` — Gemini model for L0 search grounding (default: gemini-2.5-flash; must support google_search)
-- `TRENTINA_REQUIRE_L2` / `TRENTINA_REQUIRE_L3` — default true: block and clean
+- `TRENTINA_REQUIRE_L2` / `TRENTINA_REQUIRE_L3` — default true: block and redact
   refuse when that layer is ABSENT. `false` turns absence into a warning; a
   partial read is never excused. `QUARANTINE_FALLBACK` was removed in 0.31.0
   and setting it fails startup.
@@ -71,9 +71,9 @@ with input length. Two rules keep that bounded:
 - Input is capped at `CLASSIFIER_MAX_TOKENS`. Past that the result carries
   `truncated=True`. The default sits above what `QUARANTINE_MAX_CONTENT`
   (100k chars ≈ 28k tokens) can produce, so the two limits never fight.
-- A truncated scan is never reported as BENIGN. block and clean refuse it
+- A truncated scan is never reported as BENIGN. block and redact refuse it
   (`modes.Gaps`), so they pass `fail_on_truncate=True` and skip the inference
-  at the token count; warn scans the head and delivers with `l2_truncated`.
+  at the token count; flag scans the head and delivers with `l2_truncated`.
 
 Async callers must use `classify_async`. Calling the
 synchronous `classify()` from a coroutine blocks the event loop for the whole
@@ -81,7 +81,7 @@ scan and takes the gateway down with it.
 
 ## Tools
 
-### Five tools, three modes, one policy (0.32.0)
+### Five tools, three modes, one policy (0.32.0; renamed 0.35.0)
 
 Rules P1–P10 are in `docs/defense-pipeline.md` (Pipeline Flow); the decision
 lives in `modes.py`, the tool-side path in `tools/judged.py`.
@@ -90,10 +90,10 @@ Tools: `fetch_tool`, `read_tool`, `dir_tool`, `content_tool`, `search_tool`.
 Every call runs L1 ∥ L2 on the arrived bytes, then L3 briefed with both. The
 `trentina_mode` ARGUMENT decides delivery, never detection:
 
-- `block` — refuses a flag or any blocking gap. Allowlisted → clean instead.
-- `warn` — bytes IDENTICAL to what arrived, `_trentina_warning` attached. A
+- `block` — refuses a flag or any blocking gap. Allowlisted → redact instead.
+- `flag` — bytes IDENTICAL to what arrived, `_trentina_warning` attached. A
   security-researcher grant; leave it out of agent policies.
-- `clean` — L3 detect, extract (guided by `trentina_prompt`), verify; any
+- `redact` — L3 detect, extract (guided by `trentina_prompt`), verify; any
   objection refuses.
 
 Until 0.32.0 the mode was the tool's NAME prefix (#193), so the agent chose
@@ -104,19 +104,24 @@ its own posture and nothing enforced it. Now the policy does:
   before the perimeter scan, INSERTS the gateway's after it (only when more
   than one mode is allowed), resolves an omitted mode to `enforcement` BEFORE
   checking it, and strips both args before forwarding. Every backend's tools
-  get it — `clean` on a proxied response is real now (`scan_tool_response`).
+  get it — `redact` on a proxied response is real now (`scan_tool_response`).
   Internal tools receive the RESOLVED mode; admin tools (no declared
   `trentina_mode`) get nothing inserted.
 - Standalone: `TRENTINA_MODE` / `TRENTINA_MODES`, both defaulting to block.
 - Refusals carry `{reason, mode, flagged_by|gaps, alternatives}` —
   JSON-RPC `error.data` for web tools, `_trentina_refusal` for proxied ones.
-  Flagged → `clean` only, NEVER `warn`; gap-only → `warn`.
+  Flagged → `redact` only, NEVER `flag`; gap-only → `flag`.
 
 No text written by L3 reaches an agent: finding types are a closed enum
 (`prompts.FINDING_TYPES`).
 
-NOTE: `defense.enforcement` is the DEFAULT mode and accepts only `warn` and
+NOTE: `defense.enforcement` is the DEFAULT mode and accepts only `flag` and
 `block` — a call that omits the mode carries no extraction prompt.
+
+[DEPRECATED] `warn`/`clean`, the pre-0.35.0 names (#200), are normalized to
+`flag`/`redact` by `config.canonical_mode` wherever a mode is read, and removed
+in 0.36.0. The names are OpenRouter's guardrail actions; our `redact` is an L3
+rewrite, not their span substitution. Precedence: block > redact > flag.
 
 ### Stats
 - quarantine_stats — role-scoped like the gateway admin tools below: an agent
@@ -171,7 +176,7 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
   COPY for L2 to read. `PipelineResult` carries exactly two strings and the
   names say who reads each: `content` is what the agent receives, byte-identical
   to what arrived, and what L2 and L3 detect on; `l2_input` is L1's normalized
-  copy, which L2 reads AS WELL when L1 normalized anything, and which clean's
+  copy, which L2 reads AS WELL when L1 normalized anything, and which redact's
   extraction turn reads. L1 also takes a directory's stdlib-shadow counts
   (`ShadowStats`), merged in by the `dir` producer.
 

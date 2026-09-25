@@ -1,4 +1,4 @@
-"""The perimeter at the MCP proxy ingress — warn mode (plan step 5).
+"""The perimeter at the MCP proxy ingress — flag mode (plan step 5).
 
 Until tonight the gateway's README claim was false: proxied tool responses
 and tool descriptions crossed into the agent verbatim, and the three-layer
@@ -23,7 +23,7 @@ functions are the missing wall:
   perimeter existed) are scanned exactly like live ones — the poisoned-
   cache ingress closes structurally rather than by a deploy-time flush.
 
-Enforcement here is hardwired ANNOTATE: content is never modified (L1 is a
+Enforcement here was hardwired to what is now flag: content is never modified (L1 is a
 owner's rule), a flagged payload gets a ``_trentina_warning``
 sibling field, and every flag lands in the detections table as
 ``source_type="tool_response"`` / ``"tool_description"`` — the score
@@ -61,7 +61,7 @@ from ..modes import (
     refusal_body,
     refusal_reason,
 )
-from ..quarantine.agent import quarantine_clean
+from ..quarantine.agent import quarantine_redact
 from ..warning import build_warning
 
 if TYPE_CHECKING:
@@ -70,38 +70,39 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: Kill switch (owner requirement, ahead of any enforcement flip): setting
-#: TRENTINA_ENFORCEMENT_OVERRIDE=warn forces every profile to warn, for the
+#: TRENTINA_ENFORCEMENT_OVERRIDE=flag forces every profile to flag, for the
 #: night `block` misfires at 3am. Any other value is ignored loudly.
 #:
-#: `annotate` is still accepted, because the one moment this variable is
-#: reached for is the moment nobody wants to discover it was renamed.
+#: `warn` (before 0.35.0) and `annotate` (before 0.25.0) are still accepted,
+#: because the one moment this variable is reached for is the moment nobody
+#: wants to discover it was renamed.
 _OVERRIDE_ENV = "TRENTINA_ENFORCEMENT_OVERRIDE"
-_OVERRIDE_VALUES = {"warn": "warn", "annotate": "warn"}
+_OVERRIDE_VALUES = {"flag": "flag", "warn": "flag", "annotate": "flag"}
 
 
 def effective_mode(profile: Profile, mode: Mode | None = None) -> Mode:
     """The call's resolved mode, or the profile default; the kill switch
-    wins over both, including a call that asked for block or clean."""
+    wins over both, including a call that asked for block or redact."""
     override = os.environ.get(_OVERRIDE_ENV, "").strip().lower()
     if override in _OVERRIDE_VALUES:
-        if override != "warn":
+        if override != "flag":
             logger.warning(
-                "%s=%r is the pre-0.25.0 spelling of 'warn'; honouring it",
+                "%s=%r is an old spelling of 'flag'; honouring it",
                 _OVERRIDE_ENV,
                 override,
             )
         return Mode(_OVERRIDE_VALUES[override])
     if override:
         logger.error(
-            "%s=%r is not a valid override (only 'warn' is); ignoring",
+            "%s=%r is not a valid override (only 'flag' is); ignoring",
             _OVERRIDE_ENV,
             override,
         )
     return mode if mode is not None else Mode(profile.defense.enforcement)
 
 
-DEFAULT_CLEAN_PROMPT = "Extract the information this tool response contains."
-"""clean on a proxied response whose call named no trentina_prompt."""
+DEFAULT_REDACT_PROMPT = "Extract the information this tool response contains."
+"""redact on a proxied response whose call named no trentina_prompt."""
 
 
 @dataclass(frozen=True)
@@ -109,7 +110,7 @@ class IngressDecision:
     """What the router should do with a scanned tool response.
 
     ``refusal`` is set with ``blocked``: the structured body naming the
-    modes the caller may try next. ``extraction`` is set under clean: the
+    modes the caller may try next. ``extraction`` is set under redact: the
     verified text that REPLACES the response.
     """
 
@@ -307,10 +308,10 @@ async def scan_tool_response(
 ) -> IngressDecision:
     """Judge one tool response and decide its fate under the call's mode.
 
-    warn — deliver intact, warning attached (`blocked=False`).
+    flag — deliver intact, warning attached (`blocked=False`).
     block — a flagged or incompletely judged response is refused
         (`blocked=True`); the caller delivers the refusal INSTEAD.
-    clean — refused on the same gaps as block; otherwise a verified L3
+    redact — refused on the same gaps as block; otherwise a verified L3
         extraction guided by ``prompt`` replaces the response (#193). The
         call carries the prompt, which is what a proxied response lacked
         until the mode became a per-call argument.
@@ -335,9 +336,9 @@ async def scan_tool_response(
         f"response:{mode.value}:{provenance.value}",
         joined + json.dumps(unscannable, sort_keys=True),
     )
-    # clean is not served from the cache: its extraction is per prompt, and
+    # redact is not served from the cache: its extraction is per prompt, and
     # the extraction's briefing needs the verdict itself, not its warning.
-    hit, cached = _cache_get(key) if mode is not Mode.CLEAN else (False, None)
+    hit, cached = _cache_get(key) if mode is not Mode.REDACT else (False, None)
     if hit:
         blocked = bool(cached and cached.get("blocked"))
         return IngressDecision(
@@ -353,7 +354,7 @@ async def scan_tool_response(
         defense=profile.defense,
         provenance=provenance,
         l3_context=l3_context,
-        stop_on_partial=mode is not Mode.WARN,
+        stop_on_partial=mode is not Mode.FLAG,
         attribution={
             "profile": profile.name,
             "backend": backend_name,
@@ -374,14 +375,14 @@ async def scan_tool_response(
     layer_gaps = gaps_of(verdict)
     unjudgeable = layer_gaps.blocking()
 
-    if mode is Mode.CLEAN:
-        return await _clean_response(verdict, warning, unjudgeable, prompt, policy, key)
+    if mode is Mode.REDACT:
+        return await _redact_response(verdict, warning, unjudgeable, prompt, policy, key)
 
     blocked = False
-    # `is not WARN` rather than `is BLOCK`, deliberately. `warn` is the only
+    # `is not FLAG` rather than `is BLOCK`, deliberately. `flag` is the only
     # mode that DELIVERS flagged content, so making it the sole exception
     # means any mode added later fails closed until someone implements it.
-    if (verdict.flagged or unjudgeable) and mode is not Mode.WARN:
+    if (verdict.flagged or unjudgeable) and mode is not Mode.FLAG:
         blocked = True
         if warning is None:
             # build_warning() only returns None when nothing was flagged and
@@ -431,7 +432,7 @@ def _refusal_from_warning(
     return refusal_body(reason, mode, flagged_by=flagged_by, gaps=gaps, policy=policy)
 
 
-async def _clean_response(
+async def _redact_response(
     verdict: Any,
     warning: dict[str, Any] | None,
     unjudgeable: bool,
@@ -439,9 +440,9 @@ async def _clean_response(
     policy: ModePolicy,
     key: str,
 ) -> IngressDecision:
-    """clean on a proxied response: refuse on gaps, else extract and verify.
+    """redact on a proxied response: refuse on gaps, else extract and verify.
 
-    A flag does not refuse clean — that is what clean is for — but a layer
+    A flag does not refuse redact — that is what redact is for — but a layer
     that could not finish does, exactly as in ``tools/judged.py``.
     """
     if unjudgeable:
@@ -450,16 +451,16 @@ async def _clean_response(
         return IngressDecision(
             warning=blocked_warning,
             blocked=True,
-            refusal=_refusal_from_warning(blocked_warning, Mode.CLEAN, policy),
+            refusal=_refusal_from_warning(blocked_warning, Mode.REDACT, policy),
         )
-    result = await quarantine_clean(
+    result = await quarantine_redact(
         verdict.pipeline.l2_input[: get_config().max_content],
-        prompt or DEFAULT_CLEAN_PROMPT,
+        prompt or DEFAULT_REDACT_PROMPT,
         detection=verdict.l3_assessment,
     )
     if result.refused_by is not None:
-        reason = f"clean refused: {result.refused_by}"
-        refusal = refusal_body(reason, Mode.CLEAN, policy=policy)
+        reason = f"redact refused: {result.refused_by}"
+        refusal = refusal_body(reason, Mode.REDACT, policy=policy)
         refusal["alternatives"] = []
         return IngressDecision(
             warning={**(warning or {}), "blocked": True, "clean_refused_by": result.refused_by},
@@ -606,7 +607,7 @@ async def scan_tool_list(
             # blocking the description IS removing it.
             # A description that could not be fully judged is withheld under
             # block exactly like a flagged one: same rule as responses.
-            if effective_mode(profile) is not Mode.WARN and (
+            if effective_mode(profile) is not Mode.FLAG and (
                 warning.get("flagged_by") or Gaps.of_warning(warning).blocking()
             ):
                 logger.warning(

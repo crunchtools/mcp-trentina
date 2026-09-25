@@ -4,7 +4,7 @@ The policy is one line per profile, `defense.modes`. These tests pin the
 parts an attacker would lean on: an omitted mode resolves BEFORE it is
 checked, the backend never sees the inserted arguments, gateway-authored
 schema text is never judged as a backend's, and a refusal never steers the
-agent toward warn for content a layer flagged.
+agent toward flag for content a layer flagged.
 """
 
 from __future__ import annotations
@@ -96,44 +96,44 @@ def _profile(
 class TestPolicyConfig:
     def test_unset_modes_is_the_default_alone(self) -> None:
         assert DefenseConfig(enforcement="block").modes == ["block"]
-        assert DefenseConfig().modes == ["warn"]
+        assert DefenseConfig().modes == ["flag"]
 
     def test_a_default_outside_the_policy_is_refused_at_load(self) -> None:
         """The omitted-mode trap, closed where it is cheapest: an omitted
         mode resolves to `enforcement`, so a policy without it cannot load."""
         with pytest.raises(ValidationError, match=r"must be in defense\.modes"):
-            DefenseConfig(enforcement="warn", modes=["block", "clean"])
+            DefenseConfig(enforcement="flag", modes=["block", "redact"])
 
     def test_a_backend_override_must_include_the_default(self) -> None:
         with pytest.raises(ValidationError, match="must include the profile default"):
-            _profile(["block", "clean"], backend={"modes": ["clean"]})
+            _profile(["block", "redact"], backend={"modes": ["redact"]})
 
-    def test_clean_cannot_be_the_default(self) -> None:
+    def test_redact_cannot_be_the_default(self) -> None:
         with pytest.raises(ValidationError, match="cannot be a default"):
-            DefenseConfig.model_validate({"enforcement": "clean"})
+            DefenseConfig.model_validate({"enforcement": "redact"})
 
 
 class TestResolution:
     def test_omitted_resolves_to_the_default_before_the_check(self) -> None:
-        policy = ModePolicy((Mode.BLOCK, Mode.CLEAN), Mode.BLOCK)
+        policy = ModePolicy((Mode.BLOCK, Mode.REDACT), Mode.BLOCK)
         assert policy.resolve(None) is Mode.BLOCK
-        assert policy.resolve("clean") is Mode.CLEAN
+        assert policy.resolve("redact") is Mode.REDACT
         with pytest.raises(ModeNotPermittedError):
-            policy.resolve("warn")
+            policy.resolve("flag")
 
     def test_a_guard_excluding_the_default_refuses_an_omitted_mode(self) -> None:
         """Per-tool narrowing: the guard runs on the RESOLVED value, so an
         omitted mode cannot slip past it the way an absent argument does."""
         p = _profile(
-            ["block", "clean"],
+            ["block", "redact"],
             backend={
                 "parameter_guards": {
-                    "jira_get_issue": {MODE_PARAM: ParameterConstraint(allow=["clean"])}
+                    "jira_get_issue": {MODE_PARAM: ParameterConstraint(allow=["redact"])}
                 }
             },
         )
         policy = policy_for(p, p.backends["jira"], "jira_get_issue")
-        assert policy.allowed == (Mode.CLEAN,)
+        assert policy.allowed == (Mode.REDACT,)
         with pytest.raises(ModeNotPermittedError):
             policy.resolve(None)
 
@@ -143,25 +143,25 @@ class TestSchema:
         assert insert_params(TOOL, ModePolicy((Mode.BLOCK,), Mode.BLOCK)) is TOOL
 
     def test_the_enum_is_exactly_the_policy(self) -> None:
-        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.CLEAN), Mode.BLOCK))
+        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.REDACT), Mode.BLOCK))
         props = tool["inputSchema"]["properties"]
-        assert props[MODE_PARAM] == {"type": "string", "enum": ["block", "clean"]}
+        assert props[MODE_PARAM] == {"type": "string", "enum": ["block", "redact"]}
         assert props[PROMPT_PARAM] == {"type": "string"}
         assert PROMPT_PARAM in props
         assert MODE_PARAM not in tool["inputSchema"]["required"]
         assert MODE_PARAM not in TOOL["inputSchema"]["properties"], "input mutated"
 
-    def test_no_prompt_without_clean(self) -> None:
-        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.WARN), Mode.BLOCK))
+    def test_no_prompt_without_redact(self) -> None:
+        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.FLAG), Mode.BLOCK))
         assert PROMPT_PARAM not in tool["inputSchema"]["properties"]
 
     def test_default_outside_the_tool_policy_makes_the_mode_required(self) -> None:
-        tool = insert_params(TOOL, ModePolicy((Mode.CLEAN,), Mode.BLOCK))
+        tool = insert_params(TOOL, ModePolicy((Mode.REDACT,), Mode.BLOCK))
         assert MODE_PARAM in tool["inputSchema"]["required"]
 
     def test_inserted_text_is_the_enum_alone(self) -> None:
         """#198: the explanation lives in `initialize`, not on 372 tools."""
-        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.WARN, Mode.CLEAN), Mode.BLOCK))
+        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.FLAG, Mode.REDACT), Mode.BLOCK))
         inserted = {k: tool["inputSchema"]["properties"][k] for k in (MODE_PARAM, PROMPT_PARAM)}
         assert len(json.dumps(inserted, separators=(",", ":"))) < 120
 
@@ -183,22 +183,22 @@ class TestInstructions:
         assert mode_instructions(_profile(["block"])) == ""
 
     def test_the_profile_modes_and_default_are_stated_once(self) -> None:
-        text = mode_instructions(_profile(["block", "clean"]))
+        text = mode_instructions(_profile(["block", "redact"]))
         assert "Omitted, it is block." in text
-        assert "clean returns" in text and PROMPT_PARAM in text
-        assert "warn" not in text
+        assert "redact returns" in text and PROMPT_PARAM in text
+        assert "flag returns" not in text
 
     def test_a_backend_widening_the_policy_is_explained(self) -> None:
-        text = mode_instructions(_profile(["block"], backend={"modes": ["block", "warn"]}))
-        assert "warn returns it verbatim" in text
+        text = mode_instructions(_profile(["block"], backend={"modes": ["block", "flag"]}))
+        assert "flag returns it verbatim" in text
 
     def test_one_sentence_per_mode(self) -> None:
         """The modes are joined with '; ', so no mode's text may contain one."""
-        text = mode_instructions(_profile(["block", "warn", "clean"]))
+        text = mode_instructions(_profile(["block", "flag", "redact"]))
         assert text.count("; ") == 2
 
     async def test_initialize_carries_them(self) -> None:
-        p = _profile(["block", "warn", "clean"])
+        p = _profile(["block", "flag", "redact"])
         resp = await route_jsonrpc(p, {"jsonrpc": "2.0", "id": 1, "method": "initialize"})
         text = resp["result"]["instructions"]
         assert text.startswith("trentina gateway, profile=agent.")
@@ -206,19 +206,19 @@ class TestInstructions:
 
 
 class TestAlternatives:
-    ALL = ModePolicy((Mode.BLOCK, Mode.WARN, Mode.CLEAN), Mode.BLOCK)
+    ALL = ModePolicy((Mode.BLOCK, Mode.FLAG, Mode.REDACT), Mode.BLOCK)
 
-    def test_flagged_offers_clean_never_warn(self) -> None:
+    def test_flagged_offers_redact_never_flag(self) -> None:
         body = refusal_body("flagged by L3", Mode.BLOCK, flagged_by="L3", policy=self.ALL)
-        assert body["alternatives"] == ["clean"]
+        assert body["alternatives"] == ["redact"]
 
-    def test_gap_only_offers_warn(self) -> None:
+    def test_gap_only_offers_flag(self) -> None:
         from mcp_trentina_crunchtools.modes import Gaps
 
         body = refusal_body(
             "not fully judged", Mode.BLOCK, gaps=Gaps(l3_unavailable=True), policy=self.ALL
         )
-        assert body["alternatives"] == ["warn"]
+        assert body["alternatives"] == ["flag"]
         assert body["gaps"] == ["l3_unavailable"]
 
     def test_block_only_offers_nothing(self) -> None:
@@ -226,8 +226,8 @@ class TestAlternatives:
         body = refusal_body("flagged by L2", Mode.BLOCK, flagged_by="L2", policy=only)
         assert body["alternatives"] == []
 
-    def test_clean_refused_on_a_flag_offers_nothing(self) -> None:
-        body = refusal_body("flagged by L3", Mode.CLEAN, flagged_by="L3", policy=self.ALL)
+    def test_redact_refused_on_a_flag_offers_nothing(self) -> None:
+        body = refusal_body("flagged by L3", Mode.REDACT, flagged_by="L3", policy=self.ALL)
         assert body["alternatives"] == []
 
 
@@ -252,11 +252,11 @@ class TestRouter:
             patch(f"{ROUTER}.scan_tool_list", side_effect=fake_scan),
         ):
             resp = await route_jsonrpc(
-                _profile(["block", "clean"]), {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+                _profile(["block", "redact"]), {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
             )
         assert MODE_PARAM not in seen[0]["inputSchema"]["properties"], "gateway text was judged"
         (tool,) = resp["result"]["tools"]
-        assert tool["inputSchema"]["properties"][MODE_PARAM]["enum"] == ["block", "clean"]
+        assert tool["inputSchema"]["properties"][MODE_PARAM]["enum"] == ["block", "redact"]
 
     async def _call(
         self, profile: Profile, arguments: dict[str, Any], decision: IngressDecision | None = None
@@ -293,20 +293,20 @@ class TestRouter:
 
     async def test_backend_never_sees_the_inserted_arguments(self) -> None:
         _, forwarded, scan = await self._call(
-            _profile(["block", "clean"]),
-            {"issue_key": "X-1", MODE_PARAM: "clean", PROMPT_PARAM: "the summary"},
+            _profile(["block", "redact"]),
+            {"issue_key": "X-1", MODE_PARAM: "redact", PROMPT_PARAM: "the summary"},
         )
         assert forwarded == {"issue_key": "X-1"}
-        assert scan.call_args.kwargs["mode"] is Mode.CLEAN
+        assert scan.call_args.kwargs["mode"] is Mode.REDACT
         assert scan.call_args.kwargs["prompt"] == "the summary"
 
     async def test_omitted_mode_runs_as_the_default(self) -> None:
-        _, _, scan = await self._call(_profile(["block", "clean"]), {"issue_key": "X-1"})
+        _, _, scan = await self._call(_profile(["block", "redact"]), {"issue_key": "X-1"})
         assert scan.call_args.kwargs["mode"] is Mode.BLOCK
 
     async def test_a_mode_outside_the_policy_is_refused_before_the_backend(self) -> None:
         resp, forwarded, scan = await self._call(
-            _profile(["block", "clean"]), {"issue_key": "X-1", MODE_PARAM: "warn"}
+            _profile(["block", "redact"]), {"issue_key": "X-1", MODE_PARAM: "flag"}
         )
         assert resp["error"]["code"] == -32602
         assert MODE_PARAM in resp["error"]["message"]
@@ -314,21 +314,21 @@ class TestRouter:
         scan.assert_not_called()
 
     async def test_a_refusal_carries_its_alternatives(self) -> None:
-        refusal = {"reason": "flagged by L3", "flagged_by": "L3", "alternatives": ["clean"]}
+        refusal = {"reason": "flagged by L3", "flagged_by": "L3", "alternatives": ["redact"]}
         resp, _, _ = await self._call(
-            _profile(["block", "clean"]),
+            _profile(["block", "redact"]),
             {"issue_key": "X-1"},
             IngressDecision(warning={"flagged_by": "L3"}, blocked=True, refusal=refusal),
         )
         result = resp["result"]
         assert result["isError"] is True
         assert result["_trentina_refusal"] == refusal
-        assert f"{MODE_PARAM}=clean" in result["content"][0]["text"]
+        assert f"{MODE_PARAM}=redact" in result["content"][0]["text"]
 
-    async def test_clean_replaces_the_response_and_drops_structured_content(self) -> None:
+    async def test_redact_replaces_the_response_and_drops_structured_content(self) -> None:
         resp, _, _ = await self._call(
-            _profile(["block", "clean"]),
-            {"issue_key": "X-1", MODE_PARAM: "clean"},
+            _profile(["block", "redact"]),
+            {"issue_key": "X-1", MODE_PARAM: "redact"},
             IngressDecision(warning=None, extraction='{"extracted_text": "summary"}'),
         )
         result = resp["result"]
@@ -374,12 +374,12 @@ class TestInternalBackend:
     async def test_admin_tools_get_no_mode(self) -> None:
         with patch(f"{ROUTER}.scan_tool_list", new=_identity):
             resp = await self._route(
-                self._profile(["block", "warn", "clean"]),
+                self._profile(["block", "flag", "redact"]),
                 {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
             )
         tools = {t["name"]: t for t in resp["result"]["tools"]}
         fetch = tools[f"web{NAMESPACE_SEP}fetch_tool"]["inputSchema"]["properties"]
-        assert fetch[MODE_PARAM]["enum"] == ["block", "warn", "clean"]
+        assert fetch[MODE_PARAM]["enum"] == ["block", "flag", "redact"]
         stats = tools[f"web{NAMESPACE_SEP}quarantine_stats_tool"]["inputSchema"]
         assert MODE_PARAM not in (stats.get("properties") or {})
 
@@ -393,7 +393,7 @@ class TestInternalBackend:
 
     async def test_a_refused_web_call_names_its_alternatives(self) -> None:
         resp = await self._route(
-            self._profile(["block", "warn", "clean"]),
+            self._profile(["block", "flag", "redact"]),
             {
                 "jsonrpc": "2.0",
                 "id": 3,
@@ -407,8 +407,8 @@ class TestInternalBackend:
         data = resp["error"]["data"]
         assert data["mode"] == "block"
         assert data["flagged_by"]
-        assert data["alternatives"] == ["clean"]
-        assert f"{MODE_PARAM}=clean" in resp["error"]["message"]
+        assert data["alternatives"] == ["redact"]
+        assert f"{MODE_PARAM}=redact" in resp["error"]["message"]
         assert "ignore previous" not in str(resp), "payload text leaked into the refusal"
 
 
@@ -428,19 +428,19 @@ class TestStandalone:
         policy = current_policy()
         assert policy.allowed == (Mode.BLOCK,)
         with pytest.raises(ModeNotPermittedError):
-            policy.resolve("warn")
+            policy.resolve("flag")
 
     def test_a_default_outside_the_set_fails_startup(self, mode_env: Callable[..., None]) -> None:
         from mcp_trentina_crunchtools.errors import ConfigError
 
-        mode_env("warn", "block,clean")
+        mode_env("flag", "block,redact")
         with pytest.raises(ConfigError):
             get_config()
 
 
 @pytest.mark.parametrize(
     ("mode", "modes"),
-    [("clean", ""), ("block", "block,unknown"), ("yolo", "")],
+    [("redact", ""), ("block", "block,unknown"), ("yolo", "")],
 )
 def test_a_bad_standalone_policy_fails_startup(
     mode_env: Callable[..., None], mode: str, modes: str
@@ -456,10 +456,10 @@ def test_a_bad_standalone_policy_fails_startup(
 async def test_a_mode_guard_refuses_at_call_even_when_the_mode_is_omitted() -> None:
     """The guard reads the RESOLVED mode: omitting the argument is not a bypass."""
     p = _profile(
-        ["block", "clean"],
+        ["block", "redact"],
         backend={
             "parameter_guards": {
-                "jira_get_issue": {MODE_PARAM: ParameterConstraint(allow=["clean"])}
+                "jira_get_issue": {MODE_PARAM: ParameterConstraint(allow=["redact"])}
             }
         },
     )
@@ -482,14 +482,14 @@ async def test_a_mode_guard_refuses_at_call_even_when_the_mode_is_omitted() -> N
     call.assert_not_called()
 
 
-def test_a_blocklist_refusal_offers_clean_only_where_allowed() -> None:
+def test_a_blocklist_refusal_offers_redact_only_where_allowed() -> None:
     from mcp_trentina_crunchtools.gateway.context import profile_context
     from mcp_trentina_crunchtools.tools.judged import blocklisted
 
-    p = _profile(["block", "warn", "clean"])
-    with profile_context(p, ModePolicy((Mode.BLOCK, Mode.WARN, Mode.CLEAN), Mode.BLOCK)):
-        assert blocklisted("u", Mode.WARN, "t").refusal["alternatives"] == ["clean"]
-    with profile_context(p, ModePolicy((Mode.BLOCK, Mode.WARN), Mode.BLOCK)):
+    p = _profile(["block", "flag", "redact"])
+    with profile_context(p, ModePolicy((Mode.BLOCK, Mode.FLAG, Mode.REDACT), Mode.BLOCK)):
+        assert blocklisted("u", Mode.FLAG, "t").refusal["alternatives"] == ["redact"]
+    with profile_context(p, ModePolicy((Mode.BLOCK, Mode.FLAG), Mode.BLOCK)):
         assert blocklisted("u", Mode.BLOCK, "t").refusal["alternatives"] == []
 
 
@@ -536,18 +536,18 @@ class TestServerTools:
         self, tool: str, mode_env: Callable[..., None]
     ) -> None:
 
-        mode_env(modes="block,clean")
+        mode_env(modes="block,redact")
         with pytest.raises(Exception, match="trentina_mode"):
-            await self._run(tool, trentina_mode="warn")
+            await self._run(tool, trentina_mode="flag")
 
     @pytest.mark.parametrize("tool", sorted(FAMILY_TOOLS))
-    async def test_clean_carries_the_callers_prompt(
+    async def test_redact_carries_the_callers_prompt(
         self, tool: str, mode_env: Callable[..., None]
     ) -> None:
 
-        mode_env(modes="block,clean")
-        fake = await self._run(tool, trentina_mode="clean", trentina_prompt="the date")
-        assert Mode.CLEAN in fake.call_args.args
+        mode_env(modes="block,redact")
+        fake = await self._run(tool, trentina_mode="redact", trentina_prompt="the date")
+        assert Mode.REDACT in fake.call_args.args
         assert "the date" in fake.call_args.args
 
     async def test_the_gateway_policy_beats_the_environment(
@@ -560,10 +560,10 @@ class TestServerTools:
         )
 
         mode_env(modes="block")
-        policy = ModePolicy((Mode.BLOCK, Mode.WARN), Mode.BLOCK)
-        with profile_context(_profile(["block", "warn"]), policy):
-            fake = await self._run("content_tool", trentina_mode="warn")
-        assert Mode.WARN in fake.call_args.args
+        policy = ModePolicy((Mode.BLOCK, Mode.FLAG), Mode.BLOCK)
+        with profile_context(_profile(["block", "flag"]), policy):
+            fake = await self._run("content_tool", trentina_mode="flag")
+        assert Mode.FLAG in fake.call_args.args
         assert get_current_policy() is None, "policy leaked past the call"
 
 
@@ -575,7 +575,7 @@ class TestInternalModes:
         p = Profile(
             name="researcher",
             auth=AuthConfig(bearer_token_env="TEST"),
-            defense=DefenseConfig(enforcement="block", modes=["block", "warn", "clean"]),
+            defense=DefenseConfig(enforcement="block", modes=["block", "flag", "redact"]),
             backends={"web": Backend(url="internal://web")},
         )
         assert p.auth is not None
@@ -583,7 +583,7 @@ class TestInternalModes:
         return p
 
     @pytest.mark.parametrize("tool", sorted(FAMILY_TOOLS))
-    @pytest.mark.parametrize("mode", ["block", "warn", "clean"])
+    @pytest.mark.parametrize("mode", ["block", "flag", "redact"])
     async def test_the_resolved_mode_and_prompt_reach_the_family(
         self, tool: str, mode: str
     ) -> None:
@@ -626,7 +626,82 @@ class TestInternalModes:
             internal._server = saved
         assert "result" in resp, resp
         assert Mode(mode) in seen["args"]
-        if mode == "clean":
+        if mode == "redact":
             assert "the date" in seen["args"]
-        assert seen["policy"].allowed == (Mode.BLOCK, Mode.WARN, Mode.CLEAN)
+        assert seen["policy"].allowed == (Mode.BLOCK, Mode.FLAG, Mode.REDACT)
         assert get_current_policy() is None
+
+
+class TestPre035Spellings:
+    """`warn`/`clean` became `flag`/`redact` in 0.35.0 (#200), OpenRouter's names.
+
+    Accepted everywhere a mode is read, for one minor; emitted nowhere. Every
+    profile model is `extra="forbid"` and a profile that fails to load is
+    fatal, so without the alias an upgrade takes a deployed gateway down.
+    Delete this class with the aliases in 0.36.0.
+    """
+
+    def test_the_enum_maps_them(self) -> None:
+        assert Mode("warn") is Mode.FLAG
+        assert Mode("clean") is Mode.REDACT
+
+    def test_the_deprecation_is_logged_once_per_name(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from mcp_trentina_crunchtools import config as config_mod
+
+        config_mod._legacy_logged.clear()
+        with caplog.at_level("WARNING"):
+            for _ in range(3):
+                config_mod.canonical_mode("warn")
+        logged = [r.getMessage() for r in caplog.records if "[DEPRECATED]" in r.getMessage()]
+        assert logged == [
+            "[DEPRECATED] trentina mode 'warn' will be removed in v0.36.0. Use 'flag' instead."
+        ]
+
+    def test_a_profile_is_normalized_on_load(self) -> None:
+        d = DefenseConfig.model_validate(
+            {"enforcement": "warn", "modes": ["block", "warn", "clean"]}
+        )
+        assert d.enforcement == "flag"
+        assert d.modes == ["block", "flag", "redact"]
+
+    def test_clean_as_a_default_is_still_refused_with_the_reason(self) -> None:
+        with pytest.raises(ValidationError, match="cannot be a default"):
+            DefenseConfig.model_validate({"enforcement": "clean"})
+
+    def test_a_call_asking_for_an_old_name_resolves_to_the_new_one(self) -> None:
+        policy = ModePolicy((Mode.BLOCK, Mode.REDACT), Mode.BLOCK)
+        assert policy.resolve("clean") is Mode.REDACT
+
+    def test_a_mode_guard_keeps_its_meaning(self) -> None:
+        """`deny: [warn]` matched against the resolved `flag` would deny nothing."""
+        p = _profile(
+            ["block", "flag", "redact"],
+            backend={
+                "parameter_guards": {
+                    "jira_get_issue": {MODE_PARAM: ParameterConstraint(allow=["*"], deny=["warn"])}
+                }
+            },
+        )
+        policy = policy_for(p, p.backends["jira"], "jira_get_issue")
+        assert policy.allowed == (Mode.BLOCK, Mode.REDACT)
+
+    def test_the_standalone_env_accepts_them(self, mode_env: Callable[..., None]) -> None:
+        from mcp_trentina_crunchtools.modes import current_policy
+
+        mode_env("warn", "warn,clean")
+        policy = current_policy()
+        assert policy.default is Mode.FLAG
+        assert policy.allowed == (Mode.FLAG, Mode.REDACT)
+
+    def test_nothing_emits_them(self) -> None:
+        body = refusal_body(
+            "flagged by L3",
+            Mode.BLOCK,
+            flagged_by="L3",
+            policy=ModePolicy((Mode.BLOCK, Mode.FLAG, Mode.REDACT), Mode.BLOCK),
+        )
+        assert body["alternatives"] == ["redact"]
+        assert "warn" not in mode_instructions(_profile(["block", "flag", "redact"]))
+        assert "clean" not in mode_instructions(_profile(["block", "flag", "redact"]))

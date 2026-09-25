@@ -20,8 +20,8 @@ from mcp_trentina_crunchtools.quarantine.agent import (
 from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
 from mcp_trentina_crunchtools.tools.search import (
     block_search,
-    clean_search,
-    warn_search,
+    flag_search,
+    redact_search,
 )
 
 from .mode_harness import layers
@@ -327,15 +327,15 @@ class TestSearchThroughTheOneJudgingPath:
     """Search is a producer like any other (#187). The per-family mode matrix
     lives in test_mode_parity / test_mode_gaps; these are search's own edges."""
 
-    @pytest.mark.parametrize("mode", ["block", "warn", "clean"])
+    @pytest.mark.parametrize("mode", ["block", "flag", "redact"])
     async def test_an_l0_failure_refuses_in_every_mode(self, env: Path, mode: str) -> None:
-        """clean_search used to return {"error": ...} instead."""
+        """redact_search used to return {"error": ...} instead."""
         with layers(env) as fakes:
             fakes.search_grounded.side_effect = QuarantineAgentError("HTTP 503")
             call = {
                 "block": lambda: block_search("q"),
-                "warn": lambda: warn_search("q"),
-                "clean": lambda: clean_search("q", "Summarize."),
+                "flag": lambda: flag_search("q"),
+                "redact": lambda: redact_search("q", "Summarize."),
             }[mode]
             with pytest.raises(BlockedSourceError):
                 await call()
@@ -352,10 +352,10 @@ class TestSearchThroughTheOneJudgingPath:
             ),
             patch("mcp_trentina_crunchtools.defense.record_detection") as record,
         ):
-            await warn_search("q")
+            await flag_search("q")
         assert record.call_args.kwargs["provenance"] == "model_output"
 
-    async def test_block_and_warn_deliver_l0_text_and_sources(self, env: Path) -> None:
+    async def test_block_and_flag_deliver_l0_text_and_sources(self, env: Path) -> None:
         with layers(env) as fakes:
             result = await block_search("q")
         assert result["content"] == fakes.payload
@@ -364,11 +364,11 @@ class TestSearchThroughTheOneJudgingPath:
         ]
         assert result["query"] == "q"
 
-    async def test_clean_delivers_the_extraction_and_sources_not_the_answer(
+    async def test_redact_delivers_the_extraction_and_sources_not_the_answer(
         self, env: Path
     ) -> None:
         with layers(env) as fakes:
-            result = await clean_search("q", "Summarize.")
+            result = await redact_search("q", "Summarize.")
         assert result["content"]["extracted_text"] != fakes.payload
         assert result["sources"][0]["uri"] == "https://example.com/a"
         assert "text" not in result

@@ -87,7 +87,7 @@ class TestProfileModel:
         assert p.name == "agent2"
         assert p.auth.bearer_token_env == "TRENTINA_PROFILE_AGENT2_TOKEN"
         assert p.backends == {}
-        assert p.defense.enforcement == "warn"
+        assert p.defense.enforcement == "flag"
         assert p.defense.audit is True
 
     def test_profile_with_backends(self) -> None:
@@ -209,7 +209,7 @@ class TestProfileModel:
 
     def test_defense_defaults(self) -> None:
         d = DefenseConfig()
-        assert d.enforcement == "warn"
+        assert d.enforcement == "flag"
         assert d.audit is True
         assert d.audit is True
         assert 0.0 <= d.l2_threshold <= 1.0
@@ -660,7 +660,8 @@ class TestBearerPathWithNoStaticToken:
 
 
 class TestEnforcementModeNames:
-    """`annotate`/`extract` became `warn`/`clean` in 0.25.0.
+    """`annotate`/`extract` became `warn`/`clean` in 0.25.0, and those became
+    `flag`/`redact` in 0.35.0 (see TestPre035Spellings in test_mode_param.py).
 
     The old names described the MECHANISM — a note gets attached, an
     extraction is run. The new ones describe what the reading agent is being
@@ -672,10 +673,10 @@ class TestEnforcementModeNames:
     window; they get deleted with it in 0.27.0.
     """
 
-    def test_the_default_is_warn(self) -> None:
+    def test_the_default_is_flag(self) -> None:
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
-        assert DefenseConfig().enforcement == "warn"
+        assert DefenseConfig().enforcement == "flag"
 
     @pytest.mark.parametrize("old", ["annotate", "extract"])
     def test_the_pre_0_25_spellings_are_gone(self, old: str) -> None:
@@ -692,12 +693,12 @@ class TestEnforcementModeNames:
         with pytest.raises(pydantic.ValidationError):
             DefenseConfig(enforcement=old)
 
-    def test_clean_is_refused_at_load_and_says_why(self) -> None:
-        """`enforcement` is the DEFAULT mode, and clean cannot be a default.
+    def test_redact_is_refused_at_load_and_says_why(self) -> None:
+        """`enforcement` is the DEFAULT mode, and redact cannot be a default.
 
         A call that omits the mode carries no extraction prompt either. The
-        message has to say where clean belongs — `modes` — or pydantic's own
-        "input should be 'warn' or 'block'" sends an operator hunting for a
+        message has to say where redact belongs — `modes` — or pydantic's own
+        "input should be 'flag' or 'block'" sends an operator hunting for a
         typo.
         """
         from pydantic import ValidationError
@@ -705,16 +706,16 @@ class TestEnforcementModeNames:
         from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 
         with pytest.raises(ValidationError, match="cannot be a default"):
-            DefenseConfig(enforcement="clean")
+            DefenseConfig(enforcement="redact")
 
-    def test_the_alert_ingress_refuses_clean_too(self) -> None:
+    def test_the_alert_ingress_refuses_redact_too(self) -> None:
         """Both push and pull paths, or the gap just moves."""
         from pydantic import ValidationError
 
         from mcp_trentina_crunchtools.gateway.profile import AlertIngressConfig
 
         with pytest.raises(ValidationError, match="cannot be a default"):
-            AlertIngressConfig(token_env="T", forward_url="http://x:1/h", enforcement="clean")
+            AlertIngressConfig(token_env="T", forward_url="http://x:1/h", enforcement="redact")
 
     def test_a_bogus_mode_is_still_refused(self) -> None:
         from pydantic import ValidationError
@@ -734,7 +735,7 @@ class TestPushPathEnforcement:
     one path with an agent to ask was the only path that was configurable.
     """
 
-    def test_the_alert_ingress_defaults_to_warn(self) -> None:
+    def test_the_alert_ingress_defaults_to_flag(self) -> None:
         """Nagios pages forward with the warning attached.
 
         Silently dropping a real incident on a classifier false positive is
@@ -743,7 +744,7 @@ class TestPushPathEnforcement:
         """
         from mcp_trentina_crunchtools.gateway.profile import AlertIngressConfig
 
-        assert AlertIngressConfig.model_fields["enforcement"].default == "warn"
+        assert AlertIngressConfig.model_fields["enforcement"].default == "flag"
 
     def test_the_matrix_ingress_has_no_mode_on_purpose(self) -> None:
         """Refusing a Matrix response does not drop a message — it breaks the

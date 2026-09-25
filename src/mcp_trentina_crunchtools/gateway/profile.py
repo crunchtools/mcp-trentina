@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     SecretStr,
@@ -24,7 +25,7 @@ from pydantic import (
     model_validator,
 )
 
-from ..config import SUPPORTED_PROVIDERS
+from ..config import LEGACY_MODE_NAMES, SUPPORTED_PROVIDERS, canonical_mode
 
 logger = logging.getLogger(__name__)
 
@@ -59,31 +60,38 @@ INTERNAL_SCHEME = "internal://"
 # the box. See gateway/scope.py, which is the only place this is interpreted.
 ProfileRole = Literal["agent", "operator"]
 
+
+def _canonical_mode(value: Any) -> Any:
+    """A mode name in its current spelling; see `config.canonical_mode`."""
+    return canonical_mode(value) if isinstance(value, str) else value
+
+
 #: The three things a flagged payload can become, named for what the reading
-#: agent is told rather than for the mechanism that tells it. `warn` forwards
+#: agent is told rather than for the mechanism that tells it. `flag` forwards
 #: the original bytes with the caution attached, `block` refuses. Spelled
-#: `annotate`/`block` before 0.25.0. `clean` is deliberately absent — see
+#: `annotate`/`block` before 0.25.0 and `warn`/`block` before 0.35.0, which
+#: is still accepted (#200). `redact` is deliberately absent — see
 #: `_normalize_enforcement`.
-EnforcementMode = Literal["warn", "block"]
+EnforcementMode = Annotated[Literal["flag", "block"], BeforeValidator(_canonical_mode)]
 
 #: What an agent may ASK for per call, through the `trentina_mode` argument
-#: the gateway inserts into every tool (#193). `clean` is here and not in
+#: the gateway inserts into every tool (#193). `redact` is here and not in
 #: `EnforcementMode` because a call that asks for it carries its own
 #: extraction prompt; a default has none.
-ModeName = Literal["block", "warn", "clean"]
+ModeName = Annotated[Literal["block", "redact", "flag"], BeforeValidator(_canonical_mode)]
 
 
 def _normalize_enforcement(block: Any, *, key: str) -> Any:
-    """Refuse `clean` as a default, with an explanation.
+    """Refuse `redact` as a default, with an explanation.
 
-    **Why `clean` cannot be the enforcement mode.** Extraction needs a PROMPT.
+    **Why `redact` cannot be the enforcement mode.** Extraction needs a PROMPT.
     Since 0.32.0 `enforcement` is the DEFAULT an omitted `trentina_mode`
     resolves to, and a call that omitted the mode carried no prompt either —
     the agent called `jira_get_issue`, not "extract something from this". A
-    call that asks for clean does carry one (`trentina_prompt`), which is why
-    clean is available per call through `modes` and not here.
+    call that asks for redact does carry one (`trentina_prompt`), which is why
+    redact is available per call through `modes` and not here.
 
-    Pydantic would refuse it anyway, but it would say "input should be 'warn'
+    Pydantic would refuse it anyway, but it would say "input should be 'flag'
     or 'block'" — which tells an operator the word is wrong, not where the
     word belongs. A profile that fails to load is fatal, so the one line they
     get has to be the line that explains it.
@@ -91,13 +99,13 @@ def _normalize_enforcement(block: Any, *, key: str) -> Any:
     if not isinstance(block, dict):
         return block
     old = block.get("enforcement")
-    if old == "clean":
+    if isinstance(old, str) and canonical_mode(old) == "redact":
         raise ValueError(
-            f"{key}: enforcement is the DEFAULT mode, and 'clean' cannot be "
+            f"{key}: enforcement is the DEFAULT mode, and 'redact' cannot be "
             f"a default — it needs an extraction prompt, which only a call "
-            f"that asks for clean carries. Use 'warn' or 'block' here"
+            f"that asks for redact carries. Use 'flag' or 'block' here"
             + (
-                ", and add 'clean' to `modes` to let the agent choose it per call."
+                ", and add 'redact' to `modes` to let the agent choose it per call."
                 if key == "defense"
                 else "."
             )
@@ -455,6 +463,29 @@ class Backend(BaseModel):
         ),
     )
 
+    @field_validator("parameter_guards")
+    @classmethod
+    def mode_guards_in_current_spelling(
+        cls, v: dict[str, dict[str, ParameterConstraint]]
+    ) -> dict[str, dict[str, ParameterConstraint]]:
+        """A `trentina_mode` guard written with `warn` or `clean` keeps its meaning.
+
+        The guard is matched against the RESOLVED mode, which is only ever
+        spelled flag or redact since 0.35.0 (#200). Left alone, `deny:
+        [warn]` would silently stop denying anything. Exact legacy names
+        only; a glob is the operator's to rewrite.
+        """
+        for params in v.values():
+            guard = params.get("trentina_mode")
+            if guard is not None:
+                guard.allow = [
+                    _canonical_mode(p) if p in LEGACY_MODE_NAMES else p for p in guard.allow
+                ]
+                guard.deny = [
+                    _canonical_mode(p) if p in LEGACY_MODE_NAMES else p for p in guard.deny
+                ]
+        return v
+
     @field_validator("url")
     @classmethod
     def url_scheme_supported(cls, v: str) -> str:
@@ -519,11 +550,11 @@ class AlertIngressConfig(BaseModel):
         description="Resolved token (load-time only)",
     )
     enforcement: EnforcementMode = Field(
-        default="warn",
+        default="flag",
         description=(
             "What a flagged alert payload becomes. There is no agent to ask on a "
             "PUSH path — nobody is waiting to pick a mode per call — so it "
-            "is set here. Defaults to warn, which is what this path already "
+            "is set here. Defaults to flag, which is what this path already "
             "did before the setting existed: forward the payload with the "
             "caution attached. For paging that is the right default, because "
             "silently dropping a real incident on a classifier false "
@@ -604,15 +635,15 @@ class DefenseConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enforcement: EnforcementMode = Field(
-        default="warn",
+        default="flag",
         description=(
             "The DEFAULT mode: what a flagged tool response becomes when "
-            "the call does not choose one. warn: delivered intact with a "
-            "_trentina_warning attached. block: refused outright. `clean` "
+            "the call does not choose one. flag: delivered intact with a "
+            "_trentina_warning attached. block: refused outright. `redact` "
             "cannot be the default — it needs the extraction prompt a call "
             "carries; allow it per call through `modes`. "
-            "TRENTINA_ENFORCEMENT_OVERRIDE=warn is the kill switch: it "
-            "forces warn everywhere for the night block misfires."
+            "TRENTINA_ENFORCEMENT_OVERRIDE=flag is the kill switch: it "
+            "forces flag everywhere for the night block misfires."
         ),
     )
     modes: list[ModeName] | None = Field(
@@ -621,7 +652,7 @@ class DefenseConfig(BaseModel):
             "The modes this profile's agent may choose per call, on every "
             "tool of every backend. Unset means [enforcement] alone, and a "
             "single mode inserts no parameter. With more than one, the "
-            "gateway adds trentina_mode (and trentina_prompt when clean is "
+            "gateway adds trentina_mode (and trentina_prompt when redact is "
             "allowed) to each tool's schema and refuses any other value. "
             "`enforcement` is the default an omitted mode resolves to, and "
             "must be in this list."

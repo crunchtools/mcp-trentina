@@ -63,7 +63,7 @@ _DEFENSE = "mcp_trentina_crunchtools.defense"
 # TestSafeContentAlwaysUntrusted pinned the per-tool pipelines as they were
 # before the defense module existed. 0.31.0 (#187) changed that behaviour on
 # purpose, which is what this file's DIVERGENCE convention is for: an
-# allowlisted source's L2 flag no longer vanishes, clean detects before it
+# allowlisted source's L2 flag no longer vanishes, redact detects before it
 # extracts, and every family runs one judging path. The matrix they pinned is
 # now pinned, per family and mode, by tests/test_mode_parity.py,
 # test_mode_gaps.py and test_clean_and_allowlist.py.

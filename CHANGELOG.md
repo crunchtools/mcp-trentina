@@ -10,6 +10,43 @@ under that name.
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-09-24
+
+The modes take OpenRouter's names: Flag, Redact, Block (#200).
+
+### Changed (breaking)
+- **`warn` is now `flag`, `clean` is now `redact`; `block` is unchanged.**
+  These are the actions of OpenRouter's prompt-injection guardrail, which
+  many people arriving here have already configured. Everything Trentina
+  emits uses the new names: `mode` in refusals and `_trentina_warning`, the
+  `alternatives` list, the `trentina_mode` enum inserted into tool schemas,
+  the `initialize` instructions, the audit `tool` column (`flag_fetch`,
+  `redact_fetch`), and `downgraded_to_redact` (was `downgraded_to_clean`).
+  A client that parses any of these must switch to the new names.
+- **`redact` is not OpenRouter's redact.** Theirs replaces regex-matched spans
+  with `[PROMPT_INJECTION]`. L2 and L3 return verdicts, not spans, so
+  Trentina's `redact` keeps what `clean` did: an extraction L3 wrote and a
+  second L3 pass verified, never the original. See
+  `docs/quarantine-tools.md#the-names-are-openrouters`.
+- Modes are declared strictest first, OpenRouter's precedence:
+  block > redact > flag. The `initialize` instructions list them in that order.
+
+### Deprecated
+- **[DEPRECATED] `warn` and `clean` will be removed in v0.36.0. Use `flag` and
+  `redact` instead.** Until then they are accepted wherever a mode is read:
+  `trentina_mode`, `defense.modes`, `defense.enforcement`,
+  `alert_ingress.enforcement`, `TRENTINA_MODE`, `TRENTINA_MODES`,
+  `TRENTINA_ENFORCEMENT_OVERRIDE`, and the allow/deny values of a
+  `trentina_mode` parameter guard. Each is normalized on the way in and
+  logged once per process.
+
+### Migration
+- Profiles: `enforcement: warn` → `flag`; `modes: [block, clean]` →
+  `[block, redact]`. The kill switch is `TRENTINA_ENFORCEMENT_OVERRIDE=flag`.
+- A `trentina_mode` guard written with an exact `warn` or `clean` is
+  rewritten on load. A glob that relied on the old spelling (`w*`) is not,
+  and needs editing by hand.
+
 ## [0.34.1] - 2026-09-24
 
 ### Fixed

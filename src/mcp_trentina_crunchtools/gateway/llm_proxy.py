@@ -341,7 +341,7 @@ def _streaming_response(
     1..N-1 already sent. So the stream passes untouched and the ASSEMBLED
     completion is judged after the last frame — that cannot protect this
     response, but it records the flag (source_type=llm_completion), feeds
-    step 7's calibration, and is exactly what annotate mode means for a
+    step 7's calibration, and is exactly what flag mode means for a
     transport that cannot carry an annotation. When enforcement modes land,
     block profiles switch to buffer-scan-release instead: an autonomous
     agent has no human waiting on time-to-first-token.
