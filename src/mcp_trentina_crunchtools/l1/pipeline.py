@@ -92,6 +92,7 @@ class PipelineStats:
             self.hidden.elements
             + self.hidden.off_screen
             + self.hidden.same_color
+            + self.hidden.latex_invisible
             + sum(asdict(self.unicode).values())
             + sum(asdict(self.encoded).values())
             + sum(asdict(self.exfiltration).values())

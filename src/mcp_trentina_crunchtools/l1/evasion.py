@@ -1,0 +1,192 @@
+"""Evasion normalization for the directive stage: scrambles, typos, spacing.
+
+An exact pattern is beaten by writing the same words slightly wrong. Three
+tricks cover most of it, and OpenRouter's guardrail and the OWASP cheat sheet
+catch all three:
+
+* **Typoglycemia** — first and last letters fixed, middle shuffled
+  (``ignroe``, ``bpyass``). A reader, human or model, still reads the word.
+* **Misspelling** — one Damerau-Levenshtein edit (``1gnore``, ``revael``).
+* **Character spacing** — ``i g n o r e  p r e v i o u s``.
+
+None of these is a detection on its own. A typo is not an attack: ``sytsem is
+down`` and ``"promt" should be "prompt"`` are ordinary text, and ``systemd`` is
+one edit from ``system``. So this module only REWRITES a line toward what it
+might have said, and the directive stage counts the line when the rewrite
+matches an exact pattern that the original did not. A typo counts only inside
+a phrase that would have been an injection spelled correctly.
+
+The one exception is typoglycemia with company: two keywords on one line,
+at least one of them scrambled (``ignroe all prevoius systme instructions``).
+A scramble is not a typing slip. Nobody shuffles the middle of a word by
+accident, twice, next to the words an injection uses.
+"""
+
+from __future__ import annotations
+
+import re
+from functools import lru_cache
+
+#: Words an injection phrase is built from. Corrections only ever produce one
+#: of these, so a misspelling of anything else is left alone.
+KEYWORDS = frozenset(
+    {
+        # verbs
+        "ignore", "disregard", "forget", "delete", "bypass", "override",
+        "skip", "reveal", "expose", "print", "output", "show", "display",
+        "leak", "repeat", "disable",
+        # qualifiers
+        "previous", "prior", "above", "earlier", "initial", "safety",
+        "security", "system", "internal", "core", "original", "hidden",
+        "secret", "developer",
+        # targets
+        "instructions", "instruction", "rules", "rule", "guidelines",
+        "guideline", "constraints", "directives", "prompt", "prompts",
+        "filters", "measures", "restrictions",
+    }
+)  # fmt: skip
+
+#: The typoglycemia targets OpenRouter and OWASP check.
+SCRAMBLE_TARGETS = frozenset(
+    {"ignore", "bypass", "override", "reveal", "delete", "system", "prompt", "instructions"}
+)
+
+# A misspelling of a word shorter than this is too cheap to make by accident
+# (`rule` → `rude`, `core` → `care`), so short keywords are only matched exactly.
+_MIN_FUZZY_LEN = 5
+
+_WORD_RE = re.compile(r"[A-Za-z0-9]+")
+# Three or more single characters separated by single spaces: `i g n o r e`,
+# and `a l l`, which a four-character floor would leave spaced.
+_SPACED_RUN_RE = re.compile(r"(?<!\S)\S(?: \S){2,}(?!\S)")
+_REPEATED_CHAR_RE = re.compile(r"(.)\1{3,}")
+
+
+def _scramble_key(word: str) -> tuple[str, str, str, int] | None:
+    if len(word) < 4:
+        return None
+    return (word[0], word[-1], "".join(sorted(word[1:-1])), len(word))
+
+
+_SCRAMBLES = {k: w for w in SCRAMBLE_TARGETS if (k := _scramble_key(w)) is not None}
+
+
+def _deletions(word: str) -> set[str]:
+    return {word[:i] + word[i + 1 :] for i in range(len(word))}
+
+
+# Deletion neighbourhoods (the SymSpell trick): two words within one edit
+# share a one-deletion variant, or one is a one-deletion variant of the other.
+# Looking a word's handful of variants up in this table is what keeps a
+# 100k-character payload from being compared against every keyword.
+_BY_DELETION: dict[str, set[str]] = {}
+for _kw in KEYWORDS:
+    if len(_kw) >= _MIN_FUZZY_LEN:
+        for _variant in _deletions(_kw) | {_kw}:
+            _BY_DELETION.setdefault(_variant, set()).add(_kw)
+
+
+def within_one_edit(a: str, b: str) -> bool:
+    """Damerau-Levenshtein distance at most 1 (adjacent transposition counts as one)."""
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        diff = [i for i in range(la) if a[i] != b[i]]
+        if len(diff) == 1:
+            return True
+        return (
+            len(diff) == 2
+            and diff[1] == diff[0] + 1
+            and a[diff[0]] == b[diff[1]]
+            and a[diff[1]] == b[diff[0]]
+        )
+    short, long_ = (a, b) if la < lb else (b, a)
+    return any(long_[:i] + long_[i + 1 :] == short for i in range(len(long_)))
+
+
+# Both are memoized per word. Ops output repeats its vocabulary heavily, and
+# the cache is bounded, so a payload of unique junk words costs a lookup miss
+# and nothing else.
+@lru_cache(maxsize=8192)
+def scrambled_keyword(word: str) -> str | None:
+    """The target ``word`` is a middle-letter scramble of, or None. Not the word itself."""
+    lowered = word.lower()
+    key = _scramble_key(lowered)
+    target = _SCRAMBLES.get(key) if key else None
+    return target if target is not None and target != lowered else None
+
+
+@lru_cache(maxsize=8192)
+def corrected_keyword(word: str) -> str | None:
+    """The keyword ``word`` misspells by one edit or a scramble, or None.
+
+    None too when the word is already a keyword, or is close to two of them
+    and so says nothing about which one was meant.
+    """
+    lowered = word.lower()
+    if lowered in KEYWORDS:
+        return None
+    scrambled = scrambled_keyword(lowered)
+    if scrambled is not None:
+        return scrambled
+    if len(lowered) < _MIN_FUZZY_LEN - 1:
+        return None
+    candidates: set[str] = set()
+    for variant in _deletions(lowered) | {lowered}:
+        candidates |= _BY_DELETION.get(variant, set())
+    # A keyword with a letter on the end is a word, not a typo: `overrides`,
+    # `systemd`, `Systems`. Correcting those turned "the system overrides the
+    # default" into `system override`.
+    matches = {
+        kw for kw in candidates if within_one_edit(lowered, kw) and not lowered.startswith(kw)
+    }
+    return matches.pop() if len(matches) == 1 else None
+
+
+def corrected_line(line: str) -> str | None:
+    """``line`` with each misspelled keyword corrected, or None if nothing was."""
+    changed = False
+
+    def fix(match: re.Match[str]) -> str:
+        nonlocal changed
+        fixed = corrected_keyword(match.group(0))
+        if fixed is None:
+            return match.group(0)
+        changed = True
+        return fixed
+
+    rewritten = _WORD_RE.sub(fix, line)
+    return rewritten if changed else None
+
+
+def scrambled_with_company(line: str) -> bool:
+    """A scrambled keyword beside at least one other keyword on the same line."""
+    scrambled = 0
+    keywords = 0
+    for match in _WORD_RE.finditer(line):
+        word = match.group(0).lower()
+        if scrambled_keyword(word) is not None:
+            scrambled += 1
+            keywords += 1
+        elif word in KEYWORDS:
+            keywords += 1
+    return scrambled >= 1 and keywords >= 2
+
+
+def collapsed_spacing(line: str) -> str | None:
+    """``line`` with character-spaced runs and long character repeats collapsed.
+
+    ``i g n o r e  p r e v i o u s`` becomes ``ignore previous``: a single space
+    inside a run joins, a wider gap stays a word break. None when the line has
+    neither trick in it.
+    """
+    spaced = _SPACED_RUN_RE.search(line) is not None
+    repeated = _REPEATED_CHAR_RE.search(line) is not None
+    if not (spaced or repeated):
+        return None
+    collapsed = _SPACED_RUN_RE.sub(lambda m: m.group(0).replace(" ", ""), line)
+    collapsed = _REPEATED_CHAR_RE.sub(r"\1", collapsed)
+    return re.sub(r"\s{2,}", " ", collapsed)
