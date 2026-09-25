@@ -1,6 +1,6 @@
 # Gatehouse — fork-safe code review + workflow protection, in ONE file.
 #
-# Drop this in your repo at .github/workflows/gatehouse.yml, add a GEMINI_API_KEY
+# Drop this in your repo at .github/workflows/gatehouse.yml, add a OPENROUTER_API_KEY
 # secret, and you get:
 #   • AI review of every PR (including from forks) — posted as a PR review
 #   • rejection of untrusted PRs that try to modify your workflow files
@@ -76,16 +76,16 @@ jobs:
   # ── 2) Review the PR diff (no checkout, BYO key) ────────────────────────────
   # The reviewer is maintained centrally in gatehouse's reusable workflow and the
   # pinned container — so security fixes reach you without copying logic around.
-  # Scope GEMINI_API_KEY to this reusable workflow so only it can read the key.
+  # Scope OPENROUTER_API_KEY to this reusable workflow so only it can read the key.
   review:
     name: Gatehouse review
     if: github.event_name == 'pull_request_target'
     permissions:
       contents: read
       pull-requests: write
-    uses: crunchtools/gatehouse/.github/workflows/review.yml@v0.8.0
+    uses: crunchtools/gatehouse/.github/workflows/review.yml@v0.9.0
     secrets:
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
   # ── 3) Every finding answered (constitution XII, v1.17.0) ──────────────────
   # Fails while any Gatehouse finding has no reply (`fixed in <sha>` or
@@ -96,4 +96,4 @@ jobs:
     if: always()
     permissions:
       pull-requests: read
-    uses: crunchtools/gatehouse/.github/workflows/triage.yml@v0.8.0
+    uses: crunchtools/gatehouse/.github/workflows/triage.yml@v0.9.0
