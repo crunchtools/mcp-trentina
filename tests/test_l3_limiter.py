@@ -437,3 +437,9 @@ class TestGoogleRetryInfo:
     def test_no_hint_anywhere(self) -> None:
         assert self._error({"error": {"message": "slow down"}}).retry_after is None
         assert self._error(["not", "a", "dict"]).retry_after is None
+
+    def test_body_that_is_not_json(self) -> None:
+        request = httpx.Request("POST", "https://example.invalid")
+        response = httpx.Response(429, content=b"<html>slow down</html>", request=request)
+        err = status_error(httpx.HTTPStatusError("throttled", request=request, response=response))
+        assert err.retry_after is None
