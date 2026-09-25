@@ -47,11 +47,24 @@ class L1Error(TrentinaError):
 
 
 class QuarantineAgentError(TrentinaError):
-    """Raised when the Q-Agent (Gemini) call fails."""
+    """Raised when the Q-Agent (Gemini) call fails.
 
-    def __init__(self, reason: str, status_code: int | None = None) -> None:
+    ``status_code`` is the provider's HTTP status, when there was one.
+    ``retry_after`` is seconds to wait before asking that provider again: the
+    driver sets it from a 429's Retry-After header, and ``limited_generate``
+    replaces it with the pause the L3 limiter will actually enforce.
+    """
+
+    def __init__(
+        self,
+        reason: str,
+        status_code: int | None = None,
+        retry_after: float | None = None,
+    ) -> None:
         super().__init__(f"Q-Agent error: {reason}")
         self.status_code = status_code
+        # Seconds the provider asked us to wait, from its Retry-After header.
+        self.retry_after = retry_after
 
 
 class BlockedSourceError(TrentinaError):

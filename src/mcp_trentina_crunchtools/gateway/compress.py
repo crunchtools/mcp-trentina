@@ -15,7 +15,9 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..database import get_all_compressions, save_compression
+from ..errors import QuarantineAgentError
 from ..quarantine.agent import resolve_profile_llm
+from ..quarantine.limiter import THROTTLE_STATUS, limited_generate
 from ..quarantine.providers import get_provider
 from .service import service_profile
 
@@ -303,7 +305,8 @@ async def _call_compress_model(
     for attempt in range(MAX_RETRIES):
         try:
             provider = _service_provider()
-            provider_result = await provider.generate(
+            provider_result = await limited_generate(
+                provider,
                 system_prompt=COMPRESS_SYSTEM_PROMPT,
                 user_content=user_content,
                 response_schema=COMPRESS_RESPONSE_SCHEMA,
@@ -313,10 +316,11 @@ async def _call_compress_model(
             parsed = json.loads(provider_result.text)
             return _parse_compress_response(parsed)
         except Exception as exc:
-            exc_msg = str(exc)
-            is_retryable = any(f"HTTP {code}" in exc_msg for code in _RETRYABLE_STATUS_CODES)
-            if is_retryable and attempt < MAX_RETRIES - 1:
-                delay = RETRY_BASE_DELAY * (2**attempt)
+            status = exc.status_code if isinstance(exc, QuarantineAgentError) else None
+            if status in _RETRYABLE_STATUS_CODES and attempt < MAX_RETRIES - 1:
+                # A 429's wait is the limiter's pause, which the next
+                # acquire already honours; only an outage needs our own.
+                delay = 0.0 if status == THROTTLE_STATUS else RETRY_BASE_DELAY * (2**attempt)
                 logger.info(
                     "compress: provider error, retry %d/%d in %.0fs: %s",
                     attempt + 1,

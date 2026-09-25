@@ -17,6 +17,7 @@ from mcp_trentina_crunchtools.gateway.ingress_defense import reset_verdict_cache
 from mcp_trentina_crunchtools.gateway.loader import reset_active_config
 from mcp_trentina_crunchtools.gateway.matrix_proxy import reset_extractors
 from mcp_trentina_crunchtools.gateway.router import reset_profile_tools_cache
+from mcp_trentina_crunchtools.quarantine.limiter import reset_limiters
 from mcp_trentina_crunchtools.quarantine.providers import reset_provider
 
 
@@ -25,6 +26,7 @@ def _reset_singletons() -> None:
     """Reset global singletons before every test."""
     breaker.reset()
     reset_provider()
+    reset_limiters()
     # A test that boots the gateway (test_logging_config) leaves an
     # ActiveConfig registered for the rest of the session. Admin tools read
     # that singleton to tell a multi-tenant gateway from a standalone server,

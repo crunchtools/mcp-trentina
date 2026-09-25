@@ -158,6 +158,10 @@ these variables control the process itself. Profile tokens
 | `CLASSIFIER_MODEL_PATH` | `/models/prompt-guard-2-86m` | Filesystem path to the ONNX classifier model. Set to `/models/prompt-guard-2-86m` by the container image. |
 | `CLASSIFIER_MAX_TOKENS` | `32768` | Max tokens the L2 classifier will scan before truncating. |
 | `CLASSIFIER_THREADS` | `4` | ONNX Runtime intra-op thread count for the L2 classifier. |
+| `TRENTINA_L2_CONCURRENCY` | `2` | L2 scans run at once. Each already uses `CLASSIFIER_THREADS` threads, so size the product to the container's `--cpus`. |
+| `TRENTINA_L3_CONCURRENCY_START` | `4` | L3 calls in flight per (provider, model) before the adaptive limiter has learned anything. It grows from here until the provider throttles. |
+| `TRENTINA_L3_CONCURRENCY_MAX` | `64` | Ceiling for the adaptive L3 limiter, per (provider, model). A safety cap, not a target. |
+| `TRENTINA_L3_THROTTLE_BUDGET` | `20` | Seconds a user-facing L3 call may spend waiting out 429s on one provider before falling back. `0` falls back at once. The boot warm-up uses 300. |
 | `QUARANTINE_DB` | `~/.local/share/mcp-trentina/trentina.db` (container: `/data/quarantine.db`) | Path to the main SQLite database (blocklist, audit log). See [Audit Log](docs/audit-log.md) and [Blocklist](docs/blocklist.md). |
 | `TRENTINA_PERIMETER_DB` | `<QUARANTINE_DB's directory>/perimeter.db` | Path to the perimeter verdict-cache database, deliberately separate from `QUARANTINE_DB`. |
 | `QUARANTINE_TRUST_CONFIG` | `~/.config/mcp-env/mcp-trentina-trust.json` | Path to the trust-level configuration JSON. See [Quarantine Tools](docs/quarantine-tools.md). |

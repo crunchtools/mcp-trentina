@@ -1,0 +1,119 @@
+"""Boot warm-up: judge every profile's tool descriptions before anyone asks (#216).
+
+On a cold perimeter store the first ``tools/list`` judges every tool
+description through all three layers, and a client times out waiting for it
+(#104). The warm-up starts that work as soon as the event loop serves,
+through the same single-flight build a client's ``tools/list`` uses
+(``router.ensure_profile_build``), so a client connecting mid-warm-up joins
+the work in flight instead of starting its own.
+
+It runs as background L3 work: user-facing scans are granted limiter slots
+first, and it may wait out a provider's throttling far longer than a user
+call would, because nobody is waiting on it.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import time
+from typing import TYPE_CHECKING, Any
+
+from ..errors import scrub_credentials
+from ..quarantine.limiter import Priority, all_limiters, l3_priority, l3_throttle_budget
+from .ingress_defense import perimeter_counts
+from .loader import get_active_config
+from .router import ensure_profile_build
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from .profile import Profile
+
+logger = logging.getLogger(__name__)
+
+# Seconds one L3 call in the warm-up may spend waiting out 429s before the
+# fallback chain moves on.
+WARMUP_THROTTLE_BUDGET = 300.0
+
+_task: asyncio.Task[None] | None = None
+
+
+async def warm_all() -> None:
+    """Build every profile's aggregate, then log one summary line."""
+    active = get_active_config()
+    if active is None:
+        return
+    priority = l3_priority.set(Priority.BACKGROUND)
+    budget = l3_throttle_budget.set(WARMUP_THROTTLE_BUDGET)
+    try:
+        await _warm(list(active.config.profiles.values()))
+    finally:
+        l3_priority.reset(priority)
+        l3_throttle_budget.reset(budget)
+
+
+async def _warm(profiles: list[Profile]) -> None:
+    judged, hits = perimeter_counts["judged"], perimeter_counts["hits"]
+    started = time.monotonic()
+    logger.info("warm-up: judging tool descriptions for %d profiles", len(profiles))
+
+    # Each build task copies this context, so its L3 calls queue as
+    # background work. A client that joins one mid-flight shares that.
+    results = await asyncio.gather(
+        *(ensure_profile_build(p) for p in profiles), return_exceptions=True
+    )
+    tools = 0
+    for profile, outcome in zip(profiles, results, strict=True):
+        if isinstance(outcome, BaseException):
+            # Scrubbed: a provider error can carry the request, and the
+            # request can carry a key.
+            logger.warning(
+                "warm-up: profile=%s failed: %s: %s",
+                profile.name,
+                type(outcome).__name__,
+                scrub_credentials(str(outcome)),
+            )
+        else:
+            tools += len(outcome)
+
+    logger.info(
+        "warm-up: done in %.1fs — profiles=%d tools=%d judged=%d cached=%d l3=%s",
+        time.monotonic() - started,
+        len(profiles),
+        tools,
+        perimeter_counts["judged"] - judged,
+        perimeter_counts["hits"] - hits,
+        _limiter_summary(),
+    )
+
+
+def _limiter_summary() -> str:
+    snaps: list[dict[str, Any]] = [lim.snapshot() for lim in all_limiters()]
+    if not snaps:
+        return "idle"
+    return ",".join(f"{s['judge']}(limit={s['limit']},throttles={s['throttles']})" for s in snaps)
+
+
+@contextlib.asynccontextmanager
+async def trentina_lifespan() -> AsyncIterator[dict[str, Any]]:
+    """FastMCP lifespan: start the warm-up once serving begins; stop it on exit.
+
+    Standalone (no gateway) there is nothing to warm, and this does nothing.
+    FastMCP ref-counts its lifespan, but the module-level task still guards
+    against a second warm-up if it is ever entered twice.
+    """
+    global _task
+    started_here = False
+    if get_active_config() is not None and _task is None:
+        _task = asyncio.create_task(warm_all(), name="trentina-warmup")
+        started_here = True
+    try:
+        yield {}
+    finally:
+        if started_here and _task is not None:
+            _task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await _task
+            _task = None

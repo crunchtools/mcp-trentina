@@ -43,6 +43,12 @@ uv run mcp-trentina-crunchtools
 - `CLASSIFIER_MAX_TOKENS` — Max tokens L2 will scan; 0 disables the cap (default: 32768)
 - `CLASSIFIER_THREADS` — ONNX intra-op threads; 0 uses the ONNX default of one per core (default: 4).
   Set it to match the container's `--cpus`; threads beyond that quota contend and slow scans down.
+- `TRENTINA_L2_CONCURRENCY` — L2 scans at once (default 2); each uses `CLASSIFIER_THREADS`.
+- `TRENTINA_L3_CONCURRENCY_START` / `TRENTINA_L3_CONCURRENCY_MAX` — the adaptive
+  L3 limiter's starting point and ceiling per (provider, model) (4 / 64). See
+  `quarantine/limiter.py`: it grows until the provider throttles, then AIMD.
+- `TRENTINA_L3_THROTTLE_BUDGET` — seconds a user-facing L3 call waits out 429s
+  on one provider before falling back (default 20; the boot warm-up uses 300).
 
 ## onnxruntime telemetry
 
@@ -56,6 +62,16 @@ session file at `/tmp/.ses`. Disabling leaves only the `/sys/class/drm` and
 The same code path causes an import-time segfault in a shell-less image (see
 the Containerfile's `/etc/machine-id` note). Both mitigations are in place;
 either alone prevents the crash.
+
+## Boot warm-up and L3 pacing (#216)
+
+`gateway/warmup.py` runs from the FastMCP lifespan and builds every profile's
+aggregate through `router.ensure_profile_build`, the same single-flight task a
+client's `tools/list` joins. Descriptions within a backend are judged
+concurrently (`scan_tool_list`); what paces them is the per-judge
+`AdaptiveLimiter` wrapped around every `provider.generate` call via
+`limited_generate`. Call `generate` through `limited_generate`, never
+directly: a bare call is invisible to the limiter and competes with it blind.
 
 ## Endpoints
 
