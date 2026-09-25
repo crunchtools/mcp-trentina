@@ -28,7 +28,8 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from enum import Enum
+from typing import TYPE_CHECKING
 
 from ..config import get_config
 from .context import _current_profile
@@ -63,11 +64,16 @@ def service_profile() -> Profile | None:
     return find_operator(active.config.profiles) if active is not None else None
 
 
-_UNRESOLVED: Any = object()
+class _Unresolved(Enum):
+    """``service_context``'s default: "resolve the operator yourself"."""
+
+    TOKEN = 0
 
 
 @contextmanager
-def service_context(operator: Profile | None = _UNRESOLVED) -> Iterator[Profile | None]:
+def service_context(
+    operator: Profile | _Unresolved | None = _Unresolved.TOKEN,
+) -> Iterator[Profile | None]:
     """Run the enclosed model calls as the service identity.
 
     Binds the operator profile for the block and yields it. With no operator
@@ -79,7 +85,7 @@ def service_context(operator: Profile | None = _UNRESOLVED) -> Iterator[Profile 
     would let a reload between the two file a verdict under one judge that
     another one reached.
     """
-    if operator is _UNRESOLVED:
+    if isinstance(operator, _Unresolved):
         operator = service_profile()
     token = _current_profile.set(operator)
     try:
