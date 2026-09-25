@@ -33,6 +33,22 @@ Treat it as a temporary migration aid: anything reaching Trentina through it
 is not inspected, not allowlisted and not audited. Migrate consumers to
 `/gateway/<profile>/mcp` and unset the variable.
 
+### Sessions and restarts
+
+`initialize` issues an `Mcp-Session-Id`. Sessions live in memory, so every
+gateway restart ends all of them. A client that sends a session id the gateway
+no longer holds gets a `404` whose body is a JSON-RPC error: code `-32001`, and
+a message saying why (TTL expiry, eviction, teardown, or "never issued by this
+gateway process") and telling it to re-initialize. An `initialize` that still
+carries the stale header is accepted and gets a new session. A client that
+recovers on its own therefore never needs a human after a deploy.
+
+Claude Code re-initializes on a `404` to a POST, so a stale session is
+invisible to it. If a client reports "timed out" right after a restart, the
+session isn't the cause. Look at how long the first `tools/list` took: a cold
+perimeter store makes that call judge every tool description (see the startup
+`caches loaded` line).
+
 ### Backend Routing
 
 When an agent calls a tool, Trentina parses the namespaced tool name to determine which backend handles it:
