@@ -10,6 +10,13 @@ under that name.
 
 ## [Unreleased]
 
+## [0.34.1] - 2026-09-24
+
+### Fixed
+- **The mode instructions read as three modes, not four.** warn's text
+  carried its own semicolon, the separator between modes, so on lotor it
+  split into two clauses and clean's "instead" attached to warn.
+
 ## [0.34.0] - 2026-09-24
 
 ### Changed (schema contract)
