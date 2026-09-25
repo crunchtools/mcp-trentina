@@ -122,9 +122,11 @@ _NEGATIVE_OFFSET_PATTERNS = (
     "top: -",
 )
 
-# `style="..."` / `style='...'`. Both alternatives are `[^quote]*`, which
-# cannot backtrack catastrophically on hostile input.
-_STYLE_ATTR_RE = re.compile(r"""style\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE)
+# `style="..."`, `style='...'` or unquoted `style=display:none`. Every
+# alternative is a single negated class, which cannot backtrack
+# catastrophically on hostile input.
+_ATTR_VALUE = r"""\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>=`]+))"""
+_STYLE_ATTR_RE = re.compile(r"style" + _ATTR_VALUE, re.IGNORECASE)
 
 # The bare `hidden` boolean attribute: `<div hidden>`, `<div hidden="">`,
 # `<div hidden/>`. Requires a preceding tag open so the English word "hidden"
@@ -141,6 +143,63 @@ _LATEX_INVISIBLE_RE = re.compile(
     r"|[hv]?phantom\s*\{)",
     re.IGNORECASE,
 )
+
+# `<style>` blocks and `class="..."` attributes, for hiding done by a class
+# rule rather than an inline style (#179). The block is found by its opening
+# tag and closed with `str.find`-style searches in `_style_blocks`, never with
+# one lazy `.*?` regex: that rescans to the end from every unclosed `<style`.
+_STYLE_OPEN_RE = re.compile(r"<style\b[^<>]*>", re.IGNORECASE)
+_STYLE_CLOSE_RE = re.compile(r"</style\s*>", re.IGNORECASE)
+_CLASS_ATTR_RE = re.compile(r"(?<![\w-])class" + _ATTR_VALUE, re.IGNORECASE)
+# A comment, or a string, whose close is optional: an unclosed comment runs to
+# the end and an unclosed string to the line end, as in CSS. Every match
+# consumes what it scanned, so one pass is linear on hostile input.
+_CSS_NOISE_RE = re.compile(
+    r"""/\*.*?(?:\*/|\Z)|"(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?""",
+    re.DOTALL,
+)
+# `\\6f ` (hex, one optional trailing space) or `\\x` (a literal character).
+_CSS_ESCAPE_RE = re.compile(r"\\(?:([0-9a-fA-F]{1,6})[ \t\n]?|(.))", re.DOTALL)
+_MAX_CODE_POINT = 0x10FFFF
+_SURROGATES = range(0xD800, 0xE000)
+# An escaped ASCII character that is not an identifier character (`.a\\,b`
+# names the class `a,b`) is parked here while the selector is split, so it
+# cannot act as syntax, and restored once the class name is extracted.
+_PARKED = 0xF0000
+_PARKED_RE = re.compile("[\U000f0000-\U000f007f]")
+_CLASS_NAME_RE = re.compile(r"\.([\w\-\U000f0000-\U000f007f]+)")
+# `:not(...)` names the classes an element must NOT have, so its contents go.
+# The other functional pseudo-classes are unwrapped: `:is(.h)` styles `.h`.
+_NOT_RE = re.compile(r":not\([^()]*\)", re.IGNORECASE)
+_FUNCTIONAL_RE = re.compile(r":(?:is|where|matches|-webkit-any|-moz-any|any)\(", re.IGNORECASE)
+# A selector's subject is its last compound: `.menu .tip` styles `.tip`.
+_COMBINATOR_RE = re.compile(r"[\s>+~()]+")
+_HTML_COMMENT_RE = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)
+# The properties the predicates above read; a class rule keeps no others.
+_READ_PROPERTIES = frozenset(
+    {
+        "display",
+        "visibility",
+        "opacity",
+        "clip",
+        "clip-path",
+        "font-size",
+        "position",
+        "left",
+        "top",
+        "text-indent",
+        "color",
+        "background",
+        "background-color",
+    }
+)
+# Every substring a predicate looks for; a class keeps the ones it has.
+_TRIGGERS = (
+    _HIDDEN_STYLE_PATTERNS + _OFFSCREEN_PATTERNS + _POSITION_PATTERNS + _NEGATIVE_OFFSET_PATTERNS
+)
+# Colours kept per class and property, most recent first out. Past this a
+# class has been padded; the browser shows the last value, which is kept.
+_MAX_COLORS = 8
 
 _COLOR_RE = re.compile(r"(?:^|;)\s*color\s*:\s*([^;!]+)")
 _BACKGROUND_RE = re.compile(r"(?:^|;)\s*background(?:-color)?\s*:\s*([^;!]+)")
@@ -190,14 +249,14 @@ def style_is_off_screen(style_lower: str) -> bool:
 
 def style_has_same_color(style_lower: str) -> bool:
     """Foreground colour equal to background colour — text written in ink the
-    colour of the paper."""
-    color_match = _COLOR_RE.search(style_lower)
-    bg_match = _BACKGROUND_RE.search(style_lower)
-    if not (color_match and bg_match):
-        return False
-    fg = normalize_color(color_match.group(1))
-    bg = normalize_color(bg_match.group(1))
-    return bool(fg and bg and fg == bg)
+    colour of the paper.
+
+    Any foreground against any background, not the first of each: a style
+    that sets a colour twice is judged on both (#179).
+    """
+    fgs = {normalize_color(m.group(1)) for m in _COLOR_RE.finditer(style_lower)}
+    bgs = {normalize_color(m.group(1)) for m in _BACKGROUND_RE.finditer(style_lower)}
+    return bool((fgs & bgs) - {None})
 
 
 def classify_style(style_lower: str) -> str | None:
@@ -209,7 +268,12 @@ def classify_style(style_lower: str) -> str | None:
     operator sidecar wants descriptive ones — while precedence and patterns
     stay in one place. The checks are ordered and the first match wins, which
     is what the converter's per-element ``break`` has always done.
+
+    CSS escapes are decoded first, so `display:n\\6f ne` is `display:none`
+    here as it is in the browser.
     """
+    if "\\" in style_lower:
+        style_lower = _unescape_css(style_lower).lower()
     if style_is_hidden(style_lower):
         return "hidden"
     if style_is_off_screen(style_lower):
@@ -217,6 +281,171 @@ def classify_style(style_lower: str) -> str | None:
     if style_has_same_color(style_lower):
         return "same_color"
     return None
+
+
+def _unescape_css(css: str, *, park: bool = False) -> str:
+    """Decode CSS escapes: `n\\6f ne` is `none` to a browser, and must be to
+    the predicates. An out-of-range code point becomes U+FFFD, as in CSS.
+
+    With `park`, an escape that decodes to ASCII punctuation is moved to
+    ``_PARKED`` instead, so it stays part of an identifier and never reads
+    as selector syntax.
+    """
+
+    def _char(match: re.Match[str]) -> str:
+        if match.group(2) is not None:
+            char = match.group(2)
+        else:
+            code = int(match.group(1), 16)
+            valid = 0 < code <= _MAX_CODE_POINT and code not in _SURROGATES
+            char = chr(code) if valid else "\ufffd"
+        if park and char.isascii() and not (char.isalnum() or char in "-_"):
+            return chr(_PARKED + ord(char))
+        return char
+
+    return _CSS_ESCAPE_RE.sub(_char, css)
+
+
+def _selector_classes(head: str) -> list[str]:
+    """The classes a selector list styles: each subject's, escapes decoded.
+
+    Escapes are decoded before the split, with any that decode to ASCII
+    punctuation parked outside the syntax, so `.\\68 ` is `.h` and `.a\\,b`
+    is one class, not a selector list. Parentheses left by an unwrapped
+    `:is(` read as combinators; a comma inside one splits the list early,
+    which only ever adds a class.
+    """
+    selectors = _unescape_css(head, park=True)
+    selectors = _FUNCTIONAL_RE.sub("", _NOT_RE.sub("", selectors))
+    names = []
+    for selector in selectors.split(","):
+        subject = _COMBINATOR_RE.split(selector.strip(" \t\n()"))[-1].split(":")[0]
+        names += [
+            _PARKED_RE.sub(lambda m: chr(ord(m.group(0)) - _PARKED), name)
+            for name in _CLASS_NAME_RE.findall(subject)
+        ]
+    return names
+
+
+def _style_blocks(text: str) -> list[str]:
+    """The contents of every closed `<style>` block, in linear time."""
+    blocks: list[str] = []
+    pos = 0
+    while opened := _STYLE_OPEN_RE.search(text, pos):
+        closed = _STYLE_CLOSE_RE.search(text, opened.end())
+        if closed is None:
+            break
+        blocks.append(text[opened.end() : closed.start()])
+        pos = closed.end()
+    return blocks
+
+
+@dataclass
+class ClassStyle:
+    """What one class's rules can contribute to a hiding predicate.
+
+    Only the trigger substrings and the colours, never the declarations
+    themselves, so its size is bounded however many rules name the class.
+    """
+
+    triggers: set[str] = field(default_factory=set)
+    colors: dict[str, None] = field(default_factory=dict)
+    backgrounds: dict[str, None] = field(default_factory=dict)
+
+    def add(self, prop: str, value: str) -> None:
+        """Keep what one lowercased declaration can contribute."""
+        declaration = f"{prop}:{value}"
+        self.triggers.update(t for t in _TRIGGERS if t in declaration)
+        if prop == "text-indent" and "-999" in value:
+            self.triggers.add("text-indent:-999")
+        if prop in {"color", "background", "background-color"}:
+            colors = self.colors if prop == "color" else self.backgrounds
+            hex_color = normalize_color(value.partition("!")[0])
+            if hex_color is not None:
+                colors.pop(hex_color, None)
+                colors[hex_color] = None
+                if len(colors) > _MAX_COLORS:
+                    del colors[next(iter(colors))]
+
+    def merge(self, other: ClassStyle) -> None:
+        """Fold another rule's summary in, `other`'s colours most recent."""
+        self.triggers |= other.triggers
+        for mine, theirs in ((self.colors, other.colors), (self.backgrounds, other.backgrounds)):
+            for color in theirs:
+                mine.pop(color, None)
+                mine[color] = None
+            while len(mine) > _MAX_COLORS:
+                del mine[next(iter(mine))]
+
+    def style(self) -> str:
+        """The summary as a style string for ``classify_style``."""
+        parts = sorted(self.triggers)
+        parts += [f"color:{c}" for c in self.colors]
+        parts += [f"background:{c}" for c in self.backgrounds]
+        return "; ".join(parts)
+
+
+ClassRules = dict[str, ClassStyle]
+
+
+def class_declarations(text: str) -> ClassRules:
+    """What the class rules in `text`'s `<style>` blocks can hide.
+
+    `text` is markup, whole or fragment. The result maps each class name to
+    its ``ClassStyle`` summary; ``class_style`` turns an element's classes
+    into one style string.
+
+    `<div class="h">` hidden by `.h{display:none}` carries no inline style,
+    so the inline predicates never saw it: the converter delivered its text
+    in full and this stage counted nothing (#179). ``class_style`` turns
+    these into a style string for the same predicates as an inline style.
+
+    Not a CSS engine, and deliberately not trying to be one. A hiding
+    declaration anywhere counts: a later rule, a more specific one, an
+    inline style or `@media` that would show the element again is ignored,
+    and a rule applies to every class in its selector's subject up to the
+    first pseudo-class, so `.menu .tip:hover` styles `.tip` (see
+    ``_selector_classes`` for `:is`, `:not` and escapes). Resolving the
+    cascade instead would let a page un-hide an element on paper while the
+    browser keeps it hidden. Every shortcut errs toward calling something
+    hidden, which costs the converter visible text and the risk score a
+    count; the other direction delivers an invisible payload unmarked.
+    External stylesheets are out of reach.
+    """
+    rules: ClassRules = {}
+    # A `<style>` inside an HTML comment applies to nothing.
+    for block in _style_blocks(_HTML_COMMENT_RE.sub("", text)):
+        # Split on `}` rather than matching `sel { decl }` with one regex:
+        # linear on unbalanced input, and an `@media x {` prefix lands in the
+        # selector's head, where `rpartition` discards it.
+        # Comments dropped and string contents blanked first, so neither can
+        # hide a `{`, `}` or `;` from the split.
+        skeleton = _CSS_NOISE_RE.sub(lambda m: "" if m.group(0).startswith("/*") else '""', block)
+        for chunk in skeleton.split("}"):
+            head, brace, body = chunk.rpartition("{")
+            if not brace:
+                continue
+            # Summarised once, then merged per class: the summary is bounded,
+            # so a rule with thousands of selectors and declarations costs
+            # their sum, not their product.
+            rule = ClassStyle()
+            for declaration in _unescape_css(body).lower().split(";"):
+                prop, colon, value = declaration.partition(":")
+                if colon and prop.strip() in _READ_PROPERTIES:
+                    rule.add(prop.strip(), value.strip())
+            if not (rule.triggers or rule.colors or rule.backgrounds):
+                continue
+            for name in _selector_classes(head.rpartition("{")[2]):
+                if name not in rules:
+                    rules[name] = ClassStyle()
+                rules[name].merge(rule)
+    return rules
+
+
+def class_style(class_attr: str | list[str], rules: ClassRules) -> str:
+    """The style an element's classes give it, for ``classify_style``."""
+    names = class_attr.split() if isinstance(class_attr, str) else class_attr
+    return "; ".join(rules[n].style() for n in dict.fromkeys(names) if n in rules)
 
 
 def detect_hidden_markup(text: str) -> tuple[str, HiddenStats]:
@@ -236,13 +465,26 @@ def detect_hidden_markup(text: str) -> tuple[str, HiddenStats]:
     for seen, match in enumerate(_STYLE_ATTR_RE.finditer(text)):
         if seen >= _MAX_STYLE_ATTRS:
             break
-        style = (match.group(1) or match.group(2) or "").lower()
+        style = (match.group(1) or match.group(2) or match.group(3) or "").lower()
         if not style:
             continue
         concept = classify_style(style)
         if concept is not None:
             name = concept_field[concept]
             setattr(stats, name, getattr(stats, name) + 1)
+
+    # Attribute by attribute, with no parse, so a class and an inline style on
+    # one tag are judged apart; the converter, which parses, joins them.
+    declarations = class_declarations(text)
+    if declarations:
+        for seen, match in enumerate(_CLASS_ATTR_RE.finditer(text)):
+            if seen >= _MAX_STYLE_ATTRS:
+                break
+            classes = match.group(1) or match.group(2) or match.group(3) or ""
+            concept = classify_style(class_style(classes, declarations))
+            if concept is not None:
+                name = concept_field[concept]
+                setattr(stats, name, getattr(stats, name) + 1)
 
     stats.elements += len(_HIDDEN_ATTR_RE.findall(text))
     stats.latex_invisible = len(_LATEX_INVISIBLE_RE.findall(text))

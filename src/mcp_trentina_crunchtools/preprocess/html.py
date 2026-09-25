@@ -49,7 +49,7 @@ from bs4 import BeautifulSoup, Comment, Tag
 from markdownify import markdownify
 
 from ..channels import Channel, Kind
-from ..l1.hidden import classify_style
+from ..l1.hidden import ClassRules, class_declarations, class_style, classify_style
 from .base import Cost, PreProcessContext, PreProcessResult
 
 # Past this, do not even parse. Matches structured.py: the converter refuses
@@ -70,6 +70,10 @@ class ConversionStats:
 
     The rest is tag hygiene — expected on any web page, never suspicious, and
     never part of the risk score even when it lived in ``HtmlStats``.
+
+    ``template_tags`` counts the `<template>` elements removed, nested ones
+    included. A browser never renders one, so its text is hidden content and
+    its `<style>` blocks apply to nothing (#179).
     """
 
     hidden_elements: int = field(default=0)
@@ -80,6 +84,7 @@ class ConversionStats:
     noscript_tags: int = field(default=0)
     meta_tags: int = field(default=0)
     html_comments: int = field(default=0)
+    template_tags: int = field(default=0)
 
 
 # The concepts `l1.hidden.classify_style` reports, mapped to this module's
@@ -91,20 +96,34 @@ _CONCEPT_FIELD = {
 }
 
 
-def _classify_and_remove(soup: BeautifulSoup, stats: ConversionStats) -> None:
+def _classify_and_remove(
+    soup: BeautifulSoup,
+    declarations: ClassRules,
+    stats: ConversionStats,
+) -> None:
     """Remove elements hidden from a human reader, counting what went.
 
     The predicates come from ``l1/hidden.py`` so that what is STRIPPED here
-    and what is COUNTED there are one rule with one precedence order.
+    and what is COUNTED there are one rule with one precedence order. An
+    element's style is its inline style and its classes' `<style>`-block
+    declarations together, so hiding by class is caught like hiding
+    inline (#179). Both are read, neither overrides: see
+    ``class_declarations`` for why this errs toward hidden.
     """
     for tag in list(soup.find_all(True)):
         if not isinstance(tag, Tag) or tag.attrs is None:
             continue
 
-        style = tag.get("style", "")
-        concept = (
-            classify_style(style.lower()) if isinstance(style, str) and style else None
+        inline = tag.get("style", "")
+        style = "; ".join(
+            part
+            for part in (
+                inline.lower() if isinstance(inline, str) else "",
+                class_style(tag.get("class") or [], declarations),
+            )
+            if part
         )
+        concept = classify_style(style) if style else None
         field_name = _CONCEPT_FIELD[concept] if concept else None
         if field_name is None and tag.get("hidden") is not None:
             field_name = "hidden_elements"
@@ -136,7 +155,16 @@ def to_markdown(html_content: str) -> tuple[str, ConversionStats]:
     stats = ConversionStats()
     soup = BeautifulSoup(html_content, "html.parser")
 
-    _classify_and_remove(soup, stats)
+    # A `<template>` is never rendered, text or styles, so it goes first. The
+    # class rules then come from the parsed `<style>` nodes that remain, not
+    # the raw text, so a block inside an HTML comment stays inert too. Read
+    # before `_strip_dangerous_tags` deletes them.
+    templates = soup.find_all("template")
+    stats.template_tags = len(templates)
+    for template in templates:
+        template.decompose()
+    styles = "".join(str(tag) for tag in soup.find_all("style"))
+    _classify_and_remove(soup, class_declarations(styles), stats)
     _strip_dangerous_tags(soup, stats)
 
     comments = soup.find_all(string=lambda text: isinstance(text, Comment))
@@ -180,19 +208,28 @@ class HtmlProcessor:
 
         if bytes_in > _MAX_PARSE_BYTES:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="too_large",
+                self.name,
+                self.cost,
+                payload,
+                reason="too_large",
             )
 
         # Cheap gate before spending a parse: markup contains a tag open.
         if "<" not in payload:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="not_markup",
+                self.name,
+                self.cost,
+                payload,
+                reason="not_markup",
             )
 
         text, stats, reason = await asyncio.to_thread(_convert, payload)
         if text is None:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason=reason,
+                self.name,
+                self.cost,
+                payload,
+                reason=reason,
             )
 
         return PreProcessResult(
