@@ -307,6 +307,19 @@ class TestHostileInput:
         assert stats.elements == 5_000
         assert text.count("<i") == 20_000
 
+    @pytest.mark.parametrize(
+        ("benign", "hidden"),
+        [
+            ('<i style="color:red">a</i>', '<div style="display:none">x</div>'),
+            ('<i class="a">a</i>', '<style>.h{display:none}</style><div class="h">x</div>'),
+        ],
+    )
+    def test_harmless_attributes_cannot_push_a_payload_past_the_cap(
+        self, benign: str, hidden: str
+    ) -> None:
+        _, stats = detect_hidden_markup(benign * 6_000 + hidden)
+        assert stats.elements == 1
+
     def test_unterminated_style_attribute_does_not_hang(self) -> None:
         _, stats = detect_hidden_markup('<div style="display:none' + "x" * 100_000)
         assert stats.elements == 0

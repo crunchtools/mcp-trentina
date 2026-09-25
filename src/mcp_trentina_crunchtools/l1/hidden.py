@@ -39,11 +39,12 @@ from dataclasses import dataclass, field
 
 RGB_BYTE_MASK = 0xFF
 
-# Bounded so a pathological payload cannot buy unbounded regex work. Well
-# above what any real document carries, and far above the >10 that already
+# Detections counted per scan before it stops. Far above the >10 that already
 # saturates `risk_level_for_count` at "critical", so the cap can only cost
-# precision in a count that is already maxed out.
-_MAX_STYLE_ATTRS = 5_000
+# precision in a count that is already maxed out. It caps DETECTIONS, not
+# attributes scanned: a cap on attributes let a page push its hidden element
+# past the cap with harmless ones (#179). The scan is linear either way.
+_MAX_DETECTIONS = 5_000
 
 
 @dataclass
@@ -467,9 +468,8 @@ def detect_hidden_markup(text: str) -> tuple[str, HiddenStats]:
         "same_color": "same_color",
     }
 
-    for seen, match in enumerate(_STYLE_ATTR_RE.finditer(text)):
-        if seen >= _MAX_STYLE_ATTRS:
-            break
+    found = 0
+    for match in _STYLE_ATTR_RE.finditer(text):
         # Character references decoded, as the browser does: `&#100;isplay`.
         style = html.unescape(match.group(1) or match.group(2) or match.group(3) or "").lower()
         if not style:
@@ -478,19 +478,24 @@ def detect_hidden_markup(text: str) -> tuple[str, HiddenStats]:
         if concept is not None:
             name = concept_field[concept]
             setattr(stats, name, getattr(stats, name) + 1)
+            found += 1
+            if found >= _MAX_DETECTIONS:
+                break
 
     # Attribute by attribute, with no parse, so a class and an inline style on
     # one tag are judged apart; the converter, which parses, joins them.
     declarations = class_declarations(text)
     if declarations:
-        for seen, match in enumerate(_CLASS_ATTR_RE.finditer(text)):
-            if seen >= _MAX_STYLE_ATTRS:
-                break
+        found = 0
+        for match in _CLASS_ATTR_RE.finditer(text):
             classes = html.unescape(match.group(1) or match.group(2) or match.group(3) or "")
             concept = classify_style(class_style(classes, declarations))
             if concept is not None:
                 name = concept_field[concept]
                 setattr(stats, name, getattr(stats, name) + 1)
+                found += 1
+                if found >= _MAX_DETECTIONS:
+                    break
 
     stats.elements += len(_HIDDEN_ATTR_RE.findall(text))
     stats.latex_invisible = len(_LATEX_INVISIBLE_RE.findall(text))
