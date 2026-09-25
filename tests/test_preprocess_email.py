@@ -89,7 +89,8 @@ class TestEmailReduction:
 class TestDoesNotDeleteTheWrongThing:
     async def test_prose_is_not_mistaken_for_mail(self) -> None:
         prose = "\n".join(
-            f"An ordinary sentence number {i} with no mail shape at all." for i in range(60)
+            f"An ordinary sentence number {i} with no mail shape at all."
+            for i in range(60)
         )
         result = await _run(prose)
         assert not result.applied
@@ -98,7 +99,9 @@ class TestDoesNotDeleteTheWrongThing:
 
     async def test_one_angle_bracket_does_not_qualify(self) -> None:
         """A single quoted line in prose is a citation, not a thread."""
-        payload = "\n".join([f"Ordinary line {i}." for i in range(40)] + ["> a single quoted line"])
+        payload = "\n".join(
+            [f"Ordinary line {i}." for i in range(40)] + ["> a single quoted line"]
+        )
         result = await _run(payload)
         assert not result.applied
 
@@ -167,8 +170,9 @@ class TestProperties:
         result = await _run(payload)
         before = len(payload.split("\n"))
         after = result.details["lines_out"]
-        dropped = int(result.details["quoted_lines_dropped"]) + int(
-            result.details["signature_lines_dropped"]
+        dropped = (
+            int(result.details["quoted_lines_dropped"])
+            + int(result.details["signature_lines_dropped"])
         )
         markers = int(result.details["quoted_runs_collapsed"])
         assert before - dropped + markers == after

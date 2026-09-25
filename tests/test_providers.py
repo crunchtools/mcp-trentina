@@ -70,6 +70,7 @@ SAMPLE_SCHEMA: dict[str, Any] = {
 
 @pytest.mark.asyncio
 class TestGeminiProvider:
+
     async def test_generate_returns_text(self) -> None:
         provider = GeminiProvider(api_key="test-key", model="gemini-2.5-flash-lite")
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
@@ -94,7 +95,9 @@ class TestGeminiProvider:
         url = mock_post.call_args.args[0]
         assert "super-secret-key" not in url
         assert "key=" not in url
-        assert mock_post.call_args.kwargs["headers"]["x-goog-api-key"] == ("super-secret-key")
+        assert mock_post.call_args.kwargs["headers"]["x-goog-api-key"] == (
+            "super-secret-key"
+        )
 
     async def test_generate_with_schema(self) -> None:
         provider = GeminiProvider(api_key="test-key", model="test")
@@ -126,6 +129,7 @@ class TestGeminiProvider:
 
 @pytest.mark.asyncio
 class TestOpenAIProvider:
+
     async def test_generate_returns_text(self) -> None:
         provider = OpenAIProvider(api_key="sk-test")
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
@@ -153,6 +157,7 @@ class TestOpenAIProvider:
 
 @pytest.mark.asyncio
 class TestAnthropicProvider:
+
     async def test_generate_returns_text(self) -> None:
         provider = AnthropicProvider(api_key="sk-ant-test")
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
@@ -183,6 +188,7 @@ class TestAnthropicProvider:
 
 @pytest.mark.asyncio
 class TestOllamaProvider:
+
     async def test_generate_returns_text(self) -> None:
         provider = OllamaProvider(model="qwen2.5:0.5b")
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
@@ -208,6 +214,7 @@ class TestOllamaProvider:
 
 
 class TestGetProviderFactory:
+
     def setup_method(self) -> None:
         reset_provider()
 
@@ -218,7 +225,6 @@ class TestGetProviderFactory:
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.delenv("TRENTINA_MODEL_PROVIDER", raising=False)
         from mcp_trentina_crunchtools import config as config_mod
-
         config_mod._config = None
         provider = get_provider()
         assert isinstance(provider, GeminiProvider)
@@ -228,7 +234,6 @@ class TestGetProviderFactory:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openai")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         from mcp_trentina_crunchtools import config as config_mod
-
         config_mod._config = None
         provider = get_provider()
         assert isinstance(provider, OpenAIProvider)
@@ -237,7 +242,6 @@ class TestGetProviderFactory:
     def test_unknown_provider_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "unknown")
         from mcp_trentina_crunchtools import config as config_mod
-
         config_mod._config = None
         with pytest.raises(QuarantineAgentError, match="Unknown provider"):
             get_provider()
@@ -247,21 +251,18 @@ class TestGetProviderFactory:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openai")
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         from mcp_trentina_crunchtools import config as config_mod
-
         config_mod._config = None
         with pytest.raises(QuarantineAgentError, match="OPENAI_API_KEY"):
             get_provider()
         config_mod._config = None
 
     def test_explicit_provider_name_overrides_global(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
+        self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "gemini")
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         from mcp_trentina_crunchtools import config as config_mod
-
         config_mod._config = None
         default_provider = get_provider()
         assert isinstance(default_provider, GeminiProvider)
@@ -273,7 +274,6 @@ class TestGetProviderFactory:
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         from mcp_trentina_crunchtools import config as config_mod
-
         config_mod._config = None
         p1 = get_provider("gemini")
         p2 = get_provider("gemini")
@@ -287,7 +287,6 @@ class TestGetProviderFactory:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "gemini")
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         from mcp_trentina_crunchtools import config as config_mod
-
         config_mod._config = None
         p = get_provider(None)
         assert isinstance(p, GeminiProvider)

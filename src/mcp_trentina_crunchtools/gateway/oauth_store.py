@@ -67,9 +67,7 @@ def promoted_ttl_seconds() -> int:
     Documented in README.md's environment table.
     """
     days = int_env(
-        "TRENTINA_REGISTRATION_TTL_DAYS",
-        DEFAULT_PROMOTED_TTL_DAYS,
-        minimum=1,
+        "TRENTINA_REGISTRATION_TTL_DAYS", DEFAULT_PROMOTED_TTL_DAYS, minimum=1,
     )
     return days * SECONDS_PER_DAY
 
@@ -82,9 +80,7 @@ def cull_interval_seconds() -> int:
     README.md's environment table.
     """
     return int_env(
-        "TRENTINA_OAUTH_CULL_INTERVAL",
-        DEFAULT_CULL_INTERVAL_SECONDS,
-        minimum=60,
+        "TRENTINA_OAUTH_CULL_INTERVAL", DEFAULT_CULL_INTERVAL_SECONDS, minimum=60,
     )
 
 
@@ -131,15 +127,12 @@ async def promote_registration(client_store: Any, client_id: str) -> None:
         if stored is None:
             return
         await client_store.put(
-            key=client_id,
-            value=stored,
-            ttl=promoted_ttl_seconds(),
+            key=client_id, value=stored, ttl=promoted_ttl_seconds(),
         )
     except Exception:
         logger.warning(
             "oauth-store: could not promote registration %s — it keeps its "
-            "provisional lifetime and the client will re-register",
-            client_id,
+            "provisional lifetime and the client will re-register", client_id,
             exc_info=True,
         )
         return
@@ -163,22 +156,18 @@ async def mark_provisional(client_store: Any, client_id: str) -> None:
         if stored is None:
             return
         await client_store.put(
-            key=client_id,
-            value=stored,
-            ttl=PROVISIONAL_TTL_SECONDS,
+            key=client_id, value=stored, ttl=PROVISIONAL_TTL_SECONDS,
         )
     except Exception:
         logger.warning(
             "oauth-store: could not set a provisional lifetime on "
-            "registration %s — it will not expire on its own",
-            client_id,
+            "registration %s — it will not expire on its own", client_id,
             exc_info=True,
         )
         return
 
 
 if TYPE_CHECKING:
-
     class _ExchangeHost:
         """The slice of ``OAuthProxy`` that :class:`PromoteOnExchange` uses.
 
@@ -213,7 +202,9 @@ class PromoteOnExchange(_ExchangeHost):
     Must precede the provider in the MRO, or these ``super()`` calls never run.
     """
 
-    async def exchange_authorization_code(self, client: Any, authorization_code: Any) -> Any:
+    async def exchange_authorization_code(
+        self, client: Any, authorization_code: Any
+    ) -> Any:
         """Exchange the code, then promote the registration that used it.
 
         A successful exchange is the line between a client someone actually
@@ -221,7 +212,9 @@ class PromoteOnExchange(_ExchangeHost):
         Everything a registration keeps past its provisional hour, it keeps
         because of this call.
         """
-        token = await super().exchange_authorization_code(client, authorization_code)
+        token = await super().exchange_authorization_code(
+            client, authorization_code
+        )
         await promote_registration(self._client_store, client.client_id)
         return token
 
@@ -235,7 +228,9 @@ class PromoteOnExchange(_ExchangeHost):
         actively refreshing, and its next refresh would fail at ``get_client``
         with nothing in the log to say why.
         """
-        token = await super().exchange_refresh_token(client, refresh_token, scopes)
+        token = await super().exchange_refresh_token(
+            client, refresh_token, scopes
+        )
         await promote_registration(self._client_store, client.client_id)
         return token
 
@@ -287,7 +282,9 @@ def start_cull_task(storage: Any) -> None:
 
     interval = cull_interval_seconds()
     try:
-        _cull_task = asyncio.get_running_loop().create_task(_cull_forever(storage, interval))
+        _cull_task = asyncio.get_running_loop().create_task(
+            _cull_forever(storage, interval)
+        )
     except RuntimeError:
         # No running loop yet — synchronous startup, or a test. The first
         # request the OAuth routes serve starts it instead, which is the
@@ -299,8 +296,7 @@ def start_cull_task(storage: Any) -> None:
     # question gets asked. Verified on lotor at 0.27.2 — this line was missing
     # from the journal and there was no other way to tell.
     logger.warning(
-        "oauth-store: expired-record sweeper started (every %ds)",
-        interval,
+        "oauth-store: expired-record sweeper started (every %ds)", interval,
     )
 
 

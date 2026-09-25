@@ -34,7 +34,6 @@ class GatewayConfig:
     session_ttl_seconds: float = 300.0
     max_sessions_per_profile: int = 10
 
-
 logger = logging.getLogger(__name__)
 
 _ENV_REF_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
@@ -141,9 +140,7 @@ def _resolve_bearer_token(name: str, profile: Profile) -> None:
     if profile.auth is None:
         return
     profile.auth.bearer_token = _require_env(
-        name,
-        profile.auth.bearer_token_env,
-        "bearer token",
+        name, profile.auth.bearer_token_env, "bearer token",
     )
 
 
@@ -160,9 +157,7 @@ def _resolve_oauth_client_secret(name: str, profile: Profile) -> None:
     if oauth is None or oauth.client_secret_env is None:
         return
     oauth.client_secret = _require_env(
-        name,
-        oauth.client_secret_env,
-        "OAuth client secret",
+        name, oauth.client_secret_env, "OAuth client secret",
     )
 
 
@@ -181,9 +176,7 @@ def _resolve_oauth_audience(name: str, profile: Profile) -> None:
     if oauth is None or oauth.audience_env is None:
         return
     oauth.audience = _require_env(
-        name,
-        oauth.audience_env,
-        "OAuth audience",
+        name, oauth.audience_env, "OAuth audience",
     ).get_secret_value()
 
 
@@ -239,9 +232,9 @@ def _warn_on_loose_mode(path: Path, file_var: str) -> None:
         # path form as clear-text logging of sensitive data, and on this one
         # it is right for the right reason.
         logger.warning(
-            "%s names a secret file whose mode is %04o — more permissive than 0600",
-            file_var,
-            mode,
+            "%s names a secret file whose mode is %04o — more permissive "
+            "than 0600",
+            file_var, mode,
         )
 
 
@@ -271,7 +264,8 @@ def _read_secret_env(env_var: str) -> str:
             raw = path.read_text(encoding="utf-8")
         except OSError as exc:
             raise ProfileConfigError(
-                f"{file_var}: cannot read the secret file it names ({exc.strerror or exc})"
+                f"{file_var}: cannot read the secret file it names "
+                f"({exc.strerror or exc})"
             ) from exc
         _warn_on_loose_mode(path, file_var)
         return raw.strip()
@@ -299,14 +293,10 @@ def _resolve_matrix_ingress_secrets(name: str, matrix_ingress: MatrixIngressConf
     decrypt = matrix_ingress.preprocess.decrypt
     if decrypt is not None and decrypt.enabled:
         decrypt.access_token = _require_env(
-            name,
-            decrypt.access_token_env,
-            "matrix decrypt access token",
+            name, decrypt.access_token_env, "matrix decrypt access token",
         )
         decrypt.recovery_key = _require_env(
-            name,
-            decrypt.recovery_key_env,
-            "matrix decrypt recovery key",
+            name, decrypt.recovery_key_env, "matrix decrypt recovery key",
         )
         # Decode now, at load, so a mistyped key is a refused start rather
         # than a silent inability to decrypt anything in production. The
@@ -317,7 +307,8 @@ def _resolve_matrix_ingress_secrets(name: str, matrix_ingress: MatrixIngressConf
             decode_recovery_key(decrypt.recovery_key.get_secret_value())
         except RecoveryKeyError as exc:
             raise ProfileConfigError(
-                f"Profile {name!r}: {decrypt.recovery_key_env} is not a valid recovery key ({exc})"
+                f"Profile {name!r}: {decrypt.recovery_key_env} is not a valid "
+                f"recovery key ({exc})"
             ) from exc
 
 
@@ -359,7 +350,9 @@ def load_profiles(path: Path | str) -> GatewayConfig:
         raise ProfileConfigError(f"Invalid YAML in {config_path}: {exc}") from exc
 
     if not isinstance(cfg_data, dict):
-        raise ProfileConfigError(f"Profiles file {config_path} must contain a top-level mapping")
+        raise ProfileConfigError(
+            f"Profiles file {config_path} must contain a top-level mapping"
+        )
 
     profiles_section = cfg_data.get("profiles")
     if not isinstance(profiles_section, dict) or not profiles_section:
@@ -388,7 +381,9 @@ def load_profiles(path: Path | str) -> GatewayConfig:
         llm_providers=llm_section if isinstance(llm_section, dict) else {},
         matrix=matrix_section if isinstance(matrix_section, dict) else {},
         session_ttl_seconds=float(gateway_section.get("session_ttl_seconds", 300.0)),
-        max_sessions_per_profile=int(gateway_section.get("max_sessions_per_profile", 10)),
+        max_sessions_per_profile=int(
+            gateway_section.get("max_sessions_per_profile", 10)
+        ),
     )
 
 
@@ -440,7 +435,9 @@ def register_active_config(
         path=path,
         config=config,
         llm_providers=llm_providers if llm_providers is not None else {},
-        alert_route_registered=any(p.alert_ingress is not None for p in config.profiles.values()),
+        alert_route_registered=any(
+            p.alert_ingress is not None for p in config.profiles.values()
+        ),
         matrix_route_registered=bool(config.matrix.get("enabled")),
         oauth_route_registered=oauth_route_registered,
     )

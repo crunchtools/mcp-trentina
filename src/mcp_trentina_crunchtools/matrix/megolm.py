@@ -89,7 +89,9 @@ def unwrap_session_data(decryptor: Any, session_data: dict[str, Any]) -> dict[st
 def import_session(session_key_base64: str) -> Any:
     """Turn an exported room key into something that can decrypt events."""
     v = _require()
-    return v.InboundGroupSession.import_session(v.ExportedSessionKey(session_key_base64))
+    return v.InboundGroupSession.import_session(
+        v.ExportedSessionKey(session_key_base64)
+    )
 
 
 def decrypt_event(session: Any, ciphertext_base64: str) -> bytes:
@@ -101,5 +103,7 @@ def decrypt_event(session: Any, ciphertext_base64: str) -> bytes:
 
 def _require() -> Any:
     if not megolm_available() or _vodozemac is None:
-        raise RuntimeError("vodozemac is not installed; callers must check megolm_available()")
+        raise RuntimeError(
+            "vodozemac is not installed; callers must check megolm_available()"
+        )
     return _vodozemac

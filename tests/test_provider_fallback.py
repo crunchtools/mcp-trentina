@@ -30,6 +30,8 @@ def reset_config_and_providers(monkeypatch):
     reset_provider()
 
 
+
+
 class TestIsRetryable:
     def test_429_is_retryable(self):
         exc = QuarantineAgentError("rate limited", status_code=429)
@@ -72,6 +74,8 @@ class TestIsRetryable:
         assert not _is_retryable(exc)
 
 
+
+
 class TestConfigFallbackParsing:
     def test_empty_fallback_defaults_to_empty_list(self, monkeypatch):
         monkeypatch.delenv("TRENTINA_PROVIDER_FALLBACK", raising=False)
@@ -108,6 +112,8 @@ class TestConfigFallbackParsing:
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         config = get_config()
         assert config.provider_fallback == ["ollama"]
+
+
 
 
 class TestGetFallbackProvidersStandalone:
@@ -147,6 +153,7 @@ class TestGetFallbackProvidersStandalone:
         name, key = chain[0]
         assert name == "ollama"
         assert key is None
+
 
 
 FAKE_EXTRACTED = {
@@ -286,8 +293,7 @@ class TestCallWithFallback:
             patch(
                 "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
-            ),
-            pytest.raises(QuarantineAgentError, match="HTTP 400"),
+            ),pytest.raises(QuarantineAgentError, match="HTTP 400")
         ):
             await _call_with_fallback(
                 content="test content",
@@ -315,8 +321,7 @@ class TestCallWithFallback:
             patch(
                 "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
-            ),
-            pytest.raises(QuarantineAgentError, match="all providers exhausted"),
+            ),pytest.raises(QuarantineAgentError, match="all providers exhausted")
         ):
             await _call_with_fallback(
                 content="test content",
@@ -334,13 +339,10 @@ class TestCallWithFallback:
 
         gemini_mock = AsyncMock(side_effect=make_429_error())
 
-        with (
-            patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
-                new=gemini_mock,
-            ),
-            pytest.raises(QuarantineAgentError, match="all providers exhausted"),
-        ):
+        with patch(
+            "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+            new=gemini_mock,
+        ), pytest.raises(QuarantineAgentError, match="all providers exhausted"):
             await _call_with_fallback(
                 content="test content",
                 system_prompt="test prompt",
@@ -353,7 +355,9 @@ class TestCallWithFallback:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         get_config()
 
-        gemini_mock = AsyncMock(side_effect=QuarantineAgentError("Request timed out"))
+        gemini_mock = AsyncMock(
+            side_effect=QuarantineAgentError("Request timed out")
+        )
         openai_result = make_provider_result(make_good_response())
         openai_mock = AsyncMock(return_value=openai_result)
 

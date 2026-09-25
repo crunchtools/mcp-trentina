@@ -137,7 +137,6 @@ class TestThreadSafety:
             def cb(_name: str, _data: dict) -> None:
                 with lock:
                     call_count["n"] += 1
-
             bus.subscribe("e", cb)
 
         def emit_event(n: int) -> None:

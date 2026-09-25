@@ -135,7 +135,9 @@ class TestProfileLookup:
         p2.auth.bearer_token = SecretStr("t")
 
         profiles = {"alice": p1, "bob": p2}
-        affected = registry.profiles_for_backend_url("http://slack:8005/mcp", profiles)
+        affected = registry.profiles_for_backend_url(
+            "http://slack:8005/mcp", profiles
+        )
         assert affected == ["alice"]
 
     def test_no_profiles_for_unknown_url(self, registry: SessionRegistry) -> None:

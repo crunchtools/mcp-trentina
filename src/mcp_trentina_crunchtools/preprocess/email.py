@@ -184,29 +184,20 @@ class EmailProcessor:
 
         if len(lines) < _MIN_LINES:
             return PreProcessResult.declined(
-                self.name,
-                self.cost,
-                payload,
-                reason="not_line_structured",
+                self.name, self.cost, payload, reason="not_line_structured",
                 details={"lines_in": len(lines), "bytes_in": bytes_in},
             )
 
         if not _looks_like_mail(lines):
             return PreProcessResult.declined(
-                self.name,
-                self.cost,
-                payload,
-                reason="not_email",
+                self.name, self.cost, payload, reason="not_email",
             )
 
         kept, quoted_dropped, runs, signature_dropped = _collapse(lines)
 
         if not quoted_dropped and not signature_dropped:
             return PreProcessResult.declined(
-                self.name,
-                self.cost,
-                payload,
-                reason="nothing_repetitive",
+                self.name, self.cost, payload, reason="nothing_repetitive",
             )
 
         reduced = "\n".join(kept)
@@ -214,10 +205,7 @@ class EmailProcessor:
 
         if bytes_in > 0 and bytes_out >= bytes_in:
             return PreProcessResult.declined(
-                self.name,
-                self.cost,
-                payload,
-                reason="not_smaller",
+                self.name, self.cost, payload, reason="not_smaller",
                 details={
                     "would_be_bytes": bytes_out,
                     "would_be_ratio": round(bytes_out / bytes_in, 4),

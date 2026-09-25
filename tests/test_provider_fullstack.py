@@ -73,7 +73,6 @@ def _configure_provider(provider_name: str, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", provider_name)
     reset_provider()
     import mcp_trentina_crunchtools.config as config_mod
-
     config_mod._config = None
 
 

@@ -26,9 +26,8 @@ pytestmark = pytest.mark.asyncio
 
 _S = "mcp_trentina_crunchtools.preprocess.summarize"
 
-BIG_PAYLOAD = (
-    "An operational log line that resists petit because every sentence differs in words. " * 200
-)
+BIG_PAYLOAD = ("An operational log line that resists petit because every "
+               "sentence differs in words. " * 200)
 
 
 def _patch_worker(**kwargs: Any) -> Any:
@@ -38,12 +37,10 @@ def _patch_worker(**kwargs: Any) -> Any:
 class TestSummarizeProcessor:
     async def test_summarizes_large_payload(self) -> None:
         with (
-            _patch_worker(
-                return_value={
-                    "summary": "200 repetitions of one operational line.",
-                    "usage": {"input_tokens": 4000, "output_tokens": 12},
-                }
-            ) as worker,
+            _patch_worker(return_value={
+                "summary": "200 repetitions of one operational line.",
+                "usage": {"input_tokens": 4000, "output_tokens": 12},
+            }) as worker,
             patch(f"{_S}.get_config") as cfg,
         ):
             cfg.return_value.has_api_key = True

@@ -376,8 +376,12 @@ class TestL3UniqueCatches:
     async def test_l3_catches(self, payload: str) -> None:
         """Verify Q-Agent detects the injection via semantic reasoning."""
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("mcp_trentina_crunchtools.quarantine.providers.get_config") as mock_prov_config,
+            patch(
+                "mcp_trentina_crunchtools.quarantine.agent.get_config"
+            ) as mock_config,
+            patch(
+                "mcp_trentina_crunchtools.quarantine.providers.get_config"
+            ) as mock_prov_config,
             patch(
                 "httpx.AsyncClient.post",
                 new_callable=AsyncMock,
@@ -386,7 +390,9 @@ class TestL3UniqueCatches:
         ):
             for cfg in (mock_config, mock_prov_config):
                 cfg.return_value.has_api_key = True
-                cfg.return_value.api_key.get_secret_value.return_value = "test-key"
+                cfg.return_value.api_key.get_secret_value.return_value = (
+                    "test-key"
+                )
                 cfg.return_value.model = "gemini-2.5-flash-lite"
                 cfg.return_value.provider = "gemini"
 
@@ -408,8 +414,12 @@ class TestL3BenignNoFalsePositives:
     async def test_benign_not_flagged(self, content: str) -> None:
         """Normal content should not be flagged as injection."""
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("mcp_trentina_crunchtools.quarantine.providers.get_config") as mock_prov_config,
+            patch(
+                "mcp_trentina_crunchtools.quarantine.agent.get_config"
+            ) as mock_config,
+            patch(
+                "mcp_trentina_crunchtools.quarantine.providers.get_config"
+            ) as mock_prov_config,
             patch(
                 "httpx.AsyncClient.post",
                 new_callable=AsyncMock,
@@ -418,7 +428,9 @@ class TestL3BenignNoFalsePositives:
         ):
             for cfg in (mock_config, mock_prov_config):
                 cfg.return_value.has_api_key = True
-                cfg.return_value.api_key.get_secret_value.return_value = "test-key"
+                cfg.return_value.api_key.get_secret_value.return_value = (
+                    "test-key"
+                )
                 cfg.return_value.model = "gemini-2.5-flash-lite"
                 cfg.return_value.provider = "gemini"
 
@@ -447,20 +459,30 @@ class TestL3DetectorMetaAttacks:
     tests.adversarial_corpus so the two never drift.
     """
 
-    @pytest.mark.parametrize("case", _DETECTOR_META_CASES, ids=[c.id for c in _DETECTOR_META_CASES])
+    @pytest.mark.parametrize(
+        "case", _DETECTOR_META_CASES, ids=[c.id for c in _DETECTOR_META_CASES]
+    )
     def test_reaches_l3_intact(self, case: Case) -> None:
         """Meta-attacks must bypass L1 (no structural markers to strip)."""
         result = run_l1(case.payload)
         total = sum(result.stats.to_flat_dict().values())
-        assert total == 0, f"{case.id} unexpectedly stripped by L1 — it should reach L3 intact"
+        assert total == 0, (
+            f"{case.id} unexpectedly stripped by L1 — it should reach L3 intact"
+        )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("case", _DETECTOR_META_CASES, ids=[c.id for c in _DETECTOR_META_CASES])
+    @pytest.mark.parametrize(
+        "case", _DETECTOR_META_CASES, ids=[c.id for c in _DETECTOR_META_CASES]
+    )
     async def test_l3_flags_meta_attack(self, case: Case) -> None:
         """The Q-Agent must flag attacks on itself as injection."""
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("mcp_trentina_crunchtools.quarantine.providers.get_config") as mock_prov_config,
+            patch(
+                "mcp_trentina_crunchtools.quarantine.agent.get_config"
+            ) as mock_config,
+            patch(
+                "mcp_trentina_crunchtools.quarantine.providers.get_config"
+            ) as mock_prov_config,
             patch(
                 "httpx.AsyncClient.post",
                 new_callable=AsyncMock,
@@ -469,7 +491,9 @@ class TestL3DetectorMetaAttacks:
         ):
             for cfg in (mock_config, mock_prov_config):
                 cfg.return_value.has_api_key = True
-                cfg.return_value.api_key.get_secret_value.return_value = "test-key"
+                cfg.return_value.api_key.get_secret_value.return_value = (
+                    "test-key"
+                )
                 cfg.return_value.model = "gemini-2.5-flash-lite"
                 cfg.return_value.provider = "gemini"
 

@@ -110,7 +110,8 @@ class TestSecurityProperties:
         reduces by nothing — and it is preferred to silent data loss.
         """
         records = [
-            {"key": f"PROJ-{1000 + i}", "summary": "Nightly build failed"} for i in range(200)
+            {"key": f"PROJ-{1000 + i}", "summary": "Nightly build failed"}
+            for i in range(200)
         ]
         result = await _run(json.dumps(records, indent=2))
         assert not result.applied
@@ -122,7 +123,8 @@ class TestSecurityProperties:
         results. Fingerprinting the values keeps genuinely different records
         apart."""
         records = [
-            {"key": f"PROJ-{i}", "summary": f"unique problem {chr(97 + i)} here"} for i in range(26)
+            {"key": f"PROJ-{i}", "summary": f"unique problem {chr(97 + i)} here"}
+            for i in range(26)
         ]
         result = await _run(json.dumps(records, indent=2))
         assert not result.applied, "every record differs in words; nothing to collapse"

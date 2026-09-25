@@ -108,11 +108,8 @@ class SummarizeProcessor:
 
         if bytes_out / bytes_in > _MAX_RATIO:
             return PreProcessResult.declined(
-                self.name,
-                self.cost,
-                payload,
-                reason="no_reduction",
-                details=details,
+                self.name, self.cost, payload,
+                reason="no_reduction", details=details,
             )
 
         return PreProcessResult(
@@ -124,3 +121,4 @@ class SummarizeProcessor:
             bytes_out=bytes_out,
             details=details,
         )
+

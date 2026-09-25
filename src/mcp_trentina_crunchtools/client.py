@@ -14,20 +14,18 @@ FETCH_TIMEOUT = 30.0
 MAX_RESPONSE_SIZE = 5_000_000  # 5 MB
 USER_AGENT = "mcp-trentina-crunchtools/0.1.0 (security-scanner)"
 
-TEXT_CONTENT_TYPES = frozenset(
-    {
-        "application/atom+xml",
-        "application/ecmascript",
-        "application/javascript",
-        "application/json",
-        "application/ld+json",
-        "application/rss+xml",
-        "application/x-ndjson",
-        "application/xhtml+xml",
-        "application/xml",
-        "application/yaml",
-    }
-)
+TEXT_CONTENT_TYPES = frozenset({
+    "application/atom+xml",
+    "application/ecmascript",
+    "application/javascript",
+    "application/json",
+    "application/ld+json",
+    "application/rss+xml",
+    "application/x-ndjson",
+    "application/xhtml+xml",
+    "application/xml",
+    "application/yaml",
+})
 """Media types the defense pipeline can read as text.
 
 Anything outside this set — PDF, images, archives, office documents —
@@ -61,20 +59,16 @@ def _build_redirect_chain(resp: httpx.Response) -> list[dict[str, object]] | Non
         return None
     chain = []
     for hop in resp.history:
-        chain.append(
-            {
-                "url": str(hop.url),
-                "status": hop.status_code,
-                "content_type": hop.headers.get("content-type", ""),
-            }
-        )
-    chain.append(
-        {
-            "url": str(resp.url),
-            "status": resp.status_code,
-            "content_type": resp.headers.get("content-type", ""),
-        }
-    )
+        chain.append({
+            "url": str(hop.url),
+            "status": hop.status_code,
+            "content_type": hop.headers.get("content-type", ""),
+        })
+    chain.append({
+        "url": str(resp.url),
+        "status": resp.status_code,
+        "content_type": resp.headers.get("content-type", ""),
+    })
     return chain
 
 
@@ -90,21 +84,20 @@ async def fetch_url(url: str) -> tuple[str, str]:
     Raises FetchError on failure, UnsupportedContentTypeError on non-text.
     """
     try:
-        async with (
-            httpx.AsyncClient(
-                timeout=httpx.Timeout(FETCH_TIMEOUT),
-                follow_redirects=True,
-                max_redirects=5,
-                headers={"User-Agent": USER_AGENT},
-            ) as http_client,
-            http_client.stream("GET", url) as resp,
-        ):
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(FETCH_TIMEOUT),
+            follow_redirects=True,
+            max_redirects=5,
+            headers={"User-Agent": USER_AGENT},
+        ) as http_client, http_client.stream("GET", url) as resp:
             resp.raise_for_status()
 
             content_type = resp.headers.get("content-type", "text/html")
             if not _is_text_content_type(content_type):
                 redirect_chain = _build_redirect_chain(resp)
-                raise UnsupportedContentTypeError(url, content_type, redirect_chain=redirect_chain)
+                raise UnsupportedContentTypeError(
+                    url, content_type, redirect_chain=redirect_chain
+                )
 
             declared = resp.headers.get("content-length")
             if declared is not None and declared.isdigit() and int(declared) > MAX_RESPONSE_SIZE:
@@ -114,7 +107,9 @@ async def fetch_url(url: str) -> tuple[str, str]:
             async for chunk in resp.aiter_bytes():
                 buf += chunk
                 if len(buf) > MAX_RESPONSE_SIZE:
-                    raise FetchError(url, f"Response too large: exceeds {MAX_RESPONSE_SIZE} bytes")
+                    raise FetchError(
+                        url, f"Response too large: exceeds {MAX_RESPONSE_SIZE} bytes"
+                    )
 
             return bytes(buf).decode(resp.encoding or "utf-8", errors="replace"), content_type
 
