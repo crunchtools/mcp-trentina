@@ -13,6 +13,13 @@ LLM_DELIMITER_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"<\|assistant\|>", re.IGNORECASE),
     re.compile(r"<\|endoftext\|>", re.IGNORECASE),
     re.compile(r"<\|pad\|>", re.IGNORECASE),
+    # Llama 3 (#201).
+    re.compile(r"<\|(?:eot_id|start_header_id|end_header_id|begin_of_text)\|>", re.IGNORECASE),
+    # DeepSeek's fullwidth-pipe tokens. The unicode stage runs first and its
+    # NFKC folds U+FF5C to `|` (U+2581 has no compatibility form and
+    # survives), so the folded spelling is the one this stage actually sees;
+    # the fullwidth one is kept for a caller that runs the stage alone.
+    re.compile("<[|\uff5c](?:begin|end)\u2581of\u2581sentence[|\uff5c]>"),
     re.compile(r"\[INST\]", re.IGNORECASE),
     re.compile(r"\[/INST\]", re.IGNORECASE),
     re.compile(r"<<SYS>>", re.IGNORECASE),

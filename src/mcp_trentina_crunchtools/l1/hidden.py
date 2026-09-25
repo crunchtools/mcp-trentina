@@ -49,9 +49,11 @@ _MAX_STYLE_ATTRS = 5_000
 class HiddenStats:
     """Counts of content-hiding fingerprints.
 
-    All three are SUSPICIOUS and feed ``PipelineStats.suspicious_detections``,
-    flattening to ``hidden_elements``, ``hidden_off_screen`` and
-    ``hidden_same_color``.
+    All four are SUSPICIOUS and feed ``PipelineStats.suspicious_detections``,
+    flattening to ``hidden_elements``, ``hidden_off_screen``,
+    ``hidden_same_color`` and ``hidden_latex_invisible``. The last is OWASP's
+    ``$\\color{white}{\\text{...}}$``: markup of another kind, rendered by
+    KaTeX or MathJax in ink the colour of the page.
     The tag-hygiene counters that used to sit beside them (``script_tags``,
     ``style_tags``, ``meta_tags``, ``noscript_tags``, ``html_comments``) moved
     to the converter's sidecar in 0.28.0: they were never suspicious, they
@@ -62,6 +64,7 @@ class HiddenStats:
     elements: int = field(default=0)
     off_screen: int = field(default=0)
     same_color: int = field(default=0)
+    latex_invisible: int = field(default=0)
 
 
 _NAMED_COLORS: dict[str, str] = {
@@ -121,15 +124,20 @@ _NEGATIVE_OFFSET_PATTERNS = (
 
 # `style="..."` / `style='...'`. Both alternatives are `[^quote]*`, which
 # cannot backtrack catastrophically on hostile input.
-_STYLE_ATTR_RE = re.compile(
-    r"""style\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE
-)
+_STYLE_ATTR_RE = re.compile(r"""style\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE)
 
 # The bare `hidden` boolean attribute: `<div hidden>`, `<div hidden="">`,
 # `<div hidden/>`. Requires a preceding tag open so the English word "hidden"
 # in prose does not count.
-_HIDDEN_ATTR_RE = re.compile(
-    r"<[a-zA-Z][^>]*?\shidden(?=[\s/>=])", re.IGNORECASE
+_HIDDEN_ATTR_RE = re.compile(r"<[a-zA-Z][^>]*?\shidden(?=[\s/>=])", re.IGNORECASE)
+
+# `\color{white}`, `\textcolor{#fff}`, `\color{transparent}`, `\phantom{`.
+# White is assumed to be the page: that is the case the attack relies on, and
+# a dark page makes the same text visible, which is not what anyone hides.
+_LATEX_INVISIBLE_RE = re.compile(
+    r"\\(?:(?:text)?color\s*\{\s*(?:white|\#?fff(?:fff)?|transparent)\s*\}"
+    r"|[hv]?phantom\s*\{)",
+    re.IGNORECASE,
 )
 
 _COLOR_RE = re.compile(r"(?:^|;)\s*color\s*:\s*([^;!]+)")
@@ -235,4 +243,5 @@ def detect_hidden_markup(text: str) -> tuple[str, HiddenStats]:
             setattr(stats, name, getattr(stats, name) + 1)
 
     stats.elements += len(_HIDDEN_ATTR_RE.findall(text))
+    stats.latex_invisible = len(_LATEX_INVISIBLE_RE.findall(text))
     return text, stats

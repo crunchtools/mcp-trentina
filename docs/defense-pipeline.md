@@ -63,16 +63,26 @@ The defense-in-depth approach means an attack has to evade three fundamentally d
 L1 counts, and never modifies what the agent receives:
 
 - **What the agent receives** (`content`) — the caller's text, untouched. A CVE ticket, a Nagios alert, or a security mail *discusses* attacks in the words attacks use; amputating those lines destroyed exactly the content an ops agent exists to read, and destroyed the evidence before the smarter layers could judge it.
-- **A normalized copy** (`l2_input`) — the same text with obfuscation undone: zero-width characters removed, encoded blobs decoded, fake `<|im_start|>`/`[INST]` delimiters dropped, exfiltration image URLs defanged. L2 reads it *in addition to* the original whenever L1's normalizing stages fired (three zero-width characters can split Prompt Guard's tokens while L1 rates them only medium), and redact mode's extraction turn reads it.
+- **A normalized copy** (`l2_input`) — the same text with obfuscation undone: zero-width characters removed, encoded blobs decoded, fake `<|im_start|>`/`<|eot_id|>`/`[INST]` delimiters dropped, exfiltration image URLs (Markdown and HTML) defanged. L2 reads it *in addition to* the original whenever L1's normalizing stages fired (three zero-width characters can split Prompt Guard's tokens while L1 rates them only medium), and redact mode's extraction turn reads it.
 
 Detections (hidden markup, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions", and — for a directory — Python files that shadow the standard library) feed the risk score, the warning, and L3's briefing.
 
 **L1 is format-agnostic.** It scans what it is handed and makes no judgement about a payload's type. Until 0.28.0 a `looks_like_html` sniffer chose between an HTML pipeline and a text one on a leading `<!DOCTYPE` or `<html>`; an HTML *fragment* — the shape most tool output carries — matched neither, so identical bytes were defended two different ways depending on their first few characters. The fork is gone. Markup is handled in two tiers instead:
 
 - **Tier 1, conversion (`preprocess/html.py`).** Converting to Markdown does not detect hidden content, it removes the vocabulary that expresses it: Markdown has no `style` attribute, no `display:none`, no foreground/background pair. After conversion the attack class is absent rather than mitigated. The converter declines on anything it cannot parse, so it sits in the default chain and no-ops on everything that is not markup.
-- **Tier 2, fingerprints (`l1/hidden.py`).** Conversion cannot be guaranteed to have run — the agent may ask for raw bytes, the converter may decline, or the text may merely embed markup. So an ordinary L1 stage counts hiding fingerprints (`display:none`, off-screen positioning, same-colour text) on every payload and feeds the risk score.
+- **Tier 2, fingerprints (`l1/hidden.py`).** Conversion cannot be guaranteed to have run — the agent may ask for raw bytes, the converter may decline, or the text may merely embed markup. So an ordinary L1 stage counts hiding fingerprints (`display:none`, off-screen positioning, same-colour text, KaTeX `\color{white}`) on every payload and feeds the risk score.
 
-**Latency:** <10ms. **Cost:** Zero (no model calls). **Always runs.**
+#### Where these patterns come from
+
+L1's directive, control-token, encoding and image-exfiltration patterns follow OpenRouter's published [prompt-injection guardrail](https://openrouter.ai/docs/guides/features/guardrails/prompt-injection), which is derived from the [OWASP LLM Prompt Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html). OpenRouter sees a lot of injection traffic, and its list is field experience. The patterns keep OpenRouter's names (`l1/directives.py`, `PATTERNS`), so a detection can be looked up there. The KaTeX `\color{white}` fingerprint (`l1/hidden.py`) comes from OWASP alone.
+
+Evasions are handled the way OpenRouter handles them (`l1/evasion.py`): scrambled middles (`ignroe`), one-edit typos (`1gnore`) and character spacing (`i g n o r e`) are undone, and the line is counted when the rewrite matches an exact pattern that the original did not. A typo alone is never a detection. `sytsem is down`, `systemd`, `"promt" should be "prompt"` and "the system overrides the default" all stay clean. These lines are counted as `directives_evasions_detected`, apart from exact hits.
+
+Where Trentina departs from the source, it does so to cut false positives on ops output. `System:` as a line prefix matches only with a capital S, since `system:` opens ordinary log lines. An opening `<tool>`/`<function>` tag counts only at the start of a line, because documentation writes `<backend>__<tool>`. A keyword with a letter appended (`overrides`, `systemd`) is treated as a word rather than a typo. Measured on 31k lines of a host's journal, `podman`/`systemctl`/`ps` output and this repository's docs and source, the expansion added no detections (see #201).
+
+OWASP's recommended "dual-LLM" architecture, where a quarantined model reads untrusted content and a privileged one acts on structured results, is what L3 already is.
+
+**Latency:** ~55ms per 100k characters. **Cost:** Zero (no model calls). **Always runs.**
 
 ### Layer 2 — Prompt Guard 2 Classifier
 
