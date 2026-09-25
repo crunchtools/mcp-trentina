@@ -9,6 +9,7 @@ import time
 import httpx
 import pytest
 
+from mcp_trentina_crunchtools.config import get_config
 from mcp_trentina_crunchtools.errors import QuarantineAgentError
 from mcp_trentina_crunchtools.quarantine import classifier
 from mcp_trentina_crunchtools.quarantine.limiter import (
@@ -19,6 +20,7 @@ from mcp_trentina_crunchtools.quarantine.limiter import (
     limited_generate,
     limiter_for,
 )
+from mcp_trentina_crunchtools.quarantine.providers import get_provider
 from mcp_trentina_crunchtools.quarantine.providers.base import (
     Provider,
     ProviderResult,
@@ -307,3 +309,26 @@ class TestL2GateUnderCancellation:
         assert classifier._gate[1].locked()
         release.set()
         await asyncio.wait_for(second, timeout=2)
+
+
+class TestJudgeStamp:
+    @pytest.mark.parametrize(
+        ("name", "env", "model", "expected"),
+        [
+            ("gemini", "GEMINI_API_KEY", "judge-model", ("gemini", "judge-model")),
+            ("openai", "OPENAI_API_KEY", None, ("openai", "gpt-4o-mini")),
+            ("openai", "OPENAI_API_KEY", "gpt-4.1", ("openai", "gpt-4.1")),
+        ],
+    )
+    def test_get_provider_names_the_model_actually_called(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        name: str,
+        env: str,
+        model: str | None,
+        expected: tuple[str, str],
+    ) -> None:
+        monkeypatch.setenv(env, "k")
+        monkeypatch.delenv("QUARANTINE_MODEL", raising=False)
+        get_config()
+        assert get_provider(name, model=model).judge == expected

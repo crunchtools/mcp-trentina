@@ -143,7 +143,17 @@ class AdaptiveLimiter:
             raise
 
     def release(self, epoch: int, outcome: Outcome, retry_after: float | None = None) -> None:
-        """Return a slot and adjust the limit by what the request learned."""
+        """Return a slot and adjust the limit by what the request learned.
+
+        Args:
+            epoch: What ``acquire`` returned — the congestion epoch the slot
+                was granted in. A result from before the last halving does
+                not move the limit again.
+            outcome: ``OK`` counts toward growth, ``THROTTLED`` halves the
+                limit and pauses new requests, ``FAILED`` only frees the slot.
+            retry_after: For ``THROTTLED``, the provider's requested wait in
+                seconds; None means back off by the limiter's own schedule.
+        """
         self.in_flight -= 1
         if outcome is Outcome.OK and epoch == self.epoch:
             # A success that started before the last halving says nothing
