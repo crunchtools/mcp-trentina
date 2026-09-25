@@ -16,8 +16,9 @@ might have said, and the directive stage counts the line when the rewrite
 matches an exact pattern that the original did not. A typo counts only inside
 a phrase that would have been an injection spelled correctly.
 
-The one exception is typoglycemia with company: two keywords on one line,
-at least one of them scrambled (``ignroe all prevoius systme instructions``).
+The one exception is typoglycemia with company: two misspelled keywords on
+one line, at least one of them scrambled (``ignroe all prevoius systme
+instructions``).
 A scramble is not a typing slip. Nobody shuffles the middle of a word by
 accident, twice, next to the words an injection uses.
 """
@@ -182,17 +183,21 @@ def corrected_line(line: str) -> str | None:
 
 
 def scrambled_with_company(line: str) -> bool:
-    """A scrambled keyword beside at least one other keyword on the same line."""
-    scrambled = 0
-    keywords = 0
+    """Two misspelled keywords on one line, at least one of them scrambled.
+
+    Misspelled, not merely present: "check the sytsem logs for rules" is one
+    typo beside an ordinary word and stays clean, while "bpyass all safety
+    measuers" is not a typing slip.
+    """
+    misspelled = 0
+    scrambled = False
     for match in _WORD_RE.finditer(line):
-        word = match.group(0).lower()
-        if scrambled_keyword(word) is not None:
-            scrambled += 1
-            keywords += 1
-        elif word in KEYWORDS:
-            keywords += 1
-    return scrambled >= 1 and keywords >= 2
+        word = match.group(0)
+        if corrected_keyword(word) is None:
+            continue
+        misspelled += 1
+        scrambled = scrambled or scrambled_keyword(word) is not None
+    return scrambled and misspelled >= 2
 
 
 def collapsed_spacing(line: str) -> str | None:

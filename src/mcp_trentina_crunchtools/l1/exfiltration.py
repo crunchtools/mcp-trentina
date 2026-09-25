@@ -24,15 +24,13 @@ _EXFIL_PARAM_NAMES = frozenset(
 )
 
 _MD_IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-# The tag, then every `src=` inside it. Every one, because a decoy in another
-# attribute's value (`alt="x src=/safe.png"`) would otherwise stand in for the
-# real source. Suspicious if ANY is: counting a src that sits inside a quoted
-# value is over-detection on contrived markup and costs a count, never the
-# delivered bytes. `src` follows whitespace or a slash (`<img/src=...>` is
-# recovered and fetched by browsers), never a hyphen: `data-src` is a
-# lazy-load hint that is never fetched. Every class is negated up to its own
-# delimiter, so hostile markup cannot make either pattern backtrack.
-_HTML_IMAGE_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+# The tag, then every `src=` in it, any suspicious one counting: a decoy in
+# another attribute's value (`alt="x src=/safe.png"`) cannot stand in for the
+# real source. `src` follows whitespace or a slash (`<img/src=...>` is fetched)
+# but never a hyphen (`data-src` is not). Quoted values are skipped, so a `>`
+# inside one does not end the tag; the alternatives start on disjoint
+# characters, so there is nothing to backtrack between.
+_HTML_IMAGE_PATTERN = re.compile(r"""<img\b(?:[^>"']|"[^"]*"|'[^']*')*>""", re.IGNORECASE)
 _SRC_ATTR = re.compile(
     r"""[\s/]src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""",
     re.IGNORECASE,
