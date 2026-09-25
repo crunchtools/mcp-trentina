@@ -154,6 +154,54 @@ class TestStreamableHTTPPost:
         )
         assert resp2.status_code == 404
 
+    def test_a_stale_session_404_is_a_json_rpc_error(self) -> None:
+        """#104: the 404 says what happened and what to do, as JSON-RPC."""
+        _sessions, client = _make_registry_and_client()
+        resp = client.post(
+            "/alice/mcp",
+            json={"jsonrpc": "2.0", "id": 7, "method": "tools/list"},
+            headers={**AUTH, MCP_SESSION_ID_HEADER: "deadbeef" * 4},
+        )
+
+        assert resp.status_code == 404
+        assert resp.headers["content-type"].startswith("application/json")
+        body = resp.json()
+        assert body["id"] == 7
+        assert body["error"]["code"] == -32001
+        assert "never issued by this gateway process" in body["error"]["message"]
+        assert "Re-initialize" in body["error"]["message"]
+
+    def test_initialize_over_a_stale_session_starts_a_new_one(self) -> None:
+        """A client recovering from a restart must not be refused for its old header."""
+        sessions, client = _make_registry_and_client()
+        stale = "deadbeef" * 4
+        resp = client.post(
+            "/alice/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+            headers={**AUTH, MCP_SESSION_ID_HEADER: stale},
+        )
+
+        assert resp.status_code == 200
+        fresh = resp.headers[MCP_SESSION_ID_HEADER]
+        assert fresh != stale
+        assert sessions.get_session(fresh) is not None
+
+    def test_another_profiles_session_is_not_named_in_the_404(self) -> None:
+        """The scoped explanation (#137): no owner, no lifetime, for a foreign session."""
+        sessions, client = _make_registry_and_client()
+        foreign = sessions.create_session("bob")
+        sessions.delete_session(foreign)
+
+        resp = client.post(
+            "/alice/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            headers={**AUTH, MCP_SESSION_ID_HEADER: foreign},
+        )
+
+        assert resp.status_code == 404
+        assert "bob" not in resp.text
+        assert "never issued" in resp.json()["error"]["message"]
+
     def test_post_without_session_id_still_works(self) -> None:
         _, client = _make_registry_and_client()
         resp = client.post(

@@ -479,7 +479,7 @@ async def _handle_get(
             sessions.explain_missing(session_id, None),
             _client_desc(request),
         )
-        return _plain(404, "Session not found or expired")
+        return _session_gone(sessions, session_id, profile_name, None)
 
     if session.profile_name != profile_name:
         return _plain(403, "Session does not belong to this profile")
@@ -566,7 +566,7 @@ async def _handle_delete(
             sessions.explain_missing(session_id, None),
             _client_desc(request),
         )
-        return _plain(404, "Session not found or expired")
+        return _session_gone(sessions, session_id, profile_name, None)
 
     if session.profile_name != profile_name:
         return _plain(403, "Session does not belong to this profile")
@@ -626,7 +626,19 @@ async def _handle_post(
     session_id = request.headers.get(MCP_SESSION_ID_HEADER, "")
     if session_id:
         session = sessions.get_session(session_id)
-        if session is None:
+        if session is None and body.get("method") == "initialize":
+            # A client re-initializing is doing exactly what the 404 asked
+            # of it; a stale header left on that request is not a reason to
+            # refuse the recovery (#104). It gets a fresh session below.
+            logger.warning(
+                "gateway: re-initialize over stale session=%s profile=%s: %s [%s]",
+                session_id[:8],
+                profile_name,
+                sessions.explain_missing(session_id, None),
+                _client_desc(request),
+            )
+            session_id = ""
+        elif session is None:
             logger.warning(
                 "gateway: DISCONNECT — session=%s profile=%s rejected on "
                 "method=%r: %s [%s] census=%s",
@@ -637,8 +649,8 @@ async def _handle_post(
                 _client_desc(request),
                 sessions.census(),
             )
-            return _plain(404, "Session not found or expired")
-        if session.profile_name != profile_name:
+            return _session_gone(sessions, session_id, profile_name, body.get("id"))
+        elif session is not None and session.profile_name != profile_name:
             return _plain(403, "Session does not belong to this profile")
 
     try:
@@ -698,6 +710,41 @@ async def _handle_post(
         headers[MCP_SESSION_ID_HEADER] = session_id
 
     return JSONResponse(response, headers=headers)
+
+
+JSONRPC_SESSION_NOT_FOUND = -32001
+"""The code the TypeScript MCP SDK's own server sends with this 404.
+
+Clients recognize an expired session by the 404 status, not by the body.
+Claude Code re-initializes on a 404 to a POST, and deliberately does not on a
+404 to the SSE GET. So the body is for whoever reads it next: a JSON-RPC
+error, like both reference SDKs send, rather than a bare text line.
+"""
+
+
+def _session_gone(
+    sessions: SessionRegistry, session_id: str, profile_name: str, req_id: Any
+) -> JSONResponse:
+    """404 for a session this gateway no longer holds, saying why and what to do.
+
+    The explanation is scoped to the caller (#137): a session that belonged to
+    another profile reads as one this process never issued.
+    """
+    why = sessions.explain_missing(session_id, profile_name)
+    return JSONResponse(
+        {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {
+                "code": JSONRPC_SESSION_NOT_FOUND,
+                "message": (
+                    f"Session not found: {why}. Re-initialize without an "
+                    "Mcp-Session-Id header to start a new session."
+                ),
+            },
+        },
+        status_code=404,
+    )
 
 
 def _plain(status: int, text: str, *, headers: dict[str, str] | None = None) -> Response:

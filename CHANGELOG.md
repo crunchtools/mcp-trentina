@@ -10,6 +10,14 @@ under that name.
 
 ## [Unreleased]
 
+### Changed
+- **A stale session's 404 is a JSON-RPC error** (#104): code `-32001`, which
+  matches the TypeScript SDK's server, and a message that gives the cause and
+  says to re-initialize. It used to be a bare text line. The explanation is
+  scoped to the caller, so another profile's session reads as never issued.
+- **`initialize` over a stale `Mcp-Session-Id` is accepted** and issues a new
+  session, instead of being refused with the 404 that asked for it.
+
 The operator profile becomes the gateway's service identity (#138, #137).
 
 ### Changed (breaking)
