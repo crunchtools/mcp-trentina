@@ -2,8 +2,9 @@
 
 Until 0.31.0 each family carried its own copy: ``_fetch_judged``,
 ``_read_judged``, ``_content_judged``, ``_search_judged``, and four separate
-``clean_*`` bodies. The copies drifted in exactly the way copies do. redact
-ran a different pipeline from block and flag; search built its own recipe,
+``clean_*`` bodies (redact was named clean until 0.35.0). The copies drifted
+in exactly the way copies do. redact ran a different pipeline from block and
+flag; search built its own recipe,
 blocked on a private ``total_l1 >= 3`` rule, and never called L3 at all.
 
 A producer now does only what only it can: fetch the URL, read the file,
