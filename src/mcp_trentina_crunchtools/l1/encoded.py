@@ -18,7 +18,14 @@ _BASE64_PATTERN = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
 _HEX_PATTERN = re.compile(r"(?:0x|\\x)?([0-9a-f]{2}[\s,;]?){20,}", re.IGNORECASE)
 _DATA_URI_PATTERN = re.compile(r"data:text/[^;]*;base64,([A-Za-z0-9+/=]+)", re.IGNORECASE)
 
-MAX_BASE64_DECODE_LENGTH = 500
+# Decoded characters past which a base64 run is left undecoded. Was 500, with
+# no recorded reason, and that made padding a free bypass: repeat an
+# instruction until the blob clears ~700 encoded characters and it was never
+# decoded, so never detected (#179). Decode and scan are linear and cost
+# milliseconds at this size. The value matches `QUARANTINE_MAX_CONTENT`'s
+# default, the most one document delivers to L3. The cap stays as a backstop
+# for callers that hand L1 content nothing upstream has bounded.
+MAX_BASE64_DECODE_LENGTH = 100_000
 BASE64_EXPANSION_RATIO = 1.4
 
 

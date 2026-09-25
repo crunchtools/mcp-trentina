@@ -207,6 +207,14 @@ _PREFIX_PATTERNS = re.compile(
 # The only pattern that needs the previous line, so it is checked in the loop.
 _ROLE_LABEL = re.compile(r"^\s*\[?(?:system|assistant|user)\]?:", re.IGNORECASE)
 
+# A line break a reader sees as a WRAP, not a new line: Markdown's hard break
+# (two-plus trailing spaces or a trailing backslash before the newline), which
+# is how markdownify renders `<br>`, and a raw `<br>` in bytes the converter
+# never saw. Scanning per line let `ignore<br>previous instructions` evade
+# every multi-word pattern for the price of one tag (#179). A blank line is a
+# paragraph break and stays a separate unit.
+_SOFT_BREAK = re.compile(r"[ \t]{2,}\r?\n|\\\r?\n|<br\b[^<>]*>[ \t]*(?:\r?\n)?", re.IGNORECASE)
+
 
 @dataclass
 class DirectiveStats:
@@ -248,12 +256,13 @@ def strip_directives(text: str) -> tuple[str, DirectiveStats]:
 
     One detection per line, however many patterns hit it — the unit of
     suspicion is the hostile line, and counting each pattern would let a
-    single line inflate the risk score on its own.
+    single line inflate the risk score on its own. A soft break joins its
+    two halves into one line for the scan (see ``_SOFT_BREAK``).
     """
     stats = DirectiveStats()
 
     previous = ""
-    for line in text.split("\n"):
+    for line in _SOFT_BREAK.sub(" ", text).split("\n"):
         if matches_exact(line) or (previous.rstrip().endswith("]") and _ROLE_LABEL.search(line)):
             stats.directives_detected += 1
         elif _matches_evasion(line):

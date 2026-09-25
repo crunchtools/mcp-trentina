@@ -25,6 +25,24 @@ under that name.
   `TRENTINA_L3_CONCURRENCY_START` (4) and `TRENTINA_L3_CONCURRENCY_MAX` (64)
   bound it. L2 scans are capped by `TRENTINA_L2_CONCURRENCY` (2).
 
+### Fixed
+L1 detection gaps, found by adversarial testing (#179, three reported and
+first fixed by @politerealism).
+- **Hidden by a `<style>`-block class.** An element with `class="h"` hidden by
+  `.h{display:none}` carried no inline style, so the converter delivered its
+  text and L1 counted nothing. Class rules now go to the same predicates as
+  inline styles, for both stripping and counting. A hiding rule counts even
+  when a later or inline one would show the element again, because resolving
+  the cascade would let a page un-hide on paper what a browser still hides.
+- **`<template>` content is stripped by the converter.** A browser never
+  renders it, and its text used to reach the agent as visible Markdown.
+- **A `<br>` split a directive.** Directives were scanned per line, so one
+  hard break (or a raw `<br>`) put "ignore" and "previous instructions" on
+  different lines and past every multi-word pattern.
+- **Padding past the base64 cap.** Blobs over ~700 encoded characters were
+  never decoded, so repeating a payload was enough to skip detection. The cap
+  is now 100k decoded characters, the default `QUARANTINE_MAX_CONTENT`.
+
 ### Changed
 - **A 429 waits instead of failing** (#216). A throttled L3 call retries on
   the same provider once the limiter's pause ends, for up to
