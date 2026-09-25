@@ -25,9 +25,11 @@ _EXFIL_PARAM_NAMES = frozenset(
 
 _MD_IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 # Each alternative is a negated class up to its own delimiter, so hostile
-# markup cannot make this backtrack.
+# markup cannot make this backtrack. `src` must follow whitespace or a slash
+# (`<img/src=...>` is markup a browser recovers and fetches), never a hyphen:
+# `data-src` is a lazy-load hint the browser never fetches from.
 _HTML_IMAGE_PATTERN = re.compile(
-    r"""<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>""",
+    r"""<img\b[^>]*?[\s/]src\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>""",
     re.IGNORECASE,
 )
 

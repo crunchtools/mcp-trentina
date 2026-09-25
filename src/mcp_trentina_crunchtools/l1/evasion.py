@@ -63,6 +63,9 @@ _REPEATED_CHAR_RE = re.compile(r"(.)\1{3,}")
 
 
 def _scramble_key(word: str) -> tuple[str, str, str, int] | None:
+    """First letter, last letter, sorted middle, length: equal for every
+    middle-letter scramble of one word. None under four letters, where there
+    is no middle to scramble."""
     if len(word) < 4:
         return None
     return (word[0], word[-1], "".join(sorted(word[1:-1])), len(word))
@@ -78,6 +81,7 @@ _MAX_WORD_LEN = max(len(k) for k in KEYWORDS) + 1
 
 
 def _deletions(word: str) -> set[str]:
+    """Every string ``word`` becomes with one character deleted."""
     return {word[:i] + word[i + 1 :] for i in range(len(word))}
 
 

