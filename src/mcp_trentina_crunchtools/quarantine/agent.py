@@ -150,8 +150,7 @@ async def _call_with_fallback(
                 response_schema=response_schema,
                 user_prompt=user_prompt,
                 provider_name=name,
-                _api_key_override=key,
-                _bypass_profile=True,
+                api_key=key,
             )
         except QuarantineAgentError as exc:
             if not _is_retryable(exc):
@@ -175,7 +174,14 @@ async def _call_with_fallback(
     raise QuarantineAgentError(f"all providers exhausted: {[n for n, _ in chain]}") from last_exc
 
 
-async def _call_throttle_aware(**kwargs: Any) -> tuple[dict[str, Any], str]:
+async def _call_throttle_aware(
+    content: str,
+    system_prompt: str,
+    response_schema: dict[str, Any],
+    user_prompt: str | None,
+    provider_name: str,
+    api_key: SecretStr | None,
+) -> tuple[dict[str, Any], str]:
     """``_call_gemini`` on one provider, waiting out its 429s within the budget.
 
     A throttle is the provider asking for time, not failing, so the same
@@ -188,7 +194,15 @@ async def _call_throttle_aware(**kwargs: Any) -> tuple[dict[str, Any], str]:
     deadline: float | None = None
     while True:
         try:
-            return await _call_gemini(**kwargs)
+            return await _call_gemini(
+                content=content,
+                system_prompt=system_prompt,
+                response_schema=response_schema,
+                user_prompt=user_prompt,
+                provider_name=provider_name,
+                _api_key_override=api_key,
+                _bypass_profile=True,
+            )
         except QuarantineAgentError as exc:
             if exc.status_code != THROTTLE_STATUS:
                 raise
@@ -198,7 +212,7 @@ async def _call_throttle_aware(**kwargs: Any) -> tuple[dict[str, Any], str]:
                 raise
             logger.info(
                 "provider %s throttled; retrying in %.1fs",
-                kwargs.get("provider_name"),
+                provider_name,
                 exc.retry_after or 0.0,
             )
 

@@ -17,6 +17,7 @@ from mcp_trentina_crunchtools.quarantine.limiter import (
     Outcome,
     Priority,
     l3_priority,
+    l3_throttle_budget,
     limited_generate,
     limiter_for,
 )
@@ -346,3 +347,33 @@ class TestGrantedThenCancelled:
             await waiter
         assert lim.in_flight == 0
         lim.release(await asyncio.wait_for(lim.acquire(), timeout=1), Outcome.OK)
+
+
+class TestPauseRefusesQueuedCallers:
+    async def test_a_waiter_is_refused_when_a_later_pause_outlasts_its_budget(self) -> None:
+        lim = AdaptiveLimiter(JUDGE, start=1, ceiling=1)
+        held = await lim.acquire()
+        token = l3_throttle_budget.set(5.0)
+        try:
+            waiter = asyncio.ensure_future(lim.acquire())
+            await _settle()
+        finally:
+            l3_throttle_budget.reset(token)
+        # The in-flight call comes back 429 with a pause longer than 5s.
+        lim.release(held, Outcome.THROTTLED, retry_after=60.0)
+        with pytest.raises(QuarantineAgentError) as info:
+            await waiter
+        assert info.value.status_code == 429
+        assert lim.in_flight == 0
+
+    async def test_a_waiter_with_room_in_its_budget_keeps_waiting(self) -> None:
+        lim = AdaptiveLimiter(JUDGE, start=1, ceiling=1)
+        held = await lim.acquire()
+        token = l3_throttle_budget.set(300.0)
+        try:
+            waiter = asyncio.ensure_future(lim.acquire())
+            await _settle()
+        finally:
+            l3_throttle_budget.reset(token)
+        lim.release(held, Outcome.THROTTLED, retry_after=0.3)
+        await asyncio.wait_for(waiter, timeout=2)

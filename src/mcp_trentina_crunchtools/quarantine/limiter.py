@@ -112,6 +112,9 @@ class AdaptiveLimiter:
         self._waiters: dict[Priority, collections.deque[asyncio.Future[int]]] = {
             p: collections.deque() for p in Priority
         }
+        # Each queued caller's throttle budget, so a pause that begins while
+        # it waits can refuse it rather than hold it past what it allowed.
+        self._budgets: dict[asyncio.Future[int], float] = {}
 
     def _cap(self) -> int:
         return max(1, int(self.limit))
@@ -131,6 +134,7 @@ class AdaptiveLimiter:
         fut: asyncio.Future[int] = asyncio.get_running_loop().create_future()
         queue = self._waiters[l3_priority.get()]
         queue.append(fut)
+        self._budgets[fut] = throttle_budget()
         self._pump()
         try:
             return await fut
@@ -141,6 +145,8 @@ class AdaptiveLimiter:
             elif fut in queue:
                 queue.remove(fut)
             raise
+        finally:
+            self._budgets.pop(fut, None)
 
     def release(self, epoch: int, outcome: Outcome, retry_after: float | None = None) -> None:
         """Return a slot and adjust the limit by what the request learned.
@@ -190,6 +196,20 @@ class AdaptiveLimiter:
             self._cap(),
             self.resume_in(),
         )
+        self._refuse_waiters_past_budget()
+
+    def _refuse_waiters_past_budget(self) -> None:
+        """Fail queued callers whose budget the current pause outlasts."""
+        pause = self.resume_in()
+        for fut, budget in list(self._budgets.items()):
+            if pause > budget and not fut.done():
+                fut.set_exception(
+                    QuarantineAgentError(
+                        f"{self.name} paused for throttling",
+                        status_code=THROTTLE_STATUS,
+                        retry_after=pause,
+                    )
+                )
 
     def _pump(self) -> None:
         """Grant queued waiters the free slots, foreground first."""
