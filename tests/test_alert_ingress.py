@@ -389,7 +389,7 @@ class TestAlertIngressEnforcement:
         client = TestClient(_alert_app({"alpha": profile}))
         return client, calls
 
-    def test_warn_forwards_the_page_with_the_caution_attached(
+    def test_flag_forwards_the_page_with_the_caution_attached(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -398,7 +398,7 @@ class TestAlertIngressEnforcement:
         a flagged one."""
         profile = _make_profile("alpha", alert_token="tok")
         assert profile.alert_ingress is not None
-        assert profile.alert_ingress.enforcement == "warn"
+        assert profile.alert_ingress.enforcement == "flag"
         client, calls = self._flagged(monkeypatch, profile)
 
         with patch(
@@ -414,7 +414,7 @@ class TestAlertIngressEnforcement:
 
         assert resp.status_code == 200
         forwarded = json.loads(calls["content"])
-        assert forwarded["output"] == "page", "warn never modifies the payload"
+        assert forwarded["output"] == "page", "flag never modifies the payload"
         assert forwarded["_trentina_warning"]["l2_label"] == "MALICIOUS"
 
     def test_block_refuses_and_forwards_nothing(

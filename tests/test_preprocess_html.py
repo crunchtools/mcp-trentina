@@ -115,7 +115,7 @@ class TestConversion:
             '<div style="display:none">'
             '  <span class="child1">hidden child 1</span>'
             '  <a href="#" class="child2">hidden child 2</a>'
-            '  <div><p>deeply nested</p></div>'
+            "  <div><p>deeply nested</p></div>"
             "</div>"
             "<p>visible content</p>"
         )
@@ -218,7 +218,7 @@ class TestProtocol:
 
     async def test_accounts_for_what_it_removed(self) -> None:
         payload = (
-            '<p>Visible.</p>'
+            "<p>Visible.</p>"
             '<div style="display:none">a</div>'
             '<span style="color:#fff;background:#fff">b</span>'
             "<script>evil()</script><!-- c -->"

@@ -78,8 +78,6 @@ class OllamaProvider(Provider):
         except httpx.TimeoutException as exc:
             raise QuarantineAgentError("Request timed out") from exc
         except httpx.ConnectError as exc:
-            raise QuarantineAgentError(
-                f"Ollama unreachable at {self._base_url}: {exc}"
-            ) from exc
+            raise QuarantineAgentError(f"Ollama unreachable at {self._base_url}: {exc}") from exc
         except httpx.RequestError as exc:
             raise QuarantineAgentError(str(exc)) from exc

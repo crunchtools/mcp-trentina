@@ -184,13 +184,17 @@ async def _authorize(
         except OAuthForbiddenError as exc:
             logger.info(
                 "gateway: oauth forbidden profile=%s reason=%s [%s]",
-                profile.name, exc, _client_desc(request),
+                profile.name,
+                exc,
+                _client_desc(request),
             )
             return _plain(403, "Forbidden")
         except AuthError as exc:
             logger.info(
                 "gateway: oauth challenge profile=%s reason=%s [%s]",
-                profile.name, exc, _client_desc(request),
+                profile.name,
+                exc,
+                _client_desc(request),
             )
             return _oauth_challenge(profile.name, oauth, invalid_token=presented)
         else:
@@ -268,8 +272,7 @@ def _oauth_challenge(
     headers: dict[str, str] = {}
     if oauth is not None:
         metadata_url = (
-            f"{oauth.base_url}/.well-known/oauth-protected-resource"
-            f"/gateway/{profile_name}/mcp"
+            f"{oauth.base_url}/.well-known/oauth-protected-resource/gateway/{profile_name}/mcp"
         )
         challenge = f'Bearer resource_metadata="{metadata_url}"'
         if invalid_token:
@@ -351,12 +354,7 @@ def _resource_metadata(
     """
     profile_name = request.path_params.get("profile", "")
     profile = registry.get(profile_name)
-    if (
-        oauth is None
-        or profile is None
-        or profile.oauth is None
-        or not profile.oauth.enabled
-    ):
+    if oauth is None or profile is None or profile.oauth is None or not profile.oauth.enabled:
         return _plain(404, "Not Found")
     # Delegated profiles name their external issuer here; proxy profiles name
     # us. Both come from one place so the 401 challenge and this document can
@@ -369,19 +367,21 @@ def _resource_metadata(
         )
         return _plain(404, "Not Found")
     issuer, scopes = advertised
-    return JSONResponse({
-        "resource": f"{oauth.base_url}/gateway/{profile_name}/mcp",
-        # The AS identifier must match what the client discovers byte-for-byte
-        # (trailing slash included) or RFC 8414 §3.3 makes a strict client
-        # reject it — see the OAuthContext docstring. For a delegated profile
-        # that string is the external issuer, stored verbatim.
-        "authorization_servers": [issuer],
-        # Normalized to full googleapis URIs, not the shorthand — the two
-        # discovery documents must name the same scope strings or a strict
-        # client requests a scope the AS rejects.
-        "scopes_supported": list(scopes),
-        "bearer_methods_supported": ["header"],
-    })
+    return JSONResponse(
+        {
+            "resource": f"{oauth.base_url}/gateway/{profile_name}/mcp",
+            # The AS identifier must match what the client discovers byte-for-byte
+            # (trailing slash included) or RFC 8414 §3.3 makes a strict client
+            # reject it — see the OAuthContext docstring. For a delegated profile
+            # that string is the external issuer, stored verbatim.
+            "authorization_servers": [issuer],
+            # Normalized to full googleapis URIs, not the shorthand — the two
+            # discovery documents must name the same scope strings or a strict
+            # client requests a scope the AS rejects.
+            "scopes_supported": list(scopes),
+            "bearer_methods_supported": ["header"],
+        }
+    )
 
 
 def _health_payload(registry: dict[str, Profile]) -> Response:
@@ -392,11 +392,13 @@ def _health_payload(registry: dict[str, Profile]) -> Response:
     blocked.  During the 2026-08-22 incident an unbounded classifier scan
     wedged the loop for 90 minutes with no way to detect it from outside.
     """
-    return JSONResponse({
-        "status": "ok",
-        "classifier": classifier_status(),
-        "profiles": len(registry),
-    })
+    return JSONResponse(
+        {
+            "status": "ok",
+            "classifier": classifier_status(),
+            "profiles": len(registry),
+        }
+    )
 
 
 def register_with_fastmcp(
@@ -413,6 +415,7 @@ def register_with_fastmcp(
         return _health_payload(registry)
 
     if oauth is not None:
+
         @mcp_server.custom_route(  # type: ignore[untyped-decorator]
             "/.well-known/oauth-protected-resource/gateway/{profile}/mcp",
             methods=["GET"],
@@ -463,8 +466,7 @@ async def _handle_get(
         # stricter client may. `Allow` is required on a 405 (RFC 9110 15.5.6).
         return _plain(
             405,
-            "Method Not Allowed: no standalone SSE stream without an "
-            "Mcp-Session-Id header",
+            "Method Not Allowed: no standalone SSE stream without an Mcp-Session-Id header",
             headers={"Allow": "POST, DELETE"},
         )
 
@@ -522,9 +524,7 @@ async def _sse_event_stream(
         yield f"retry: {SSE_RETRY_MS}\n\n"
         while True:
             try:
-                notification = await asyncio.wait_for(
-                    queue.get(), timeout=keepalive_seconds
-                )
+                notification = await asyncio.wait_for(queue.get(), timeout=keepalive_seconds)
             except TimeoutError:
                 if not sessions.is_active(session_id):
                     return
@@ -606,7 +606,8 @@ async def _handle_post(
         # discarding the cause loses the only signal that separates a flaky
         # client from someone probing the gateway.
         logger.warning(
-            "gateway: could not read request body profile=%s", profile_name,
+            "gateway: could not read request body profile=%s",
+            profile_name,
             exc_info=True,
         )
         return _plain(400, "Bad Request: cannot read body")
@@ -699,10 +700,11 @@ async def _handle_post(
     return JSONResponse(response, headers=headers)
 
 
-def _plain(
-    status: int, text: str, *, headers: dict[str, str] | None = None
-) -> Response:
+def _plain(status: int, text: str, *, headers: dict[str, str] | None = None) -> Response:
     """Build a plain-text response with the given status code."""
     return Response(
-        content=text, media_type="text/plain", status_code=status, headers=headers,
+        content=text,
+        media_type="text/plain",
+        status_code=status,
+        headers=headers,
     )

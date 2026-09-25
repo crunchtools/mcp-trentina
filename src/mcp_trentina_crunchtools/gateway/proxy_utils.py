@@ -4,13 +4,23 @@ from __future__ import annotations
 
 from urllib.parse import unquote
 
-STRIP_REQUEST_HEADERS = frozenset({
-    "host", "content-length", "transfer-encoding", "connection",
-})
+STRIP_REQUEST_HEADERS = frozenset(
+    {
+        "host",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+    }
+)
 
-STRIP_RESPONSE_HEADERS = frozenset({
-    "content-encoding", "content-length", "transfer-encoding", "connection",
-})
+STRIP_RESPONSE_HEADERS = frozenset(
+    {
+        "content-encoding",
+        "content-length",
+        "transfer-encoding",
+        "connection",
+    }
+)
 
 PLAIN_TEXT = "text/plain"
 

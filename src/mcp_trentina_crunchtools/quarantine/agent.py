@@ -420,10 +420,10 @@ async def _output_flagged(strings: dict[str, str]) -> bool:
     return False
 
 
-async def quarantine_clean(
+async def quarantine_redact(
     content: str, prompt: str, *, detection: dict[str, Any] | None
 ) -> CleanResult:
-    """Turns 2 and 3 of clean mode. Turn 1 is ``defend()``'s detection.
+    """Turns 2 and 3 of redact mode. Turn 1 is ``defend()``'s detection.
 
     Extract, check every delivered string with L1 and L2, then have a third
     L3 call verify the same strings. Any failure refuses; there is no turn 4,

@@ -17,7 +17,7 @@ which interpolates payload values into a live agent prompt with no
 detection of its own.
 
 What a flagged payload becomes is ``alert_ingress.enforcement``, and it
-defaults to ``warn``: forwarded with a ``_trentina_warning`` field attached
+defaults to ``flag``: forwarded with a ``_trentina_warning`` field attached
 rather than dropped. For paging that is the right default — silently
 dropping a real incident on a classifier false positive is worse than
 forwarding a flagged one, and the warning lands in context ahead of the
@@ -175,8 +175,8 @@ async def _handle_alert(
     )
 
     enforcement = profile.alert_ingress.enforcement
-    if flagged and enforcement != "warn":
-        # `clean` has no extraction contract on this path yet, so it refuses
+    if flagged and enforcement != "flag":
+        # `redact` has no extraction contract on this path yet, so it refuses
         # rather than forwarding the bytes it exists to replace — the same
         # reading the tool path takes.
         logger.warning(

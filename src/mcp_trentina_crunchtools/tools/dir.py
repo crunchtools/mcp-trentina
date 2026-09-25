@@ -1,4 +1,4 @@
-"""Directory tools — block_dir, warn_dir and clean_dir.
+"""Directory tools — block_dir, flag_dir and redact_dir.
 
 A directory listing is a payload like any other: file names are text an
 attacker chose, and a name can be an instruction. So the listing crosses all
@@ -9,7 +9,7 @@ every ``.py`` file (up to 500 of them) and returned a bespoke
 ``recommendation`` string. Module shadowing — a ``struct.py`` that Python
 imports instead of the real one — is now an L1 detector (``ShadowStats``)
 whose any-hit risk is critical, so a shadowed directory is refused by block,
-cleaned by clean and warned by warn through the same rule as everything
+redacted by redact and flagged by flag through the same rule as everything
 else. File CONTENTS are not read here; that is ``*_read``, one file at a
 time, all three layers.
 """
@@ -55,7 +55,7 @@ async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str
     entries = sorted((_entry(e) for e in found), key=lambda e: e["name"])
 
     blocked = is_blocked(resolved)
-    if blocked and mode is not Mode.CLEAN:
+    if blocked and mode is not Mode.REDACT:
         raise blocklisted(resolved, mode, blocked["detected_at"])
 
     listing = "\n".join(
@@ -105,11 +105,11 @@ async def block_dir(path: str) -> dict[str, Any]:
     return await list_dir(path, Mode.BLOCK)
 
 
-async def warn_dir(path: str) -> dict[str, Any]:
+async def flag_dir(path: str) -> dict[str, Any]:
     """The listing, with the verdict attached when there is one."""
-    return await list_dir(path, Mode.WARN)
+    return await list_dir(path, Mode.FLAG)
 
 
-async def clean_dir(path: str, prompt: str) -> dict[str, Any]:
+async def redact_dir(path: str, prompt: str) -> dict[str, Any]:
     """A verified L3 extraction of the listing, never the names themselves."""
-    return await list_dir(path, Mode.CLEAN, prompt)
+    return await list_dir(path, Mode.REDACT, prompt)

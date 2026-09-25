@@ -103,9 +103,7 @@ class TestFragmentRegression:
         """Markdown never matched the old sniffer at all, so an inline hidden
         span in a .md file was invisible to L1. Coverage this change adds
         rather than preserves."""
-        stats = run_l1(
-            "# Title\n\nBody text.\n\n<span style=\"display:none\">payload</span>\n"
-        ).stats
+        stats = run_l1('# Title\n\nBody text.\n\n<span style="display:none">payload</span>\n').stats
         assert stats.hidden.elements == 1
 
 
@@ -132,9 +130,7 @@ class TestRiskWiring:
         finds nothing, because the vocabulary is gone rather than missed."""
         from mcp_trentina_crunchtools.preprocess.html import to_markdown
 
-        markdown, _ = to_markdown(
-            '<p>Visible.</p><div style="display:none">payload</div>'
-        )
+        markdown, _ = to_markdown('<p>Visible.</p><div style="display:none">payload</div>')
         stats = run_l1(markdown).stats
         assert stats.suspicious_detections() == 0
 

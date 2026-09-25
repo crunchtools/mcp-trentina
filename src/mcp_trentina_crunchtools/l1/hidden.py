@@ -121,16 +121,12 @@ _NEGATIVE_OFFSET_PATTERNS = (
 
 # `style="..."` / `style='...'`. Both alternatives are `[^quote]*`, which
 # cannot backtrack catastrophically on hostile input.
-_STYLE_ATTR_RE = re.compile(
-    r"""style\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE
-)
+_STYLE_ATTR_RE = re.compile(r"""style\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE)
 
 # The bare `hidden` boolean attribute: `<div hidden>`, `<div hidden="">`,
 # `<div hidden/>`. Requires a preceding tag open so the English word "hidden"
 # in prose does not count.
-_HIDDEN_ATTR_RE = re.compile(
-    r"<[a-zA-Z][^>]*?\shidden(?=[\s/>=])", re.IGNORECASE
-)
+_HIDDEN_ATTR_RE = re.compile(r"<[a-zA-Z][^>]*?\shidden(?=[\s/>=])", re.IGNORECASE)
 
 _COLOR_RE = re.compile(r"(?:^|;)\s*color\s*:\s*([^;!]+)")
 _BACKGROUND_RE = re.compile(r"(?:^|;)\s*background(?:-color)?\s*:\s*([^;!]+)")

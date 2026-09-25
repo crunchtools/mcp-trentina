@@ -537,7 +537,7 @@ async def _assemble_call_result(
 ) -> dict[str, Any]:
     """Shape the MCP result and run it through the perimeter.
 
-    Annotate mode: remote backends only. Internal tools run the pipeline at
+    Flag mode: remote backends only. Internal tools run the pipeline at
     their own ingress — the firewall filters where content ENTERS, and
     scanning the same bytes twice is cost, not defense.
     """
@@ -627,8 +627,8 @@ async def _assemble_call_result(
                 refused["_trentina_refusal"] = decision.refusal
             return refused
         if decision.extraction is not None:
-            # clean: the verified extraction REPLACES the response, and
-            # structuredContent goes with it — clean never re-delivers what
+            # redact: the verified extraction REPLACES the response, and
+            # structuredContent goes with it — redact never re-delivers what
             # it replaced.
             result = {
                 "content": [{"type": "text", "text": decision.extraction}],
@@ -643,7 +643,7 @@ async def _assemble_call_result(
                 # A sibling key is exactly what strict MCP clients strip
                 # before the model reads the result; a text content block is
                 # the only channel guaranteed to reach it. Appended, never
-                # replacing — annotate mode delivers the content intact.
+                # replacing — flag mode delivers the content intact.
                 result["content"] = [
                     *result["content"],
                     {

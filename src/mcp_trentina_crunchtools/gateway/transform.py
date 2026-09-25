@@ -75,17 +75,11 @@ def resolve(profile: Profile, backend: Backend, tool_name: str) -> PreProcessCon
     return PreProcessConfig(
         enabled=base.enabled if override.enabled is None else override.enabled,
         strategy=base.strategy if override.strategy is None else override.strategy,
-        processors=(
-            base.processors if override.processors is None else override.processors
-        ),
+        processors=(base.processors if override.processors is None else override.processors),
         target_bytes=(
-            base.target_bytes
-            if override.target_bytes is None
-            else override.target_bytes
+            base.target_bytes if override.target_bytes is None else override.target_bytes
         ),
-        min_bytes=(
-            base.min_bytes if override.min_bytes is None else override.min_bytes
-        ),
+        min_bytes=(base.min_bytes if override.min_bytes is None else override.min_bytes),
     )
 
 
@@ -146,9 +140,7 @@ def _processors_for(
     That is the place that refuses; this is the place that copes.
     """
     try:
-        return build_preprocessors(
-            cfg, channel=Channel.TOOL, profile_name=profile_name
-        )
+        return build_preprocessors(cfg, channel=Channel.TOOL, profile_name=profile_name)
     except ProfileConfigError:
         logger.exception(
             "transform: unusable processor config for %s:%s; delivering unchanged",

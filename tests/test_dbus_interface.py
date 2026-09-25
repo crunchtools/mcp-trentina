@@ -62,7 +62,7 @@ class TestEmitRequestEvent:
         start = time.time() - 0.1
 
         emit_request_event(
-            tool="clean_fetch",
+            tool="redact_fetch",
             source="https://evil.com",
             disposition=Disposition.EXTRACTED.value,
             risk_level="high",
@@ -205,7 +205,7 @@ class TestEventDataShapes:
         bus.subscribe("request_processed", lambda _n, d: events_captured.append(d))
 
         emit_request_event(
-            tool="clean_search",
+            tool="redact_search",
             source="query:test",
             disposition=Disposition.EXTRACTED.value,
             risk_level="low",

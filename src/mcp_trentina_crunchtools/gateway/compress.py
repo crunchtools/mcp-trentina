@@ -178,12 +178,15 @@ async def precompress_all(
 
             try:
                 count = await _precompress_backend(
-                    backend_name, backend, provider_name=profile.defense.provider,
+                    backend_name,
+                    backend,
+                    provider_name=profile.defense.provider,
                 )
                 stats[backend_name] = count
             except Exception:
                 logger.warning(
-                    "compress: backend %s failed, skipping", backend_name,
+                    "compress: backend %s failed, skipping",
+                    backend_name,
                     exc_info=True,
                 )
             await asyncio.sleep(DELAY_BETWEEN_BACKENDS)
@@ -305,7 +308,10 @@ async def _call_compress_model(
                 delay = RETRY_BASE_DELAY * (2**attempt)
                 logger.info(
                     "compress: provider error, retry %d/%d in %.0fs: %s",
-                    attempt + 1, MAX_RETRIES, delay, exc,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
+                    exc,
                 )
                 await asyncio.sleep(delay)
                 continue
@@ -326,5 +332,3 @@ def _parse_compress_response(parsed: dict[str, Any]) -> list[tuple[str, str]]:
         for item in compressed_list
         if isinstance(item, dict) and "id" in item and "text" in item
     ]
-
-

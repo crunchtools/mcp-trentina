@@ -82,7 +82,7 @@ def _parse_mcp_response(resp: httpx.Response) -> dict[str, Any]:
     if resp.headers.get("content-type", "").startswith("text/event-stream"):
         for line in resp.text.splitlines():
             if line.startswith("data:"):
-                return dict(json.loads(line[len("data:"):].strip()))
+                return dict(json.loads(line[len("data:") :].strip()))
         raise AssertionError(f"no data frame in SSE response: {resp.text!r}")
     return dict(resp.json())
 
@@ -98,9 +98,7 @@ def _probe_initialize(url: str, revision: str) -> dict[str, Any]:
     rather than leaving one dangling for the rest of the module. Measured at
     ~0.02s, so it costs nothing worth saving.
     """
-    resp = httpx.post(
-        url, json=_initialize_body(revision), headers=_MCP_HEADERS, timeout=10.0
-    )
+    resp = httpx.post(url, json=_initialize_body(revision), headers=_MCP_HEADERS, timeout=10.0)
     session_id = resp.headers.get(MCP_SESSION_ID_HEADER)
     try:
         return _parse_mcp_response(resp)
@@ -161,9 +159,7 @@ def backend_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
                     if resp.status_code < 500:
                         break
                 if time.monotonic() > deadline:
-                    raise RuntimeError(
-                        f"probe backend did not come up in time:\n{_log()}"
-                    )
+                    raise RuntimeError(f"probe backend did not come up in time:\n{_log()}")
                 time.sleep(0.1)
 
             yield url
@@ -223,17 +219,13 @@ class TestRealTransportToolCall:
         assert all(b["type"] == "text" for b in result.content)
 
     async def test_round_trips_structured_content(self, backend: Backend) -> None:
-        result = await call_backend_tool(
-            "probe", backend, "structured_echo", {"text": "hi"}
-        )
+        result = await call_backend_tool("probe", backend, "structured_echo", {"text": "hi"})
 
         assert result.is_error is False
         assert result.structured_content is not None
         assert result.structured_content["echoed"] == "hi"
 
-    async def test_backend_tool_error_reports_as_is_error(
-        self, backend: Backend
-    ) -> None:
+    async def test_backend_tool_error_reports_as_is_error(self, backend: Backend) -> None:
         """A raising tool must surface as is_error, not as a transport failure.
 
         ``is_error`` is read off a real CallToolResult here. Reading the wrong
@@ -243,9 +235,7 @@ class TestRealTransportToolCall:
 
         assert result.is_error is True
 
-    async def test_unknown_tool_reports_in_band_error(
-        self, backend: Backend
-    ) -> None:
+    async def test_unknown_tool_reports_in_band_error(self, backend: Backend) -> None:
         """An unknown tool is a tool-level error, not a transport failure.
 
         MCP reports it in-band as ``is_error`` on a normal result rather than
@@ -282,9 +272,7 @@ class TestProtocolRevisionMatrix:
         self, backend: Backend, backend_url: str
     ) -> None:
         """Negotiating an old revision is not enough -- tools must still work."""
-        assert "error" not in _probe_initialize(
-            backend_url, HANDSHAKE_PROTOCOL_VERSIONS[0]
-        )
+        assert "error" not in _probe_initialize(backend_url, HANDSHAKE_PROTOCOL_VERSIONS[0])
 
         result = await call_backend_tool("probe", backend, "echo", {"text": "old"})
         assert any(b.get("text") == "echo:old" for b in result.content)
@@ -299,9 +287,7 @@ class TestOutputValidationOverride:
     validation on for the buggy backends the flag exists to tolerate.
     """
 
-    async def test_patches_a_validator_that_actually_exists(
-        self, backend: Backend
-    ) -> None:
+    async def test_patches_a_validator_that_actually_exists(self, backend: Backend) -> None:
         from mcp import ClientSession
 
         from mcp_trentina_crunchtools.gateway.backend import (
@@ -326,9 +312,7 @@ class TestOutputValidationOverride:
                 "ClientSession -- the SDK renamed the validator hook again"
             )
 
-    async def test_call_succeeds_with_validation_disabled(
-        self, backend_url: str
-    ) -> None:
+    async def test_call_succeeds_with_validation_disabled(self, backend_url: str) -> None:
         backend = Backend(
             url=backend_url,
             timeout_seconds=30.0,
@@ -336,9 +320,7 @@ class TestOutputValidationOverride:
             validate_output_schema=False,
         )
 
-        result = await call_backend_tool(
-            "probe", backend, "structured_echo", {"text": "hi"}
-        )
+        result = await call_backend_tool("probe", backend, "structured_echo", {"text": "hi"})
 
         assert result.is_error is False
         assert result.structured_content == {"echoed": "hi"}

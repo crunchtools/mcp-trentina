@@ -2,7 +2,7 @@
 
 <!-- mcp-name: io.github.crunchtools/trentina -->
 
-Trentina is a secure MCP gateway that inspects everything between your AI agents and the outside world — web content, MCP tool responses and tool definitions, Matrix messages, LLM completions, and monitoring alerts — through a [three-layer defense pipeline](docs/defense-pipeline.md) at every ingress, with per-profile enforcement (warn or block) and a full audit trail. Content is never silently modified: what your agent reads is what actually arrived, plus Trentina's verdict. (E2EE Matrix rooms are ciphertext at the gateway and outside what any proxy can defend.) Named after the 1377 quarantine system from Ragusa, where incoming ships had to anchor offshore for thirty days before anyone was allowed into the city. Same idea: keep the commerce flowing without letting something dangerous through.
+Trentina is a secure MCP gateway that inspects everything between your AI agents and the outside world — web content, MCP tool responses and tool definitions, Matrix messages, LLM completions, and monitoring alerts — through a [three-layer defense pipeline](docs/defense-pipeline.md) at every ingress, with per-profile enforcement (flag or block) and a full audit trail. Content is never silently modified: what your agent reads is what actually arrived, plus Trentina's verdict. (E2EE Matrix rooms are ciphertext at the gateway and outside what any proxy can defend.) Named after the 1377 quarantine system from Ragusa, where incoming ships had to anchor offshore for thirty days before anyone was allowed into the city. Same idea: keep the commerce flowing without letting something dangerous through.
 
 ## Capabilities
 
@@ -44,11 +44,11 @@ Every tool call through the gateway is recorded in SQLite with profile, backend,
 
 ### [Cumulative Detection Memory](docs/blocklist.md)
 
-When `block` refuses a source, Trentina records it in a SQLite blocklist, and later `block`/`warn` requests for it are refused before anything is fetched — the system remembers what it's seen before. Blocklist entries include the source URL or content hash, detection timestamp, and risk level.
+When `block` refuses a source, Trentina records it in a SQLite blocklist, and later `block`/`flag` requests for it are refused before anything is fetched — the system remembers what it's seen before. Blocklist entries include the source URL or content hash, detection timestamp, and risk level.
 
 ### [Content Tools](docs/quarantine-tools.md)
 
-Five tools — `fetch` (URL), `read` (file), `dir` (directory listing), `content` (inline text), `search` (web) — each taking a `trentina_mode` argument. Every call runs all three layers; the mode decides only what is delivered. `block` refuses flagged or incompletely judged content. `warn` delivers the exact bytes with the verdict attached — a security-researcher grant. `clean` returns an extraction that L3 wrote and a second L3 pass verified, guided by `trentina_prompt`. Which modes an agent may choose is policy, not the agent's call: the profile's `defense.modes` through the gateway, which inserts the same argument into every backend's tools, or `TRENTINA_MODE`/`TRENTINA_MODES` standalone.
+Five tools — `fetch` (URL), `read` (file), `dir` (directory listing), `content` (inline text), `search` (web) — each taking a `trentina_mode` argument. Every call runs all three layers; the mode decides only what is delivered. `block` refuses flagged or incompletely judged content. `flag` delivers the exact bytes with the verdict attached — a security-researcher grant. `redact` returns an extraction that L3 wrote and a second L3 pass verified, guided by `trentina_prompt`. The names are [OpenRouter's guardrail actions](docs/quarantine-tools.md#the-names-are-openrouters), though `redact` rewrites through L3 rather than substituting spans; `warn` and `clean`, the pre-0.35.0 names, are deprecated aliases. Which modes an agent may choose is policy, not the agent's call: the profile's `defense.modes` through the gateway, which inserts the same argument into every backend's tools, or `TRENTINA_MODE`/`TRENTINA_MODES` standalone.
 
 ### [LLM Key Proxying](docs/llm-proxying.md)
 
@@ -144,10 +144,10 @@ these variables control the process itself. Profile tokens
 | `OLLAMA_MODEL` | `qwen2.5:0.5b` | Model used when the Ollama provider is selected. See [LLM Key Proxying](docs/llm-proxying.md). |
 | `QUARANTINE_MODEL` | `gemini-2.5-flash-lite` | Model used for quarantine agent (L3) extraction/detection calls. |
 | `QUARANTINE_SEARCH_MODEL` | `gemini-2.5-flash` | Model used for grounded L0 search. |
-| `TRENTINA_REQUIRE_L2` | `true` | `false` lets `block`/`clean` deliver with a warning when the L2 model is absent, instead of refusing. Never excuses a partial scan. See [Defense Pipeline](docs/defense-pipeline.md). |
+| `TRENTINA_REQUIRE_L2` | `true` | `false` lets `block`/`redact` deliver with a warning when the L2 model is absent, instead of refusing. Never excuses a partial scan. See [Defense Pipeline](docs/defense-pipeline.md). |
 | `TRENTINA_REQUIRE_L3` | `true` | The same for an absent L3 provider. Replaces `QUARANTINE_FALLBACK` (removed in 0.31.0; setting it now fails startup). |
-| `TRENTINA_MODE` | `block` | Standalone only: the mode an omitted `trentina_mode` resolves to. `warn` or `block`. Under the gateway the profile's `defense.enforcement` decides. |
-| `TRENTINA_MODES` | the default | Standalone only: comma-separated modes a call may choose (`block,clean`). A default outside the set fails startup. Under the gateway the profile's `defense.modes` decides. |
+| `TRENTINA_MODE` | `block` | Standalone only: the mode an omitted `trentina_mode` resolves to. `flag` or `block`. Under the gateway the profile's `defense.enforcement` decides. |
+| `TRENTINA_MODES` | the default | Standalone only: comma-separated modes a call may choose (`block,redact`). A default outside the set fails startup. Under the gateway the profile's `defense.modes` decides. |
 | `QUARANTINE_MAX_CONTENT` | `100000` | Max characters of content sent to the quarantine LLM per call. See [Token Routing](docs/token-routing.md). |
 | `CLASSIFIER_THRESHOLD` | `0.5` | Malicious-score threshold above which the L2 classifier flags content. |
 | `CLASSIFIER_MODEL_PATH` | `/models/prompt-guard-2-86m` | Filesystem path to the ONNX classifier model. Set to `/models/prompt-guard-2-86m` by the container image. |

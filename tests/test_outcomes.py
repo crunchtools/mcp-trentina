@@ -207,8 +207,8 @@ def test_refusal_of_finds_a_nested_refusal() -> None:
     from mcp_trentina_crunchtools.gateway.errors import BackendCallError
     from mcp_trentina_crunchtools.outcomes import refusal_of
 
-    inner = BlockedSourceError("s", "flagged by L3", refusal={"alternatives": ["clean"]})
+    inner = BlockedSourceError("s", "flagged by L3", refusal={"alternatives": ["redact"]})
     outer = BackendCallError("wrapped")
     outer.__cause__ = inner
-    assert refusal_of(outer) == {"alternatives": ["clean"]}
+    assert refusal_of(outer) == {"alternatives": ["redact"]}
     assert refusal_of(RuntimeError("x")) is None

@@ -102,16 +102,16 @@ class MatrixProcessor:
                 # them as undecryptable would pin the rate high for ever.
                 continue
             if algorithm != MEGOLM_ALGORITHM:
-                undecryptable.append(UndecryptableEvent(
-                    event_id, room_id, session_id, "unsupported_algorithm"))
+                undecryptable.append(
+                    UndecryptableEvent(event_id, room_id, session_id, "unsupported_algorithm")
+                )
                 _bump(skipped, len(ciphertext))
                 continue
 
             plaintext = await self._decrypt(room_id, session_id, ciphertext)
             if plaintext is None:
                 reason = "no_session" if self._keys else "decryption_disabled"
-                undecryptable.append(
-                    UndecryptableEvent(event_id, room_id, session_id, reason))
+                undecryptable.append(UndecryptableEvent(event_id, room_id, session_id, reason))
                 _bump(skipped, len(ciphertext))
                 continue
 
@@ -130,13 +130,13 @@ class MatrixProcessor:
         if undecryptable:
             logger.warning(
                 "matrix select: %s — %d of %d encrypted event(s) unread",
-                ctx.path or ctx.source, len(undecryptable), len(encrypted),
+                ctx.path or ctx.source,
+                len(undecryptable),
+                len(encrypted),
             )
         return view
 
-    async def _decrypt(
-        self, room_id: str, session_id: str, ciphertext: str
-    ) -> str | None:
+    async def _decrypt(self, room_id: str, session_id: str, ciphertext: str) -> str | None:
         if self._keys is None or not session_id:
             return None
         try:
@@ -150,7 +150,9 @@ class MatrixProcessor:
             # Identity only. Never the ciphertext, never partial plaintext.
             logger.warning(
                 "matrix select: decrypt failed for session %s in room %s: %s",
-                session_id, room_id, type(exc).__name__,
+                session_id,
+                room_id,
+                type(exc).__name__,
             )
             return None
 
@@ -180,8 +182,7 @@ def _prose_from(plaintext: str) -> list[str]:
     out = [v for f in _PROSE_FIELDS if isinstance(v := content.get(f), str) and v]
     new_content = content.get("m.new_content")
     if isinstance(new_content, dict):
-        out += [v for f in _PROSE_FIELDS
-                if isinstance(v := new_content.get(f), str) and v]
+        out += [v for f in _PROSE_FIELDS if isinstance(v := new_content.get(f), str) and v]
     return out or iter_leaves(event)
 
 

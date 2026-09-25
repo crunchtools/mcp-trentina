@@ -114,9 +114,7 @@ class TestContentTypeAllowlist:
         assert returned_type == content_type
 
     @pytest.mark.asyncio
-    async def test_missing_content_type_is_allowed(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_missing_content_type_is_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An absent header is common on plain files; don't break those."""
         mock_http(monkeypatch, content_type=None, body=b"plain")
 
@@ -164,9 +162,7 @@ class TestSizeCap:
             await fetch_url("https://example.com/big")
 
     @pytest.mark.asyncio
-    async def test_body_at_the_limit_is_accepted(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_body_at_the_limit_is_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_http(monkeypatch, content_type="text/plain", body=b"y" * 1000)
 
         content, _ = await fetch_url("https://example.com/ok")

@@ -1,11 +1,11 @@
-"""A layer that could not finish: block and clean refuse, warn delivers loudly (#187 D3/D4).
+"""A layer that could not finish: block and redact refuse, flag delivers loudly (#187 D3/D4).
 
 A scan that did not fully happen must never read like a scan that found
 nothing. Absent layers (no ONNX model, no provider) can be excused per layer
 with TRENTINA_REQUIRE_L2/L3=false; a partial read never can — that is the
 padding attack, where the payload sits past the cap and the head reads clean.
 
-One of these cells was a live bug: warn_fetch RAISED on a large page, because
+One of these cells was a live bug: flag_fetch RAISED on a large page, because
 the tools passed guarded=True to defend() in every mode.
 """
 
@@ -75,8 +75,8 @@ def _cells() -> list[tuple[str, str]]:
 
 
 @pytest.mark.parametrize(("family", "gap"), _cells())
-@pytest.mark.parametrize("mode", [Mode.BLOCK, Mode.CLEAN], ids=lambda m: m.value)
-async def test_block_and_clean_refuse(
+@pytest.mark.parametrize("mode", [Mode.BLOCK, Mode.REDACT], ids=lambda m: m.value)
+async def test_block_and_redact_refuse(
     env: Path, monkeypatch: pytest.MonkeyPatch, family: str, gap: str, mode: Mode
 ) -> None:
     with layers(env) as fakes:
@@ -87,21 +87,21 @@ async def test_block_and_clean_refuse(
 
 
 @pytest.mark.parametrize(("family", "gap"), _cells())
-async def test_warn_delivers_and_says_so(
+async def test_flag_delivers_and_says_so(
     env: Path, monkeypatch: pytest.MonkeyPatch, family: str, gap: str
 ) -> None:
     with layers(env) as fakes:
         _arrange(gap, monkeypatch, fakes)
-        result = await call(family, Mode.WARN, fakes)
+        result = await call(family, Mode.FLAG, fakes)
     assert result["scan"]["disposition"] == "annotated"
     assert result["_trentina_warning"][_key(gap)] is True
 
 
-async def test_warn_fetch_no_longer_raises_on_a_large_page(env: Path) -> None:
-    """The live bug: warn's contract is deliver-with-warning, not raise."""
+async def test_flag_fetch_no_longer_raises_on_a_large_page(env: Path) -> None:
+    """The live bug: flag's contract is deliver-with-warning, not raise."""
     with layers(env) as fakes:
         fakes.classify.side_effect = _l2_truncated()
-        result = await call("fetch", Mode.WARN, fakes)
+        result = await call("fetch", Mode.FLAG, fakes)
     assert result["content"] == fakes.payload
     assert result["_trentina_warning"]["l2_truncated"] is True
     assert result["scan"]["layers"]["l2"] == "partial"

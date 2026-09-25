@@ -17,47 +17,61 @@ Every tool runs **all three layers**: L1 and L2 in parallel on the bytes as they
 | `trentina_mode` | on a flag, or a layer that could not finish | what you get |
 |---|---|---|
 | `block` | refused | the bytes that arrived, or an error — never flagged or half-judged content |
-| `warn` | delivered, with `_trentina_warning` | **exactly** the bytes that arrived |
-| `clean` | extracted (half-judged content is refused) | an extraction L3 wrote and a second L3 pass verified, guided by `trentina_prompt` — never the original |
+| `flag` | delivered, with `_trentina_warning` | **exactly** the bytes that arrived |
+| `redact` | extracted (half-judged content is refused) | an extraction L3 wrote and a second L3 pass verified, guided by `trentina_prompt` — never the original |
 
 ```
 fetch_tool {url}                                           # the policy default
-fetch_tool {url, trentina_mode: "clean", trentina_prompt: "the release date"}
-fetch_tool {url, trentina_mode: "warn"}                    # only if the policy grants warn
+fetch_tool {url, trentina_mode: "redact", trentina_prompt: "the release date"}
+fetch_tool {url, trentina_mode: "flag"}                    # only if the policy grants flag
 ```
 
-Five tools: `fetch_tool`, `read_tool`, `dir_tool`, `content_tool`, `search_tool`. Until **0.32.0** the mode was part of the tool NAME — fifteen tools — so the agent picked its own security posture and nothing enforced the pick; an injection could argue its way to `warn_fetch`. Now a **policy** decides which values count (#193):
+Five tools: `fetch_tool`, `read_tool`, `dir_tool`, `content_tool`, `search_tool`. Until **0.32.0** the mode was part of the tool NAME — fifteen tools — so the agent picked its own security posture and nothing enforced the pick; an injection could argue its way to `flag_fetch`. Now a **policy** decides which values count (#193):
 
 - Through the gateway, the calling profile's `defense.modes` — see [Profiles](profiles.md#content-modes). The gateway applies the same parameter to every backend's tools, not only these.
-- Standalone, `TRENTINA_MODE` (default `block`) and `TRENTINA_MODES` (default: that one mode). A default outside the set, or a default of `clean`, fails startup.
+- Standalone, `TRENTINA_MODE` (default `block`) and `TRENTINA_MODES` (default: that one mode). A default outside the set, or a default of `redact`, fails startup.
 
 A mode outside the policy is refused before anything runs. An omitted mode resolves to the default *before* the check, so leaving it out cannot skip the policy.
 
 `quarantine_stats` is the only other tool that touches a verdict, and it reports on the gateway, not on content. The diagnostic scans were removed in **0.31.0**.
 
+### The names are OpenRouter's
+
+The modes are named after the actions of OpenRouter's [prompt-injection guardrail](https://openrouter.ai/docs/guides/features/guardrails/prompt-injection), since most people trying Trentina already know that vocabulary. Precedence is theirs too: `block` > `redact` > `flag`.
+
+| Trentina | OpenRouter | same? |
+|---|---|---|
+| `block` | Block, reject with 403 | yes |
+| `flag` | Flag, pass through unmodified and record the detection | yes, and the verdict is attached inline for the agent too, not only recorded |
+| `redact` | Redact, replace matched spans with `[PROMPT_INJECTION]` | **no** |
+
+OpenRouter's redact swaps out the spans its regexes matched. Trentina's L2 and L3 return verdicts, not spans, so there is nothing to swap out. Trentina's `redact` rewrites the whole payload through L3 instead (detect, extract, verify) and never returns the original bytes.
+
+Before 0.35.0, `flag` was `warn` and `redact` was `clean`. Both old names are still accepted everywhere a mode is read (`trentina_mode`, `defense.modes`, `defense.enforcement`, `alert_ingress.enforcement`, `TRENTINA_MODE`, `TRENTINA_MODES`, `TRENTINA_ENFORCEMENT_OVERRIDE`, and a `trentina_mode` parameter guard). They are normalized on the way in and logged once per process as `[DEPRECATED]`. Nothing emits them. They will be removed in 0.36.0.
+
 ### Choosing
 
 - By default → `block`.
-- You want the information, not the bytes → `clean`.
-- You must read content verbatim that legitimately discusses attacks in the words attacks use — a CVE advisory, an incident log → `warn`. It is a **security-researcher grant**: almost never the right mode for an assistant, a coding agent or a swarm, and policies should leave it out unless someone needs it. Treat what it returns as data, never as instructions.
+- You want the information, not the bytes → `redact`.
+- You must read content verbatim that legitimately discusses attacks in the words attacks use — a CVE advisory, an incident log → `flag`. It is a **security-researcher grant**: almost never the right mode for an assistant, a coding agent or a swarm, and policies should leave it out unless someone needs it. Treat what it returns as data, never as instructions.
 
 ### Refusals name what to try next
 
 A refusal carries a structured body — JSON-RPC `error.data` for these tools, `_trentina_refusal` for a proxied response — and the same thing as one line of text for clients that strip structured fields:
 
 ```json
-{"reason": "flagged by L3", "mode": "block", "flagged_by": "L3", "alternatives": ["clean"]}
+{"reason": "flagged by L3", "mode": "block", "flagged_by": "L3", "alternatives": ["redact"]}
 ```
 
-- **Flagged** (or blocklisted) → `clean`, if the policy allows it. **Never `warn`**: "retry with warn" would be the gateway itself steering the agent to the verbatim bytes an attacker wanted delivered. warn in a policy is a grant for deliberate reading, not a retry path.
-- **Refused only because a layer could not finish**, nothing flagged → `warn`, if allowed. `clean` refuses on the same gaps.
+- **Flagged** (or blocklisted) → `redact`, if the policy allows it. **Never `flag`**: "retry with flag" would be the gateway itself steering the agent to the verbatim bytes an attacker wanted delivered. flag in a policy is a grant for deliberate reading, not a retry path.
+- **Refused only because a layer could not finish**, nothing flagged → `flag`, if allowed. `redact` refuses on the same gaps.
 - Otherwise `[]`. The reason names the layer that objected — "flagged by L3", not "malicious"; a flag can be a false positive.
 
 No payload text and no L3 prose appear in a refusal.
 
-`warn` is the only mode that satisfies the owner's rule in both directions — *what the agent receives is byte-identical to what entered the perimeter, or nothing at all* — even when the verdict is bad.
+`flag` is the only mode that satisfies the owner's rule in both directions — *what the agent receives is byte-identical to what entered the perimeter, or nothing at all* — even when the verdict is bad.
 
-### clean runs L3 three times
+### redact runs L3 three times
 
 1. **Detect** on the original (the same detection every mode gets).
 2. **Extract** from L1's normalized copy, briefed with turn 1's risk level and finding types.
@@ -67,7 +81,7 @@ A provider error at turn 2 or 3 refuses. Until 0.31.0 a provider error handed ba
 
 ### A layer that could not finish
 
-`block` and `clean` need a verdict from every layer. A layer that is absent (no ONNX model, no L3 provider) refuses unless the operator sets `TRENTINA_REQUIRE_L2=false` or `TRENTINA_REQUIRE_L3=false`, which turns that absence into a warning. A layer that read only *part* of the payload — L2 past its token cap, L3 past `QUARANTINE_MAX_CONTENT` — always refuses: that is the padding attack. `warn` delivers in every case and says which layer fell short.
+`block` and `redact` need a verdict from every layer. A layer that is absent (no ONNX model, no L3 provider) refuses unless the operator sets `TRENTINA_REQUIRE_L2=false` or `TRENTINA_REQUIRE_L3=false`, which turns that absence into a warning. A layer that read only *part* of the payload — L2 past its token cap, L3 past `QUARANTINE_MAX_CONTENT` — always refuses: that is the padding attack. `flag` delivers in every case and says which layer fell short.
 
 ## What every response carries
 
@@ -98,13 +112,13 @@ What was *found* is `_trentina_warning`'s job: `flagged_by`, L1 counts, L2's lab
 }
 ```
 
-An allowlisted source runs all three layers and its flags stand. What changes is the cost: `block` hands a flagged or partially-read payload to the clean path instead of refusing it, and says so (`disposition: extracted`, `downgraded_to_clean` in the warning). A clean that fails still refuses, and an absent layer still refuses — allowlisting removes false-positive refusals; it does not open a channel that survives the clean pipeline giving up. The realistic threat is a trusted source being compromised.
+An allowlisted source runs all three layers and its flags stand. What changes is the cost: `block` hands a flagged or partially-read payload to the redact path instead of refusing it, and says so (`disposition: extracted`, `downgraded_to_redact` in the warning). A redact that fails still refuses, and an absent layer still refuses — allowlisting removes false-positive refusals; it does not open a channel that survives the redact pipeline giving up. The realistic threat is a trusted source being compromised.
 
 ## Family notes
 
-**search** — L0 is a grounded Gemini call; redirect URLs are resolved. The answer, each source title and each URL become one document through the same path as a fetched page, judged as model output. `block` and `warn` return the answer plus `sources`; `clean` returns the extraction plus `sources`, never the raw answer.
+**search** — L0 is a grounded Gemini call; redirect URLs are resolved. The answer, each source title and each URL become one document through the same path as a fetched page, judged as model output. `block` and `flag` return the answer plus `sources`; `redact` returns the extraction plus `sources`, never the raw answer.
 
-**dir** — the listing (name, type, size per entry, at most 500) is the payload, because file names are attacker-chosen text. A `.py` file that shadows a Python standard-library module (`struct.py`, `os.py`) is an L1 detection with critical risk: run Python in that directory and it imports the attacker's module. `block` refuses it; `warn` names it under `shadows`. File contents are not read — that is `read_tool`, one file at a time.
+**dir** — the listing (name, type, size per entry, at most 500) is the payload, because file names are attacker-chosen text. A `.py` file that shadows a Python standard-library module (`struct.py`, `os.py`) is an L1 detection with critical risk: run Python in that directory and it imports the attacker's module. `block` refuses it; `flag` names it under `shadows`. File contents are not read — that is `read_tool`, one file at a time.
 
 **content** — inline text is never allowlisted (it has no provenance), is capped at `QUARANTINE_MAX_CONTENT`, and is blocklisted by SHA-256.
 

@@ -98,9 +98,7 @@ def _migrate(db: sqlite3.Connection) -> None:
     if "outcome" not in columns:
         db.execute("ALTER TABLE gateway_calls ADD COLUMN outcome TEXT")
 
-    detection_columns = {
-        row["name"] for row in db.execute("PRAGMA table_info(detections)")
-    }
+    detection_columns = {row["name"] for row in db.execute("PRAGMA table_info(detections)")}
     # Gateway attribution columns (which profile, which backend and tool,
     # which direction the content was moving, and the provenance the L3
     # gate saw). Nullable — 50 web-shaped legacy rows and the standalone
@@ -204,9 +202,7 @@ def get_blocklist_stats(profile: str | None = None) -> dict[str, Any]:
     clause = " AND profile = ?" if profile else ""
     args: tuple[Any, ...] = (profile,) if profile else ()
 
-    total_query = (
-        "SELECT COUNT(*) as cnt FROM detections WHERE blocked = 1{profile_clause}"
-    )
+    total_query = "SELECT COUNT(*) as cnt FROM detections WHERE blocked = 1{profile_clause}"
     recent_query = (
         "SELECT source_type, source, domain, detected_at, risk_level "
         "FROM detections WHERE blocked = 1{profile_clause} "
@@ -396,9 +392,7 @@ def get_compression_stats() -> dict[str, Any]:
 def get_all_tool_lists() -> dict[str, list[dict[str, Any]]]:
     """Load all cached tool lists as {backend_url: tools_list}."""
     db = get_db()
-    rows = db.execute(
-        "SELECT backend_url, tools_json FROM tool_list_cache"
-    ).fetchall()
+    rows = db.execute("SELECT backend_url, tools_json FROM tool_list_cache").fetchall()
     result: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         result[row["backend_url"]] = json.loads(row["tools_json"])
@@ -406,7 +400,8 @@ def get_all_tool_lists() -> dict[str, list[dict[str, Any]]]:
 
 
 def save_tool_list(
-    backend_url: str, tools: list[dict[str, Any]],
+    backend_url: str,
+    tools: list[dict[str, Any]],
 ) -> None:
     """Persist a tool list to SQLite."""
     db = get_db()

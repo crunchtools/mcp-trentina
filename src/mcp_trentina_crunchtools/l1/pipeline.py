@@ -143,7 +143,7 @@ class PipelineResult:
     undone: zero-width characters removed, encoded blobs replaced, delimiter
     tokens dropped. L2 reads it as well as ``content`` whenever a normalizing
     stage fired, so the very tricks L1 counts cannot blind the classifier;
-    clean's extraction turn reads it too. It is never delivered.
+    redact's extraction turn reads it too. It is never delivered.
 
     The owner's rule (2026-09-13): what the agent receives is byte-identical
     to what entered the perimeter, or nothing at all.

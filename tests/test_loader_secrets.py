@@ -75,16 +75,16 @@ class TestReadSecretEnv:
         with pytest.raises(ProfileConfigError, match="cannot read the secret file"):
             _read_secret_env("SECRET_X")
 
-    def test_empty_file_is_empty(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_file_is_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         secret = tmp_path / "token"
         secret.write_text("\n")
         monkeypatch.setenv("SECRET_X_FILE", str(secret))
         assert _read_secret_env("SECRET_X") == ""
 
     def test_the_secret_path_is_never_logged(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Name the env var, never the path.
@@ -115,7 +115,9 @@ class TestReadSecretEnv:
         assert "very-secret-location" not in str(exc.value)
 
     def test_loose_permissions_warn_but_do_not_fail(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         secret = tmp_path / "token"
@@ -127,7 +129,9 @@ class TestReadSecretEnv:
         assert "more permissive than 0600" in caplog.text
 
     def test_tight_permissions_are_silent(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         secret = tmp_path / "token"
@@ -154,9 +158,7 @@ class TestConsumersRouteThroughIt:
             "bearer-from-file"
         )
 
-    def test_require_env_error_names_both_spellings(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_require_env_error_names_both_spellings(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("TEST_BEARER", raising=False)
         monkeypatch.delenv("TEST_BEARER_FILE", raising=False)
         with pytest.raises(ProfileConfigError, match="TEST_BEARER_FILE"):
@@ -172,9 +174,7 @@ class TestConsumersRouteThroughIt:
         out = _expand_env_refs("Bearer ${HDR_TOKEN}", context="t")
         assert out == "Bearer hdr-from-file"
 
-    def test_end_to_end_profile_load(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_end_to_end_profile_load(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = tmp_path / "profiles.yaml"
         cfg.write_text(PROFILE_YAML)
         secret = tmp_path / "bearer"

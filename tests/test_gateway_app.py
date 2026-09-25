@@ -112,9 +112,7 @@ class TestGatewayApp:
         body = resp.json()
         assert body["result"]["serverInfo"]["name"] == "mcp-trentina-gateway:alice"
 
-    def test_tools_call_invalid_backend_returns_jsonrpc_error(
-        self, client: TestClient
-    ) -> None:
+    def test_tools_call_invalid_backend_returns_jsonrpc_error(self, client: TestClient) -> None:
         resp = client.post(
             "/alice/mcp",
             json={
@@ -196,9 +194,7 @@ class TestHealthEndpoint:
 
     def test_health_does_not_shadow_a_profile_named_health(self) -> None:
         """/health is a fixed route; /{profile}/mcp still resolves separately."""
-        resp = client_with_profile("health").post(
-            "/health/mcp", json={"jsonrpc": "2.0", "id": 1}
-        )
+        resp = client_with_profile("health").post("/health/mcp", json={"jsonrpc": "2.0", "id": 1})
         assert resp.status_code == 401  # reached auth, not the health handler
 
 
@@ -259,10 +255,12 @@ def oauth_client() -> TestClient:
         oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
     )
     profile.auth.bearer_token = SecretStr("static-token")
-    provider = _StubProvider({
-        "good": _StubAccessToken({"email": "alice@example.com", "email_verified": True}),
-        "wrong-user": _StubAccessToken({"email": "eve@evil.com", "email_verified": True}),
-    })
+    provider = _StubProvider(
+        {
+            "good": _StubAccessToken({"email": "alice@example.com", "email_verified": True}),
+            "wrong-user": _StubAccessToken({"email": "eve@evil.com", "email_verified": True}),
+        }
+    )
     oauth = OAuthContext(
         provider=provider,
         base_url=OAUTH_BASE_URL,
@@ -310,9 +308,7 @@ class TestGatewayOAuth:
         assert resp.status_code == 401
         assert "resource_metadata=" in resp.headers.get("WWW-Authenticate", "")
 
-    def test_static_bearer_still_works_on_oauth_profile(
-        self, oauth_client: TestClient
-    ) -> None:
+    def test_static_bearer_still_works_on_oauth_profile(self, oauth_client: TestClient) -> None:
         resp = oauth_client.post(
             "/gemini-app/mcp",
             json={"jsonrpc": "2.0", "id": 5, "method": "ping"},
@@ -321,9 +317,7 @@ class TestGatewayOAuth:
         assert resp.status_code == 200
 
     def test_resource_metadata_document(self, oauth_client: TestClient) -> None:
-        resp = oauth_client.get(
-            "/.well-known/oauth-protected-resource/gateway/gemini-app/mcp"
-        )
+        resp = oauth_client.get("/.well-known/oauth-protected-resource/gateway/gemini-app/mcp")
         assert resp.status_code == 200
         body = resp.json()
         assert body["resource"] == f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp"
@@ -340,12 +334,8 @@ class TestGatewayOAuth:
         assert body["scopes_supported"] == list(OAUTH_SCOPES)
         assert "email" not in body["scopes_supported"]
 
-    def test_resource_metadata_unknown_profile_404(
-        self, oauth_client: TestClient
-    ) -> None:
-        resp = oauth_client.get(
-            "/.well-known/oauth-protected-resource/gateway/nope/mcp"
-        )
+    def test_resource_metadata_unknown_profile_404(self, oauth_client: TestClient) -> None:
+        resp = oauth_client.get("/.well-known/oauth-protected-resource/gateway/nope/mcp")
         assert resp.status_code == 404
 
 
@@ -366,9 +356,7 @@ class TestGatewayOAuthDisabled:
         profile = Profile(name="alice", auth=AuthConfig(bearer_token_env="A"))
         profile.auth.bearer_token = SecretStr("alice-token")
         client = TestClient(gateway_app({"alice": profile}))
-        resp = client.get(
-            "/.well-known/oauth-protected-resource/gateway/alice/mcp"
-        )
+        resp = client.get("/.well-known/oauth-protected-resource/gateway/alice/mcp")
         assert resp.status_code == 404
 
 
@@ -406,9 +394,7 @@ class TestOAuthResourcePin:
     def test_resource_url_is_the_gateway_endpoint(self) -> None:
         ctx = self._build({"gemini-app": self._oauth_profile("gemini-app")})
         ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
-        assert str(ctx.provider._resource_url) == (
-            f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp"
-        )
+        assert str(ctx.provider._resource_url) == (f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp")
 
     def test_internal_mount_path_is_not_appended(self) -> None:
         ctx = self._build({"gemini-app": self._oauth_profile("gemini-app")})
@@ -418,19 +404,17 @@ class TestOAuthResourcePin:
     def test_jwt_audience_is_bound_to_the_pinned_resource(self) -> None:
         ctx = self._build({"gemini-app": self._oauth_profile("gemini-app")})
         ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
-        assert ctx.provider.jwt_issuer.audience == (
-            f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp"
-        )
+        assert ctx.provider.jwt_issuer.audience == (f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp")
 
     def test_multiple_oauth_profiles_pin_the_first_sorted(self) -> None:
-        ctx = self._build({
-            "zulu-app": self._oauth_profile("zulu-app"),
-            "gemini-app": self._oauth_profile("gemini-app"),
-        })
-        ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
-        assert str(ctx.provider._resource_url) == (
-            f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp"
+        ctx = self._build(
+            {
+                "zulu-app": self._oauth_profile("zulu-app"),
+                "gemini-app": self._oauth_profile("gemini-app"),
+            }
         )
+        ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
+        assert str(ctx.provider._resource_url) == (f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp")
 
     def test_no_oauth_profile_builds_no_context(self) -> None:
         from mcp_trentina_crunchtools import _build_oauth_context
@@ -609,9 +593,7 @@ class TestProvisionedConfidentialClient:
         in when it gave up without sending a request.
         """
         ctx = self._build({"gemini-app": self._profile()})
-        methods = self._metadata_document(ctx)[
-            "token_endpoint_auth_methods_supported"
-        ]
+        methods = self._metadata_document(ctx)["token_endpoint_auth_methods_supported"]
         assert "client_secret_post" in methods
         assert "none" in methods
 
@@ -631,10 +613,7 @@ class TestProvisionedConfidentialClient:
         ctx = self._build({"gemini-app": self._profile()})
         manager = ctx.provider._cimd_manager
         assert manager is not None
-        assert (
-            manager.allowed_redirect_uri_patterns
-            == ctx.provider._allowed_client_redirect_uris
-        )
+        assert manager.allowed_redirect_uri_patterns == ctx.provider._allowed_client_redirect_uris
 
     def test_other_routes_are_untouched(self) -> None:
         ctx = self._build({"gemini-app": self._provisioned_profile()})
@@ -699,10 +678,12 @@ def delegated_client() -> TestClient:
         ),
     )
     profile.auth.bearer_token = SecretStr("static-token")
-    verifier = _StubVerifier({
-        "good": _StubAccessToken({"email": "alice@example.com", "email_verified": True}),
-        "wrong-user": _StubAccessToken({"email": "eve@evil.com", "email_verified": True}),
-    })
+    verifier = _StubVerifier(
+        {
+            "good": _StubAccessToken({"email": "alice@example.com", "email_verified": True}),
+            "wrong-user": _StubAccessToken({"email": "eve@evil.com", "email_verified": True}),
+        }
+    )
     oauth = OAuthContext(
         provider=None,
         base_url=OAUTH_BASE_URL,
@@ -722,33 +703,21 @@ def delegated_client() -> TestClient:
 class TestDelegatedProfile:
     """A profile that names an external authorization server."""
 
-    def test_metadata_advertises_the_external_issuer(
-        self, delegated_client: TestClient
-    ) -> None:
-        resp = delegated_client.get(
-            "/.well-known/oauth-protected-resource/gateway/gemini-app/mcp"
-        )
+    def test_metadata_advertises_the_external_issuer(self, delegated_client: TestClient) -> None:
+        resp = delegated_client.get("/.well-known/oauth-protected-resource/gateway/gemini-app/mcp")
         assert resp.status_code == 200
         assert resp.json()["authorization_servers"] == [DELEGATED_ISSUER]
 
-    def test_advertised_issuer_has_no_trailing_slash(
-        self, delegated_client: TestClient
-    ) -> None:
+    def test_advertised_issuer_has_no_trailing_slash(self, delegated_client: TestClient) -> None:
         """Google publishes the bare origin; a client compares byte-for-byte."""
-        resp = delegated_client.get(
-            "/.well-known/oauth-protected-resource/gateway/gemini-app/mcp"
-        )
+        resp = delegated_client.get("/.well-known/oauth-protected-resource/gateway/gemini-app/mcp")
         assert not resp.json()["authorization_servers"][0].endswith("/")
 
     def test_resource_is_still_ours(self, delegated_client: TestClient) -> None:
-        resp = delegated_client.get(
-            "/.well-known/oauth-protected-resource/gateway/gemini-app/mcp"
-        )
+        resp = delegated_client.get("/.well-known/oauth-protected-resource/gateway/gemini-app/mcp")
         assert resp.json()["resource"] == f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp"
 
-    def test_valid_delegated_token_accepted(
-        self, delegated_client: TestClient
-    ) -> None:
+    def test_valid_delegated_token_accepted(self, delegated_client: TestClient) -> None:
         resp = delegated_client.post(
             "/gemini-app/mcp",
             json={"jsonrpc": "2.0", "id": 1},
@@ -764,9 +733,7 @@ class TestDelegatedProfile:
         )
         assert resp.status_code == 403
 
-    def test_static_bearer_still_short_circuits(
-        self, delegated_client: TestClient
-    ) -> None:
+    def test_static_bearer_still_short_circuits(self, delegated_client: TestClient) -> None:
         """It is checked before any outbound verification, so a delegated
         profile carries two independent credentials. Intended; documented."""
         resp = delegated_client.post(
@@ -776,9 +743,7 @@ class TestDelegatedProfile:
         )
         assert resp.status_code != 401
 
-    def test_challenge_still_points_at_our_metadata(
-        self, delegated_client: TestClient
-    ) -> None:
+    def test_challenge_still_points_at_our_metadata(self, delegated_client: TestClient) -> None:
         """We are still the resource, even though Google is the AS."""
         resp = delegated_client.post("/gemini-app/mcp", json={"jsonrpc": "2.0", "id": 1})
         assert resp.status_code == 401
@@ -788,18 +753,14 @@ class TestDelegatedProfile:
 class TestChallengeErrorCode:
     """RFC 6750 §3.1 — an error code only when a credential was refused."""
 
-    def test_no_error_code_when_no_credential_is_sent(
-        self, oauth_client: TestClient
-    ) -> None:
+    def test_no_error_code_when_no_credential_is_sent(self, oauth_client: TestClient) -> None:
         """'SHOULD NOT include an error code' when the request lacks any
         authentication information — there is nothing yet to call invalid."""
         resp = oauth_client.post("/gemini-app/mcp", json={"jsonrpc": "2.0", "id": 1})
         assert resp.status_code == 401
         assert "error=" not in resp.headers["WWW-Authenticate"]
 
-    def test_invalid_token_when_a_bearer_is_refused(
-        self, oauth_client: TestClient
-    ) -> None:
+    def test_invalid_token_when_a_bearer_is_refused(self, oauth_client: TestClient) -> None:
         resp = oauth_client.post(
             "/gemini-app/mcp",
             json={"jsonrpc": "2.0", "id": 1},
@@ -808,9 +769,7 @@ class TestChallengeErrorCode:
         assert resp.status_code == 401
         assert 'error="invalid_token"' in resp.headers["WWW-Authenticate"]
 
-    def test_resource_metadata_present_in_both_cases(
-        self, oauth_client: TestClient
-    ) -> None:
+    def test_resource_metadata_present_in_both_cases(self, oauth_client: TestClient) -> None:
         bare = oauth_client.post("/gemini-app/mcp", json={"jsonrpc": "2.0", "id": 1})
         refused = oauth_client.post(
             "/gemini-app/mcp",
@@ -868,18 +827,20 @@ class TestConfidentialDynamicRegistration:
         """
         from mcp.shared.auth import OAuthClientInformationFull
 
-        return OAuthClientInformationFull.model_validate({
-            "client_id": f"probe-{method}",
-            "client_id_issued_at": 1790000000,
-            "client_secret": secret,
-            "client_secret_expires_at": 0 if secret else None,
-            "redirect_uris": [self.REDIRECT],
-            "grant_types": ["authorization_code", "refresh_token"],
-            "response_types": ["code"],
-            "token_endpoint_auth_method": method,
-            "application_type": "web",
-            "client_name": "probe",
-        })
+        return OAuthClientInformationFull.model_validate(
+            {
+                "client_id": f"probe-{method}",
+                "client_id_issued_at": 1790000000,
+                "client_secret": secret,
+                "client_secret_expires_at": 0 if secret else None,
+                "redirect_uris": [self.REDIRECT],
+                "grant_types": ["authorization_code", "refresh_token"],
+                "response_types": ["code"],
+                "token_endpoint_auth_method": method,
+                "application_type": "web",
+                "client_name": "probe",
+            }
+        )
 
     @pytest.mark.asyncio
     async def test_the_secret_survives_registration(self) -> None:
@@ -970,9 +931,7 @@ class TestMultiProfileResourceIndicator:
         return Profile(
             name=name,
             auth=AuthConfig(bearer_token_env="A"),
-            oauth=OAuthConfig(
-                enabled=True, allowed_emails=emails or ["alice@example.com"]
-            ),
+            oauth=OAuthConfig(enabled=True, allowed_emails=emails or ["alice@example.com"]),
         )
 
     def _build(self, profiles: dict[str, Profile]) -> OAuthContext:
@@ -989,10 +948,12 @@ class TestMultiProfileResourceIndicator:
         return ctx
 
     def _both(self) -> OAuthContext:
-        return self._build({
-            "claude-web": self._profile("claude-web"),
-            "gemini-web": self._profile("gemini-web"),
-        })
+        return self._build(
+            {
+                "claude-web": self._profile("claude-web"),
+                "gemini-web": self._profile("gemini-web"),
+            }
+        )
 
     def test_every_proxied_profile_is_registered(self) -> None:
         ctx = self._both()
@@ -1056,10 +1017,12 @@ class TestMultiProfileResourceIndicator:
         """One audience covers both seats, so differing allowlists are a
         boundary the operator thinks exists and does not."""
         with caplog.at_level("WARNING"):
-            self._build({
-                "claude-web": self._profile("claude-web", ["alice@example.com"]),
-                "gemini-web": self._profile("gemini-web", ["someone@example.com"]),
-            })
+            self._build(
+                {
+                    "claude-web": self._profile("claude-web", ["alice@example.com"]),
+                    "gemini-web": self._profile("gemini-web", ["someone@example.com"]),
+                }
+            )
         assert "different allowed_emails" in caplog.text
 
     def test_a_single_profile_never_warns(self, caplog: Any) -> None:
@@ -1106,21 +1069,21 @@ class TestRegisteredRedirectUriIsRestricted:
         assert ctx is not None
         return ctx.provider
 
-    def _register(
-        self, provider: Any, redirect: str, application_type: str = "web"
-    ) -> Any:
+    def _register(self, provider: Any, redirect: str, application_type: str = "web") -> Any:
         from mcp.shared.auth import OAuthClientInformationFull
 
-        return OAuthClientInformationFull.model_validate({
-            "client_id": "probe",
-            "client_id_issued_at": 1790000000,
-            "client_secret": None,
-            "redirect_uris": [redirect],
-            "grant_types": ["authorization_code"],
-            "response_types": ["code"],
-            "token_endpoint_auth_method": "none",
-            "application_type": application_type,
-        })
+        return OAuthClientInformationFull.model_validate(
+            {
+                "client_id": "probe",
+                "client_id_issued_at": 1790000000,
+                "client_secret": None,
+                "redirect_uris": [redirect],
+                "grant_types": ["authorization_code"],
+                "response_types": ["code"],
+                "token_endpoint_auth_method": "none",
+                "application_type": application_type,
+            }
+        )
 
     @pytest.mark.asyncio
     async def test_an_attacker_callback_is_refused(self) -> None:

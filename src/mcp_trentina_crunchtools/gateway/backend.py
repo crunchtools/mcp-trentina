@@ -34,7 +34,8 @@ if TYPE_CHECKING:
 
 @asynccontextmanager
 async def _connect_streamable_http(
-    url: str, headers: dict[str, str] | None,
+    url: str,
+    headers: dict[str, str] | None,
 ) -> AsyncIterator[Any]:
     """Adapt this module's ``headers`` dict onto mcp's ``http_client=`` API.
 
@@ -65,6 +66,7 @@ async def _connect_streamable_http(
         streamable_http_client(url, http_client=http_client) as streams,
     ):
         yield streams[0], streams[1]
+
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +173,8 @@ def reset_tool_list_cache() -> None:
 
 
 async def list_backend_tools(
-    backend_name: str, backend: Backend,
+    backend_name: str,
+    backend: Backend,
 ) -> list[dict[str, Any]]:
     """Fetch the tool list from one backend MCP server.
 
@@ -198,7 +201,8 @@ async def list_backend_tools(
 
 
 async def _single_flight_fetch(
-    backend_name: str, backend: Backend,
+    backend_name: str,
+    backend: Backend,
 ) -> list[dict[str, Any]]:
     """Run one fetch and drop its in-flight slot when done."""
     try:
@@ -208,7 +212,8 @@ async def _single_flight_fetch(
 
 
 async def _fetch_and_cache(
-    backend_name: str, backend: Backend,
+    backend_name: str,
+    backend: Backend,
 ) -> list[dict[str, Any]]:
     """Fetch one backend's tool list, cache it, and persist to SQLite.
 
@@ -217,9 +222,7 @@ async def _fetch_and_cache(
     fall back on here — a failure simply raises.
     """
     if not breaker.allow(backend.url):
-        raise BackendCallError(
-            f"backend {backend_name!r} circuit open — skipped"
-        )
+        raise BackendCallError(f"backend {backend_name!r} circuit open — skipped")
 
     headers = backend.headers or None
     try:
@@ -263,15 +266,16 @@ async def call_backend_tool(
             circuit open.
     """
     if not breaker.allow(backend.url):
-        raise BackendCallError(
-            f"backend {backend_name!r} circuit open — skipped"
-        )
+        raise BackendCallError(f"backend {backend_name!r} circuit open — skipped")
 
     headers = backend.headers or None
     try:
         result = await asyncio.wait_for(
             _do_call_tool(
-                backend.url, headers, tool_name, arguments,
+                backend.url,
+                headers,
+                tool_name,
+                arguments,
                 validate_output=backend.validate_output_schema,
             ),
             timeout=backend.timeout_seconds,
@@ -301,9 +305,7 @@ async def call_backend_tool(
             f"backend {backend_name!r} returned {type(result).__name__} "
             f"for tool {tool_name!r}, which carries no content"
         )
-    content: list[dict[str, Any]] = [
-        _serialize_content_block(b) for b in raw_content
-    ]
+    content: list[dict[str, Any]] = [_serialize_content_block(b) for b in raw_content]
     structured = _field(result, "structured_content", "structuredContent")
     return BackendCall(
         content=content,
@@ -404,7 +406,9 @@ def _serialize_tool(tool: Any) -> dict[str, Any]:
             continue
         if hasattr(value, "model_dump"):
             value = value.model_dump(
-                mode="json", by_alias=True, exclude_none=True,
+                mode="json",
+                by_alias=True,
+                exclude_none=True,
             )
         out[wire_key] = value
     return out

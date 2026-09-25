@@ -241,7 +241,7 @@ class TestProtocolVersionNegotiation:
         "requested",
         [
             "2026-07-28",  # the modern per-request-envelope era: real, not a
-                           # handshake revision, so not reachable this way
+            # handshake revision, so not reachable this way
             "1999-01-01",
             "",
             None,
@@ -270,9 +270,7 @@ class TestProtocolVersionNegotiation:
         registry or the gateway becomes undialable.
         """
         for requested in (*HANDSHAKE_PROTOCOL_VERSIONS, "2026-07-28", "nonsense"):
-            assert (
-                _negotiate_protocol_version(requested) in HANDSHAKE_PROTOCOL_VERSIONS
-            )
+            assert _negotiate_protocol_version(requested) in HANDSHAKE_PROTOCOL_VERSIONS
 
 
 class TestStreamableHTTPDelete:
@@ -558,11 +556,13 @@ class TestBackwardsCompatibility:
         assert resp.status_code == 400
 
     def test_tools_call_dispatch(self) -> None:
-        mock_route = AsyncMock(return_value={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {"content": [{"type": "text", "text": "ok"}], "isError": False},
-        })
+        mock_route = AsyncMock(
+            return_value={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {"content": [{"type": "text", "text": "ok"}], "isError": False},
+            }
+        )
         with patch(
             "mcp_trentina_crunchtools.gateway.app.route_jsonrpc",
             mock_route,

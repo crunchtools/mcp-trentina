@@ -9,7 +9,7 @@ catching the attack would have been the delivery mechanism.
 So the payload's command is planted in every free-text field L3 can write
 (summary, finding description, the finding TYPE itself, injection_details)
 and must appear nowhere in any response: not in block's refusal, not in
-warn's warning, not in clean's extraction, not in fetch's 4xx advisory, not
+flag's warning, not in redact's extraction, not in fetch's 4xx advisory, not
 in the gateway's warning.
 """
 
@@ -53,9 +53,9 @@ STEERED_EXTRACTION: dict[str, Any] = {
 
 
 def _outside_the_payload(result: dict[str, Any], mode: Mode) -> dict[str, Any]:
-    """block and warn deliver the page itself, which contains the command by
+    """block and flag deliver the page itself, which contains the command by
     definition. D2 is about everything ELSE in the response."""
-    if mode is Mode.CLEAN:
+    if mode is Mode.REDACT:
         return result
     return {k: v for k, v in result.items() if k not in ("content", "entries")}
 
@@ -76,7 +76,7 @@ async def test_the_echo_never_leaves(env: Path, family: str, mode: Mode) -> None
 
 async def test_finding_types_are_a_closed_set(env: Path) -> None:
     with layers(env, payload=PAGE, detection=STEERED) as fakes:
-        result = await call("fetch", Mode.WARN, fakes)
+        result = await call("fetch", Mode.FLAG, fakes)
     warning = result["_trentina_warning"]
     assert warning["l3_finding_types"] == ["other", "tool_invocation"]
     assert warning["l3_risk_level"] == "critical"
@@ -84,7 +84,7 @@ async def test_finding_types_are_a_closed_set(env: Path) -> None:
 
 
 async def test_the_4xx_advisory_carries_no_l3_prose(env: Path) -> None:
-    from mcp_trentina_crunchtools.tools.fetch import warn_fetch
+    from mcp_trentina_crunchtools.tools.fetch import flag_fetch
 
     with (
         layers(env, payload=PAGE, detection=STEERED),
@@ -96,7 +96,7 @@ async def test_the_4xx_advisory_carries_no_l3_prose(env: Path) -> None:
             ),
         ),
     ):
-        result = await warn_fetch("https://example.com/")
+        result = await flag_fetch("https://example.com/")
     assert "security_advisory" in result
     assert ECHO not in json.dumps(result)
 

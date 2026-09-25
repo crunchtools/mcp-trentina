@@ -2,8 +2,8 @@
 
 Until 0.31.0 each family carried its own copy: ``_fetch_judged``,
 ``_read_judged``, ``_content_judged``, ``_search_judged``, and four separate
-``clean_*`` bodies. The copies drifted in exactly the way copies do. clean
-ran a different pipeline from block and warn; search built its own recipe,
+``clean_*`` bodies. The copies drifted in exactly the way copies do. redact
+ran a different pipeline from block and flag; search built its own recipe,
 blocked on a private ``total_l1 >= 3`` rule, and never called L3 at all.
 
 A producer now does only what only it can: fetch the URL, read the file,
@@ -22,7 +22,7 @@ from ..dbus_interface import emit_request_event
 from ..defense import DefenseVerdict, Provenance, defend
 from ..errors import BlockedSourceError
 from ..modes import Mode, gaps_of, refusal_body, refusal_reason
-from ..quarantine.agent import quarantine_clean
+from ..quarantine.agent import quarantine_redact
 from ..report import Disposition, build_report
 from ..warning import build_warning
 
@@ -31,15 +31,15 @@ if TYPE_CHECKING:
 
     from ..l1.pipeline import PipelineResult
 
-DEFAULT_CLEAN_PROMPT = "Extract the main content."
-"""Used when block downgrades an allowlisted source to clean: the agent asked
+DEFAULT_REDACT_PROMPT = "Extract the main content."
+"""Used when block downgrades an allowlisted source to redact: the agent asked
 for the bytes, so there is no extraction prompt of its own to use."""
 
 
 def blocklisted(source: str, mode: Mode, detected_at: str) -> BlockedSourceError:
-    """block and warn on a blocklisted source, refused before any bytes arrive.
+    """block and flag on a blocklisted source, refused before any bytes arrive.
 
-    Offers clean when the policy allows it, because clean is the mode that
+    Offers redact when the policy allows it, because redact is the mode that
     proceeds on a blocklisted source.
     """
     reason = f"on the blocklist since {detected_at}"
@@ -103,7 +103,7 @@ class _Call:
     ) -> BlockedSourceError:
         """The refusal, naming the modes this caller may try next.
 
-        ``judged`` is False when the refusal is clean's own extraction turn
+        ``judged`` is False when the refusal is redact's own extraction turn
         objecting: then neither the verdict's flag nor its gaps is the reason,
         and nothing is suggested.
         """
@@ -146,27 +146,27 @@ async def judge_and_deliver(
     l3_context: str | None = None,
     delivered: Any = None,
     extras: Mapping[str, Any] | None = None,
-    clean_extras: Mapping[str, Any] | None = None,
+    redact_extras: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Judge ``document`` with all three layers and dispose of it per ``mode``.
 
     Args:
         document: The payload as produced — what every layer reads.
-        mode: block, warn or clean. It decides delivery, never detection.
+        mode: block, flag or redact. It decides delivery, never detection.
         family: ``fetch``, ``read``, ``dir``, ``content`` or ``search``.
-        prompt: The extraction request, for clean.
+        prompt: The extraction request, for redact.
         allowlisted: An operator vouched for the source. Its flags still
-            stand; block sends a flagged or partially-read payload to clean
+            stand; block sends a flagged or partially-read payload to redact
             instead of refusing it. An ABSENT layer still refuses.
-        blocklisted_at: Set when clean proceeds on a blocklisted source.
-        delivered: What block and warn hand over, when it is not the document
+        blocklisted_at: Set when redact proceeds on a blocklisted source.
+        delivered: What block and flag hand over, when it is not the document
             itself (search delivers L0's text, the sources separately).
-        extras: Family fields for block and warn responses.
-        clean_extras: Family fields for clean responses. Separate because
-            clean must not re-deliver the payload it replaced.
+        extras: Family fields for block and flag responses.
+        redact_extras: Family fields for redact responses. Separate because
+            redact must not re-deliver the payload it replaced.
 
     Raises:
-        BlockedSourceError: block or clean refused. The message names the
+        BlockedSourceError: block or redact refused. The message names the
             layer or gap, never the payload.
     """
     call = _Call(
@@ -184,13 +184,13 @@ async def judge_and_deliver(
         source_type=source_type,
         provenance=provenance,
         domain=domain,
-        # warn delivers a partial scan with a warning, so it pays for the
-        # partial scan; block and clean would refuse it, so they do not.
-        stop_on_partial=mode is not Mode.WARN,
+        # flag delivers a partial scan with a warning, so it pays for the
+        # partial scan; block and redact would refuse it, so they do not.
+        stop_on_partial=mode is not Mode.FLAG,
         precomputed_l1=precomputed_l1,
         l3_context=l3_context,
         # `blocked` feeds the blocklist. Only a block refusal belongs there:
-        # a warn row marked blocked made the NEXT warn of the same page raise.
+        # a flag row marked blocked made the NEXT flag of the same page raise.
         attribution={
             "tool": call.tool,
             "blocked": mode is Mode.BLOCK and not allowlisted,
@@ -198,7 +198,7 @@ async def judge_and_deliver(
     )
     original = document if delivered is None else delivered
 
-    if mode is Mode.WARN:
+    if mode is Mode.FLAG:
         return _deliver(call, verdict, original, extras)
 
     flagged_by = verdict.flagged_by.value if verdict.flagged_by is not None else None
@@ -209,12 +209,14 @@ async def judge_and_deliver(
         gaps = gaps_of(verdict)
         absent = gaps.blocking() and not gaps.truncated_only()
         if allowlisted and not absent:
-            return await _clean(call, verdict, DEFAULT_CLEAN_PROMPT, clean_extras, downgraded=True)
+            return await _redact(
+                call, verdict, DEFAULT_REDACT_PROMPT, redact_extras, downgraded=True
+            )
         raise call.refuse(verdict, reason)
 
     if gaps_of(verdict).blocking():
         raise call.refuse(verdict, reason or "not fully judged")
-    return await _clean(call, verdict, prompt or DEFAULT_CLEAN_PROMPT, clean_extras)
+    return await _redact(call, verdict, prompt or DEFAULT_REDACT_PROMPT, redact_extras)
 
 
 def _deliver(
@@ -244,27 +246,27 @@ def _deliver(
     return response
 
 
-async def _clean(
+async def _redact(
     call: _Call,
     verdict: DefenseVerdict,
     prompt: str,
-    clean_extras: Mapping[str, Any] | None,
+    redact_extras: Mapping[str, Any] | None,
     *,
     downgraded: bool = False,
 ) -> dict[str, Any]:
     """Turns 2 and 3 over L1's normalized text; refuse if either objects."""
-    result = await quarantine_clean(
+    result = await quarantine_redact(
         verdict.pipeline.l2_input[: get_config().max_content],
         prompt,
         detection=verdict.l3_assessment,
     )
     if result.refused_by is not None:
-        raise call.refuse(verdict, f"clean refused: {result.refused_by}", judged=False)
+        raise call.refuse(verdict, f"redact refused: {result.refused_by}", judged=False)
 
     extraction = result.content
     # A downgraded block keeps block's response shape: `content` is text.
     content: Any = extraction.get("extracted_text", "") if downgraded else extraction
-    warning = call.warning(verdict, downgraded_to_clean=downgraded)
+    warning = call.warning(verdict, downgraded_to_redact=downgraded)
     call.emit(verdict, Disposition.EXTRACTED, len(str(extraction.get("extracted_text", ""))))
     response: dict[str, Any] = {
         "content": content,
@@ -278,7 +280,7 @@ async def _clean(
         ),
         "l1": l1_metadata(verdict.pipeline),
         "usage": result.usage,
-        **(clean_extras or {}),
+        **(redact_extras or {}),
     }
     if warning is not None:
         response["_trentina_warning"] = warning

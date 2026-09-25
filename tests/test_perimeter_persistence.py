@@ -74,9 +74,7 @@ class TestPerimeterVersion:
         if the version is ever reverted."""
         save_verdict("old", None, "0")
         get_all_verdicts(PERIMETER_VERSION)
-        remaining = get_perimeter_db().execute(
-            "SELECT COUNT(*) FROM verdict_cache"
-        ).fetchone()[0]
+        remaining = get_perimeter_db().execute("SELECT COUNT(*) FROM verdict_cache").fetchone()[0]
         assert remaining == 0
 
     def test_unreadable_row_is_dropped_not_fatal(self) -> None:
@@ -233,9 +231,11 @@ def _fresh_store() -> None:
 
 def test_saved_rows_carry_a_timestamp() -> None:
     save_verdict("k", None, PERIMETER_VERSION)
-    row = get_perimeter_db().execute(
-        "SELECT cached_at, warning_json FROM verdict_cache WHERE cache_key = 'k'"
-    ).fetchone()
+    row = (
+        get_perimeter_db()
+        .execute("SELECT cached_at, warning_json FROM verdict_cache WHERE cache_key = 'k'")
+        .fetchone()
+    )
     assert row["cached_at"]
     assert row["warning_json"] is None
     json.dumps(row["cached_at"])  # plain string, serializable

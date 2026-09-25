@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from .cache import cache_flush
-from .content import block_content, clean_content, judge_content, warn_content
-from .dir import block_dir, clean_dir, list_dir, warn_dir
-from .fetch import block_fetch, clean_fetch, fetch_page, warn_fetch
-from .read import block_read, clean_read, read_file, warn_read
+from .content import block_content, flag_content, judge_content, redact_content
+from .dir import block_dir, flag_dir, list_dir, redact_dir
+from .fetch import block_fetch, fetch_page, flag_fetch, redact_fetch
+from .read import block_read, flag_read, read_file, redact_read
 from .reconnect import reconnect_backend
 from .reload import reload_profiles
-from .search import block_search, clean_search, warn_search, web_search
+from .search import block_search, flag_search, redact_search, web_search
 from .stats import get_trentina_stats
 
 __all__ = [
@@ -19,22 +19,22 @@ __all__ = [
     "block_read",
     "block_search",
     "cache_flush",
-    "clean_content",
-    "clean_dir",
-    "clean_fetch",
-    "clean_read",
-    "clean_search",
     "fetch_page",
+    "flag_content",
+    "flag_dir",
+    "flag_fetch",
+    "flag_read",
+    "flag_search",
     "get_trentina_stats",
     "judge_content",
     "list_dir",
     "read_file",
     "reconnect_backend",
+    "redact_content",
+    "redact_dir",
+    "redact_fetch",
+    "redact_read",
+    "redact_search",
     "reload_profiles",
-    "warn_content",
-    "warn_dir",
-    "warn_fetch",
-    "warn_read",
-    "warn_search",
     "web_search",
 ]

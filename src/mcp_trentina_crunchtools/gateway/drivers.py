@@ -64,6 +64,7 @@ _EMAIL = EmailProcessor()
 _HTML = HtmlProcessor()
 _SUMMARIZE = SummarizeProcessor()
 
+
 def _make_matrix(cfg: ProcessorChainConfig, keys: Any) -> MatrixProcessor:
     """Decryption on top of selection: decrypted text goes through the same
     rules as anything else, so it gets its own SelectProcessor rather than a
@@ -80,9 +81,7 @@ PREPROCESSORS: dict[str, Callable[[ProcessorChainConfig, Any], Any]] = {
     "email": lambda _cfg, _keys: _EMAIL,
     "html": lambda _cfg, _keys: _HTML,
     "summarize": lambda _cfg, _keys: _SUMMARIZE,
-    "select": lambda cfg, _keys: SelectProcessor(
-        skip_sample_bytes=cfg.skip_sample_bytes
-    ),
+    "select": lambda cfg, _keys: SelectProcessor(skip_sample_bytes=cfg.skip_sample_bytes),
     "matrix": _make_matrix,
 }
 

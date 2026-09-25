@@ -4,19 +4,24 @@ Every content tool and the gateway judge with the same three layers; the mode
 decides only what is delivered:
 
 * ``block`` — a flagged verdict is refused; the agent never sees it.
-* ``warn`` — the bytes as they arrived, with the verdict attached. A
+* ``flag`` — the bytes as they arrived, with the verdict attached. A
   researcher's grant: almost never the right mode for an assistant, a coding
   agent or a swarm.
-* ``clean`` — an L3 extraction, verified, instead of the original.
+* ``redact`` — an L3 extraction, verified, instead of the original.
 
-Before 0.31.0 the modes ran different pipelines — clean spent L3 on
+The names are OpenRouter's guardrail actions (#200); until 0.35.0 flag was
+``warn`` and redact was ``clean``, and both are still accepted. redact is NOT
+OpenRouter's span substitution: L2 and L3 give verdicts, not spans, so there
+is nothing to substitute. The whole payload is rewritten through L3 instead.
+
+Before 0.31.0 the modes ran different pipelines — redact spent L3 on
 extraction and got no detection verdict, search never called L3 — and each
 ingress decided on its own what to do about a layer that could not run. The
 tools delivered through an L3 outage while the gateway refused; the tools
-refused a truncated L2 scan while the gateway's warn raised on it. Those were
+refused a truncated L2 scan while the gateway's flag raised on it. Those were
 two answers to one question, so the question lives here once.
 
-**block and clean require every layer to produce a verdict; warn does not.**
+**block and redact require every layer to produce a verdict; flag does not.**
 A layer that is ABSENT (no ONNX model, no provider) can be excused per layer
 with ``TRENTINA_REQUIRE_L2`` / ``TRENTINA_REQUIRE_L3``. A layer that ran but
 read only PART of the payload is never excused: that is the padding attack,
@@ -29,7 +34,7 @@ from dataclasses import asdict, dataclass, fields
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from .config import get_config
+from .config import canonical_mode, get_config
 from .errors import ModeNotPermittedError
 
 if TYPE_CHECKING:
@@ -39,11 +44,21 @@ if TYPE_CHECKING:
 
 
 class Mode(str, Enum):
-    """What a caller does with a verdict. Never which layers run."""
+    """What a caller does with a verdict. Never which layers run.
+
+    Declared strictest first, OpenRouter's precedence: block > redact > flag.
+    """
 
     BLOCK = "block"
-    WARN = "warn"
-    CLEAN = "clean"
+    REDACT = "redact"
+    FLAG = "flag"
+
+    @classmethod
+    def _missing_(cls, value: object) -> Mode | None:
+        """``Mode("warn")`` is FLAG, with the deprecation logged; see ``canonical_mode``."""
+        if isinstance(value, str) and (name := canonical_mode(value)) != value:
+            return cls(name)
+        return None
 
 
 @dataclass(frozen=True)
@@ -59,7 +74,7 @@ class Gaps:
         return self.l2_unavailable or self.l2_truncated or self.l3_unavailable or self.l3_truncated
 
     def blocking(self) -> bool:
-        """Whether block and clean must refuse. warn never consults this."""
+        """Whether block and redact must refuse. flag never consults this."""
         config = get_config()
         return (
             self.l2_truncated
@@ -82,7 +97,7 @@ class Gaps:
     def truncated_only(self) -> bool:
         """Every gap is a partial read, none an absent layer.
 
-        The allowlist may send these to clean, which reads the whole payload
+        The allowlist may send these to redact, which reads the whole payload
         through L3's own cap; an absent layer it may not excuse.
         """
         return (self.l2_truncated or self.l3_truncated) and not (
@@ -107,7 +122,7 @@ def gaps_of(verdict: DefenseVerdict) -> Gaps:
 
 
 def refusal_reason(flagged_by: str | None, gaps: Gaps) -> str | None:
-    """Why block or clean may not deliver the original, or None.
+    """Why block or redact may not deliver the original, or None.
 
     The reason names layers and gaps only. It is ours, never the payload's.
     """
@@ -152,7 +167,7 @@ class ModePolicy:
         mode skip the policy entirely — the parameter-guard trap, where a
         missing argument is simply not checked.
         """
-        name = self.default.value if requested is None else str(requested).strip().lower()
+        name = self.default.value if requested is None else canonical_mode(str(requested))
         allowed = [m.value for m in self.allowed]
         if name not in allowed:
             raise ModeNotPermittedError(name, allowed)
@@ -161,17 +176,17 @@ class ModePolicy:
     def alternatives(self, current: Mode, cause: str | None) -> list[str]:
         """What a refused call may try next, under this policy.
 
-        Flagged content is offered clean and NEVER warn: "retry with warn"
+        Flagged content is offered redact and NEVER flag: "retry with flag"
         would be the gateway itself steering the agent to the verbatim bytes
-        the attacker wanted delivered. warn in the policy is a grant for
+        the attacker wanted delivered. flag in the policy is a grant for
         deliberate reading, not the gateway's retry path. Only a refusal for
-        an unfinished read, with nothing found, may point at warn — clean
+        an unfinished read, with nothing found, may point at flag — redact
         refuses on the same gaps. Whatever is suggested is also what the
-        blocklist lets through: clean proceeds on a blocklisted source.
+        blocklist lets through: redact proceeds on a blocklisted source.
 
         ``cause`` is ``"flagged"``, ``"gaps"``, or None for anything else.
         """
-        candidates = {"flagged": [Mode.CLEAN], "gaps": [Mode.WARN]}.get(cause or "", [])
+        candidates = {"flagged": [Mode.REDACT], "gaps": [Mode.FLAG]}.get(cause or "", [])
         return [m.value for m in candidates if m in self.allowed and m is not current]
 
 

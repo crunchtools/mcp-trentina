@@ -197,9 +197,7 @@ class TestAliasShimIsRealAndDeprecated:
                     "no-fastmcp guard is now redundant but harmless"
                 )
 
-        assert any(
-            issubclass(w.category, DeprecationWarning) for w in caught
-        ), (
+        assert any(issubclass(w.category, DeprecationWarning) for w in caught), (
             "fastmcp still serves Tool.inputSchema but no longer deprecates it. "
             "The alias shim just got quieter, so the no-fastmcp guard in this "
             "module matters more, not less."

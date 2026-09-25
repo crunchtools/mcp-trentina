@@ -133,7 +133,7 @@ class TestSegmentCap:
 
 
 class TestFailClosed:
-    """A caller that refuses a partial scan anyway (block, clean) bails early.
+    """A caller that refuses a partial scan anyway (block, redact) bails early.
 
     Whether a partial scan is refused is the mode's decision (modes.py); the
     classifier's part is not to spend inference on a verdict nobody will use.
@@ -170,8 +170,8 @@ class TestFailClosed:
         assert session.run.call_count == 0
 
     @pytest.mark.asyncio
-    async def test_warn_path_scans_and_marks_truncated(self) -> None:
-        """warn delivers a partial scan with a warning, so it pays for one."""
+    async def test_flag_path_scans_and_marks_truncated(self) -> None:
+        """flag delivers a partial scan with a warning, so it pays for one."""
         with mocked_model(token_count=462_000) as session:
             result = await classify_async("x" * 855_551)
 

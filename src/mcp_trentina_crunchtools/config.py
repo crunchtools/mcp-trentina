@@ -94,7 +94,30 @@ def int_env(name: str, default: int, *, minimum: int | None = None) -> int:
 
 DEFAULT_PROVIDER_FALLBACK: list[str] = []
 
-MODE_NAMES = ("block", "warn", "clean")
+#: Named for OpenRouter's prompt-injection guardrail actions (#200), which is
+#: the vocabulary most people arriving here already know.
+MODE_NAMES = ("block", "flag", "redact")
+
+#: The pre-0.35.0 spellings. Accepted, normalized, and logged once per
+#: process until 0.36.0 removes them; nothing ever emits them.
+LEGACY_MODE_NAMES = {"warn": "flag", "clean": "redact"}
+_legacy_logged: set[str] = set()
+
+
+def canonical_mode(name: str) -> str:
+    """``name`` lower-cased, with a pre-0.35.0 spelling mapped to its new one."""
+    lowered = name.strip().lower()
+    new = LEGACY_MODE_NAMES.get(lowered)
+    if new is None:
+        return lowered
+    if lowered not in _legacy_logged:
+        _legacy_logged.add(lowered)
+        logger.warning(
+            "[DEPRECATED] trentina mode %r will be removed in v0.36.0. Use %r instead.",
+            lowered,
+            new,
+        )
+    return new
 
 
 def _mode_policy_env() -> tuple[str, tuple[str, ...]]:
@@ -106,15 +129,15 @@ def _mode_policy_env() -> tuple[str, tuple[str, ...]]:
     """
     from .errors import ConfigError
 
-    default = os.environ.get("TRENTINA_MODE", "").strip().lower() or "block"
+    default = canonical_mode(os.environ.get("TRENTINA_MODE", "")) or "block"
     raw = os.environ.get("TRENTINA_MODES", "")
-    allowed = tuple(dict.fromkeys(m.strip().lower() for m in raw.split(",") if m.strip()))
+    allowed = tuple(dict.fromkeys(canonical_mode(m) for m in raw.split(",") if m.strip()))
     allowed = allowed or (default,)
     for name in (default, *allowed):
         if name not in MODE_NAMES:
             raise ConfigError(f"unknown trentina mode {name!r}: use {', '.join(MODE_NAMES)}")
-    if default == "clean":
-        raise ConfigError("TRENTINA_MODE cannot be clean: a default carries no extraction prompt")
+    if default == "redact":
+        raise ConfigError("TRENTINA_MODE cannot be redact: a default carries no extraction prompt")
     if default not in allowed:
         raise ConfigError(f"TRENTINA_MODE {default!r} must be in TRENTINA_MODES {list(allowed)}")
     return default, allowed

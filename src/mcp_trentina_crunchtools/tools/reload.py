@@ -123,17 +123,14 @@ def _backend_delta(before: Backend, after: Backend) -> dict[str, Any]:
     candidate: dict[str, Any] = {
         "tools_allow": _glob_delta(before.tools_allow, after.tools_allow),
         "tools_deny": _glob_delta(before.tools_deny, after.tools_deny),
-        "parameter_guards": _guard_delta(
-            before.parameter_guards, after.parameter_guards
-        ),
+        "parameter_guards": _guard_delta(before.parameter_guards, after.parameter_guards),
         "response_guards": _guard_delta(
             before.response_guards, after.response_guards, noun="fields"
         ),
         "fields_changed": sorted(
             name
             for name in type(before).model_fields
-            if name
-            not in ("tools_allow", "tools_deny", "parameter_guards", "response_guards")
+            if name not in ("tools_allow", "tools_deny", "parameter_guards", "response_guards")
             and getattr(before, name) != getattr(after, name)
         ),
     }
@@ -153,8 +150,7 @@ def _profile_delta(before: Profile, after: Profile) -> dict[str, Any]:
         "fields_changed": sorted(
             name
             for name in type(before).model_fields
-            if name not in ("name", "backends")
-            and getattr(before, name) != getattr(after, name)
+            if name not in ("name", "backends") and getattr(before, name) != getattr(after, name)
         ),
     }
     return {key: value for key, value in candidate.items() if value}
@@ -228,9 +224,7 @@ def _uses_oauth_proxy(profile: Profile) -> bool:
     return oauth is not None and oauth.enabled and oauth.issuer is None
 
 
-def _unapplied_delegated(
-    current: GatewayConfig, new_config: GatewayConfig
-) -> list[str]:
+def _unapplied_delegated(current: GatewayConfig, new_config: GatewayConfig) -> list[str]:
     """Report delegated-mode edits a reload cannot put into force.
 
     A delegated profile's verifier and advertised issuer are built once at
@@ -245,15 +239,11 @@ def _unapplied_delegated(
     """
     notes: list[str] = []
     for name, profile in sorted(new_config.profiles.items()):
-        notes.extend(
-            _unapplied_delegated_for(current.profiles.get(name), profile, name)
-        )
+        notes.extend(_unapplied_delegated_for(current.profiles.get(name), profile, name))
     return notes
 
 
-def _unapplied_delegated_for(
-    before: Profile | None, after: Profile, name: str
-) -> list[str]:
+def _unapplied_delegated_for(before: Profile | None, after: Profile, name: str) -> list[str]:
     """The delegated-mode note for one profile, if it has one.
 
     Shared by the operator and agent paths so the two scopes cannot disagree
@@ -264,18 +254,20 @@ def _unapplied_delegated_for(
         return []
     old_oauth = before.oauth if before is not None else None
     if old_oauth is None or old_oauth.issuer is None:
-        return [(
-            f"profile {name!r} now delegates OAuth to {new_oauth.issuer} but no "
-            "verifier was built for it at startup — restart to serve it"
-        )]
-    if (old_oauth.issuer, old_oauth.audience_env) != (
-        new_oauth.issuer, new_oauth.audience_env
-    ):
-        return [(
-            f"profile {name!r} changed oauth.issuer/audience_env: the verifier "
-            "and the advertised authorization server are bound at startup — "
-            "restart to apply"
-        )]
+        return [
+            (
+                f"profile {name!r} now delegates OAuth to {new_oauth.issuer} but no "
+                "verifier was built for it at startup — restart to serve it"
+            )
+        ]
+    if (old_oauth.issuer, old_oauth.audience_env) != (new_oauth.issuer, new_oauth.audience_env):
+        return [
+            (
+                f"profile {name!r} changed oauth.issuer/audience_env: the verifier "
+                "and the advertised authorization server are bound at startup — "
+                "restart to apply"
+            )
+        ]
     return []
 
 
@@ -374,7 +366,8 @@ async def _apply_own_profile(
 
     logger.warning(
         "gateway: profile %s reloaded its own section — %d field group(s) moved",
-        name, len(delta),
+        name,
+        len(delta),
     )
     result: dict[str, Any] = {
         "reloaded": True,
@@ -446,7 +439,10 @@ async def reload_profiles() -> dict[str, Any]:
         # load_profiles' own for every expected cause, and an unexpected one
         # is exactly where an operator needs more than its str().
         logger.warning(
-            "gateway: profile reload REFUSED from %s: %s", path, exc, exc_info=True,
+            "gateway: profile reload REFUSED from %s: %s",
+            path,
+            exc,
+            exc_info=True,
         )
         refusal: dict[str, Any] = {
             "reloaded": False,
@@ -484,9 +480,7 @@ async def reload_profiles() -> dict[str, Any]:
     session_registry.max_sessions_per_profile = new_config.max_sessions_per_profile
     replace_active_config(replace(new_config, profiles=registry))
 
-    invalidated = [
-        name for name in (*added, *removed, *changed) if invalidate_profile_cache(name)
-    ]
+    invalidated = [name for name in (*added, *removed, *changed) if invalidate_profile_cache(name)]
     if _compression_surface(before) != _compression_surface(after):
         retrigger_compression()
 
@@ -496,13 +490,16 @@ async def reload_profiles() -> dict[str, Any]:
         for session in session_registry.get_sessions_for_profile(name)
     )
     notified = {
-        name: await session_registry.broadcast_tools_changed(name)
-        for name in [*added, *changed]
+        name: await session_registry.broadcast_tools_changed(name) for name in [*added, *changed]
     }
 
     logger.warning(
         "gateway: profiles reloaded from %s by %s — %d added, %d removed, %d changed",
-        path, scope.label, len(added), len(removed), len(changed),
+        path,
+        scope.label,
+        len(added),
+        len(removed),
+        len(changed),
     )
     return {
         "reloaded": True,

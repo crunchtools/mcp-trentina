@@ -87,7 +87,7 @@ class TestLayerStates:
         assert states["l3"] == LayerState.COMPLETE.value
 
     def test_l2_partial_when_it_bailed_at_the_token_count(self) -> None:
-        """block/clean skip the inference entirely: no classification, and
+        """block/redact skip the inference entirely: no classification, and
         that is PARTIAL, not UNAVAILABLE — the model is there."""
         states = layer_states(_verdict(classification=None, l2_truncated=True))
         assert states["l2"] == LayerState.PARTIAL.value

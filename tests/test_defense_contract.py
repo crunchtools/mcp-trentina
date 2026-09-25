@@ -15,7 +15,7 @@ packages. Three categories are allowed through, each for a stated reason:
   whether a layer is loaded. /health and the stats tool need them and they
   cannot begin a pipeline.
 * Types (`ClassifierResult`) — annotations, no behaviour.
-* `quarantine_clean` — clean mode's turns 2 and 3 (extract, verify), which
+* `quarantine_redact` — redact mode's turns 2 and 3 (extract, verify), which
   run AFTER defend() has detected. They are the mode's delivery, not a second
   detection path; tools reach them only through tools/judged.py.
 

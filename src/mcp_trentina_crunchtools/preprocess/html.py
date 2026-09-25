@@ -102,9 +102,7 @@ def _classify_and_remove(soup: BeautifulSoup, stats: ConversionStats) -> None:
             continue
 
         style = tag.get("style", "")
-        concept = (
-            classify_style(style.lower()) if isinstance(style, str) and style else None
-        )
+        concept = classify_style(style.lower()) if isinstance(style, str) and style else None
         field_name = _CONCEPT_FIELD[concept] if concept else None
         if field_name is None and tag.get("hidden") is not None:
             field_name = "hidden_elements"
@@ -180,19 +178,28 @@ class HtmlProcessor:
 
         if bytes_in > _MAX_PARSE_BYTES:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="too_large",
+                self.name,
+                self.cost,
+                payload,
+                reason="too_large",
             )
 
         # Cheap gate before spending a parse: markup contains a tag open.
         if "<" not in payload:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="not_markup",
+                self.name,
+                self.cost,
+                payload,
+                reason="not_markup",
             )
 
         text, stats, reason = await asyncio.to_thread(_convert, payload)
         if text is None:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason=reason,
+                self.name,
+                self.cost,
+                payload,
+                reason=reason,
             )
 
         return PreProcessResult(

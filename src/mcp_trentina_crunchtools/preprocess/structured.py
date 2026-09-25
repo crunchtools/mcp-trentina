@@ -184,8 +184,7 @@ class _Reducer:
             self.groups_collapsed += len(dropped)
             self.elements_dropped += sum(dropped.values())
             kept.extend(
-                _OMITTED.format(count=count)
-                for count in sorted(dropped.values(), reverse=True)
+                _OMITTED.format(count=count) for count in sorted(dropped.values(), reverse=True)
             )
         return kept
 
@@ -229,7 +228,10 @@ class StructuredProcessor:
 
         if bytes_in > _MAX_PARSE_BYTES:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="too_large",
+                self.name,
+                self.cost,
+                payload,
+                reason="too_large",
             )
 
         # Cheap gate before spending a parse: JSON documents worth reducing
@@ -237,13 +239,19 @@ class StructuredProcessor:
         stripped = payload.lstrip()
         if not stripped or stripped[0] not in "[{":
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="not_json",
+                self.name,
+                self.cost,
+                payload,
+                reason="not_json",
             )
 
         text, reducer, reason = await asyncio.to_thread(_parse_and_reduce, payload)
         if text is None:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason=reason,
+                self.name,
+                self.cost,
+                payload,
+                reason=reason,
             )
 
         bytes_out = len(text.encode("utf-8"))
@@ -251,7 +259,10 @@ class StructuredProcessor:
             # See petit.py: the ratio is measured, so report it rather than
             # collapse every near-miss and every no-hoper into one word.
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="not_smaller",
+                self.name,
+                self.cost,
+                payload,
+                reason="not_smaller",
                 details={
                     "would_be_bytes": bytes_out,
                     "would_be_ratio": round(bytes_out / bytes_in, 4),

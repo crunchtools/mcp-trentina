@@ -153,7 +153,7 @@ profiles:
           - "batch_delete*"
       # ... rest of agent2's backends
     defense:
-      enforcement: warn             # interactive: flagged content is delivered with the verdict attached
+      enforcement: flag             # interactive: flagged content is delivered with the verdict attached
       l2_threshold: 0.5             # how suspicious L2 must be before it flags
 
   agent1:

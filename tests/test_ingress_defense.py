@@ -1,4 +1,4 @@
-"""Tests for the MCP ingress perimeter (plan step 5, warn mode).
+"""Tests for the MCP ingress perimeter (plan step 5, flag mode).
 
 Real L1 runs in these, and the hostile fixture is multi-line and
 pattern-dense enough to cross the L1 blocking threshold on its own, so no
@@ -156,8 +156,8 @@ class TestScanToolResponse:
         assert warning is not None
         assert warning["flagged_by"] == "L1"
         assert warning["risk_level"] in ("high", "critical")
-        assert not decision.blocked, "default enforcement is warn"
-        assert blocks[0]["text"] == HOSTILE, "warn mode never touches content"
+        assert not decision.blocked, "default enforcement is flag"
+        assert blocks[0]["text"] == HOSTILE, "flag mode never touches content"
 
     async def test_structured_content_leaves_are_judged(self) -> None:
         decision = await scan_tool_response(
@@ -233,7 +233,7 @@ class TestScanToolList:
         result = await scan_tool_list(_profile(), "jira", tools, tools)
         assert [
             {k: v for k, v in t.items() if k != "_trentina_warning"} for t in result
-        ] == tools, "warn mode never touches content"
+        ] == tools, "flag mode never touches content"
         assert _only_l3_unavailable(result[0].get("_trentina_warning"))
 
     async def test_poisoned_description_is_annotated(self) -> None:
@@ -244,7 +244,7 @@ class TestScanToolList:
         result = await scan_tool_list(_profile(), "jira", tools, tools)
         assert _only_l3_unavailable(result[0].get("_trentina_warning"))
         assert result[1]["_trentina_warning"]["flagged_by"] == "L1"
-        assert result[1]["description"] == HOSTILE, "warn mode never touches content"
+        assert result[1]["description"] == HOSTILE, "flag mode never touches content"
 
     async def test_input_schema_poisoning_is_caught(self) -> None:
         tools = [
@@ -416,7 +416,7 @@ class TestRouterIntegration:
 
 class TestEnforcement:
     """The step-8 mechanism, landed ahead of the flip. Everything defaults
-    to warn; block/clean exist so the flip is a config edit, not a
+    to flag; block/redact exist so the flip is a config edit, not a
     deploy."""
 
     def _block_profile(self) -> Profile:
@@ -466,13 +466,13 @@ class TestEnforcement:
         assert decision.warning is not None
         assert decision.warning["l3_unavailable"] is True
 
-    async def test_kill_switch_forces_warn(
+    async def test_kill_switch_forces_flag(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """TRENTINA_ENFORCEMENT_OVERRIDE=warn is the 3am lever: flagged
+        """TRENTINA_ENFORCEMENT_OVERRIDE=flag is the 3am lever: flagged
         content flows again, warnings intact, no deploy."""
-        monkeypatch.setenv("TRENTINA_ENFORCEMENT_OVERRIDE", "warn")
+        monkeypatch.setenv("TRENTINA_ENFORCEMENT_OVERRIDE", "flag")
         decision = await scan_tool_response(
             profile=self._block_profile(),
             backend_name="jira",
@@ -482,6 +482,23 @@ class TestEnforcement:
         )
         assert not decision.blocked
         assert decision.warning is not None
+
+    @pytest.mark.parametrize("old", ["warn", "annotate"])
+    async def test_kill_switch_accepts_its_old_spellings(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        old: str,
+    ) -> None:
+        """The night this is reached for is not the night to learn it was renamed."""
+        monkeypatch.setenv("TRENTINA_ENFORCEMENT_OVERRIDE", old)
+        decision = await scan_tool_response(
+            profile=self._block_profile(),
+            backend_name="jira",
+            tool_name="jira_get_issue",
+            content_blocks=[{"type": "text", "text": HOSTILE}],
+            structured_content=None,
+        )
+        assert not decision.blocked
 
     async def test_invalid_override_is_ignored(
         self,
@@ -498,14 +515,14 @@ class TestEnforcement:
         assert decision.blocked, "an unknown override must not weaken block"
 
     async def test_an_unknown_mode_is_refused_not_delivered(self) -> None:
-        """`warn` is the only mode that DELIVERS flagged content, and a mode
+        """`flag` is the only mode that DELIVERS flagged content, and a mode
         nobody implemented must refuse rather than deliver. Since 0.32.0 the
         mode is a per-call argument, so the unknown value arrives from the
         AGENT — and is refused before anything runs."""
         from mcp_trentina_crunchtools.errors import ModeNotPermittedError
         from mcp_trentina_crunchtools.modes import Mode, ModePolicy
 
-        policy = ModePolicy((Mode.BLOCK, Mode.WARN, Mode.CLEAN), Mode.BLOCK)
+        policy = ModePolicy((Mode.BLOCK, Mode.FLAG, Mode.REDACT), Mode.BLOCK)
         with pytest.raises(ModeNotPermittedError):
             policy.resolve("some_future_mode")
 
@@ -594,7 +611,7 @@ class TestAdversarialReviewFixes:
         assert decision.warning is not None
         assert decision.warning["l2_truncated"] is True
 
-    async def test_h1_truncated_scan_only_warns_in_annotate(self) -> None:
+    async def test_h1_truncated_scan_only_warns_in_flag(self) -> None:
         from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
 
         truncated_benign = ClassifierResult(
@@ -790,7 +807,7 @@ class TestBlockWithholdsUnjudgedDescriptions:
         result = await scan_tool_list(profile, "jira", tools, tools)
         assert result == []
 
-    async def test_warn_still_lists_them_with_the_gap(self) -> None:
+    async def test_flag_still_lists_them_with_the_gap(self) -> None:
         tools = [{"name": "good_tool", "description": "Reads a ticket."}]
         result = await scan_tool_list(_profile(), "jira", tools, tools)
         assert result[0]["_trentina_warning"]["l3_unavailable"] is True
@@ -799,7 +816,7 @@ class TestBlockWithholdsUnjudgedDescriptions:
 class TestPerCallMode:
     """#193: the call's mode, not the profile's, decides a proxied response."""
 
-    async def test_a_call_asking_block_refuses_under_a_warn_profile(self) -> None:
+    async def test_a_call_asking_block_refuses_under_a_flag_profile(self) -> None:
         from mcp_trentina_crunchtools.modes import Mode, ModePolicy
 
         decision = await scan_tool_response(
@@ -809,25 +826,25 @@ class TestPerCallMode:
             content_blocks=[{"type": "text", "text": HOSTILE}],
             structured_content=None,
             mode=Mode.BLOCK,
-            policy=ModePolicy((Mode.BLOCK, Mode.WARN, Mode.CLEAN), Mode.WARN),
+            policy=ModePolicy((Mode.BLOCK, Mode.FLAG, Mode.REDACT), Mode.FLAG),
         )
         assert decision.blocked
         assert decision.refusal is not None
-        assert decision.refusal["alternatives"] == ["clean"], "flagged must never offer warn"
+        assert decision.refusal["alternatives"] == ["redact"], "flagged must never offer flag"
 
-    async def test_clean_extracts_flagged_content_instead_of_refusing(self) -> None:
+    async def test_redact_extracts_flagged_content_instead_of_refusing(self) -> None:
         from mcp_trentina_crunchtools.modes import Mode
         from mcp_trentina_crunchtools.quarantine.agent import CleanResult
 
         extract = AsyncMock(return_value=CleanResult(content={"extracted_text": "Tuesday"}))
-        with _l3_available_and_clean(), patch(f"{_I}.quarantine_clean", extract):
+        with _l3_available_and_clean(), patch(f"{_I}.quarantine_redact", extract):
             decision = await scan_tool_response(
                 profile=_profile("permode2"),
                 backend_name="jira",
                 tool_name="jira_get_issue",
                 content_blocks=[{"type": "text", "text": HOSTILE}],
                 structured_content={"secret": "not delivered"},
-                mode=Mode.CLEAN,
+                mode=Mode.REDACT,
                 prompt="when is the window",
             )
         assert not decision.blocked
@@ -835,30 +852,30 @@ class TestPerCallMode:
         assert json.loads(decision.extraction) == {"extracted_text": "Tuesday"}
         assert extract.call_args.args[1] == "when is the window"
 
-    async def test_clean_refuses_what_a_layer_could_not_finish(self) -> None:
-        """Keyless unit env: L3 is absent, which blocks clean exactly as block."""
+    async def test_redact_refuses_what_a_layer_could_not_finish(self) -> None:
+        """Keyless unit env: L3 is absent, which blocks redact exactly as block."""
         from mcp_trentina_crunchtools.modes import Mode, ModePolicy
 
         extract = AsyncMock()
-        with patch(f"{_I}.quarantine_clean", extract):
+        with patch(f"{_I}.quarantine_redact", extract):
             decision = await scan_tool_response(
                 profile=_profile("permode3"),
                 backend_name="jira",
                 tool_name="jira_get_issue",
                 content_blocks=[{"type": "text", "text": "The window is Tuesday."}],
                 structured_content=None,
-                mode=Mode.CLEAN,
-                policy=ModePolicy((Mode.BLOCK, Mode.WARN, Mode.CLEAN), Mode.BLOCK),
+                mode=Mode.REDACT,
+                policy=ModePolicy((Mode.BLOCK, Mode.FLAG, Mode.REDACT), Mode.BLOCK),
             )
         assert decision.blocked
         extract.assert_not_called()
         assert decision.refusal is not None
-        assert decision.refusal["alternatives"] == ["warn"], "gap-only may offer warn"
+        assert decision.refusal["alternatives"] == ["flag"], "gap-only may offer flag"
 
     async def test_the_kill_switch_beats_the_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from mcp_trentina_crunchtools.modes import Mode
 
-        monkeypatch.setenv("TRENTINA_ENFORCEMENT_OVERRIDE", "warn")
+        monkeypatch.setenv("TRENTINA_ENFORCEMENT_OVERRIDE", "flag")
         decision = await scan_tool_response(
             profile=_profile("permode4"),
             backend_name="jira",
@@ -972,13 +989,13 @@ class TestToolDescriptionBriefing:
         assert mock_defend.called is judged
 
 
-async def test_clean_is_never_served_from_the_verdict_cache() -> None:
-    """clean's extraction is per prompt: a second identical call extracts again."""
+async def test_redact_is_never_served_from_the_verdict_cache() -> None:
+    """redact's extraction is per prompt: a second identical call extracts again."""
     from mcp_trentina_crunchtools.modes import Mode
     from mcp_trentina_crunchtools.quarantine.agent import CleanResult
 
     extract = AsyncMock(return_value=CleanResult(content={"extracted_text": "x"}))
-    with _l3_available_and_clean(), patch(f"{_I}.quarantine_clean", extract):
+    with _l3_available_and_clean(), patch(f"{_I}.quarantine_redact", extract):
         for prompt in ("first", "second"):
             decision = await scan_tool_response(
                 profile=_profile("nocache"),
@@ -986,7 +1003,7 @@ async def test_clean_is_never_served_from_the_verdict_cache() -> None:
                 tool_name="jira_get_issue",
                 content_blocks=[{"type": "text", "text": "The window is Tuesday."}],
                 structured_content=None,
-                mode=Mode.CLEAN,
+                mode=Mode.REDACT,
                 prompt=prompt,
             )
             assert decision.extraction is not None

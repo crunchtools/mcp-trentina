@@ -141,6 +141,4 @@ class TestResolveBackend:
             with pytest.raises(ScopeError) as nonexistent:
                 resolve_backend(scope, "nope")
 
-        assert str(mine.value).replace("jira", "X") == str(
-            nonexistent.value
-        ).replace("nope", "X")
+        assert str(mine.value).replace("jira", "X") == str(nonexistent.value).replace("nope", "X")

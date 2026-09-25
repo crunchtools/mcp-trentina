@@ -41,7 +41,6 @@ SIMPLE_SCHEMA = {
 )
 @pytest.mark.asyncio
 class TestOpenAIIntegration:
-
     async def test_simple_generation(self) -> None:
         from mcp_trentina_crunchtools.quarantine.providers.openai import OpenAIProvider
 
@@ -52,8 +51,7 @@ class TestOpenAIIntegration:
         result = await provider.generate(
             system_prompt="You are a geography expert. Respond with JSON.",
             user_content=(
-                "What is the capital of France? "
-                "Respond as JSON with keys: capital, country"
+                "What is the capital of France? Respond as JSON with keys: capital, country"
             ),
             response_schema=SIMPLE_SCHEMA,
         )
@@ -69,7 +67,6 @@ class TestOpenAIIntegration:
 )
 @pytest.mark.asyncio
 class TestAnthropicIntegration:
-
     async def test_simple_generation(self) -> None:
         from mcp_trentina_crunchtools.quarantine.providers.anthropic import AnthropicProvider
 
@@ -80,8 +77,7 @@ class TestAnthropicIntegration:
         result = await provider.generate(
             system_prompt="You are a geography expert. Respond with valid JSON only.",
             user_content=(
-                "What is the capital of France? "
-                "Respond as JSON with keys: capital, country"
+                "What is the capital of France? Respond as JSON with keys: capital, country"
             ),
             response_schema=SIMPLE_SCHEMA,
         )
@@ -97,7 +93,6 @@ class TestAnthropicIntegration:
 )
 @pytest.mark.asyncio
 class TestGeminiIntegration:
-
     async def test_simple_generation(self) -> None:
         from mcp_trentina_crunchtools.quarantine.providers.gemini import GeminiProvider
 
