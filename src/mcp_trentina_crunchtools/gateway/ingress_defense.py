@@ -55,6 +55,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..config import get_config
 from ..defense import Provenance, defend
+from ..errors import scrub_credentials
 from ..modes import (
     Gaps,
     Mode,
@@ -598,7 +599,14 @@ def _settle(key: str, task: asyncio.Task[dict[str, Any] | None]) -> None:
     if _inflight.get(key) is task:
         del _inflight[key]
     if not task.cancelled() and (exc := task.exception()) is not None:
-        logger.warning("perimeter: judgement failed for key=%s: %r", key[:12], exc)
+        # Scrubbed: an exception from a provider call can carry the request,
+        # and the request can carry a key.
+        logger.warning(
+            "perimeter: judgement failed for key=%s: %s: %s",
+            key[:12],
+            type(exc).__name__,
+            scrub_credentials(str(exc)),
+        )
 
 
 async def _judge_description(

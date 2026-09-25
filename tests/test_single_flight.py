@@ -116,6 +116,30 @@ class TestAFlagReachesEveryone:
         assert len(flagged) == 1
 
 
+class TestDifferentJudges:
+    async def test_the_same_thresholds_under_different_judges_are_not_shared(self) -> None:
+        """A verdict one model reached must not reach a list judged by another (#137)."""
+        defend = _GatedDefend()
+        judge_a = _profile("ops").model_copy(update={"defense": DefenseConfig(model="judge-a")})
+        judge_b = _profile("ops").model_copy(update={"defense": DefenseConfig(model="judge-b")})
+        with (
+            patch.object(ing, "service_profile", side_effect=[judge_a, judge_b]),
+            patch.object(ing, "defend", defend),
+            patch.object(ing, "build_warning", return_value=None),
+        ):
+            first = asyncio.create_task(
+                ing.scan_tool_list(_profile("alpha"), "b", TOOLS[:1], TOOLS[:1])
+            )
+            second = asyncio.create_task(
+                ing.scan_tool_list(_profile("beta"), "b", TOOLS[:1], TOOLS[:1])
+            )
+            await _settle()
+            defend.gate.set()
+            await asyncio.gather(first, second)
+
+        assert defend.calls == 2
+
+
 class TestTheWorkOutlivesTheCaller:
     async def test_a_cancelled_caller_leaves_the_verdict_banked(self) -> None:
         defend = _GatedDefend()
@@ -183,3 +207,19 @@ class TestFailure:
 
         assert defend.calls == 2
         assert _key(profile, TOOLS[0]) in ing._verdicts
+
+    async def test_the_failure_line_is_scrubbed(self, caplog: pytest.LogCaptureFixture) -> None:
+        async def leaky(*_a: Any, **_k: Any) -> Any:
+            raise RuntimeError("HTTP 400 for https://x/?key=AIzaSECRET123")
+
+        with (
+            patch.object(ing, "defend", leaky),
+            patch.object(ing, "build_warning", return_value=None),
+            pytest.raises(RuntimeError),
+        ):
+            await ing.scan_tool_list(_profile("alpha"), "b", TOOLS[:1], TOOLS[:1])
+
+        await _settle()
+        lines = [r.getMessage() for r in caplog.records if "judgement failed" in r.getMessage()]
+        assert lines
+        assert "AIzaSECRET123" not in lines[0]
