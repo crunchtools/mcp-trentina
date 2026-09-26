@@ -27,7 +27,7 @@ PAGE = (
 )
 FRAGMENT = "<div><p>One</p><p>Two</p><ul><li>three</li></ul></div>"
 SYSLOG = "\n".join(
-    f"2026-09-17T10:00:{i % 60:02d}Z host sshd[{1000 + i}]: Accepted publickey for scott"
+    f"2026-09-17T10:00:{i % 60:02d}Z host sshd[{1000 + i}]: Accepted publickey for alice"
     for i in range(200)
 )
 
@@ -48,7 +48,7 @@ async def _run(payload: str, content_type: str | None = None) -> PreProcessResul
         ('{"unterminated": ', None, Format.TEXT),
         (SYSLOG, None, Format.TEXT),
         # One tag name HTML does not define is enough to leave text alone.
-        ("From: Scott <scott@example.com>\nTo: <a@b.c>\n<p>hi</p><div>x</div>", None, Format.TEXT),
+        ("From: Alice <alice@example.com>\nTo: <a@b.c>\n<p>hi</p><div>x</div>", None, Format.TEXT),
         ("fn f() -> Vec<String> { <div>x</div><p>y</p> }", None, Format.TEXT),
         ("Text.<ref>Smith 2020</ref> More <p>x</p><div>y</div>", None, Format.TEXT),
         # Too little markup, or none of it structural.
@@ -67,9 +67,9 @@ def test_an_unclosed_comment_is_linear_and_not_a_page() -> None:
 @pytest.mark.asyncio
 class TestRegressions:
     async def test_a_mail_header_keeps_its_addresses(self) -> None:
-        mail = "From: Scott <scott@example.com>\nTo: Team <team@example.com>\n\nHi <b>all</b>."
+        mail = "From: Alice <alice@example.com>\nTo: Team <team@example.com>\n\nHi <b>all</b>."
         result = await _run(mail)
-        assert "<scott@example.com>" in result.content
+        assert "<alice@example.com>" in result.content
 
     async def test_generics_survive(self) -> None:
         code = "fn names() -> Vec<String> {\n    Vec::<String>::new()\n}\n"

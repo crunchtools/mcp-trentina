@@ -6,13 +6,12 @@ Implements the MCP wire-protocol surface a consumer needs from the gateway:
 -32601 (method not found).
 
 For `tools/list`, aggregates across all backends in the profile and applies
-the allowlist filter. Tool names in the response are namespaced as
-`<backend>__<tool>` to avoid collisions across backends.
+the allowlist filter. Tools are served under short names (`names.py`, 0.38.0),
+or as `<backend>__<tool>` when the profile turns `short_names` off.
 
-For `tools/call`, parses the namespaced tool name back into (backend, tool),
-verifies the backend is in the profile, re-checks the allowlist (defense in
-depth), and forwards. Phase 1 returns the backend response verbatim; Phase 2
-inserts the L1/L2/L3 defense pipeline here.
+For `tools/call`, resolves the name back into (backend, tool), verifies the
+backend is in the profile, re-checks the allowlist (defense in depth), and
+forwards. `<backend>__<tool>` resolves either way until 0.40.0.
 """
 
 from __future__ import annotations
@@ -61,6 +60,7 @@ from .modes_policy import (
     resolve_preprocess,
     strip_params,
 )
+from .names import NAMESPACE_SEP, forget_issued_names, resolve_name, serve_short_names
 from .schema_compact import compact_tool
 from .transform import transform_response
 
@@ -76,7 +76,6 @@ logger = logging.getLogger(__name__)
 # at the SDK's own handshake ceiling rather than a literal, so trentina tracks
 # the protocol registry instead of drifting behind it.
 PROTOCOL_VERSION = LATEST_HANDSHAKE_VERSION
-NAMESPACE_SEP = "__"
 _CANONICAL = functools.partial(json.dumps, sort_keys=True, ensure_ascii=False)
 
 # JSON-RPC 2.0 reserved error codes (https://www.jsonrpc.org/specification#error_object)
@@ -178,6 +177,7 @@ def reset_profile_tools_cache() -> None:
     for name in {*_profile_tools_cache, *_profile_backend_urls, *_profile_inflight}:
         invalidate_profile_cache(name)
     _profile_inflight.clear()
+    forget_issued_names()
 
 
 def _audit(
@@ -266,9 +266,13 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
 
     if method == "initialize":
         # The mode explanation is said here once, not on every tool (#198).
+        naming = (
+            "Where two servers offer a tool of the same name, a server tag prefixes it."
+            if profile.short_names
+            else f"Tool names are namespaced as <backend>{NAMESPACE_SEP}<tool>."
+        )
         instructions = (
-            f"trentina gateway, profile={profile.name}. Tool names are "
-            f"namespaced as <backend>{NAMESPACE_SEP}<tool>. {mode_instructions(profile)}"
+            f"trentina gateway, profile={profile.name}. {naming} {mode_instructions(profile)}"
         ).rstrip()
         return _ok(
             req_id,
@@ -432,6 +436,7 @@ async def _build_profile_tools(
             continue
         aggregated.extend(outcome)
 
+    aggregated = serve_short_names(profile, aggregated)
     if not any_hard_failed and generation == _cache_generation.get(profile.name, 0):
         _profile_tools_cache[profile.name] = aggregated
         _profile_backend_urls[profile.name] = {
@@ -463,19 +468,18 @@ async def _route_tools_call(
     ``isError`` — that previously audited as a success, inflating the ok
     column with tool-level errors.
     """
-    namespaced_name = params.get("name", "")
+    served_name = params.get("name", "")
     arguments = params.get("arguments") or {}
 
-    if NAMESPACE_SEP not in namespaced_name:
-        return _err(
-            req_id,
-            JSONRPC_INVALID_PARAMS,
-            f"Tool name {namespaced_name!r} must be <backend>{NAMESPACE_SEP}<tool>",
+    resolved = resolve_name(profile, served_name)
+    if resolved is None and NAMESPACE_SEP in served_name:
+        # A legacy-shaped name for a backend this profile does not hold.
+        raise BackendNotInProfileError(
+            f"backend {served_name.partition(NAMESPACE_SEP)[0]!r} not in profile {profile.name!r}"
         )
-
-    backend_name, _, tool_name = namespaced_name.partition(NAMESPACE_SEP)
-    if not tool_name:
-        return _err(req_id, JSONRPC_INVALID_PARAMS, f"Empty tool component in {namespaced_name!r}")
+    if resolved is None or not resolved[1]:
+        return _err(req_id, JSONRPC_INVALID_PARAMS, f"Unknown tool {served_name!r}")
+    backend_name, tool_name = resolved
 
     backend = profile.backends.get(backend_name)
     if backend is None:

@@ -11,7 +11,7 @@ SQLite and looked up synchronously on subsequent calls. Best-effort: failures
 at any level are logged and skipped, and an uncompressed description is
 served as the backend wrote it.
 
-Parameter descriptions (0.38.0) were ~100 KB of josui's 400 KB tool list and
+Parameter descriptions (0.38.0) were ~100 KB of a 376-tool profile's 400 KB tool list and
 were never compressed: the tool prompt says to leave them to the schema.
 Each is first trimmed of boilerplate the schema already states (``_trim``),
 then, past ``PARAM_MODEL_MIN_CHARS``, rewritten by the model with the tool

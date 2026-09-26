@@ -363,6 +363,7 @@ class TestInternalBackend:
     def _profile(self, modes: list[ModeName]) -> Profile:
         p = Profile(
             name="webseat",
+            short_names=False,
             auth=AuthConfig(bearer_token_env="TEST"),
             defense=DefenseConfig(enforcement="block", modes=modes),
             backends={"web": Backend(url="internal://web")},

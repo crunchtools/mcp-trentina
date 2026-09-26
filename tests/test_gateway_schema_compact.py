@@ -263,7 +263,7 @@ class TestRouter:
 
 
 def test_fields_no_agent_reads_are_dropped() -> None:
-    """0.38.0: outputSchema and the titles that repeat the name cost ~40 KB on josui."""
+    """0.38.0: outputSchema and titles that repeat the name: ~40 KB on a 376-tool profile."""
     tool = {
         "name": "list_issues",
         "title": "List Issues",

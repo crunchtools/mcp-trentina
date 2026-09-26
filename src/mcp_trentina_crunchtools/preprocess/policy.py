@@ -26,7 +26,7 @@ the policy.
 
 Every tool accepts the switch; ``instructions`` says so once per session.
 Declaring it in each tool's schema is optional (``selectable``): Claude Code
-forwards an undeclared argument, and 376 declarations cost josui ~15 KB.
+forwards an undeclared argument, and 376 declarations cost a 376-tool profile ~15 KB.
 """
 
 from __future__ import annotations

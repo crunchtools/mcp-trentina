@@ -18,7 +18,7 @@ boilerplate: dropping it would LOOSEN what the agent reads, and then the agent
 could send arguments the backend refuses.
 
 Beside the inputSchema, three fields an agent does not use are dropped
-(0.38.0): ``outputSchema`` (34 KB on josui), the top-level ``title`` and
+(0.38.0): ``outputSchema`` (34 KB on a 376-tool profile), the top-level ``title`` and
 ``annotations.title``, which repeat the name. The gateway still validates
 results against each backend's own outputSchema, which the backend session
 holds (``Backend.validate_output_schema``); only the copy served to the agent

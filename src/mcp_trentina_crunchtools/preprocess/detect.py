@@ -5,7 +5,7 @@ processor in it tried every payload, each declining what was not its shape.
 That works for the reducers, whose declines are cheap and exact. It does not
 work for ``html``: its gate is "is there any markup at all", and on text that
 merely contains angle brackets it is destructive. Measured before this module
-existed, it deleted ``<scott@example.com>`` from a mail header, turned
+existed, it deleted ``<alice@example.com>`` from a mail header, turned
 ``Vec<String>`` into ``Vec``, stripped wikitext ``<ref>`` and corrupted JSON
 by writing newlines into string values. A converter that is always in the
 chain has to be told when to run.
@@ -16,7 +16,7 @@ deletes nothing:
 * **HTML** only when the server SAID so (``PreProcessContext.content_type``)
   or the text is unmistakably a document: a leading doctype or ``<html>``, or
   at least ``_MIN_TAGS`` real tags, one of them structural, and NOT ONE tag
-  name that HTML does not define. ``<scott``, ``<String``, ``<ref`` are
+  name that HTML does not define. ``<alice``, ``<String``, ``<ref`` are
   unknown names, so one of them is enough to leave the payload alone. Missing
   a real page costs tokens; mistaking text for a page costs the agent content.
 * **JSON** when it is bracketed at both ends. ``structured`` collapses

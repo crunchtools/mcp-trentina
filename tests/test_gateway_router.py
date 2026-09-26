@@ -34,6 +34,7 @@ from mcp_trentina_crunchtools.gateway.router import (
 def _profile() -> Profile:
     """Build a Profile with two backends and one deny pattern for testing."""
     p = Profile(
+        short_names=False,
         name="testp",
         auth=AuthConfig(bearer_token_env="TEST"),
         backends={
@@ -55,6 +56,7 @@ def _profile() -> Profile:
 def _mixed_profile() -> Profile:
     """Profile mixing an http backend with an internal:// (trentina-tools) backend."""
     p = Profile(
+        short_names=False,
         name="mixed",
         auth=AuthConfig(bearer_token_env="TEST"),
         backends={
@@ -424,6 +426,7 @@ class TestRouter:
 
         db_mod._db = None
         p = Profile(
+            short_names=False,
             name="guarded",
             auth=AuthConfig(bearer_token_env="TEST"),
             backends={
@@ -487,6 +490,7 @@ class TestRouter:
             )
 
         p = Profile(
+            short_names=False,
             name="isolated",
             auth=AuthConfig(bearer_token_env="TEST"),
             backends={
@@ -554,6 +558,7 @@ class TestRouter:
             )
 
         p = Profile(
+            short_names=False,
             name="isolated2",
             auth=AuthConfig(bearer_token_env="TEST"),
             backends={
@@ -639,6 +644,7 @@ class TestRouter:
     async def test_tools_call_rejects_guarded_parameter(self) -> None:
         """Parameter guard blocks a call with a forbidden argument value."""
         p = Profile(
+            short_names=False,
             name="guarded",
             auth=AuthConfig(bearer_token_env="TEST"),
             backends={
@@ -687,6 +693,7 @@ class TestRouter:
             )
 
         p = Profile(
+            short_names=False,
             name="guarded",
             auth=AuthConfig(bearer_token_env="TEST"),
             backends={
@@ -854,6 +861,7 @@ class TestProfileToolsCache:
             return [{"name": "tool_a", "description": "", "inputSchema": {}}]
 
         p2 = Profile(
+            short_names=False,
             name="other",
             auth=AuthConfig(bearer_token_env="TEST"),
             backends={

@@ -746,14 +746,14 @@ class TestCacheBehaviour:
         ):
             _cfg.return_value.has_api_key = True
             _cfg.return_value.max_content = 100_000
-            assert await _list_tools("alpha") == ["jira__jira_get_issue", "jira__jira_delete_issue"]
+            assert await _list_tools("alpha") == ["get_issue", "delete_issue"]
             after_warmup = len(judged)
             assert after_warmup == 2
 
             profiles_path.write_text(DENIED_YAML, encoding="utf-8")
             await _reload_as("alpha")
 
-            assert await _list_tools("alpha") == ["jira__jira_get_issue"]
+            assert await _list_tools("alpha") == ["get_issue"]
 
         assert len(judged) == after_warmup
 
@@ -841,7 +841,7 @@ class TestCacheBehaviour:
             await asyncio.sleep(0)
             invalidate_profile_cache("alpha")
             gate.set()
-            assert await build == ["jira__jira_delete_issue"]
+            assert await build == ["delete_issue"]
 
         assert "alpha" not in _profile_tools_cache
 

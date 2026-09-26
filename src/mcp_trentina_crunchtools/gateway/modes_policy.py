@@ -25,7 +25,7 @@ steps. Its policy is the resolved `preprocess` config: `processors` is what
 minifying runs, `required` the floor the switch cannot remove. Every tool
 accepts it and `instructions` explains it once; a tool's schema declares it
 only when its config says `selectable`, because a declaration on every tool
-costs josui ~15 KB for a switch the instructions already describe.
+cost a 376-tool profile ~15 KB for a switch the instructions already describe.
 """
 
 from __future__ import annotations

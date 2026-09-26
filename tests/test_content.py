@@ -52,7 +52,7 @@ async def test_the_blocklist_is_keyed_by_hash(env: Path) -> None:
 @pytest.mark.parametrize("content_type", ["text/plain", "text/markdown"])
 async def test_angle_brackets_alone_are_not_html(env: Path, content_type: str) -> None:
     """Undeclared text is converted only when it is unmistakably a page."""
-    text = "Vec<String> is returned; ask <scott@example.com>."
+    text = "Vec<String> is returned; ask <alice@example.com>."
     with layers(env) as fakes:
         result = await flag_content(text, content_type)
     assert result["content"] == text

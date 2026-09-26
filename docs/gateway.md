@@ -87,18 +87,35 @@ bytes the agent would pay for and not read (0.38.0):
   `detect` by default, unless the call passes `trentina_preprocess: false`.
   See [Minifying and exact text](profiles.md#minifying-and-exact-text).
 
-### Tool Namespacing
+### Tool Names
 
-Backend tools are namespaced with a double-underscore separator to avoid collisions:
+Since 0.38.0 each tool is served under the simplest name that says what it
+does (`gateway/names.py`), not `<backend>__<tool>`:
 
-```
-slack__slack_search_messages
-github__list_issues_tool
-gws-personal__draft_gmail_message
-web__fetch_tool
-```
+| Backend tool | Served as |
+|---|---|
+| `jira` / `jira_get_issue_watchers` | `get_issue_watchers` |
+| `cloudflare` / `list_zones_tool` | `list_zones` |
+| `memory` / `memory_store` | `memory_store` |
+| `mail-work` / `send_gmail_message` | `work_send_gmail_message` |
+| `mail-home` / `send_gmail_message` | `home_send_gmail_message` |
 
-This matches the `mcp__<server>__<tool>` convention that Claude Code and other MCP clients already use.
+The rule: drop a trailing `_tool`; drop the leading words every tool of the
+backend shares, unless one word would be all that is left; and where two
+backends' tools still collide, prefix each with the backend's tag
+(`name_tag`, else the backend name). Tags, not numbers: `work_` and
+`home_` tell an agent which account it is about to send mail from, and
+`send_gmail_message2` would not. On a 376-tool profile this took the names from 10.2 KB
+to 6.3 KB, before a client adds its own prefix.
+
+A name, once issued to a profile, is recorded and never reassigned, so adding
+a backend later cannot rename a tool an agent already knows: the newcomer
+takes the tag. Only the edge sees short names. Allowlists, parameter guards,
+`preprocess_tools`, the verdict cache and the audit log all keep using the real
+backend and tool names.
+
+`<backend>__<tool>` still routes, with a warning, until 0.40.0.
+`short_names: false` on a profile serves the old form.
 
 ### Configuration
 

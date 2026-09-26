@@ -85,7 +85,7 @@ async def test_redact_reads_the_markdown(env: Path) -> None:
 @pytest.mark.parametrize("content_type", ["text/plain", "text/markdown"])
 async def test_text_with_angle_brackets_is_not_taken_for_html(env: Path, content_type: str) -> None:
     """Only unmistakable markup is converted when the server did not say HTML."""
-    text = "Use Vec<String> here.\nMail <scott@example.com> about it.\n"
+    text = "Use Vec<String> here.\nMail <alice@example.com> about it.\n"
     with layers(env) as fakes:
         fakes.fetch_url.return_value = (text, content_type)
         result = await flag_fetch("https://example.com/raw")

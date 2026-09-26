@@ -36,7 +36,7 @@ Compression is the `summarize` pre-processor on the tool-description channel
 ### Parameter descriptions (0.38.0)
 
 Until 0.38.0 only the tool `description` was compressed, and the prompt told
-the model to leave parameters to the schema. On josui that left ~95 KB of a
+the model to leave parameters to the schema. On a 376-tool profile that left ~95 KB of a
 400 KB tool list untouched. Each parameter description is now:
 
 1. **Trimmed** of what its own schema already says: a leading `Optional.` or
@@ -149,7 +149,7 @@ Measured on the lotor tool cache (800 tools, 26 backends): 519k → 461k schema
 characters, 11%, about 15k tokens.
 
 Since 0.38.0 the same step drops three fields no agent reads: `outputSchema`
-(34 KB on josui), and the top-level `title` and `annotations.title`, which
+(34 KB on a 376-tool profile), and the top-level `title` and `annotations.title`, which
 repeat the name. Results are still validated against the backend's own
 outputSchema, which the backend session holds.
 

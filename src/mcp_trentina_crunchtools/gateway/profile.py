@@ -508,6 +508,14 @@ class Backend(BaseModel):
             "backend. Must include the profile's default (enforcement)."
         ),
     )
+    name_tag: str | None = Field(
+        default=None,
+        pattern=r"^[a-z][a-z0-9_]{0,15}$",
+        description=(
+            "Prefix for this backend's tool names where they collide with "
+            "another backend's (short_names). Default: the backend name."
+        ),
+    )
     l3_briefing: str | None = Field(
         default=None,
         max_length=MAX_L3_BRIEFING_CHARS,
@@ -1312,9 +1320,18 @@ class Profile(BaseModel):
     preprocess: PreProcessConfig = Field(
         default_factory=PreProcessConfig,
         description=(
-            "Profile-level response reduction policy. Off by default: a "
-            "gateway that starts quietly rewriting payloads is not a "
-            "default anyone opted into."
+            "Profile-level pre-processing of tool responses. Minifies by "
+            "default since 0.38.0; agents get exact text per call with "
+            "trentina_preprocess: false."
+        ),
+    )
+    short_names: bool = Field(
+        default=True,
+        description=(
+            "Serve each tool under the simplest name that says what it does, "
+            "tagged with its backend only where two backends' names collide "
+            "(gateway/names.py). Off: <backend>__<tool>, as before 0.38.0. "
+            "Either way the <backend>__<tool> form still routes until 0.40.0."
         ),
     )
     alert_ingress: AlertIngressConfig | None = Field(
