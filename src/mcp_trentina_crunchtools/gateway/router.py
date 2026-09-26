@@ -210,10 +210,12 @@ def _err(
 def _refusal_text(refusal: dict[str, Any]) -> str:
     """One line an agent reads even when a client strips the structured field."""
     alternatives = refusal.get("alternatives") or []
+    spelled = [
+        f'{MODE_PARAM}={{"redact": "<what you need>"}}' if m == "redact" else f"{MODE_PARAM}={m}"
+        for m in alternatives
+    ]
     tail = (
-        "Your policy allows retrying with "
-        + " or ".join(f"{MODE_PARAM}={m}" for m in alternatives)
-        + "."
+        "Your policy allows retrying with " + " or ".join(spelled) + "."
         if alternatives
         else "No other mode is available under your policy."
     )
@@ -402,7 +404,13 @@ async def _build_profile_tools(
         namespaced: list[dict[str, Any]] = []
         for tool in filtered:
             namespaced_tool = (
-                dict(insert_params(tool, policy_for(profile, backend, tool["name"])))
+                dict(
+                    insert_params(
+                        tool,
+                        policy_for(profile, backend, tool["name"]),
+                        declare=profile.declare_modes,
+                    )
+                )
                 if tool.get("name") in modal
                 else dict(tool)
             )
@@ -596,8 +604,7 @@ async def _dispatch(
             tool_name,
             forwarded,
             modal_arguments={
-                MODE_PARAM: mode.value,
-                PROMPT_PARAM: prompt,
+                MODE_PARAM: {"redact": prompt} if mode.value == "redact" and prompt else mode.value,
                 PREPROCESS_PARAM: requested,
             },
         )

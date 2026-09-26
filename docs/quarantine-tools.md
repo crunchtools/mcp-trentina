@@ -18,11 +18,11 @@ Every tool runs **all three layers**: L1 and L2 in parallel on the bytes as they
 |---|---|---|
 | `block` | refused | the bytes that arrived, or an error — never flagged or half-judged content |
 | `flag` | delivered, with `_trentina_warning` | **exactly** the bytes that arrived |
-| `redact` | extracted (half-judged content is refused) | an extraction L3 wrote and a second L3 pass verified, guided by `trentina_prompt` — never the original |
+| `redact` | extracted (half-judged content is refused) | an extraction L3 wrote and a second L3 pass verified, answering the question in `{"redact": "<question>"}` — never the original |
 
 ```
 fetch_tool {url}                                           # the policy default
-fetch_tool {url, trentina_mode: "redact", trentina_prompt: "the release date"}
+fetch_tool {url, trentina_mode: {"redact": "the release date"}}
 fetch_tool {url, trentina_mode: "flag"}                    # only if the policy grants flag
 ```
 

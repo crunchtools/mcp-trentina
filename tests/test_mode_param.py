@@ -9,7 +9,6 @@ agent toward flag for content a layer flagged.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Iterator
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -39,7 +38,7 @@ from mcp_trentina_crunchtools.gateway.profile import (
     Profile,
 )
 from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
-from mcp_trentina_crunchtools.modes import Mode, ModePolicy, refusal_body
+from mcp_trentina_crunchtools.modes import Mode, ModePolicy, parse_mode_arg, refusal_body
 
 ROUTER = "mcp_trentina_crunchtools.gateway.router"
 TOOL = {
@@ -138,32 +137,86 @@ class TestResolution:
             policy.resolve(None)
 
 
-class TestSchema:
-    def test_one_mode_inserts_nothing(self) -> None:
-        assert insert_params(TOOL, ModePolicy((Mode.BLOCK,), Mode.BLOCK)) is TOOL
+class TestModeArg:
+    """0.39.0: the extraction question travels inside the mode."""
 
-    def test_the_enum_is_exactly_the_policy(self) -> None:
-        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.REDACT), Mode.BLOCK))
+    @pytest.mark.parametrize(
+        ("value", "legacy", "expected"),
+        [
+            (None, None, (None, None)),
+            ("flag", None, ("flag", None)),
+            ({"redact": "What ships?"}, None, ("redact", "What ships?")),
+            ({"REDACT": "What ships?"}, None, ("redact", "What ships?")),
+            ({"redact": "What ships?"}, "ignored", ("redact", "What ships?")),
+            ("redact", "What ships?", ("redact", "What ships?")),
+            ("redact", "  ", ("redact", None)),
+        ],
+    )
+    def test_shapes(self, value: Any, legacy: Any, expected: tuple[Any, Any]) -> None:
+        assert parse_mode_arg(value, legacy) == expected
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            {"flag": "x"},
+            {"redact": ""},
+            {"redact": 3},
+            {},
+            {"redact": "a", "block": "b"},
+            1,
+            ["block"],
+        ],
+    )
+    def test_anything_else_is_refused(self, bad: Any) -> None:
+        with pytest.raises(ModeNotPermittedError, match=MODE_PARAM):
+            parse_mode_arg(bad)
+
+    def test_the_old_prompt_warns_once(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from mcp_trentina_crunchtools import modes
+
+        monkeypatch.setattr(modes, "_legacy_prompt_warned", False)
+        parse_mode_arg("redact", "What ships?")
+        parse_mode_arg("redact", "What ships?")
+        assert caplog.text.count("trentina_prompt is deprecated") == 1
+
+
+class TestSchema:
+    def test_nothing_is_declared_by_default(self) -> None:
+        """0.39.0: every tool accepts the mode; declaring it cost ~39 KB."""
+        policy = ModePolicy((Mode.BLOCK, Mode.FLAG, Mode.REDACT), Mode.BLOCK)
+        assert insert_params(TOOL, policy, declare=False) is TOOL
+
+    def test_one_mode_inserts_nothing(self) -> None:
+        assert insert_params(TOOL, ModePolicy((Mode.BLOCK,), Mode.BLOCK), declare=True) is TOOL
+
+    def test_declared_shapes_are_exactly_the_policy(self) -> None:
+        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.REDACT), Mode.BLOCK), declare=True)
         props = tool["inputSchema"]["properties"]
-        assert props[MODE_PARAM] == {"type": "string", "enum": ["block", "redact"]}
-        assert props[PROMPT_PARAM] == {"type": "string"}
-        assert PROMPT_PARAM in props
+        string, extraction = props[MODE_PARAM]["anyOf"]
+        assert string == {"type": "string", "enum": ["block"]}
+        assert extraction["required"] == ["redact"]
+        assert PROMPT_PARAM not in props
         assert MODE_PARAM not in tool["inputSchema"]["required"]
         assert MODE_PARAM not in TOOL["inputSchema"]["properties"], "input mutated"
 
-    def test_no_prompt_without_redact(self) -> None:
-        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.FLAG), Mode.BLOCK))
-        assert PROMPT_PARAM not in tool["inputSchema"]["properties"]
+    def test_no_extraction_shape_without_redact(self) -> None:
+        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.FLAG), Mode.BLOCK), declare=True)
+        assert tool["inputSchema"]["properties"][MODE_PARAM] == {
+            "type": "string",
+            "enum": ["block", "flag"],
+        }
 
     def test_default_outside_the_tool_policy_makes_the_mode_required(self) -> None:
-        tool = insert_params(TOOL, ModePolicy((Mode.REDACT,), Mode.BLOCK))
+        tool = insert_params(TOOL, ModePolicy((Mode.REDACT,), Mode.BLOCK), declare=True)
         assert MODE_PARAM in tool["inputSchema"]["required"]
-
-    def test_inserted_text_is_the_enum_alone(self) -> None:
-        """#198: the explanation lives in `initialize`, not on 372 tools."""
-        tool = insert_params(TOOL, ModePolicy((Mode.BLOCK, Mode.FLAG, Mode.REDACT), Mode.BLOCK))
-        inserted = {k: tool["inputSchema"]["properties"][k] for k in (MODE_PARAM, PROMPT_PARAM)}
-        assert len(json.dumps(inserted, separators=(",", ":"))) < 120
+        assert tool["inputSchema"]["properties"][MODE_PARAM] == {
+            "type": "object",
+            "properties": {"redact": {"type": "string"}},
+            "required": ["redact"],
+            "additionalProperties": False,
+        }
 
     def test_a_backend_declared_mode_is_stripped(self) -> None:
         declared = {
@@ -187,7 +240,7 @@ class TestInstructions:
     def test_the_profile_modes_and_default_are_stated_once(self) -> None:
         text = mode_instructions(_profile(["block", "redact"]))
         assert "Omitted, it is block." in text
-        assert "redact returns" in text and PROMPT_PARAM in text
+        assert '{"redact": "<what you need>"}' in text and PROMPT_PARAM not in text
         assert "flag returns" not in text
 
     def test_a_backend_widening_the_policy_is_explained(self) -> None:
@@ -258,7 +311,7 @@ class TestRouter:
             )
         assert MODE_PARAM not in seen[0]["inputSchema"]["properties"], "gateway text was judged"
         (tool,) = resp["result"]["tools"]
-        assert tool["inputSchema"]["properties"][MODE_PARAM]["enum"] == ["block", "redact"]
+        assert MODE_PARAM not in tool["inputSchema"]["properties"], "0.39.0: undeclared"
 
     async def _call(
         self, profile: Profile, arguments: dict[str, Any], decision: IngressDecision | None = None
@@ -335,7 +388,37 @@ class TestRouter:
         result = resp["result"]
         assert result["isError"] is True
         assert result["_trentina_refusal"] == refusal
-        assert f"{MODE_PARAM}=redact" in result["content"][0]["text"]
+        assert f'{MODE_PARAM}={{"redact": "<what you need>"}}' in result["content"][0]["text"]
+
+    async def test_the_question_rides_inside_the_mode(self) -> None:
+        with (
+            patch(
+                f"{ROUTER}.scan_tool_response",
+                AsyncMock(return_value=IngressDecision(warning=None, extraction="x")),
+            ) as scan,
+            patch(
+                f"{ROUTER}.call_backend_tool",
+                AsyncMock(
+                    return_value=BackendCall(content=[], is_error=False, structured_content=None)
+                ),
+            ) as backend,
+            patch(f"{ROUTER}._audit"),
+        ):
+            await route_jsonrpc(
+                _profile(["block", "redact"]),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "jira__get_issue",
+                        "arguments": {"issue_key": "X-1", MODE_PARAM: {"redact": "Who owns it?"}},
+                    },
+                },
+            )
+        assert scan.call_args.kwargs["mode"] is Mode.REDACT
+        assert scan.call_args.kwargs["prompt"] == "Who owns it?"
+        assert backend.call_args.args[3] == {"issue_key": "X-1"}
 
     async def test_redact_replaces_the_response_and_drops_structured_content(self) -> None:
         resp, _, _ = await self._call(
@@ -364,6 +447,7 @@ class TestInternalBackend:
         p = Profile(
             name="webseat",
             short_names=False,
+            declare_modes=True,
             auth=AuthConfig(bearer_token_env="TEST"),
             defense=DefenseConfig(enforcement="block", modes=modes),
             backends={"web": Backend(url="internal://web")},
@@ -392,7 +476,7 @@ class TestInternalBackend:
             )
         tools = {t["name"]: t for t in resp["result"]["tools"]}
         fetch = tools[f"web{NAMESPACE_SEP}fetch_tool"]["inputSchema"]["properties"]
-        assert fetch[MODE_PARAM]["enum"] == ["block", "flag", "redact"]
+        assert fetch[MODE_PARAM]["anyOf"][0]["enum"] == ["block", "flag"]
         stats = tools[f"web{NAMESPACE_SEP}quarantine_stats_tool"]["inputSchema"]
         assert MODE_PARAM not in (stats.get("properties") or {})
 
@@ -421,7 +505,7 @@ class TestInternalBackend:
         assert data["mode"] == "block"
         assert data["flagged_by"]
         assert data["alternatives"] == ["redact"]
-        assert f"{MODE_PARAM}=redact" in resp["error"]["message"]
+        assert f'{MODE_PARAM}={{"redact": "<what you need>"}}' in resp["error"]["message"]
         assert "ignore previous" not in str(resp), "payload text leaked into the refusal"
 
 

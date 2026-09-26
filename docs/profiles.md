@@ -84,12 +84,17 @@ profiles:
       modes: [block, flag, redact]
 ```
 
-With more than one mode, the gateway inserts two arguments into each tool's
-schema: `trentina_mode`, whose enum is exactly the permitted modes, and
-`trentina_prompt` when `redact` is permitted. On a call it resolves an omitted
-mode to `enforcement`, refuses anything outside the policy (`denied_guard` in
-the audit log), and strips both arguments before the backend sees them.
-With one mode nothing is inserted, and every call runs as that mode.
+With more than one mode, every tool accepts `trentina_mode`: `"block"`,
+`"flag"`, or `{"redact": "<question>"}`, where the question says what to
+extract (0.39.0; it was a separate `trentina_prompt`, still read with a warning
+until 0.41.0). The session instructions explain it once. Tool schemas do not
+declare it, because the enum alone on every tool cost a 376-tool profile
+~39 KB; `declare_modes: true` on a profile declares it again, for a client
+that drops arguments a tool does not declare. On a call the gateway resolves
+an omitted mode to `enforcement`, refuses anything outside the policy
+(`denied_guard` in the audit log), and strips the argument before the backend
+sees it. With one mode there is nothing to choose, and every call runs as
+that mode.
 
 `enforcement` is the default and must be in `modes`; a profile where it is
 not fails to load. It cannot be `redact`: a call that omits the mode carries no

@@ -112,8 +112,10 @@ Every call runs L1 ∥ L2 on the arrived bytes, then L3 briefed with both. The
 - `block` — refuses a flag or any blocking gap. Allowlisted → redact instead.
 - `flag` — bytes IDENTICAL to what arrived, `_trentina_warning` attached. A
   security-researcher grant; leave it out of agent policies.
-- `redact` — L3 detect, extract (guided by `trentina_prompt`), verify; any
-  objection refuses.
+- `redact` — L3 detect, extract, verify; any objection refuses. Spelled
+  `{"redact": "<question>"}` since 0.39.0: the question travels inside the
+  mode (`modes.parse_mode_arg`); `trentina_prompt` is read until 0.41.0. No
+  tool declares `trentina_mode` unless the profile sets `declare_modes`.
 
 "Arrived" means arrived at the perimeter, AFTER pre-processing. Output is
 minified by default (0.38.0): the `detect` pre-processor picks the minifier by
