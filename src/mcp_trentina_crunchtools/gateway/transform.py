@@ -33,13 +33,16 @@ per profile.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from ..channels import Channel
 from ..defense import Provenance
+from ..l1.hidden import HiddenStats, detect_hidden_markup
 from ..preprocess import PreProcessContext, PreProcessor, Strategy, run_preprocessors
+from ..preprocess.detect import hiding_briefing, hiding_removed
 from ..preprocess.policy import FAILED_DECLINES
 from .drivers import build_preprocessors
 from .errors import ProfileConfigError
@@ -63,6 +66,12 @@ class TransformOutcome:
     # Set when a REQUIRED processor could not run. The router delivers
     # nothing: a floor that fails open is not a floor.
     failed: str | None = None
+    # Hiding counted on the ORIGINAL of every text block, when any block's
+    # markup was converted (#229): conversion deletes the evidence L1 would
+    # count on what is delivered. None when nothing was converted.
+    hidden: HiddenStats | None = None
+    # What L3 is told when conversion deleted hidden elements.
+    briefing: str | None = None
 
 
 def resolve(profile: Profile, backend: Backend, tool_name: str) -> PreProcessConfig:
@@ -221,7 +230,7 @@ async def transform_response(
     backend_name: str,
     tool_name: str,
     content_blocks: list[Any] | None,
-    selection: tuple[str, ...] | None = None,
+    minify: bool | None = None,
 ) -> TransformOutcome:
     """Transform a tool response's text blocks. Never raises, never judges.
 
@@ -229,18 +238,17 @@ async def transform_response(
     whatever the agent asked for and regardless of ``enabled`` and
     ``min_bytes`` — first, so ``best_of`` can never discard them. They FAIL
     CLOSED: one that raises or cannot parse the payload sets ``failed`` and
-    the router delivers nothing. Then the optional processors run under the
-    configured strategy, and they fail open: a processor that cannot improve
-    a payload must not be able to cost you the response.
+    the router delivers nothing. Then, when the call minifies, the rest run
+    under the configured strategy, and they fail open: a minifier that breaks
+    costs the agent tokens, never the response.
 
     Args:
         profile, backend, backend_name, tool_name: where the response came
             from; they resolve the config (``resolve``) and label the log.
         content_blocks: the response's MCP content; only text blocks are
             rewritten.
-        selection: the agent's ``trentina_preprocess``, already resolved
-            against the policy (required names included), or None for the
-            operator's default.
+        minify: the agent's ``trentina_preprocess`` as a bool, or None for
+            the operator's default (``enabled``, above ``min_bytes``).
 
     Returns:
         The blocks to scan and deliver. When ``failed`` is set, a required
@@ -249,16 +257,15 @@ async def transform_response(
     cfg = resolve(profile, backend, tool_name)
     required: list[str] = list(cfg.required)
     # None is the operator's default: the configured chain when enabled and
-    # the response clears min_bytes. An explicit selection runs whatever the
-    # size — the agent asked for it.
-    default_on = cfg.enabled and cfg.strategy != "none"
-    chosen = selection if selection is not None else (cfg.processors if default_on else [])
-    optional = [n for n in chosen if n not in required]
+    # the response clears min_bytes. An explicit true runs whatever the size
+    # — the agent asked for it.
+    on = (cfg.enabled and cfg.strategy != "none") if minify is None else minify
+    optional: list[str] = [n for n in cfg.processors if n not in required] if on else []
     if not (required or optional):
         return TransformOutcome(content_blocks=content_blocks)
     targets = _text_blocks(content_blocks)
     lengths = [len(t.encode("utf-8")) for _, t in targets]
-    if selection is None and sum(lengths) < cfg.min_bytes:
+    if minify is None and sum(lengths) < cfg.min_bytes:
         optional = []
     if not targets or not (required or optional):
         return TransformOutcome(content_blocks=content_blocks)
@@ -280,14 +287,27 @@ async def transform_response(
         source=f"{profile.name}:{backend_name}:{tool_name}",
         target_bytes=max(1, cfg.target_bytes // len(targets)),
     )
-    # An explicit selection under strategy none still runs: the agent asked.
+    # An explicit true under strategy none still runs: the agent asked.
     strategy: Strategy = "chain" if cfg.strategy == "none" else cfg.strategy
+    return await _transform_blocks(
+        content_blocks, list(zip(targets, lengths, strict=True)), (floor, processors), strategy, ctx
+    )
+
+
+async def _transform_blocks(
+    content_blocks: list[Any] | None,
+    targets: list[tuple[tuple[int, str], int]],
+    stages: tuple[list[PreProcessor], list[PreProcessor]],
+    strategy: Strategy,
+    ctx: PreProcessContext,
+) -> TransformOutcome:
+    """Each text block through both stages, then the accounting and the hiding."""
     new_blocks = list(content_blocks or [])
     results: list[Any] = []
     metered = False
     sizes = [0, 0]
-    for (idx, text), length in zip(targets, lengths, strict=True):
-        block = await _transform_block(text, floor, processors, strategy, ctx)
+    for (idx, text), length in targets:
+        block = await _transform_block(text, *stages, strategy, ctx)
         if block.failed is not None:
             return TransformOutcome(content_blocks=None, failed=block.failed)
         results.extend(block.results)
@@ -296,7 +316,17 @@ async def transform_response(
         sizes[1] += len(block.content.encode("utf-8"))
         if block.content != text:
             new_blocks[idx] = {**new_blocks[idx], "text": block.content}
-    return _account(ctx.source, content_blocks, new_blocks, results, metered, *sizes)
+    outcome = _account(ctx.source, content_blocks, new_blocks, results, metered, *sizes)
+    removed = hiding_removed(results)
+    if removed is None:
+        return outcome
+    # Every block's original, converted or not: L1 will read the delivered
+    # text of all of them, and these counts stand in for that text's.
+    counts = await asyncio.gather(
+        *(asyncio.to_thread(detect_hidden_markup, text) for (_, text), _ in targets)
+    )
+    hidden = sum((c for _, c in counts), HiddenStats())
+    return replace(outcome, hidden=hidden, briefing=hiding_briefing(removed))
 
 
 def _account(

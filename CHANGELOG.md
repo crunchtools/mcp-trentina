@@ -10,6 +10,67 @@ under that name.
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-09-26
+
+Fewer tokens on every tool call. Measured on a 376-tool profile before this
+release: a 397 KB tool list, and tool results that arrived twice.
+
+### Changed
+
+- **Output is minified by default.** The new `detect` pre-processor is the
+  default and picks the minifier by format: HTML to Markdown then `petit` for
+  a page, `structured` for JSON, `email` then `petit` for everything else.
+  `preprocess.enabled` defaults to `true` and `processors` to `[detect]`.
+  Undeclared text is taken for HTML only when every tag name in it is one HTML
+  defines: the old chain ran `html` on everything and deleted
+  `<alice@example.com>` from mail headers, `<String>` from `Vec<String>`,
+  wikitext `<ref>`, and JSON's validity.
+- **`trentina_preprocess` is a switch.** `false` returns exact text, still
+  judged by all three layers; `true` minifies a tool whose default is exact.
+  Every tool accepts it, and the session instructions explain it once; a
+  schema declares it only where `selectable` is set (every tool declaring it
+  cost ~15 KB). `read_tool` stays exact by default. The 0.37.0 list form is
+  read with a warning until 0.40.0.
+- **One failure rule.** A `required` processor that breaks refuses the call;
+  a minifier that breaks delivers the original, judged. The internal tools
+  used to refuse on any failure.
+- `structured` emits compact JSON, and clips long strings only when the
+  payload is over `target_bytes`, which the internal tools now honour.
+- **Short tool names.** `jira__jira_get_issue_watchers` is served as
+  `get_issue_watchers`; a backend tag prefixes a name only where two backends
+  collide (`work_send_gmail_message`), set per backend with `name_tag`. Names
+  are recorded per profile and never reassigned. `<backend>__<tool>` still
+  routes with a warning until 0.40.0; `short_names: false` serves it. The
+  376-tool profile's names: 10.2 KB to 6.3 KB.
+- **Results carry what the agent reads once.** `structuredContent` that
+  repeats the one text block (FastMCP sends every value twice) is dropped
+  before the scan: half of every measured result. A clean internal result's
+  `scan` is one line and `l1` is omitted; counters that are zero are left out.
+- Served tools drop `outputSchema` (34 KB), `title` and `annotations.title`.
+  Results are still validated against the backend's own outputSchema.
+
+### Added
+
+- **Parameter descriptions are compressed** (~95 KB of the 397 KB list, never
+  compressed before): trimmed of what their schema already says, then
+  rewritten by the operator's model past 80 characters, cached, judged as
+  model output. Compressed text is swapped in by a background rebuild, so a
+  restart's first `tools/list` still matches the verdict cache.
+- `benchmarks/token_budget.py`: a profile's tools/list by part, and tool
+  results minified against exact.
+
+### Deprecated
+
+- `compress_descriptions: true` is `preprocess_tool_descriptions:
+  {processors: [summarize]}`, the `summarize` pre-processor on the new
+  tool-description channel (#176). Read with a warning until 0.40.0.
+
+### Fixed
+
+- A proxied response's HTML conversion discarded the evidence of hidden text.
+  L1 now counts the hiding on the original and L3 is told, as on the internal
+  tools (#229).
+
 ## [0.37.0] - 2026-09-25
 
 ### Added

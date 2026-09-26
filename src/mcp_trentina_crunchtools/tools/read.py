@@ -11,7 +11,6 @@ from ..database import is_blocked
 from ..errors import FileReadError
 from ..models import ALLOWED_TEXT_EXTENSIONS
 from ..modes import Mode
-from ..preprocess.policy import INTERNAL_DEFAULTS
 from .judged import blocklisted, judge_and_deliver
 from .preprocess import prepare
 
@@ -67,9 +66,7 @@ async def read_file(
 
     ``preprocess`` is the agent's ``trentina_preprocess``. Omitted, nothing
     runs but the policy's floor: an agent that reads a file usually means to
-    edit it, and needs the bytes on disk. A list names what to run, within the
-    bound policy (``preprocess/policy.py``); a name outside it raises
-    ``PreProcessNotPermittedError``.
+    edit it, and needs the bytes on disk. ``true`` minifies it by format.
     """
     resolved = _validate_file(path)
 
@@ -80,9 +77,7 @@ async def read_file(
     with open(resolved, encoding="utf-8", errors="replace") as fh:
         content = fh.read()
 
-    page = await prepare(
-        content, requested=preprocess, default=INTERNAL_DEFAULTS["read_tool"], source=resolved
-    )
+    page = await prepare(content, requested=preprocess, tool="read_tool", source=resolved)
     return await judge_and_deliver(
         page.content,
         mode=mode,

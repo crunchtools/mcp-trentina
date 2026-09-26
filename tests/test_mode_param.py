@@ -179,8 +179,10 @@ class TestSchema:
 
 
 class TestInstructions:
-    def test_one_mode_says_nothing(self) -> None:
-        assert mode_instructions(_profile(["block"])) == ""
+    def test_one_mode_explains_only_minifying(self) -> None:
+        text = mode_instructions(_profile(["block"]))
+        assert MODE_PARAM not in text
+        assert "trentina_preprocess: false" in text
 
     def test_the_profile_modes_and_default_are_stated_once(self) -> None:
         text = mode_instructions(_profile(["block", "redact"]))
@@ -361,6 +363,7 @@ class TestInternalBackend:
     def _profile(self, modes: list[ModeName]) -> Profile:
         p = Profile(
             name="webseat",
+            short_names=False,
             auth=AuthConfig(bearer_token_env="TEST"),
             defense=DefenseConfig(enforcement="block", modes=modes),
             backends={"web": Backend(url="internal://web")},

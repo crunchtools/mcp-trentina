@@ -120,13 +120,14 @@ reduction helps is a property of the tool's output shape rather than of who call
 
 | Field | Level | Default | Notes |
 |-------|-------|---------|-------|
-| `enabled` | both | `false` | Off by default; a gateway that silently rewrites payloads is not a default anyone opted into |
+| `enabled` | both | `true` | Whether an omitted `trentina_preprocess` minifies (on since 0.38.0). The agent's `true`/`false` wins |
 | `strategy` | both | `auto` | `auto` runs FREE always, escalates to METERED only while over `target_bytes` |
-| `processors` | both | `[petit]` | Order matters for `chain`. Adding `summarize` costs two model calls per response — see Defense Pipeline Interaction |
+| `processors` | both | `[detect]` | `detect` picks the minifier by format. Order matters for `chain`. Adding `summarize` costs two model calls per response — see Defense Pipeline Interaction |
 | `target_bytes` | both | `20000` | Shared across a response's text blocks, not per block |
 | `min_bytes` | both | `4096` | Reduction has a fixed cost; small payloads cannot repay it |
 
-**What is not reduced:** `structuredContent` and resource blocks are deliberately left untouched —
+**What is not reduced:** `structuredContent` that merely repeats the one text block is dropped
+before reduction (0.38.0, [Results](gateway.md#results)); otherwise `structuredContent` and resource blocks are deliberately left untouched —
 they are typed data a caller may parse and a backend may validate against its `outputSchema`.
 A backend that returns its bulk only in `structuredContent` therefore sees no reduction; the honest
 fix is to teach that backend to emit reducible text, not to have the gateway mangle typed payloads.

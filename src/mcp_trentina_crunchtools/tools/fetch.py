@@ -12,11 +12,10 @@ from ..database import is_blocked
 from ..defense import defend
 from ..errors import FetchError, UnsupportedContentTypeError
 from ..modes import Mode
-from ..preprocess.policy import INTERNAL_DEFAULTS
 from ..quarantine.prompts import finding_types
 from ..report import Disposition, build_report
 from .judged import blocklisted, judge_and_deliver
-from .preprocess import is_html_type, prepare
+from .preprocess import prepare
 
 log = logging.getLogger(__name__)
 
@@ -183,11 +182,11 @@ async def fetch_page(
     proceeds, because redact delivers only a verified extraction, and says so
     in the warning.
 
-    ``preprocess`` is the agent's ``trentina_preprocess``. Omitted, a page its
+    ``preprocess`` is the agent's ``trentina_preprocess``. Omitted or true,
+    the page is minified by format (``preprocess/detect.py``): a page its
     server calls HTML is converted to Markdown, which eliminates hidden
-    content rather than counting it (``preprocess/html.py``); anything else
-    arrives as sent. The server's content-type decides, not a sniff of the
-    bytes, and ``l1/hidden.py`` counts whatever markup is delivered.
+    content rather than counting it. ``false`` delivers it as sent, and
+    ``l1/hidden.py`` counts whatever markup is delivered.
     """
     blocked = is_blocked(url)
     if blocked and mode is not Mode.REDACT:
@@ -206,10 +205,7 @@ async def fetch_page(
         return _handle_content_type_error(url, exc)
 
     page = await prepare(
-        content,
-        requested=preprocess,
-        default=INTERNAL_DEFAULTS["fetch_tool"] if is_html_type(content_type) else (),
-        source=url,
+        content, requested=preprocess, tool="fetch_tool", source=url, content_type=content_type
     )
     return await judge_and_deliver(
         page.content,

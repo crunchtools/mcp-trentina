@@ -12,28 +12,42 @@ Agents don't need verbose descriptions to use tools correctly. Tool names, param
 
 ### Compression Pipeline
 
-1. **Lazy trigger**: On the first `tools/list` request, Trentina checks which backends have `compress_descriptions: true` enabled
-2. **Cache check**: Each tool description is hashed (SHA-256). If the hash exists in the SQLite cache, the compressed version is returned immediately — zero model calls
-3. **Batch compression**: Cache misses are batched (up to 20 descriptions per API call) and sent to Gemini Flash Lite with a structured output schema that forces concise summaries
-4. **Cache storage**: Compressed descriptions are stored in SQLite keyed by description hash. Same description from any backend/profile gets one cache entry
-5. **Passthrough on failure**: If the model is unavailable, the original description passes through unchanged
+Compression is the `summarize` pre-processor on the tool-description channel
+(#176): the same act as summarizing a tool response, on a different ingress.
 
-### Cache Architecture
+1. **Lazy trigger**: on the first `tools/list`, Trentina walks the backends
+   whose `preprocess_tool_descriptions` names `summarize`, in the background.
+2. **Cache check**: each tool description is hashed (SHA-256); a hit is a dict
+   lookup, no model call.
+3. **Batch compression**: misses go to the operator's model (the service
+   identity, [Operator](operator.md)), five tool descriptions or twenty
+   parameter descriptions per call, with a schema-constrained response.
+4. **Cache storage**: results shorter than the original are stored in SQLite,
+   keyed by hash, so the same text from any backend or profile is one entry.
+5. **Passthrough on failure**: a model that is unavailable leaves the original
+   description in place.
+6. **Background swap**: nothing compressed is served until the aggregate is
+   rebuilt. When a run banks anything, every profile's list is rebuilt in the
+   background, the new text is judged there as model output, and the new list
+   replaces the cached one when it is done. Clients keep the list they have in
+   the meantime, and a restart's first `tools/list` still matches the verdict
+   cache.
 
-```
-tools/list request
-    ↓
-For each tool:
-    hash = sha256(description)
-    if hash in memory_cache:
-        use compressed description
-    elif hash in sqlite_cache:
-        load to memory_cache, use compressed
-    else:
-        queue for batch compression
-```
+### Parameter descriptions (0.38.0)
 
-The in-memory cache makes the hot path a dict lookup — no model calls, no database queries during normal operation.
+Until 0.38.0 only the tool `description` was compressed, and the prompt told
+the model to leave parameters to the schema. On a 376-tool profile that left ~95 KB of a
+400 KB tool list untouched. Each parameter description is now:
+
+1. **Trimmed** of what its own schema already says: a leading `Optional.` or
+   trailing `(optional)` on a parameter that is not required, and a trailing
+   `Defaults to X.` when X is the schema's `default`. Deterministic, no model.
+2. **Compressed** by the model when the trimmed text is still 80 characters
+   or longer, with the tool and parameter name as context. The prompt keeps
+   meaning, units, formats, allowed values and constraints.
+
+The cache key includes the schema default the trim compared against, so the
+same words over two different defaults are two entries.
 
 ### Configuration
 
@@ -41,17 +55,16 @@ The in-memory cache makes the hot path a dict lookup — no model calls, no data
 backends:
   gws-personal:
     url: "http://gws-personal:8000/mcp"
-    compress_descriptions: true   # enable compression for this backend
+    preprocess_tool_descriptions:
+      processors: [summarize]   # compress tool and parameter descriptions
   slack:
     url: "http://mcp-slack:8000/mcp"
-    # compress_descriptions: false  (default — leave verbose)
+    # nothing set: descriptions are served as the backend wrote them
 ```
 
-The compression model can be configured via environment variable:
-
-```bash
-TRENTINA_COMPRESS_MODEL=gemini-2.5-flash-lite  # default
-```
+`compress_descriptions: true` is the pre-0.38.0 spelling. It is still read,
+with a warning, until 0.40.0; setting both keys is a load error. Only
+`summarize` is valid on this channel.
 
 ## Real-World Results
 
@@ -83,7 +96,8 @@ With both tool filtering and compression applied, the entire 154-tool surface fi
 ## What Gets Compressed
 
 - **Tool descriptions** — the `description` field in the tool definition
-- **Parameter descriptions** — the `description` fields inside `inputSchema.properties`
+- **Parameter descriptions** — the `description` fields inside
+  `inputSchema.properties` and `$defs` (0.38.0)
 
 ## What Stays Unchanged
 
@@ -133,6 +147,11 @@ backend turns it off.
 
 Measured on the lotor tool cache (800 tools, 26 backends): 519k → 461k schema
 characters, 11%, about 15k tokens.
+
+Since 0.38.0 the same step drops three fields no agent reads: `outputSchema`
+(34 KB on a 376-tool profile), and the top-level `title` and `annotations.title`, which
+repeat the name. Results are still validated against the backend's own
+outputSchema, which the backend session holds.
 
 ## Related
 

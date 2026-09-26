@@ -38,6 +38,8 @@ class Channel(str, Enum):
     MATRIX = "matrix"
     ALERT = "alert"
     TOOL = "tool"
+    # What a backend says about its own tools, on the tools/list path (#176).
+    TOOL_DESCRIPTION = "tool_description"
 
 
 class Kind(str, Enum):

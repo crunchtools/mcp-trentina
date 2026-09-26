@@ -188,6 +188,31 @@ class TestScanToolResponse:
                 )
         assert mock_defend.call_count == 1
 
+    async def test_hiding_the_original_did_reaches_l1_and_the_cache_key(self) -> None:
+        """#229: conversion deletes the evidence, so the original's counts ride in."""
+        from mcp_trentina_crunchtools.l1.hidden import HiddenStats
+
+        profile = _profile()
+        with patch(f"{_I}.defend", new_callable=AsyncMock) as mock_defend:
+            mock_defend.return_value.flagged = False
+            mock_defend.return_value.classification = _BENIGN
+            mock_defend.return_value.l3_assessment = {"injection_detected": False}
+            mock_defend.return_value.l2_truncated = False
+            mock_defend.return_value.l3_truncated = False
+            for hidden in (None, HiddenStats(elements=2), HiddenStats(elements=2)):
+                await scan_tool_response(
+                    profile=profile,
+                    backend_name="cms",
+                    tool_name="get_page",
+                    content_blocks=[{"type": "text", "text": "# Release notes"}],
+                    structured_content=None,
+                    hidden=hidden,
+                )
+        assert mock_defend.call_count == 2, "same Markdown, different hiding: two verdicts"
+        assert mock_defend.call_args_list[0].kwargs["precomputed_l1"] is None
+        l1 = mock_defend.call_args_list[1].kwargs["precomputed_l1"]
+        assert l1.stats.hidden.elements == 2
+
     async def test_unscannable_content_is_reported(self) -> None:
         decision = await scan_tool_response(
             profile=_profile(),

@@ -123,7 +123,9 @@ _EXTRACTOR_RENAMES: dict[str, str] = {"generic": "select"}
 # this Literal is what makes pydantic reject an unknown name at YAML load,
 # and the parity test in tests/test_gateway_drivers.py keeps the two in step.
 ProcessorName = Literal[
-    # TEXT — str in, str out. Valid on the tool channel.
+    # TEXT — str in, str out. Valid on the tool channel. `detect` picks
+    # among the next four by the payload's format.
+    "detect",
     "petit",
     "structured",
     "email",
@@ -135,14 +137,13 @@ ProcessorName = Literal[
     "select",
     "matrix",
 ]
-# FREE only. `html` runs FIRST: it is the only CONVERTER, so the reducers
-# behind it group the text a human would read rather than tag soup, and its
-# absence costs a whole attack class (`l1/hidden.py`, tier 1).
-#
-# The rest are ordered by how cheaply each can decline; petit has to group
-# every line before it knows, so it goes last. summarize is selectable but
-# never a default: METERED, and its output draws unconditional L3.
-_DEFAULT_PROCESSORS: list[ProcessorName] = ["html", "structured", "email", "petit"]
+# FREE only. `detect` (0.38.0) looks at the payload and runs the minifiers
+# that fit it: html then petit for a page, structured for JSON, email then
+# petit for anything else. Until 0.38.0 the default was all four in a row,
+# and `html` ran first on everything, which is how a mail header lost its
+# addresses (preprocess/detect.py). summarize is never a default: METERED,
+# and its output draws unconditional L3.
+_DEFAULT_PROCESSORS: list[ProcessorName] = ["detect"]
 
 # Fields of MatrixPreProcessConfig an AGENT may change by reloading its own
 # profile.
@@ -321,8 +322,12 @@ class PreProcessConfig(ProcessorChainConfig):
     """
 
     enabled: bool = Field(
-        default=False,
-        description="Master switch. Off means the response is untouched.",
+        default=True,
+        description=(
+            "Whether a call minifies when the agent leaves trentina_preprocess "
+            "out (default on since 0.38.0). Off: the response is untouched "
+            "unless the agent passes true. The floor runs either way."
+        ),
     )
     strategy: Literal["none", "chain", "best_of", "auto"] = Field(
         default="auto",
@@ -339,8 +344,9 @@ class PreProcessConfig(ProcessorChainConfig):
             "Which processors may run, in order. 'summarize' is METERED: it "
             "spends an LLM call AND forces its output to MODEL_OUTPUT "
             "provenance, which draws unconditional L3 — two model calls per "
-            "response, not one. Default is the FREE set. 'select' and "
-            "'matrix' are document processors and are refused here."
+            "response, not one. Default is 'detect', which picks the FREE "
+            "minifier by format. 'select' and 'matrix' are document "
+            "processors and are refused here."
         ),
     )
     target_bytes: int = Field(
@@ -362,9 +368,9 @@ class PreProcessConfig(ProcessorChainConfig):
     required: list[ProcessorName] = Field(
         default_factory=list,
         description=(
-            "Processors that run on every response whatever the agent asks "
-            "for (#183), ahead of the rest, regardless of enabled and "
-            "min_bytes. A required processor that fails refuses the call. "
+            "Processors that run on every response, trentina_preprocess: "
+            "false included (#183), ahead of the rest, regardless of enabled "
+            "and min_bytes. A required processor that fails refuses the call. "
             "Like every processor here it reads text blocks; structuredContent "
             "is judged as it arrived. Must be a subset of processors."
         ),
@@ -372,10 +378,10 @@ class PreProcessConfig(ProcessorChainConfig):
     selectable: bool = Field(
         default=False,
         description=(
-            "Offer the agent trentina_preprocess on a PROXIED tool, to pick "
-            "from processors per call. Off by default: the enum costs tokens "
-            "on every tool, and most tools return one format. The internal "
-            "fetch, read and content tools always offer it."
+            "Declare trentina_preprocess in a PROXIED tool's schema. Every "
+            "tool accepts the switch and the session instructions explain it "
+            "once; declaring it costs ~40 bytes per tool. The internal fetch, "
+            "read and content tools always declare it."
         ),
     )
 
@@ -407,7 +413,7 @@ class ToolPreProcess(BaseModel):
     )
     selectable: bool | None = Field(
         default=None,
-        description="Offer trentina_preprocess on this tool. Unset inherits the profile's.",
+        description="Declare trentina_preprocess on this tool. Unset inherits the profile's.",
     )
 
 
@@ -477,9 +483,15 @@ class Backend(BaseModel):
             "Validate tool results against the backend's outputSchema (disable for buggy backends)"
         ),
     )
-    compress_descriptions: bool = Field(
-        default=False,
-        description="Compress verbose tool descriptions via LLM at gateway startup",
+    preprocess_tool_descriptions: ProcessorChainConfig = Field(
+        default_factory=ProcessorChainConfig,
+        description=(
+            "Pre-processors for this backend's tool and parameter descriptions "
+            "(#176). {processors: [summarize]} compresses them with the "
+            "operator's model in the background, cached; until a description "
+            "is compressed it is served as the backend wrote it. Replaces "
+            "compress_descriptions: true, which is still read until 0.40.0."
+        ),
     )
     compact_schemas: bool = Field(
         default=True,
@@ -494,6 +506,14 @@ class Backend(BaseModel):
         description=(
             "Optional override of the profile's defense.modes for this one "
             "backend. Must include the profile's default (enforcement)."
+        ),
+    )
+    name_tag: str | None = Field(
+        default=None,
+        pattern=r"^[a-z][a-z0-9_]{0,15}$",
+        description=(
+            "Prefix for this backend's tool names where they collide with "
+            "another backend's (short_names). Default: the backend name."
         ),
     )
     l3_briefing: str | None = Field(
@@ -567,6 +587,34 @@ class Backend(BaseModel):
     def is_internal(self) -> bool:
         """True when this backend resolves to trentina's in-process tool surface."""
         return self.url.startswith(INTERNAL_SCHEME)
+
+    @property
+    def compresses_descriptions(self) -> bool:
+        """Whether a model rewrites this backend's descriptions (#176)."""
+        return "summarize" in self.preprocess_tool_descriptions.processors
+
+    @model_validator(mode="before")
+    @classmethod
+    def compress_descriptions_is_a_preprocessor_now(cls, raw: Any) -> Any:
+        """``compress_descriptions: true`` is now ``preprocess_tool_descriptions``.
+
+        That is ``{processors: [summarize]}``. Read until 0.40.0 with a
+        WARNING, because it is live config and a profile that fails to load
+        takes the gateway down with it.
+        """
+        if not isinstance(raw, dict) or "compress_descriptions" not in raw:
+            return raw
+        backend = dict(raw)
+        legacy = backend.pop("compress_descriptions")
+        if "preprocess_tool_descriptions" in backend:
+            raise ValueError("set preprocess_tool_descriptions or compress_descriptions, not both")
+        logger.warning(
+            "compress_descriptions is deprecated and removed in 0.40.0; use "
+            "preprocess_tool_descriptions: {processors: [summarize]}"
+        )
+        if legacy:
+            backend["preprocess_tool_descriptions"] = {"processors": ["summarize"]}
+        return backend
 
     @field_validator("tools_allow", "tools_deny")
     @classmethod
@@ -1272,9 +1320,18 @@ class Profile(BaseModel):
     preprocess: PreProcessConfig = Field(
         default_factory=PreProcessConfig,
         description=(
-            "Profile-level response reduction policy. Off by default: a "
-            "gateway that starts quietly rewriting payloads is not a "
-            "default anyone opted into."
+            "Profile-level pre-processing of tool responses. Minifies by "
+            "default since 0.38.0; agents get exact text per call with "
+            "trentina_preprocess: false."
+        ),
+    )
+    short_names: bool = Field(
+        default=True,
+        description=(
+            "Serve each tool under the simplest name that says what it does, "
+            "tagged with its backend only where two backends' names collide "
+            "(gateway/names.py). Off: <backend>__<tool>, as before 0.38.0. "
+            "Either way the <backend>__<tool> form still routes until 0.40.0."
         ),
     )
     alert_ingress: AlertIngressConfig | None = Field(

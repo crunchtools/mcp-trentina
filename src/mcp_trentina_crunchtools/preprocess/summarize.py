@@ -17,18 +17,32 @@ a per-request canary, and constrains the response to a JSON schema.
 
 The system prompt hardens the worker the same way the Q-Agent's does: the
 payload is data to describe, never instructions to follow.
+
+TOOL DESCRIPTIONS (#176, 0.38.0). Compressing a tool's description is the
+same act on a different ingress: hand text to a model, take back something
+shorter. So ``summarize`` is also the driver on ``Channel.TOOL_DESCRIPTION``,
+configured per backend as ``preprocess_tool_descriptions`` (it was the
+boolean ``compress_descriptions``), and the batched model call that does it
+lives here as ``summarize_descriptions``. ``gateway/compress.py`` is the call
+site: which descriptions, the cache, retries, and applying the results. What
+comes back is model output, and the tool-list scan judges it as such.
 """
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from ..channels import Channel, Kind
 from ..config import get_config
 from ..errors import QuarantineAgentError
 from ..quarantine.agent import quarantine_generate
+from ..quarantine.limiter import limited_generate
 from .base import Cost, PreProcessContext, PreProcessResult
+
+if TYPE_CHECKING:
+    from ..quarantine.providers.base import Provider
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +83,7 @@ class SummarizeProcessor:
 
     name = "summarize"
     cost = Cost.METERED
-    channels = frozenset({Channel.TOOL})
+    channels = frozenset({Channel.TOOL, Channel.TOOL_DESCRIPTION})
     kind = Kind.TEXT
 
     async def run(self, payload: str, ctx: PreProcessContext) -> PreProcessResult:
@@ -108,8 +122,11 @@ class SummarizeProcessor:
 
         if bytes_out / bytes_in > _MAX_RATIO:
             return PreProcessResult.declined(
-                self.name, self.cost, payload,
-                reason="no_reduction", details=details,
+                self.name,
+                self.cost,
+                payload,
+                reason="no_reduction",
+                details=details,
             )
 
         return PreProcessResult(
@@ -122,3 +139,74 @@ class SummarizeProcessor:
             details=details,
         )
 
+
+DESCRIPTIONS_MAX_OUTPUT_TOKENS = 4096
+
+_DESCRIPTION_PROMPTS = {
+    "tool": """\
+You are a tool description compressor. Given MCP tool descriptions, produce \
+the shortest possible version of each that preserves:
+1. What the tool does (core action)
+2. When to call it (trigger conditions, if stated)
+3. Key constraints or prerequisites
+
+Rules:
+- Remove examples, verbose formatting, markdown, and redundant explanations
+- Remove parameter documentation (the inputSchema handles that)
+- Keep each description to 1-2 short sentences maximum
+- Never invent capabilities not in the original
+- If the original is already concise, return it unchanged""",
+    "parameter": """\
+You are a compressor for MCP tool PARAMETER descriptions. Each item names the \
+tool and parameter it documents. Produce the shortest description that still \
+tells a caller what value to pass. Keep: meaning, units, formats, allowed \
+values, ranges, and constraints. Drop: restating that it is optional, its \
+JSON type, or a default the schema already states; filler; examples unless \
+they define a format. One short sentence or a fragment. Never invent \
+behaviour. If the original is already concise, return it unchanged.""",
+}
+
+DESCRIPTIONS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "compressed": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}, "text": {"type": "string"}},
+                "required": ["id", "text"],
+            },
+        },
+    },
+    "required": ["compressed"],
+}
+
+
+async def summarize_descriptions(
+    provider: Provider,
+    items: list[dict[str, str]],
+    kind: Literal["tool", "parameter"] = "tool",
+) -> list[tuple[str, str]]:
+    """One batched model call: each item's ``text``, shorter, keyed by its ``id``.
+
+    Items may carry more keys (a parameter's ``tool`` and ``parameter``);
+    they are context for the model. Raises what the provider raises: the
+    caller owns retries. Returns only well-formed entries.
+    """
+    result = await limited_generate(
+        provider,
+        system_prompt=_DESCRIPTION_PROMPTS[kind],
+        user_content=json.dumps({"descriptions": items}),
+        response_schema=DESCRIPTIONS_SCHEMA,
+        temperature=0.1,
+        max_output_tokens=DESCRIPTIONS_MAX_OUTPUT_TOKENS,
+    )
+    entries = json.loads(result.text).get("compressed", [])
+    if not isinstance(entries, list):
+        logger.warning("summarize: unexpected description response structure")
+        return []
+    return [
+        (str(e["id"]), str(e["text"]))
+        for e in entries
+        if isinstance(e, dict) and "id" in e and "text" in e
+    ]

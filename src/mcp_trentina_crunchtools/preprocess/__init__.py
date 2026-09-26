@@ -15,6 +15,7 @@ separate framework until #167, on a ruling that did not hold.
 from ..channels import Channel
 from .base import Cost, PreProcessContext, PreProcessor, PreProcessResult
 from .compose import PreProcessOutcome, Strategy, run_preprocessors
+from .detect import DetectProcessor
 from .email import EmailProcessor
 from .html import HtmlProcessor
 from .matrix import MatrixProcessor
@@ -34,6 +35,7 @@ __all__ = [
     "DEFAULT_SKIP_SAMPLE_BYTES",
     "Channel",
     "Cost",
+    "DetectProcessor",
     "DocumentProcessor",
     "EmailProcessor",
     "HtmlProcessor",

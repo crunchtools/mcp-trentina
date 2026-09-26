@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..channels import Channel, Kind
 from ..preprocess import (
+    DetectProcessor,
     EmailProcessor,
     HtmlProcessor,
     MatrixProcessor,
@@ -58,11 +59,13 @@ Driver = "PreProcessor | DocumentProcessor"
 # process. Document processors may own per-profile state (the Matrix one owns
 # a key cache), so they are built per call. Factories throughout rather than a
 # mix, so the table reads one way.
+_DETECT = DetectProcessor()
 _PETIT = PetitProcessor()
 _STRUCTURED = StructuredProcessor()
 _EMAIL = EmailProcessor()
 _HTML = HtmlProcessor()
 _SUMMARIZE = SummarizeProcessor()
+
 
 def _make_matrix(cfg: ProcessorChainConfig, keys: Any) -> MatrixProcessor:
     """Decryption on top of selection: decrypted text goes through the same
@@ -75,14 +78,13 @@ def _make_matrix(cfg: ProcessorChainConfig, keys: Any) -> MatrixProcessor:
 
 
 PREPROCESSORS: dict[str, Callable[[ProcessorChainConfig, Any], Any]] = {
+    "detect": lambda _cfg, _keys: _DETECT,
     "petit": lambda _cfg, _keys: _PETIT,
     "structured": lambda _cfg, _keys: _STRUCTURED,
     "email": lambda _cfg, _keys: _EMAIL,
     "html": lambda _cfg, _keys: _HTML,
     "summarize": lambda _cfg, _keys: _SUMMARIZE,
-    "select": lambda cfg, _keys: SelectProcessor(
-        skip_sample_bytes=cfg.skip_sample_bytes
-    ),
+    "select": lambda cfg, _keys: SelectProcessor(skip_sample_bytes=cfg.skip_sample_bytes),
     "matrix": _make_matrix,
 }
 
@@ -91,6 +93,7 @@ PREPROCESSORS: dict[str, Callable[[ProcessorChainConfig, Any], Any]] = {
 # guesses.
 CHANNEL_KIND: dict[Channel, Kind] = {
     Channel.TOOL: Kind.TEXT,
+    Channel.TOOL_DESCRIPTION: Kind.TEXT,
     Channel.ALERT: Kind.TEXT,
     Channel.MATRIX: Kind.DOCUMENT,
 }

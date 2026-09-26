@@ -25,14 +25,16 @@ profiles:
     # and never replaces it: the gateway transforms, then scans the result,
     # then delivers that same result (preprocess/base.py invariant 2).
     #
-    # petit only. It is deterministic, costs nothing, and keeps the input's
-    # provenance. Adding `summarize` spends an LLM call AND forces the output
-    # to MODEL_OUTPUT provenance, which draws unconditional L3 — two model
-    # calls per response. Enable it per tool, after measuring, not fleet-wide.
+    # `detect` (the default) picks the minifier by format: HTML to Markdown,
+    # JSON compacted, logs and mail threads collapsed. Deterministic, free,
+    # and it keeps the input's provenance. The agent gets exact text on any
+    # call with trentina_preprocess: false. Adding `summarize` spends an LLM
+    # call AND forces MODEL_OUTPUT provenance, which draws unconditional L3 —
+    # two model calls per response. Enable it per tool, after measuring.
     preprocess:
       enabled: true
       strategy: auto
-      processors: [petit]
+      processors: [detect]
       target_bytes: 20000
       min_bytes: 4096
 
@@ -86,6 +88,15 @@ profiles:
       # ── Heavy backend — explicit allowlist ──────────────────────
       github:
         url: "http://mcp-github:8000/mcp"
+        # Tool and parameter descriptions compressed by the operator's model,
+        # cached, judged as model output (docs/compression.md).
+        preprocess_tool_descriptions:
+          processors: [summarize]
+        # A file the agent may edit and push back comes exact by default;
+        # the agent can still ask for it minified with `true`.
+        preprocess_tools:
+          get_file_content_tool:
+            enabled: false
         tools_allow:
           - list_pull_requests_tool
           - get_pull_request_tool
@@ -98,6 +109,9 @@ profiles:
       # ── Write-capable backend — parameter guards on sends ───────
       mail:
         url: "http://mcp-mail:8000/mcp"
+        # Short tool names carry this tag only where they collide with
+        # another backend's: `mail_search_messages`, not `mail__search_...`.
+        name_tag: mail
         tools_allow:
           - search_gmail_messages
           - get_gmail_message_content

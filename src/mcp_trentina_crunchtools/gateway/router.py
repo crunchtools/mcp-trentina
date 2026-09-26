@@ -6,19 +6,20 @@ Implements the MCP wire-protocol surface a consumer needs from the gateway:
 -32601 (method not found).
 
 For `tools/list`, aggregates across all backends in the profile and applies
-the allowlist filter. Tool names in the response are namespaced as
-`<backend>__<tool>` to avoid collisions across backends.
+the allowlist filter. Tools are served under short names (`names.py`, 0.38.0),
+or as `<backend>__<tool>` when the profile turns `short_names` off.
 
-For `tools/call`, parses the namespaced tool name back into (backend, tool),
-verifies the backend is in the profile, re-checks the allowlist (defense in
-depth), and forwards. Phase 1 returns the backend response verbatim; Phase 2
-inserts the L1/L2/L3 defense pipeline here.
+For `tools/call`, resolves the name back into (backend, tool), verifies the
+backend is in the profile, re-checks the allowlist (defense in depth), and
+forwards. `<backend>__<tool>` resolves either way until 0.40.0.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
+import json
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -34,8 +35,14 @@ from ..defense import Provenance
 from ..errors import ModeNotPermittedError, PreProcessNotPermittedError
 from ..outcomes import Outcome, classify_exception, refusal_of
 from ..preprocess.policy import PREPROCESS_PARAM
+from ..quarantine.limiter import Priority, l3_priority
 from .backend import call_backend_tool, list_backend_tools, on_backend_cache_evict
-from .compress import compress_tools, maybe_trigger_compression
+from .compress import (
+    compress_tools,
+    get_profiles,
+    maybe_trigger_compression,
+    set_on_compressed,
+)
 from .errors import BackendCallError, BackendNotInProfileError
 from .filter import filter_tools
 from .guards import check_parameter_guards, check_response_guards
@@ -53,6 +60,7 @@ from .modes_policy import (
     resolve_preprocess,
     strip_params,
 )
+from .names import NAMESPACE_SEP, forget_issued_names, resolve_name, serve_short_names
 from .schema_compact import compact_tool
 from .transform import transform_response
 
@@ -60,6 +68,7 @@ if TYPE_CHECKING:
     from ..modes import Mode, ModePolicy
     from ..preprocess.policy import PreProcessPolicy
     from .profile import Backend, Profile
+    from .transform import TransformOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +76,7 @@ logger = logging.getLogger(__name__)
 # at the SDK's own handshake ceiling rather than a literal, so trentina tracks
 # the protocol registry instead of drifting behind it.
 PROTOCOL_VERSION = LATEST_HANDSHAKE_VERSION
-NAMESPACE_SEP = "__"
+_CANONICAL = functools.partial(json.dumps, sort_keys=True, ensure_ascii=False)
 
 # JSON-RPC 2.0 reserved error codes (https://www.jsonrpc.org/specification#error_object)
 JSONRPC_METHOD_NOT_FOUND = -32601
@@ -78,6 +87,8 @@ _profile_tools_cache: dict[str, list[dict[str, Any]]] = {}
 _profile_backend_urls: dict[str, set[str]] = {}
 
 _profile_inflight: dict[str, asyncio.Task[list[dict[str, Any]]]] = {}
+# Held so the rebuild after a compression pass is not garbage-collected.
+_rebuild_task: asyncio.Future[None] | None = None
 
 # Bumped per profile by every invalidation of it. An in-flight aggregation
 # built from the pre-reload Profile: its waiters still get it, but it must not
@@ -101,6 +112,36 @@ def _on_backend_evicted(url: str) -> None:
 
 
 on_backend_cache_evict(_on_backend_evicted)
+
+
+def _rebuild_after_compression() -> None:
+    """Serve newly compressed text once it is judged, without making anyone wait.
+
+    Each profile is rebuilt in the background, after any build already in
+    flight, and the new aggregate replaces the cached one when it is done.
+    Clients keep the cached list meanwhile: nothing is invalidated.
+    """
+    global _rebuild_task
+    profiles = get_profiles()
+    if profiles:
+        _rebuild_task = asyncio.ensure_future(_rebuild_in_background(list(profiles.values())))
+
+
+async def _rebuild_in_background(profiles: list[Profile]) -> None:
+    token = l3_priority.set(Priority.BACKGROUND)
+    try:
+        for profile in profiles:
+            # After the build in flight, which may predate the new text. A
+            # failed build keeps the cached list, and the build logged why.
+            inflight = _profile_inflight.get(profile.name)
+            if inflight is not None:
+                await asyncio.gather(inflight, return_exceptions=True)
+            await asyncio.gather(ensure_profile_build(profile), return_exceptions=True)
+    finally:
+        l3_priority.reset(token)
+
+
+set_on_compressed(_rebuild_after_compression)
 
 
 def invalidate_profile_cache_for_backend(url: str) -> None:
@@ -136,6 +177,7 @@ def reset_profile_tools_cache() -> None:
     for name in {*_profile_tools_cache, *_profile_backend_urls, *_profile_inflight}:
         invalidate_profile_cache(name)
     _profile_inflight.clear()
+    forget_issued_names()
 
 
 def _audit(
@@ -224,9 +266,13 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
 
     if method == "initialize":
         # The mode explanation is said here once, not on every tool (#198).
+        naming = (
+            "Where two servers offer a tool of the same name, a server tag prefixes it."
+            if profile.short_names
+            else f"Tool names are namespaced as <backend>{NAMESPACE_SEP}<tool>."
+        )
         instructions = (
-            f"trentina gateway, profile={profile.name}. Tool names are "
-            f"namespaced as <backend>{NAMESPACE_SEP}<tool>. {mode_instructions(profile)}"
+            f"trentina gateway, profile={profile.name}. {naming} {mode_instructions(profile)}"
         ).rstrip()
         return _ok(
             req_id,
@@ -340,7 +386,7 @@ async def _build_profile_tools(
         raw_tools = [strip_params(t) for t in raw_tools]
         filtered = filter_tools(raw_tools, backend)
         pre_compress = filtered
-        if backend.compress_descriptions:
+        if backend.compresses_descriptions:
             filtered = compress_tools(filtered)
         # The perimeter, on the post-compression text — compressed
         # descriptions are LLM output and it is the OUTPUT that reaches the
@@ -390,6 +436,7 @@ async def _build_profile_tools(
             continue
         aggregated.extend(outcome)
 
+    aggregated = serve_short_names(profile, aggregated)
     if not any_hard_failed and generation == _cache_generation.get(profile.name, 0):
         _profile_tools_cache[profile.name] = aggregated
         _profile_backend_urls[profile.name] = {
@@ -421,19 +468,18 @@ async def _route_tools_call(
     ``isError`` — that previously audited as a success, inflating the ok
     column with tool-level errors.
     """
-    namespaced_name = params.get("name", "")
+    served_name = params.get("name", "")
     arguments = params.get("arguments") or {}
 
-    if NAMESPACE_SEP not in namespaced_name:
-        return _err(
-            req_id,
-            JSONRPC_INVALID_PARAMS,
-            f"Tool name {namespaced_name!r} must be <backend>{NAMESPACE_SEP}<tool>",
+    resolved = resolve_name(profile, served_name)
+    if resolved is None and NAMESPACE_SEP in served_name:
+        # A legacy-shaped name for a backend this profile does not hold.
+        raise BackendNotInProfileError(
+            f"backend {served_name.partition(NAMESPACE_SEP)[0]!r} not in profile {profile.name!r}"
         )
-
-    backend_name, _, tool_name = namespaced_name.partition(NAMESPACE_SEP)
-    if not tool_name:
-        return _err(req_id, JSONRPC_INVALID_PARAMS, f"Empty tool component in {namespaced_name!r}")
+    if resolved is None or not resolved[1]:
+        return _err(req_id, JSONRPC_INVALID_PARAMS, f"Unknown tool {served_name!r}")
+    backend_name, tool_name = resolved
 
     backend = profile.backends.get(backend_name)
     if backend is None:
@@ -448,9 +494,7 @@ async def _route_tools_call(
     # the default and is checked as that, never skipped as absent.
     try:
         policy, mode, prompt, forwarded = resolve_call(profile, backend, tool_name, arguments)
-        preprocess, requested, selection = resolve_preprocess(
-            profile, backend, tool_name, arguments
-        )
+        preprocess, requested, minify = resolve_preprocess(profile, backend, tool_name, arguments)
     except (ModeNotPermittedError, PreProcessNotPermittedError) as exc:
         _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, str(exc))
         return _err(req_id, JSONRPC_INVALID_PARAMS, str(exc))
@@ -520,7 +564,7 @@ async def _route_tools_call(
         mode=mode,
         prompt=prompt,
         policy=policy,
-        selection=selection,
+        minify=minify,
     )
     return _ok(req_id, result)
 
@@ -559,13 +603,15 @@ async def _dispatch(
         )
 
 
-def _l3_context(backend: Backend, sidecar: dict[str, Any] | None) -> str | None:
+def _l3_context(backend: Backend, reduced: TransformOutcome) -> str | None:
     """The operator's word on what this backend returns (#204), then invariant 3.
 
     The transform sidecar travels to L3's briefing too. "This is the 3% that
-    survived reduction" is context a judge should have.
+    survived reduction" is context a judge should have, and so is "the
+    conversion removed elements hidden from a human reader" (#229).
     """
-    notes = [backend.l3_briefing]
+    notes = [backend.l3_briefing, reduced.briefing]
+    sidecar = reduced.sidecar
     if sidecar:
         notes.append(
             f"This artifact was transformed by trentina pre-processors "
@@ -618,6 +664,32 @@ def _preprocess_refusal(failed: str, mode: Mode | None) -> dict[str, Any]:
     }
 
 
+def _drop_duplicate_structured(structured: Any, content_blocks: list[Any] | None) -> Any:
+    """``structuredContent``, or None when it is the one text block again, as data.
+
+    FastMCP sends a tool's return value twice, as text and as structured
+    content, and the agent reads both: every result costs double (0.38.0).
+    The copy is dropped only when it says nothing the text does not, and
+    before the transform and the scan, so the perimeter judges what is
+    delivered. Response guards already ran on the result as it arrived.
+
+    Compared as canonical JSON, not with ``==``: Python's ``True == 1`` would
+    let a structured ``true`` stand in for a textual ``1``.
+    """
+    blocks = content_blocks or []
+    text = blocks[0].get("text") if len(blocks) == 1 and isinstance(blocks[0], dict) else None
+    if structured is None or not isinstance(text, str) or blocks[0].get("type") != "text":
+        return structured
+    try:
+        parsed = json.loads(text)
+    except (ValueError, RecursionError):
+        # Not JSON, so the only copy it can be is the string itself; a str
+        # never compares equal to a number or a bool.
+        return None if structured == {"result": text} else structured
+    copies = {_CANONICAL(c) for c in ({"result": text}, parsed, {"result": parsed})}
+    return None if _CANONICAL(structured) in copies else structured
+
+
 async def _assemble_call_result(
     profile: Profile,
     backend: Backend,
@@ -628,7 +700,7 @@ async def _assemble_call_result(
     mode: Mode | None = None,
     prompt: str | None = None,
     policy: ModePolicy | None = None,
-    selection: tuple[str, ...] | None = None,
+    minify: bool | None = None,
 ) -> dict[str, Any]:
     """Shape the MCP result and run it through the perimeter.
 
@@ -637,8 +709,11 @@ async def _assemble_call_result(
     scanning the same bytes twice is cost, not defense.
     """
     content_blocks = call_result.content
+    structured = await asyncio.to_thread(
+        _drop_duplicate_structured, call_result.structured_content, content_blocks
+    )
     provenance = Provenance.EXTERNAL
-    reduce_sidecar: dict[str, Any] | None = None
+    reduced: TransformOutcome | None = None
 
     # Transform BEFORE the perimeter, never after. preprocess/base.py
     # invariant 2: the caller scans the transformed artifact and delivers that
@@ -655,7 +730,7 @@ async def _assemble_call_result(
             backend_name=backend_name,
             tool_name=tool_name,
             content_blocks=content_blocks,
-            selection=selection,
+            minify=minify,
         )
         if reduced.failed is not None:
             _audit(
@@ -664,14 +739,13 @@ async def _assemble_call_result(
             return _preprocess_refusal(reduced.failed, mode)
         content_blocks = reduced.content_blocks
         provenance = reduced.provenance
-        reduce_sidecar = reduced.sidecar
 
     result: dict[str, Any] = {
         "content": content_blocks,
         "isError": call_result.is_error,
     }
-    if call_result.structured_content is not None:
-        result["structuredContent"] = call_result.structured_content
+    if structured is not None:
+        result["structuredContent"] = structured
 
     if not backend.is_internal:
         decision = await scan_tool_response(
@@ -679,12 +753,15 @@ async def _assemble_call_result(
             backend_name=backend_name,
             tool_name=tool_name,
             content_blocks=content_blocks,
-            structured_content=call_result.structured_content,
+            structured_content=structured,
             provenance=provenance,
             mode=mode,
             prompt=prompt,
             policy=policy,
-            l3_context=_l3_context(backend, reduce_sidecar),
+            l3_context=_l3_context(backend, reduced)
+            if reduced is not None
+            else backend.l3_briefing,
+            hidden=reduced.hidden if reduced is not None else None,
         )
         if decision.blocked:
             # The content never reaches the agent; the warning does. Audited

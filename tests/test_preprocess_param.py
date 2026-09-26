@@ -1,10 +1,10 @@
-"""`trentina_preprocess`: the agent's pick, inside the operator's bounds (#183).
+"""`trentina_preprocess`: one switch, inside the operator's bounds (#183, 0.38.0).
 
-These pin what an attacker would lean on. An omitted argument resolves to the
-tool's default before anything is checked. A request outside the ceiling is
+These pin what an attacker would lean on. An omitted switch resolves to the
+tool's default before anything is checked. A value that is not a switch is
 refused before dispatch. `required` runs whatever is asked, first, and fails
-closed. The argument never reaches a backend. And whatever is selected, what
-is judged is exactly what is delivered.
+closed; minifying fails open. The argument never reaches a backend. And
+whatever runs, what is judged is exactly what is delivered.
 """
 
 from __future__ import annotations
@@ -37,7 +37,6 @@ from mcp_trentina_crunchtools.gateway.profile import (
     AuthConfig,
     Backend,
     DefenseConfig,
-    ParameterConstraint,
     PreProcessConfig,
     Profile,
     ToolPreProcess,
@@ -94,51 +93,30 @@ def _profile(
 
 
 class TestPolicy:
-    POLICY = PreProcessPolicy.of(["petit", "html", "email"], ["structured"], defaults=["html"])
+    POLICY = PreProcessPolicy(["structured", "detect"], ["structured"])
 
-    def test_required_is_never_offered_and_defaults_lead(self) -> None:
-        assert self.POLICY.offered == ("html", "petit", "email")
+    def test_required_is_not_repeated_in_the_chain(self) -> None:
+        assert self.POLICY.chain == ("detect",)
         assert self.POLICY.required == ("structured",)
 
     def test_omitted_resolves_to_the_default_under_the_floor(self) -> None:
-        assert self.POLICY.resolve(None, ["html"]) == ("structured", "html")
+        assert self.POLICY.resolve(None) == ("structured", "detect")
+        off = PreProcessPolicy(["detect"], ["structured"], default=False)
+        assert off.resolve(None) == ("structured",)
 
-    def test_empty_runs_only_the_floor(self) -> None:
-        assert self.POLICY.resolve([]) == ("structured",)
+    def test_false_runs_only_the_floor_and_true_the_chain(self) -> None:
+        assert self.POLICY.resolve(False) == ("structured",)
+        off = PreProcessPolicy(["detect"], default=False)
+        assert off.resolve(True) == ("detect",)
 
-    def test_naming_a_required_processor_is_harmless(self) -> None:
-        assert self.POLICY.resolve(["structured", "email"]) == ("structured", "email")
+    @pytest.mark.parametrize(("legacy", "on"), [(["html"], True), ([], False)])
+    def test_the_0_37_list_form_still_works(self, legacy: list[str], on: bool) -> None:
+        assert self.POLICY.minifies(legacy) is on
 
-    def test_the_policy_orders_the_chain_not_the_agent(self) -> None:
-        assert self.POLICY.resolve(["email", "html"]) == ("structured", "html", "email")
-
-    @pytest.mark.parametrize("bad", [["summarize"], ["bogus"], "html", {"html": 1}])
-    def test_anything_outside_the_ceiling_is_refused(self, bad: Any) -> None:
+    @pytest.mark.parametrize("bad", ["false", 0, {"html": 1}])
+    def test_anything_but_a_switch_is_refused(self, bad: Any) -> None:
         with pytest.raises(PreProcessNotPermittedError, match="trentina_preprocess"):
             self.POLICY.resolve(bad)
-
-    def test_a_guard_that_empties_the_enum_refuses_even_empty(self) -> None:
-        emptied = PreProcessPolicy.of(["petit"], permits=lambda _n: False)
-        assert emptied.resolve(None, ["petit"]) == ("petit",)
-        with pytest.raises(PreProcessNotPermittedError):
-            emptied.resolve([])
-
-    def test_a_tool_that_takes_no_selection_refuses_even_empty(self) -> None:
-        fixed = PreProcessPolicy((), ("html",), selectable=False)
-        assert fixed.resolve(None) == ("html",)
-        with pytest.raises(PreProcessNotPermittedError):
-            fixed.resolve([])
-
-    def test_a_guard_narrows_what_is_offered(self) -> None:
-        policy = PreProcessPolicy.of(["html", "petit"], permits=lambda n: n != "petit")
-        assert policy.offered == ("html",)
-
-    def test_a_guard_narrows_the_argument_not_the_default(self) -> None:
-        """Guards judge what the agent sent; the default is the operator's."""
-        policy = PreProcessPolicy.of(["petit"], defaults=["html"], permits=lambda n: n != "html")
-        assert policy.resolve(None, ["html"]) == ("html",)
-        with pytest.raises(PreProcessNotPermittedError):
-            policy.resolve(["html"])
 
 
 @pytest.mark.parametrize(
@@ -169,7 +147,7 @@ class TestConfig:
         p = _profile(
             PreProcessConfig(processors=["html", "petit"], required=["html"]),
             tools={
-                "inherits": ToolPreProcess(selectable=True),
+                "inherits": ToolPreProcess(enabled=False),
                 "replaces": ToolPreProcess(required=["petit"]),
             },
         )
@@ -177,11 +155,10 @@ class TestConfig:
         assert resolve(p, backend, "inherits").required == ["html"]
         assert resolve(p, backend, "replaces").required == ["petit"]
         assert preprocess_policy_for(p, backend, "inherits").required == ("html",)
-        assert preprocess_policy_for(p, backend, "replaces").resolve(None) == ("petit",)
+        assert preprocess_policy_for(p, backend, "replaces").resolve(False) == ("petit",)
 
-    def test_instructions_mention_it_only_where_it_is_offered(self) -> None:
-        assert PREPROCESS_PARAM not in mode_instructions(_profile())
-        assert PREPROCESS_PARAM in mode_instructions(_profile(url="internal://web"))
+    def test_instructions_explain_the_switch_once_for_every_profile(self) -> None:
+        assert f"{PREPROCESS_PARAM}: false" in mode_instructions(_profile())
 
 
 @pytest.mark.asyncio
@@ -204,17 +181,14 @@ class TestToolsList:
         (listed,) = resp["result"]["tools"]
         return listed["inputSchema"]["properties"], seen
 
-    async def test_a_proxied_tool_offers_nothing_by_default(self) -> None:
+    async def test_a_proxied_tool_does_not_declare_it_by_default(self) -> None:
         props, _ = await self._list(_profile(), TOOL)
         assert PREPROCESS_PARAM not in props
 
-    async def test_selectable_offers_the_ceiling_minus_the_floor(self) -> None:
-        profile = _profile(
-            PreProcessConfig(processors=["html", "email", "petit"], required=["html"]),
-            tools={"get_page": ToolPreProcess(selectable=True)},
-        )
+    async def test_selectable_declares_a_boolean(self) -> None:
+        profile = _profile(tools={"get_page": ToolPreProcess(selectable=True)})
         props, _ = await self._list(profile, TOOL)
-        assert props[PREPROCESS_PARAM]["items"]["enum"] == ["email", "petit"]
+        assert props[PREPROCESS_PARAM] == {"type": "boolean"}
 
     async def test_a_backend_declared_parameter_is_stripped_before_the_scan(self) -> None:
         declared = {
@@ -228,16 +202,7 @@ class TestToolsList:
         assert PREPROCESS_PARAM not in seen[0]["inputSchema"]["properties"]
         assert PREPROCESS_PARAM not in props
 
-    async def test_a_guard_narrows_the_enum(self) -> None:
-        profile = _profile(
-            PreProcessConfig(processors=["html", "petit"], selectable=True),
-            guards={"get_page": {PREPROCESS_PARAM: ParameterConstraint(deny=["petit"])}},
-        )
-        props, _ = await self._list(profile, TOOL)
-        assert props[PREPROCESS_PARAM]["items"]["enum"] == ["html"]
-
-    async def test_internal_fetch_offers_html_under_a_petit_only_ceiling(self) -> None:
-        """The tool's own default stays selectable when the ceiling omits it."""
+    async def test_internal_fetch_declares_it(self) -> None:
         fetch = {
             "name": "fetch_tool",
             "inputSchema": {
@@ -247,7 +212,7 @@ class TestToolsList:
         }
         profile = _profile(PreProcessConfig(processors=["petit"]), url="internal://web")
         props, _ = await self._list(profile, fetch)
-        assert props[PREPROCESS_PARAM]["items"]["enum"] == ["html", "petit"]
+        assert props[PREPROCESS_PARAM] == {"type": "boolean"}
 
 
 @pytest.mark.asyncio
@@ -282,54 +247,65 @@ class TestProxiedCall:
         return resp, forwarded, scan, audit
 
     async def test_the_backend_never_sees_the_argument(self) -> None:
-        profile = _profile(PreProcessConfig(processors=["html"], selectable=True))
-        _, forwarded, _, _ = await self._call(profile, {"id": "1", PREPROCESS_PARAM: ["html"]})
+        _, forwarded, _, _ = await self._call(_profile(), {"id": "1", PREPROCESS_PARAM: True})
         assert forwarded == {"id": "1"}
 
-    async def test_a_request_outside_the_policy_is_refused_and_audited(self) -> None:
+    async def test_a_value_that_is_not_a_switch_is_refused_and_audited(self) -> None:
         resp, forwarded, scan, audit = await self._call(
-            _profile(), {"id": "1", PREPROCESS_PARAM: ["html"]}
+            _profile(), {"id": "1", PREPROCESS_PARAM: "html"}
         )
         assert "trentina_preprocess" in resp["error"]["message"]
         assert forwarded == {}
         scan.assert_not_awaited()
         assert audit.call_args.args[3] is Outcome.DENIED_GUARD
 
-    async def test_an_empty_list_cannot_switch_off_a_default_it_was_not_offered(self) -> None:
-        profile = _profile(PreProcessConfig(enabled=True, processors=["html"], min_bytes=0))
-        resp, forwarded, _, audit = await self._call(profile, {"id": "1", PREPROCESS_PARAM: []})
-        assert "trentina_preprocess" in resp["error"]["message"]
-        assert forwarded == {}
-        assert audit.call_args.args[3] is Outcome.DENIED_GUARD
+    async def test_false_is_accepted_on_an_undeclared_tool_and_delivers_as_sent(self) -> None:
+        profile = _profile(PreProcessConfig(processors=["html"], min_bytes=0))
+        resp, _, scan, _ = await self._call(profile, {"id": "1", PREPROCESS_PARAM: False})
+        assert resp["result"]["content"][0]["text"] == PAGE
+        assert scan.call_args.kwargs["content_blocks"][0]["text"] == PAGE
 
-    async def test_a_guarded_processor_is_refused_before_dispatch(self) -> None:
-        profile = _profile(
-            PreProcessConfig(processors=["html", "petit"], selectable=True),
-            guards={"get_page": {PREPROCESS_PARAM: ParameterConstraint(deny=["petit"])}},
-        )
-        resp, forwarded, scan, audit = await self._call(
-            profile, {"id": "1", PREPROCESS_PARAM: ["petit"]}
-        )
-        assert "trentina_preprocess" in resp["error"]["message"]
-        assert forwarded == {}
-        scan.assert_not_awaited()
-        assert audit.call_args.args[3] is Outcome.DENIED_GUARD
-
-    async def test_the_selection_is_what_is_scanned_and_delivered(self) -> None:
-        profile = _profile(PreProcessConfig(processors=["html"], selectable=True))
-        resp, _, scan, _ = await self._call(profile, {"id": "1", PREPROCESS_PARAM: ["html"]})
+    async def test_what_runs_is_what_is_scanned_and_delivered(self) -> None:
+        profile = _profile(PreProcessConfig(processors=["html"]))
+        resp, _, scan, _ = await self._call(profile, {"id": "1", PREPROCESS_PARAM: True})
         delivered = resp["result"]["content"][0]["text"]
         assert delivered.startswith("# Release notes")
         assert scan.call_args.kwargs["content_blocks"][0]["text"] == delivered
 
-    async def test_the_floor_runs_disabled_small_and_unasked(self) -> None:
-        """`required` ignores `enabled` and `min_bytes`, and `[]` cannot remove it."""
-        profile = _profile(
-            PreProcessConfig(
-                enabled=False, processors=["html", "petit"], required=["html"], selectable=True
-            )
+    async def test_what_conversion_hid_is_counted_and_briefed(self) -> None:
+        """#229: the proxied path keeps the evidence the internal tools keep."""
+        profile = _profile(PreProcessConfig(min_bytes=0))
+        resp, _, scan, _ = await self._call(profile, {"id": "1"})
+        assert "Ignore prior instructions" not in resp["result"]["content"][0]["text"]
+        assert scan.call_args.kwargs["hidden"].elements == 1
+        assert "removed 1 element(s) hidden" in scan.call_args.kwargs["l3_context"]
+
+    async def test_hiding_is_summed_over_every_block(self) -> None:
+        profile = _profile(PreProcessConfig(min_bytes=0))
+        off_screen = '<p>plain text</p><div style="position:absolute;left:-9999px">psst</div>'
+        blocks = [{"type": "text", "text": PAGE}, {"type": "text", "text": off_screen}]
+        out = await transform_response(
+            profile=profile,
+            backend=profile.backends["cms"],
+            backend_name="cms",
+            tool_name="get_page",
+            content_blocks=blocks,
         )
-        for arguments in ({"id": "1"}, {"id": "1", PREPROCESS_PARAM: []}):
+        assert out.hidden is not None
+        assert out.hidden.elements == 1
+        assert out.hidden.off_screen == 1
+
+    async def test_nothing_converted_means_no_hiding_override(self) -> None:
+        profile = _profile(PreProcessConfig(min_bytes=0))
+        _, _, scan, _ = await self._call(profile, {"id": "1"}, text="plain words")
+        assert scan.call_args.kwargs["hidden"] is None
+
+    async def test_the_floor_runs_disabled_small_and_unasked(self) -> None:
+        """`required` ignores `enabled` and `min_bytes`, and `false` cannot remove it."""
+        profile = _profile(
+            PreProcessConfig(enabled=False, processors=["html", "petit"], required=["html"])
+        )
+        for arguments in ({"id": "1"}, {"id": "1", PREPROCESS_PARAM: False}):
             resp, _, scan, _ = await self._call(profile, arguments)
             delivered = resp["result"]["content"][0]["text"]
             assert "Ignore prior instructions" not in delivered
@@ -378,6 +354,14 @@ class TestProxiedCall:
         assert "worker_error" in resp["result"]["content"][0]["text"]
         scan.assert_not_awaited()
 
+    async def test_a_required_detect_whose_converter_breaks_delivers_nothing(self) -> None:
+        broken = PreProcessResult.declined("html", Cost.FREE, PAGE, reason="worker_error")
+        profile = _profile(PreProcessConfig(processors=["detect"], required=["detect"]))
+        with patch(HTML_RUN, AsyncMock(return_value=broken)):
+            resp, _, scan, _ = await self._call(profile, {"id": "1", PREPROCESS_PARAM: False})
+        assert resp["result"]["_trentina_refusal"]["reason"] == "preprocess_failed"
+        scan.assert_not_awaited()
+
     async def test_a_metered_floor_is_judged_as_model_output(self) -> None:
         summary = PreProcessResult(
             name="summarize",
@@ -393,27 +377,25 @@ class TestProxiedCall:
         assert scan.call_args.kwargs["provenance"] is Provenance.MODEL_OUTPUT
 
     async def test_an_optional_failure_keeps_the_floors_output(self) -> None:
-        profile = _profile(
-            PreProcessConfig(processors=["html", "petit"], required=["html"], selectable=True)
-        )
+        profile = _profile(PreProcessConfig(processors=["html", "petit"], required=["html"]))
         with patch(
             "mcp_trentina_crunchtools.preprocess.petit.PetitProcessor.run",
             side_effect=RuntimeError("boom"),
         ):
-            resp, _, scan, _ = await self._call(profile, {"id": "1", PREPROCESS_PARAM: ["petit"]})
+            resp, _, scan, _ = await self._call(profile, {"id": "1", PREPROCESS_PARAM: True})
         delivered = resp["result"]["content"][0]["text"]
         assert delivered.startswith("# Release notes")
         assert scan.call_args.kwargs["content_blocks"][0]["text"] == delivered
 
     async def test_an_optional_processor_that_raises_still_fails_open(self) -> None:
-        profile = _profile(PreProcessConfig(processors=["html"], selectable=True))
+        profile = _profile(PreProcessConfig(processors=["html"]))
         with patch(HTML_RUN, side_effect=RuntimeError("parser exploded")):
-            resp, _, scan, _ = await self._call(profile, {"id": "1", PREPROCESS_PARAM: ["html"]})
+            resp, _, scan, _ = await self._call(profile, {"id": "1", PREPROCESS_PARAM: True})
         assert resp["result"]["content"][0]["text"] == PAGE
         assert scan.call_args.kwargs["content_blocks"][0]["text"] == PAGE
 
 
-async def _transform(cfg: PreProcessConfig, selection: tuple[str, ...] | None) -> str:
+async def _transform(cfg: PreProcessConfig, minify: bool | None) -> str:
     profile = _profile(cfg)
     out = await transform_response(
         profile=profile,
@@ -421,7 +403,7 @@ async def _transform(cfg: PreProcessConfig, selection: tuple[str, ...] | None) -
         backend_name="cms",
         tool_name="get_page",
         content_blocks=[{"type": "text", "text": PAGE}],
-        selection=selection,
+        minify=minify,
     )
     assert out.content_blocks is not None
     return str(out.content_blocks[0]["text"])
@@ -431,57 +413,57 @@ class TestTransform:
     """What runs, per call, on a proxied response. PAGE is ~180 bytes."""
 
     @pytest.mark.parametrize(
-        ("cfg", "selection", "converted"),
+        ("cfg", "minify", "converted"),
         [
             # Omitted: the configured chain, when enabled and above min_bytes.
             (PreProcessConfig(enabled=True, processors=["html"], min_bytes=0), None, True),
             (PreProcessConfig(enabled=True, processors=["html"], min_bytes=4096), None, False),
             (PreProcessConfig(enabled=False, processors=["html"], min_bytes=0), None, False),
-            # Explicit: runs below min_bytes, disabled, and under strategy none.
-            (PreProcessConfig(enabled=False, processors=["html"]), ("html",), True),
-            (PreProcessConfig(strategy="none", processors=["html"]), ("html",), True),
-            # Explicit empty: the agent declined the default.
-            (PreProcessConfig(enabled=True, processors=["html"], min_bytes=0), (), False),
+            # true: runs below min_bytes, disabled, and under strategy none.
+            (PreProcessConfig(enabled=False, processors=["html"]), True, True),
+            (PreProcessConfig(strategy="none", processors=["html"]), True, True),
+            # false: the agent declined the default.
+            (PreProcessConfig(enabled=True, processors=["html"], min_bytes=0), False, False),
         ],
     )
     async def test_what_runs(
-        self, cfg: PreProcessConfig, selection: tuple[str, ...] | None, converted: bool
+        self, cfg: PreProcessConfig, minify: bool | None, converted: bool
     ) -> None:
-        text = await _transform(cfg, selection)
+        text = await _transform(cfg, minify)
         assert text.startswith("# Release notes") is converted
         assert (text == PAGE) is not converted
 
 
 @pytest.mark.asyncio
 class TestInternalTools:
-    async def test_fetch_unconverted_is_raw_judged_as_delivered_and_still_counted(
+    async def test_fetch_false_is_raw_judged_as_delivered_and_still_counted(
         self, env: Path
     ) -> None:
-        """`[]` is unconverted, not unscanned: tier 2 still counts the hiding."""
+        """`false` is unminified, not unscanned: tier 2 still counts the hiding."""
         with layers(env) as fakes:
             fakes.fetch_url.return_value = (PAGE, "text/html")
-            result = await fetch_page("https://example.com/notes", Mode.FLAG, preprocess=[])
+            result = await fetch_page("https://example.com/notes", Mode.FLAG, preprocess=False)
         assert result["content"] == PAGE
         assert fakes.classify.call_args_list[0].args[0] == PAGE
         assert result["l1"]["stripped"]["hidden_elements"] == 1
         assert "preprocess" not in result
 
-    async def test_fetch_refuses_a_name_outside_the_policy(self, env: Path) -> None:
+    async def test_fetch_refuses_a_value_that_is_not_a_switch(self, env: Path) -> None:
         with layers(env) as fakes:
             fakes.fetch_url.return_value = (PAGE, "text/html")
             with pytest.raises(PreProcessNotPermittedError):
-                await fetch_page("https://example.com", Mode.FLAG, preprocess=["summarize"])
+                await fetch_page("https://example.com", Mode.FLAG, preprocess="summarize")
         assert fakes.classify.await_count == 0
 
-    async def test_the_bound_floor_converts_even_a_page_served_as_text(self, env: Path) -> None:
-        policy = PreProcessPolicy.of(["petit"], ["html"])
+    async def test_the_bound_floor_converts_even_when_asked_not_to(self, env: Path) -> None:
+        policy = PreProcessPolicy(["detect"], ["html"])
         with profile_context(_profile(), None, policy), layers(env) as fakes:
             fakes.fetch_url.return_value = (PAGE, "text/plain")
-            result = await fetch_page("https://example.com", Mode.FLAG, preprocess=[])
+            result = await fetch_page("https://example.com", Mode.FLAG, preprocess=False)
         assert result["content"].startswith("# Release notes")
 
     async def test_a_raising_floor_fails_the_fetch(self, env: Path) -> None:
-        policy = PreProcessPolicy.of(["html"], ["html"])
+        policy = PreProcessPolicy(["html"], ["html"])
         with (
             profile_context(_profile(), None, policy),
             layers(env) as fakes,
@@ -489,6 +471,17 @@ class TestInternalTools:
         ):
             fakes.fetch_url.return_value = (PAGE, "text/html")
             with pytest.raises(PreProcessFailedError):
+                await flag_fetch("https://example.com")
+        assert fakes.classify.await_count == 0
+
+    async def test_a_floor_past_its_parse_cap_fails_the_call(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("mcp_trentina_crunchtools.preprocess.html._MAX_PARSE_BYTES", 16)
+        policy = PreProcessPolicy(["html"], ["html"])
+        with profile_context(_profile(), None, policy), layers(env) as fakes:
+            fakes.fetch_url.return_value = (PAGE, "text/html")
+            with pytest.raises(PreProcessFailedError, match="too_large"):
                 await flag_fetch("https://example.com")
         assert fakes.classify.await_count == 0
 
@@ -503,7 +496,7 @@ class TestInternalTools:
             bytes_out=27,
         )
         judge = AsyncMock(return_value={"content": "ok"})
-        policy = PreProcessPolicy.of(["summarize"])
+        policy = PreProcessPolicy(["summarize"])
         with (
             profile_context(_profile(), None, policy),
             layers(env) as fakes,
@@ -511,68 +504,55 @@ class TestInternalTools:
             patch("mcp_trentina_crunchtools.tools.fetch.judge_and_deliver", judge),
         ):
             fakes.fetch_url.return_value = (PAGE, "text/plain")
-            await fetch_page("https://example.com", Mode.FLAG, preprocess=["summarize"])
+            await fetch_page("https://example.com", Mode.FLAG)
         assert judge.call_args.args[0] == "A page about release notes."
         assert judge.call_args.kwargs["provenance"] is Provenance.MODEL_OUTPUT
 
-    async def test_a_selected_processor_that_raises_fails_the_call(self, env: Path) -> None:
-        """Internal tools fail closed on what was asked for, floor or not."""
-        with (
-            layers(env) as fakes,
-            patch(HTML_RUN, side_effect=RuntimeError("boom")),
-        ):
-            fakes.fetch_url.return_value = (PAGE, "text/plain")
-            with pytest.raises(PreProcessFailedError):
-                await fetch_page("https://example.com", Mode.FLAG, preprocess=["html"])
-        assert fakes.classify.await_count == 0
-
-    async def test_an_asked_for_converter_past_its_parse_cap_fails_the_call(
-        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        "broken",
+        [
+            {"side_effect": RuntimeError("boom")},
+            {
+                "return_value": PreProcessResult.declined(
+                    "html", Cost.FREE, PAGE, reason="worker_error"
+                )
+            },
+        ],
+    )
+    async def test_a_minifier_that_breaks_delivers_the_original(
+        self, env: Path, broken: dict[str, Any]
     ) -> None:
-        monkeypatch.setattr("mcp_trentina_crunchtools.preprocess.html._MAX_PARSE_BYTES", 16)
-        with layers(env) as fakes:
+        """Minifying fails open: a broken minifier costs tokens, never content."""
+        with layers(env) as fakes, patch(HTML_RUN, AsyncMock(**broken)):
             fakes.fetch_url.return_value = (PAGE, "text/html")
-            with pytest.raises(PreProcessFailedError, match="too_large"):
-                await flag_fetch("https://example.com")
-        assert fakes.classify.await_count == 0
+            result = await flag_fetch("https://example.com")
+        assert result["content"] == PAGE
+        assert fakes.classify.call_args_list[0].args[0] == PAGE
 
-    async def test_a_processor_that_declines_as_broken_fails_the_call(self, env: Path) -> None:
-        broken = PreProcessResult.declined("html", Cost.FREE, PAGE, reason="worker_error")
-        with (
-            layers(env) as fakes,
-            patch(HTML_RUN, AsyncMock(return_value=broken)),
-        ):
-            fakes.fetch_url.return_value = (PAGE, "text/html")
-            with pytest.raises(PreProcessFailedError, match="worker_error"):
-                await flag_fetch("https://example.com")
-        assert fakes.classify.await_count == 0
-
-    async def test_a_chain_feeds_each_processor_the_last_ones_output(self, env: Path) -> None:
-        """html then petit: petit sees Markdown, and both are accounted for."""
+    async def test_detect_feeds_petit_the_markdown(self, env: Path) -> None:
+        """html then petit: petit sees Markdown, and the chain is accounted for."""
         seen: list[str] = []
 
         async def petit(_self: Any, payload: str, _ctx: Any) -> PreProcessResult:
             seen.append(payload)
             return PreProcessResult("petit", Cost.FREE, "grouped", True, len(payload), 7)
 
-        policy = PreProcessPolicy.of(["html", "petit"])
         with (
-            profile_context(_profile(), None, policy),
             layers(env) as fakes,
             patch("mcp_trentina_crunchtools.preprocess.petit.PetitProcessor.run", petit),
         ):
             fakes.fetch_url.return_value = (PAGE, "text/html")
-            result = await fetch_page("https://e.com", Mode.FLAG, preprocess=["petit", "html"])
+            result = await fetch_page("https://e.com", Mode.FLAG)
         assert seen[0].startswith("# Release notes")
         assert result["content"] == "grouped"
-        assert [p["name"] for p in result["preprocess"]] == ["html", "petit"]
+        assert result["preprocess"][0]["chain"] == "html,petit"
 
     async def test_read_delivers_the_bytes_on_disk_unless_asked(self, env: Path) -> None:
         page = env / "notes.html"
         page.write_text(PAGE)
         with layers(env):
             raw = await read_file(str(page), Mode.FLAG)
-            converted = await read_file(str(page), Mode.FLAG, preprocess=["html"])
+            converted = await read_file(str(page), Mode.FLAG, preprocess=True)
         assert raw["content"] == PAGE
         assert converted["content"].startswith("# Release notes")
 
@@ -616,14 +596,14 @@ class TestInternalTools:
                         "method": "tools/call",
                         "params": {
                             "name": f"cms{NAMESPACE_SEP}{tool}",
-                            "arguments": {**target, PREPROCESS_PARAM: []},
+                            "arguments": {**target, PREPROCESS_PARAM: False},
                         },
                     },
                 )
         finally:
             internal._server = saved
         assert "error" not in resp
-        assert seen["requested"] == []
+        assert seen["requested"] is False
         assert seen["policy"].required == ("petit",)
         assert get_current_preprocess_policy() is None, "policy leaked past the call"
 

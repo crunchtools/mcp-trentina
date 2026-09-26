@@ -69,6 +69,16 @@ CREATE TABLE IF NOT EXISTS tool_compressions (
     compressed_length INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS tool_names (
+    profile TEXT NOT NULL,
+    issued TEXT NOT NULL,
+    backend TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    issued_at TEXT NOT NULL,
+    PRIMARY KEY (profile, issued),
+    UNIQUE (profile, backend, tool)
+);
+
 CREATE TABLE IF NOT EXISTS tool_list_cache (
     backend_url TEXT PRIMARY KEY,
     tools_json TEXT NOT NULL,
@@ -459,4 +469,41 @@ def delete_all_tool_lists() -> None:
     """Flush all cached tool lists."""
     db = get_db()
     db.execute("DELETE FROM tool_list_cache")
+    db.commit()
+
+
+def issued_tool_names(profile: str) -> dict[str, tuple[str, str]]:
+    """Every short tool name issued to a profile: {issued: (backend, tool)}."""
+    rows = (
+        get_db()
+        .execute("SELECT issued, backend, tool FROM tool_names WHERE profile = ?", (profile,))
+        .fetchall()
+    )
+    return {row["issued"]: (row["backend"], row["tool"]) for row in rows}
+
+
+def issued_tool_name(profile: str, issued: str) -> tuple[str, str] | None:
+    """The (backend, tool) one issued name stands for, if it was issued."""
+    row = (
+        get_db()
+        .execute(
+            "SELECT backend, tool FROM tool_names WHERE profile = ? AND issued = ?",
+            (profile, issued),
+        )
+        .fetchone()
+    )
+    return (row["backend"], row["tool"]) if row else None
+
+
+def issue_tool_names(profile: str, names: dict[str, tuple[str, str]]) -> None:
+    """Record newly issued names. An issued name is never reassigned."""
+    if not names:
+        return
+    db = get_db()
+    now = datetime.now(UTC).isoformat()
+    db.executemany(
+        "INSERT OR IGNORE INTO tool_names (profile, issued, backend, tool, issued_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [(profile, issued, backend, tool, now) for issued, (backend, tool) in names.items()],
+    )
     db.commit()

@@ -20,12 +20,12 @@ where the agent can make it, and nowhere else:
 `Backend.modes` and a `parameter_guards` entry on `trentina_mode` narrow the
 policy for one backend or one tool. Neither is needed for the base policy.
 
-`trentina_preprocess` (#183) rides the same three steps. Its policy is the
-resolved `preprocess` config: `processors` is the ceiling, `required` the
-floor the argument cannot remove, and a guard on the parameter narrows what
-is offered name by name. The internal fetch, read and content tools always
-offer it; a proxied tool only when its config says `selectable`, because an
-enum on every tool costs tokens for tools whose format never varies.
+`trentina_preprocess` (#183; a switch since 0.38.0) rides the same three
+steps. Its policy is the resolved `preprocess` config: `processors` is what
+minifying runs, `required` the floor the switch cannot remove. Every tool
+accepts it and `instructions` explains it once; a tool's schema declares it
+only when its config says `selectable`, because a declaration on every tool
+cost a 376-tool profile ~15 KB for a switch the instructions already describe.
 """
 
 from __future__ import annotations
@@ -34,7 +34,12 @@ import copy
 from typing import TYPE_CHECKING, Any
 
 from ..modes import Mode, ModePolicy
-from ..preprocess.policy import INTERNAL_DEFAULTS, PREPROCESS_PARAM, PreProcessPolicy
+from ..preprocess.policy import (
+    INTERNAL_CHAIN,
+    INTERNAL_DEFAULTS,
+    PREPROCESS_PARAM,
+    PreProcessPolicy,
+)
 from .guards import evaluate_constraint
 from .transform import resolve as resolve_preprocess_config
 
@@ -61,27 +66,29 @@ def policy_for(profile: Profile, backend: Backend, tool_name: str) -> ModePolicy
 
 
 def preprocess_policy_for(profile: Profile, backend: Backend, tool_name: str) -> PreProcessPolicy:
-    """What this tool's caller may select, and what runs regardless.
+    """What minifying this tool runs, what runs regardless, and the default.
 
-    A tool that does not offer the parameter still has a floor: it is not
-    ``selectable``, so any explicit request is refused, ``[]`` included, and
-    ``required`` still runs.
+    The internal fetch, read and content tools minify with ``INTERNAL_CHAIN``
+    and declare the switch; the internal admin tools return gateway-authored
+    data and run nothing.
     """
     cfg = resolve_preprocess_config(profile, backend, tool_name)
     if backend.is_internal:
         if tool_name not in INTERNAL_DEFAULTS:
-            return PreProcessPolicy((), (), selectable=False)
-        defaults: tuple[str, ...] = INTERNAL_DEFAULTS[tool_name]
-    elif cfg.selectable:
-        defaults = ()
-    else:
-        return PreProcessPolicy((), tuple(cfg.required), selectable=False)
-    guard = backend.parameter_guards.get(tool_name, {}).get(PREPROCESS_PARAM)
-    return PreProcessPolicy.of(
-        cfg.processors,
-        cfg.required,
-        defaults=defaults,
-        permits=None if guard is None else (lambda n: evaluate_constraint(n, guard) is None),
+            return PreProcessPolicy((), default=False)
+        return PreProcessPolicy(
+            INTERNAL_CHAIN,
+            tuple(cfg.required),
+            default=INTERNAL_DEFAULTS[tool_name],
+            declared=True,
+            target_bytes=cfg.target_bytes,
+        )
+    return PreProcessPolicy(
+        tuple(cfg.processors),
+        tuple(cfg.required),
+        default=cfg.enabled and cfg.strategy != "none",
+        declared=cfg.selectable,
+        target_bytes=cfg.target_bytes,
     )
 
 
@@ -122,20 +129,14 @@ def insert_params(tool: dict[str, Any], policy: ModePolicy) -> dict[str, Any]:
 
 
 def insert_preprocess(tool: dict[str, Any], policy: PreProcessPolicy) -> dict[str, Any]:
-    """The tool with the processors its policy offers, or unchanged if none.
-
-    Required processors are not in the enum: there is nothing to choose.
-    """
-    if not policy.offered:
+    """The tool with the switch declared, when its policy says to."""
+    if not policy.declared:
         return tool
     original = tool.get("inputSchema")
     schema: dict[str, Any] = (
         copy.deepcopy(original) if isinstance(original, dict) else {"type": "object"}
     )
-    schema.setdefault("properties", {})[PREPROCESS_PARAM] = {
-        "type": "array",
-        "items": {"type": "string", "enum": list(policy.offered)},
-    }
+    schema.setdefault("properties", {})[PREPROCESS_PARAM] = {"type": "boolean"}
     return {**tool, "inputSchema": schema}
 
 
@@ -165,9 +166,8 @@ def mode_instructions(profile: Profile) -> str:
         *(m for b in profile.backends.values() for m in (b.modes or [])),
     }
     modes = [m for m in Mode if m.value in offered]
-    preprocess = _PREPROCESS_TEXT if _offers_preprocess(profile) else ""
     if len(modes) < 2:
-        return preprocess
+        return _PREPROCESS_TEXT
     default = profile.defense.enforcement
     return (
         f"Content from every tool is judged by Trentina's three layers. Tools that "
@@ -175,23 +175,16 @@ def mode_instructions(profile: Profile) -> str:
         f"is what that tool permits. Omitted, it is {default}. "
         + "; ".join(_MODE_TEXT[m] for m in modes)
         + ". A refusal lists the alternatives your policy allows. "
-        + preprocess
-    ).rstrip()
-
-
-def _offers_preprocess(profile: Profile) -> bool:
-    """Whether any tool in the profile can carry the parameter."""
-    return profile.preprocess.selectable or any(
-        b.is_internal or any(o.selectable for o in b.preprocess_tools.values())
-        for b in profile.backends.values()
+        + _PREPROCESS_TEXT
     )
 
 
 _PREPROCESS_TEXT = (
-    f"Tools that offer {PREPROCESS_PARAM} let you pick the pre-processors that "
-    f"run before judging (html converts markup to Markdown); omitted, the tool's "
-    f"default runs, and [] runs only what your policy requires. What is judged "
-    f"is exactly what is delivered."
+    f"Tool output is minified before judging: HTML becomes Markdown, JSON is "
+    f"compacted, and repeated items collapse to a count. Pass "
+    f"{PREPROCESS_PARAM}: false on any tool for the exact text, e.g. before "
+    f"editing and saving it back. true minifies a tool that returns exact text "
+    f"by default. What is judged is exactly what is delivered."
 )
 
 
@@ -213,18 +206,18 @@ def resolve_call(
 
 def resolve_preprocess(
     profile: Profile, backend: Backend, tool_name: str, arguments: dict[str, Any]
-) -> tuple[PreProcessPolicy, Any, tuple[str, ...] | None]:
-    """The call's pre-processor policy, the agent's request, and what it selects.
+) -> tuple[PreProcessPolicy, Any, bool | None]:
+    """The call's pre-processor policy, the agent's switch, and what it resolves to.
 
-    Checked here, before dispatch, so a refused request is audited as a guard
-    denial and never reaches a backend. The selection is None when the agent
-    asked for nothing: the default depends on what arrives (fetch converts
-    only a page its server calls HTML), so it is resolved where that is known.
+    Checked here, before dispatch, so a malformed switch is audited as a guard
+    denial and never reaches a backend. The resolution is None when the agent
+    left the switch out: the operator's default then also honours
+    ``min_bytes``, which an explicit ``true`` does not.
 
     Raises:
-        PreProcessNotPermittedError: a requested name is outside the policy.
+        PreProcessNotPermittedError: the switch is not a bool, None, or the
+            deprecated list form.
     """
     policy = preprocess_policy_for(profile, backend, tool_name)
     requested = arguments.get(PREPROCESS_PARAM)
-    selection = None if requested is None else policy.resolve(requested)
-    return policy, requested, selection
+    return policy, requested, None if requested is None else policy.minifies(requested)

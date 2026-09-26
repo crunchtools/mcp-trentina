@@ -24,7 +24,7 @@ from ..defense import DefenseVerdict, Provenance, defend
 from ..errors import BlockedSourceError
 from ..modes import Mode, gaps_of, refusal_body, refusal_reason
 from ..quarantine.agent import quarantine_redact
-from ..report import Disposition, build_report
+from ..report import Disposition, LayerState, build_report
 from ..warning import build_warning
 
 if TYPE_CHECKING:
@@ -50,11 +50,15 @@ def blocklisted(source: str, mode: Mode, detected_at: str) -> BlockedSourceError
 
 
 def l1_metadata(pipeline: PipelineResult) -> dict[str, Any]:
-    """The ``l1`` section of a response: sizes and every stage's counts."""
+    """The ``l1`` section of a response: sizes and the counts that are not zero.
+
+    Nineteen zeros on every clean response cost the agent ~150 tokens and
+    told it nothing (0.38.0). The full table is in the D-Bus event.
+    """
     return {
         "input_size": pipeline.input_size,
         "output_size": pipeline.output_size,
-        "stripped": pipeline.stats.to_flat_dict(),
+        "stripped": {k: v for k, v in pipeline.stats.to_flat_dict().items() if v},
     }
 
 
@@ -230,20 +234,26 @@ def _deliver(
     warning = call.warning(verdict)
     disposition = Disposition.ANNOTATED if warning is not None else Disposition.DELIVERED
     call.emit(verdict, disposition, verdict.pipeline.output_size)
-    response: dict[str, Any] = {
-        "content": original,
-        "scan": build_report(
-            verdict,
-            disposition=disposition,
-            kind=call.kind,
-            ref=call.ref,
-            allowlisted=call.allowlisted,
-        ),
-        "l1": l1_metadata(verdict.pipeline),
-        **(extras or {}),
-    }
+    scan = build_report(
+        verdict,
+        disposition=disposition,
+        kind=call.kind,
+        ref=call.ref,
+        allowlisted=call.allowlisted,
+    )
+    l1 = l1_metadata(verdict.pipeline)
+    response: dict[str, Any] = {"content": original, "scan": scan, "l1": l1, **(extras or {})}
     if warning is not None:
         response["_trentina_warning"] = warning
+    elif (
+        not l1["stripped"]
+        and not call.allowlisted
+        and set(scan["layers"].values()) == {LayerState.COMPLETE.value}
+    ):
+        # Clean: one line says so. The agent asked for the source, so the
+        # origin repeats its own argument, and L1 found nothing to report.
+        response["scan"] = {"layers": "complete", "disposition": disposition.value}
+        del response["l1"]
     return response
 
 

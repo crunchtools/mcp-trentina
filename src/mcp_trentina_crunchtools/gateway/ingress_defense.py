@@ -50,12 +50,13 @@ import json
 import logging
 import os
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..config import get_config
 from ..defense import Provenance, defend
 from ..errors import scrub_credentials
+from ..l1.pipeline import run_l1
 from ..modes import (
     Gaps,
     Mode,
@@ -71,6 +72,7 @@ from .service import judge_of, service_context, service_profile
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
+    from ..l1.hidden import HiddenStats
     from .profile import Profile
 
 logger = logging.getLogger(__name__)
@@ -331,6 +333,7 @@ async def scan_tool_response(
     mode: Mode | None = None,
     prompt: str | None = None,
     policy: ModePolicy | None = None,
+    hidden: HiddenStats | None = None,
 ) -> IngressDecision:
     """Judge one tool response and decide its fate under the call's mode.
 
@@ -343,7 +346,10 @@ async def scan_tool_response(
         until the mode became a per-call argument.
 
     ``mode`` None means the profile default. ``policy`` is what a refusal
-    offers as alternatives; without one it offers none.
+    offers as alternatives; without one it offers none. ``hidden`` is what
+    the ORIGINAL's text blocks hid before pre-processing converted them
+    (#229): L1 reports the larger of those and its own count on the
+    Markdown, where conversion left none.
 
     Flags are recorded to the detections table (source_type="tool_response")
     except on a verdict-cache hit.
@@ -363,7 +369,9 @@ async def scan_tool_response(
     key = _cache_key(
         profile,
         f"response:{mode.value}:{provenance.value}:{briefing}",
-        joined + json.dumps(unscannable, sort_keys=True),
+        joined
+        + json.dumps(unscannable, sort_keys=True)
+        + (json.dumps(asdict(hidden), sort_keys=True) if hidden is not None else ""),
         judge_of(profile),
     )
     # redact is not served from the cache: its extraction is per prompt, and
@@ -377,10 +385,18 @@ async def scan_tool_response(
             refusal=_refusal_from_warning(cached, mode, policy) if blocked else None,
         )
 
+    pipeline = None
+    if hidden is not None:
+        pipeline = await asyncio.to_thread(run_l1, joined)
+        # The original's text blocks, or L1's own count, whichever saw more:
+        # L1 alone still sees hiding in structuredContent, which no processor
+        # rewrites, and the original saw what conversion deleted.
+        pipeline.stats.hidden = pipeline.stats.hidden.at_least(hidden)
     verdict = await defend(
         joined,
         source=f"{profile.name}:{backend_name}:{tool_name}",
         source_type="tool_response",
+        precomputed_l1=pipeline,
         defense=profile.defense,
         provenance=provenance,
         l3_context=l3_context,
@@ -674,7 +690,10 @@ async def scan_tool_list(
     """Judge every tool definition; annotate the flagged ones in place.
 
     ``tools_before_compression`` decides provenance per tool: a description
-    the compressor rewrote is LLM output and earns unconditional L3. The
+    or parameter description the compressor rewrote is LLM output and earns
+    unconditional L3. A parameter that was only trimmed of boilerplate counts
+    too; telling the two apart would cost a second cache lookup per tool to
+    save L3 on text L3 was going to read anyway. The
     lists are positionally parallel (compress_tools preserves order and
     length).
 
@@ -692,7 +711,10 @@ async def scan_tool_list(
         if not surface.strip():
             return None
 
-        compressed = tool.get("description", "") != before.get("description", "")
+        # A model may have rewritten the description or any parameter's.
+        compressed = tool.get("description", "") != before.get("description", "") or (
+            tool.get("inputSchema") != before.get("inputSchema")
+        )
         provenance = Provenance.MODEL_OUTPUT if compressed else Provenance.EXTERNAL
 
         key = _cache_key(profile, f"tool:{provenance.value}", surface, judge)

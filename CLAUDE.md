@@ -115,16 +115,26 @@ Every call runs L1 ∥ L2 on the arrived bytes, then L3 briefed with both. The
 - `redact` — L3 detect, extract (guided by `trentina_prompt`), verify; any
   objection refuses.
 
-"Arrived" means arrived at the perimeter, AFTER pre-processing. The agent
-picks its pre-processors per call with `trentina_preprocess` (0.37.0, #183),
-within the profile's `preprocess.processors` (ceiling) and above its
-`required` (floor, which `[]` cannot remove). Omitted: `fetch` converts a page
-its server calls HTML, `content` converts `content_type: text/html`, `read`
-converts nothing, a proxied tool runs its configured chain. The internal tools
-run it in `tools/preprocess.py` (the router skips `transform_response` for
-them) and fail closed on anything asked for; proxied tools offer it only where
-`selectable`, and there only the floor fails closed. Policy:
+"Arrived" means arrived at the perimeter, AFTER pre-processing. Output is
+minified by default (0.38.0): the `detect` pre-processor picks the minifier by
+format (`preprocess/detect.py`), and takes undeclared text for HTML only when
+no tag name in it is foreign to HTML, because `html` deletes `<a@b.c>` and
+`Vec<String>`. `trentina_preprocess` is a switch (#183): `false` exact, `true`
+minified, omitted the tool's default (`read` and any `preprocess_tools` entry
+with `enabled: false` default to exact). Every tool accepts it; a proxied
+tool's schema declares it only where `selectable`, the internal fetch, read
+and content always. `required` is the floor it cannot remove,
+and the one failure rule is: floor fails closed, minifying fails open. The
+internal tools run it in `tools/preprocess.py` (the router skips
+`transform_response` for them) with `INTERNAL_CHAIN`. Policy:
 `preprocess/policy.py`; gateway side rides `modes_policy.py` like the mode.
+Proxied conversion hands L1 the ORIGINAL's hiding counts (#229).
+
+Tools are served under short names (`gateway/names.py`), tagged with a backend
+only on collision, recorded in `tool_names` and never reassigned. Only
+tools/list and tools/call see them; everything behind the edge uses the real
+(backend, tool). A repeated `structuredContent` is dropped before the scan
+(`router._drop_duplicate_structured`).
 
 Until 0.32.0 the mode was the tool's NAME prefix (#193), so the agent chose
 its own posture and nothing enforced it. Now the policy does:

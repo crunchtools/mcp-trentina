@@ -132,6 +132,9 @@ class PreProcessContext:
     # METERED processors only while this is exceeded. A transformation whose
     # purpose is not size ignores this; it is a budget, not a mandate.
     target_bytes: int | None = None
+    # The MIME type the payload's server declared, when it declared one.
+    # ``detect`` treats a declared HTML page as HTML without sniffing.
+    content_type: str | None = None
 
 
 @dataclass(frozen=True)
