@@ -54,8 +54,8 @@ def _issues(n: int, *, summary: str = "Nightly build failed") -> str:
     )
 
 
-async def _run(payload: str) -> PreProcessResult:
-    return await StructuredProcessor().run(payload, PreProcessContext())
+async def _run(payload: str, target_bytes: int | None = None) -> PreProcessResult:
+    return await StructuredProcessor().run(payload, PreProcessContext(target_bytes=target_bytes))
 
 
 class TestStructuredReduction:
@@ -110,11 +110,10 @@ class TestSecurityProperties:
         reduces by nothing — and it is preferred to silent data loss.
         """
         records = [
-            {"key": f"PROJ-{1000 + i}", "summary": "Nightly build failed"}
-            for i in range(200)
+            {"key": f"PROJ-{1000 + i}", "summary": "Nightly build failed"} for i in range(200)
         ]
         result = await _run(json.dumps(records, indent=2))
-        assert not result.applied
+        assert result.details["elements_dropped"] == 0
         for record in records:
             assert record["key"] in result.content
 
@@ -123,11 +122,10 @@ class TestSecurityProperties:
         results. Fingerprinting the values keeps genuinely different records
         apart."""
         records = [
-            {"key": f"PROJ-{i}", "summary": f"unique problem {chr(97 + i)} here"}
-            for i in range(26)
+            {"key": f"PROJ-{i}", "summary": f"unique problem {chr(97 + i)} here"} for i in range(26)
         ]
         result = await _run(json.dumps(records, indent=2))
-        assert not result.applied, "every record differs in words; nothing to collapse"
+        assert result.details["elements_dropped"] == 0, "every record differs in words"
 
     async def test_dropped_elements_are_gone(self) -> None:
         """Collision is deletion: an element identical to boilerplate beyond
@@ -169,21 +167,34 @@ class TestDeclines:
         result = await _run("42")
         assert not result.applied
 
-    async def test_short_array_declines(self) -> None:
-        result = await _run(json.dumps([{"a": 1}, {"a": 2}]))
+    async def test_compact_short_array_declines(self) -> None:
+        result = await _run(json.dumps([{"a": 1}, {"a": 2}], separators=(",", ":")))
         assert not result.applied
 
+    async def test_pretty_json_is_compacted_to_the_same_document(self) -> None:
+        payload = json.dumps({"a": [1, 2], "b": {"c": "d e"}}, indent=2)
+        result = await _run(payload)
+        assert result.applied
+        assert result.content == '{"a":[1,2],"b":{"c":"d e"}}'
+        assert json.loads(result.content) == json.loads(payload)
+
     async def test_declining_returns_input_untouched(self) -> None:
-        payload = json.dumps([{"a": 1}, {"a": 2}])
+        payload = json.dumps([{"a": 1}, {"a": 2}], separators=(",", ":"))
         result = await _run(payload)
         assert result.content == payload
         assert result.bytes_in == result.bytes_out
 
 
 class TestLongStrings:
+    async def test_long_string_is_kept_under_budget(self) -> None:
+        """0.38.0: the agent asked for the document; clip only past the budget."""
+        payload = json.dumps({"body": "x" * 25_000})
+        result = await _run(payload, target_bytes=100_000)
+        assert "truncated" not in result.content
+
     async def test_long_string_is_truncated(self) -> None:
         payload = json.dumps({"body": "x" * 200_000})
-        result = await _run(payload)
+        result = await _run(payload, target_bytes=20_000)
         assert result.applied
         assert result.details["strings_truncated"] == 1
         assert "truncated" in result.content
@@ -194,7 +205,7 @@ class TestLongStrings:
         front still reaches the scan and a payload past the cap is deleted
         rather than delivered."""
         payload = json.dumps({"body": "HEAD-MARKER" + "x" * 200_000 + "TAIL-MARKER"})
-        result = await _run(payload)
+        result = await _run(payload, target_bytes=20_000)
         assert "HEAD-MARKER" in result.content
         assert "TAIL-MARKER" not in result.content
 

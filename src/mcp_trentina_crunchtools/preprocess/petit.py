@@ -132,7 +132,10 @@ class PetitProcessor:
 
         if len(lines) < _MIN_LINES and bytes_in < _MIN_BYTES:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="too_small",
+                self.name,
+                self.cost,
+                payload,
+                reason="too_small",
                 details={"lines_in": len(lines), "bytes_in": bytes_in},
             )
 
@@ -148,8 +151,11 @@ class PetitProcessor:
             # The library raises rather than exits, and a reducer that
             # cannot reduce must still hand back the payload.
             return PreProcessResult.declined(
-                self.name, self.cost, payload,
-                reason="petit_error", details={"error": type(exc).__name__},
+                self.name,
+                self.cost,
+                payload,
+                reason="petit_error",
+                details={"error": type(exc).__name__},
             )
 
         if analysis.records_in < _MIN_RECORDS:
@@ -158,7 +164,10 @@ class PetitProcessor:
             # small" sent an earlier analysis of the production sidecar
             # looking for short responses that were not there.
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="not_enough_records",
+                self.name,
+                self.cost,
+                payload,
+                reason="not_enough_records",
                 details={
                     "records_in": analysis.records_in,
                     "lines_in": analysis.lines_in,
@@ -170,7 +179,10 @@ class PetitProcessor:
         collapsed = [g for g in analysis.groups if g.count > _SAMPLES_PER_GROUP]
         if not collapsed:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="nothing_repetitive",
+                self.name,
+                self.cost,
+                payload,
+                reason="nothing_repetitive",
                 details={
                     "records_in": analysis.records_in,
                     "petit_driver": analysis.driver,
@@ -222,7 +234,10 @@ class PetitProcessor:
             # first means the floor is costing real savings while the second
             # means the data simply does not compress.
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="not_smaller",
+                self.name,
+                self.cost,
+                payload,
+                reason="not_smaller",
                 details={
                     "would_be_bytes": bytes_out,
                     "would_be_ratio": round(bytes_out / bytes_in, 4),

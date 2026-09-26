@@ -448,9 +448,7 @@ async def _route_tools_call(
     # the default and is checked as that, never skipped as absent.
     try:
         policy, mode, prompt, forwarded = resolve_call(profile, backend, tool_name, arguments)
-        preprocess, requested, selection = resolve_preprocess(
-            profile, backend, tool_name, arguments
-        )
+        preprocess, requested, minify = resolve_preprocess(profile, backend, tool_name, arguments)
     except (ModeNotPermittedError, PreProcessNotPermittedError) as exc:
         _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, str(exc))
         return _err(req_id, JSONRPC_INVALID_PARAMS, str(exc))
@@ -520,7 +518,7 @@ async def _route_tools_call(
         mode=mode,
         prompt=prompt,
         policy=policy,
-        selection=selection,
+        minify=minify,
     )
     return _ok(req_id, result)
 
@@ -628,7 +626,7 @@ async def _assemble_call_result(
     mode: Mode | None = None,
     prompt: str | None = None,
     policy: ModePolicy | None = None,
-    selection: tuple[str, ...] | None = None,
+    minify: bool | None = None,
 ) -> dict[str, Any]:
     """Shape the MCP result and run it through the perimeter.
 
@@ -655,7 +653,7 @@ async def _assemble_call_result(
             backend_name=backend_name,
             tool_name=tool_name,
             content_blocks=content_blocks,
-            selection=selection,
+            minify=minify,
         )
         if reduced.failed is not None:
             _audit(

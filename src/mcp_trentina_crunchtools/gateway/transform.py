@@ -221,7 +221,7 @@ async def transform_response(
     backend_name: str,
     tool_name: str,
     content_blocks: list[Any] | None,
-    selection: tuple[str, ...] | None = None,
+    minify: bool | None = None,
 ) -> TransformOutcome:
     """Transform a tool response's text blocks. Never raises, never judges.
 
@@ -229,18 +229,17 @@ async def transform_response(
     whatever the agent asked for and regardless of ``enabled`` and
     ``min_bytes`` — first, so ``best_of`` can never discard them. They FAIL
     CLOSED: one that raises or cannot parse the payload sets ``failed`` and
-    the router delivers nothing. Then the optional processors run under the
-    configured strategy, and they fail open: a processor that cannot improve
-    a payload must not be able to cost you the response.
+    the router delivers nothing. Then, when the call minifies, the rest run
+    under the configured strategy, and they fail open: a minifier that breaks
+    costs the agent tokens, never the response.
 
     Args:
         profile, backend, backend_name, tool_name: where the response came
             from; they resolve the config (``resolve``) and label the log.
         content_blocks: the response's MCP content; only text blocks are
             rewritten.
-        selection: the agent's ``trentina_preprocess``, already resolved
-            against the policy (required names included), or None for the
-            operator's default.
+        minify: the agent's ``trentina_preprocess`` as a bool, or None for
+            the operator's default (``enabled``, above ``min_bytes``).
 
     Returns:
         The blocks to scan and deliver. When ``failed`` is set, a required
@@ -249,16 +248,15 @@ async def transform_response(
     cfg = resolve(profile, backend, tool_name)
     required: list[str] = list(cfg.required)
     # None is the operator's default: the configured chain when enabled and
-    # the response clears min_bytes. An explicit selection runs whatever the
-    # size — the agent asked for it.
-    default_on = cfg.enabled and cfg.strategy != "none"
-    chosen = selection if selection is not None else (cfg.processors if default_on else [])
-    optional = [n for n in chosen if n not in required]
+    # the response clears min_bytes. An explicit true runs whatever the size
+    # — the agent asked for it.
+    on = (cfg.enabled and cfg.strategy != "none") if minify is None else minify
+    optional: list[str] = [n for n in cfg.processors if n not in required] if on else []
     if not (required or optional):
         return TransformOutcome(content_blocks=content_blocks)
     targets = _text_blocks(content_blocks)
     lengths = [len(t.encode("utf-8")) for _, t in targets]
-    if selection is None and sum(lengths) < cfg.min_bytes:
+    if minify is None and sum(lengths) < cfg.min_bytes:
         optional = []
     if not targets or not (required or optional):
         return TransformOutcome(content_blocks=content_blocks)
@@ -280,7 +278,7 @@ async def transform_response(
         source=f"{profile.name}:{backend_name}:{tool_name}",
         target_bytes=max(1, cfg.target_bytes // len(targets)),
     )
-    # An explicit selection under strategy none still runs: the agent asked.
+    # An explicit true under strategy none still runs: the agent asked.
     strategy: Strategy = "chain" if cfg.strategy == "none" else cfg.strategy
     new_blocks = list(content_blocks or [])
     results: list[Any] = []

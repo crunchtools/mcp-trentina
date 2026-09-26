@@ -9,9 +9,8 @@ from ..config import get_config
 from ..database import is_blocked
 from ..errors import ContentSizeError
 from ..modes import Mode
-from ..preprocess.policy import INTERNAL_DEFAULTS
 from .judged import blocklisted, judge_and_deliver
-from .preprocess import is_html_type, prepare
+from .preprocess import prepare
 
 
 def _content_hash(content: str) -> str:
@@ -34,8 +33,8 @@ async def judge_content(
     content's hash — of what was handed in, before any pre-processing.
 
     ``content_type`` is the hint it was kept for (#183): declared HTML is
-    converted by default, the way fetch converts a page its server calls
-    HTML. ``preprocess`` overrides the default within the policy.
+    converted, the way fetch converts a page its server calls HTML. Minified
+    by default; ``preprocess=False`` judges and returns the text as given.
     """
     max_size = get_config().max_content
     if len(content) > max_size:
@@ -47,10 +46,7 @@ async def judge_content(
         raise blocklisted(chash, mode, blocked["detected_at"])
 
     page = await prepare(
-        content,
-        requested=preprocess,
-        default=INTERNAL_DEFAULTS["content_tool"] if is_html_type(content_type) else (),
-        source=chash,
+        content, requested=preprocess, tool="content_tool", source=chash, content_type=content_type
     )
     return await judge_and_deliver(
         page.content,

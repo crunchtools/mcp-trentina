@@ -67,8 +67,7 @@ def decode_recovery_key(text: str) -> bytes:
         )
     if tuple(raw[: len(PREFIX)]) != PREFIX:
         raise RecoveryKeyError(
-            "wrong version prefix — this is not an m.megolm_backup.v1 "
-            "recovery key"
+            "wrong version prefix — this is not an m.megolm_backup.v1 recovery key"
         )
 
     parity = 0

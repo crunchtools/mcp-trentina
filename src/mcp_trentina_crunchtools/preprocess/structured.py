@@ -1,10 +1,10 @@
 """Structured — FREE reduction for JSON-shaped tool output.
 
-Also the package's standing example of a transformation the size gate throws
-away: the rewrite re-serializes with ``indent=2`` while the input is often one
-minified line, which is strictly more parseable and strictly larger. When
-indentation costs more than grouping saves, the ``not_smaller`` decline below
-discards that artifact and the minified original ships instead.
+Output is COMPACT JSON (0.38.0): no indentation, no space after separators.
+It re-serialized with ``indent=2`` until then, which is easier on a human and
+costs an agent tokens for whitespace it never reads. Compaction alone is now
+a reason to apply: a pretty-printed payload with nothing to collapse still
+comes out smaller, and still parses to the same document.
 
 Phase 2 of the reduction plan. The sidecar's two dominant decline reasons,
 ``too_few_lines`` and ``reduction_below_floor``, both say the same thing:
@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from functools import partial
 from typing import Any
 
 from petit.Filter import Filter
@@ -122,7 +123,10 @@ class _Reducer:
     decision reads them.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, truncate: bool = False) -> None:
+        # Long strings are clipped only when the payload is over the caller's
+        # budget. Under it, the agent asked for the document and gets it.
+        self.truncate = truncate
         self.groups_collapsed = 0
         self.elements_dropped = 0
         self.strings_truncated = 0
@@ -150,7 +154,7 @@ class _Reducer:
             return node
 
         if isinstance(node, str):
-            if len(node) <= _MAX_STRING_CHARS:
+            if not self.truncate or len(node) <= _MAX_STRING_CHARS:
                 return node
             removed = len(node) - _MAX_STRING_CHARS
             self.strings_truncated += 1
@@ -184,15 +188,14 @@ class _Reducer:
             self.groups_collapsed += len(dropped)
             self.elements_dropped += sum(dropped.values())
             kept.extend(
-                _OMITTED.format(count=count)
-                for count in sorted(dropped.values(), reverse=True)
+                _OMITTED.format(count=count) for count in sorted(dropped.values(), reverse=True)
             )
         return kept
 
 
-def _parse_and_reduce(payload: str) -> tuple[str | None, _Reducer, str]:
+def _parse_and_reduce(payload: str, *, truncate: bool) -> tuple[str | None, _Reducer, str]:
     """Parse, reduce, re-serialize. Returns (text, reducer, decline_reason)."""
-    reducer = _Reducer()
+    reducer = _Reducer(truncate=truncate)
     try:
         document = json.loads(payload)
     except (ValueError, RecursionError):
@@ -207,12 +210,12 @@ def _parse_and_reduce(payload: str) -> tuple[str | None, _Reducer, str]:
     except RecursionError:
         return None, reducer, "too_deep"
 
-    if not reducer.changed:
-        return None, reducer, "nothing_repetitive"
-
     # Serializable by construction: everything in `reduced` came out of
     # json.loads or is a marker string this module wrote.
-    return json.dumps(reduced, indent=2, ensure_ascii=False), reducer, ""
+    text = json.dumps(reduced, separators=(",", ":"), ensure_ascii=False)
+    if not reducer.changed and len(text.encode("utf-8")) >= len(payload.encode("utf-8")):
+        return None, reducer, "nothing_repetitive"
+    return text, reducer, ""
 
 
 class StructuredProcessor:
@@ -223,13 +226,15 @@ class StructuredProcessor:
     channels = frozenset({Channel.TOOL})
     kind = Kind.TEXT
 
-    async def run(self, payload: str, _ctx: PreProcessContext) -> PreProcessResult:
-        # Reduction is driven by the payload's shape; it reads no job context.
+    async def run(self, payload: str, ctx: PreProcessContext) -> PreProcessResult:
         bytes_in = len(payload.encode("utf-8"))
 
         if bytes_in > _MAX_PARSE_BYTES:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="too_large",
+                self.name,
+                self.cost,
+                payload,
+                reason="too_large",
             )
 
         # Cheap gate before spending a parse: JSON documents worth reducing
@@ -237,13 +242,22 @@ class StructuredProcessor:
         stripped = payload.lstrip()
         if not stripped or stripped[0] not in "[{":
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="not_json",
+                self.name,
+                self.cost,
+                payload,
+                reason="not_json",
             )
 
-        text, reducer, reason = await asyncio.to_thread(_parse_and_reduce, payload)
+        over_budget = ctx.target_bytes is not None and bytes_in > ctx.target_bytes
+        text, reducer, reason = await asyncio.to_thread(
+            partial(_parse_and_reduce, payload, truncate=over_budget)
+        )
         if text is None:
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason=reason,
+                self.name,
+                self.cost,
+                payload,
+                reason=reason,
             )
 
         bytes_out = len(text.encode("utf-8"))
@@ -251,7 +265,10 @@ class StructuredProcessor:
             # See petit.py: the ratio is measured, so report it rather than
             # collapse every near-miss and every no-hoper into one word.
             return PreProcessResult.declined(
-                self.name, self.cost, payload, reason="not_smaller",
+                self.name,
+                self.cost,
+                payload,
+                reason="not_smaller",
                 details={
                     "would_be_bytes": bytes_out,
                     "would_be_ratio": round(bytes_out / bytes_in, 4),

@@ -59,9 +59,7 @@ def _verifier(
 ) -> tuple[GoogleTokeninfoVerifier, _Recorder]:
     recorder = _Recorder(handler)
     client = httpx2.AsyncClient(transport=httpx2.MockTransport(recorder))
-    verifier = GoogleTokeninfoVerifier(
-        audience=AUDIENCE, profile_name="gemini-app", client=client
-    )
+    verifier = GoogleTokeninfoVerifier(audience=AUDIENCE, profile_name="gemini-app", client=client)
     return verifier, recorder
 
 
@@ -153,9 +151,7 @@ class TestRejectionCache:
         import mcp_trentina_crunchtools.gateway.google_verifier as mod
 
         real = mod.time.monotonic
-        monkeypatch.setattr(
-            mod.time, "monotonic", lambda: real() + REJECTION_TTL_SECONDS + 1
-        )
+        monkeypatch.setattr(mod.time, "monotonic", lambda: real() + REJECTION_TTL_SECONDS + 1)
         assert await verifier.verify_token("bad") is None
         assert recorder.calls == 2
 
@@ -220,9 +216,7 @@ class TestTokenDigest:
         await verifier.verify_token(token)
         assert all(token not in key for key in verifier._rejected)
 
-    async def test_token_never_appears_in_logs(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    async def test_token_never_appears_in_logs(self, caplog: pytest.LogCaptureFixture) -> None:
         verifier, _ = _verifier(_status(400))
         token = "ya29.must-not-be-logged"
         with caplog.at_level("DEBUG"):

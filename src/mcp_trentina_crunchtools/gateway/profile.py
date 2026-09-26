@@ -123,7 +123,9 @@ _EXTRACTOR_RENAMES: dict[str, str] = {"generic": "select"}
 # this Literal is what makes pydantic reject an unknown name at YAML load,
 # and the parity test in tests/test_gateway_drivers.py keeps the two in step.
 ProcessorName = Literal[
-    # TEXT — str in, str out. Valid on the tool channel.
+    # TEXT — str in, str out. Valid on the tool channel. `detect` picks
+    # among the next four by the payload's format.
+    "detect",
     "petit",
     "structured",
     "email",
@@ -135,14 +137,13 @@ ProcessorName = Literal[
     "select",
     "matrix",
 ]
-# FREE only. `html` runs FIRST: it is the only CONVERTER, so the reducers
-# behind it group the text a human would read rather than tag soup, and its
-# absence costs a whole attack class (`l1/hidden.py`, tier 1).
-#
-# The rest are ordered by how cheaply each can decline; petit has to group
-# every line before it knows, so it goes last. summarize is selectable but
-# never a default: METERED, and its output draws unconditional L3.
-_DEFAULT_PROCESSORS: list[ProcessorName] = ["html", "structured", "email", "petit"]
+# FREE only. `detect` (0.38.0) looks at the payload and runs the minifiers
+# that fit it: html then petit for a page, structured for JSON, email then
+# petit for anything else. Until 0.38.0 the default was all four in a row,
+# and `html` ran first on everything, which is how a mail header lost its
+# addresses (preprocess/detect.py). summarize is never a default: METERED,
+# and its output draws unconditional L3.
+_DEFAULT_PROCESSORS: list[ProcessorName] = ["detect"]
 
 # Fields of MatrixPreProcessConfig an AGENT may change by reloading its own
 # profile.
@@ -321,8 +322,12 @@ class PreProcessConfig(ProcessorChainConfig):
     """
 
     enabled: bool = Field(
-        default=False,
-        description="Master switch. Off means the response is untouched.",
+        default=True,
+        description=(
+            "Whether a call minifies when the agent leaves trentina_preprocess "
+            "out (default on since 0.38.0). Off: the response is untouched "
+            "unless the agent passes true. The floor runs either way."
+        ),
     )
     strategy: Literal["none", "chain", "best_of", "auto"] = Field(
         default="auto",
@@ -339,8 +344,9 @@ class PreProcessConfig(ProcessorChainConfig):
             "Which processors may run, in order. 'summarize' is METERED: it "
             "spends an LLM call AND forces its output to MODEL_OUTPUT "
             "provenance, which draws unconditional L3 — two model calls per "
-            "response, not one. Default is the FREE set. 'select' and "
-            "'matrix' are document processors and are refused here."
+            "response, not one. Default is 'detect', which picks the FREE "
+            "minifier by format. 'select' and 'matrix' are document "
+            "processors and are refused here."
         ),
     )
     target_bytes: int = Field(
@@ -362,9 +368,9 @@ class PreProcessConfig(ProcessorChainConfig):
     required: list[ProcessorName] = Field(
         default_factory=list,
         description=(
-            "Processors that run on every response whatever the agent asks "
-            "for (#183), ahead of the rest, regardless of enabled and "
-            "min_bytes. A required processor that fails refuses the call. "
+            "Processors that run on every response, trentina_preprocess: "
+            "false included (#183), ahead of the rest, regardless of enabled "
+            "and min_bytes. A required processor that fails refuses the call. "
             "Like every processor here it reads text blocks; structuredContent "
             "is judged as it arrived. Must be a subset of processors."
         ),
@@ -372,10 +378,10 @@ class PreProcessConfig(ProcessorChainConfig):
     selectable: bool = Field(
         default=False,
         description=(
-            "Offer the agent trentina_preprocess on a PROXIED tool, to pick "
-            "from processors per call. Off by default: the enum costs tokens "
-            "on every tool, and most tools return one format. The internal "
-            "fetch, read and content tools always offer it."
+            "Declare trentina_preprocess in a PROXIED tool's schema. Every "
+            "tool accepts the switch and the session instructions explain it "
+            "once; declaring it costs ~40 bytes per tool. The internal fetch, "
+            "read and content tools always declare it."
         ),
     )
 
@@ -407,7 +413,7 @@ class ToolPreProcess(BaseModel):
     )
     selectable: bool | None = Field(
         default=None,
-        description="Offer trentina_preprocess on this tool. Unset inherits the profile's.",
+        description="Declare trentina_preprocess on this tool. Unset inherits the profile's.",
     )
 
 

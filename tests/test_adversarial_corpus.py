@@ -120,8 +120,7 @@ class TestLayer1Boundary:
         """
         semantic = [c for c in ATTACKS if c.bypasses_l1]
         assert len(semantic) >= 0.7 * len(ATTACKS), (
-            f"only {len(semantic)}/{len(ATTACKS)} attacks bypass L1 — "
-            f"corpus is drifting structural"
+            f"only {len(semantic)}/{len(ATTACKS)} attacks bypass L1 — corpus is drifting structural"
         )
 
 
@@ -193,8 +192,7 @@ class TestPreProcessorsDoNotSuppressAttacks:
     @staticmethod
     def _json_carrier(payload: str) -> str:
         records = [
-            {"id": i, "status": "ok", "message": "sync completed", "retries": 0}
-            for i in range(40)
+            {"id": i, "status": "ok", "message": "sync completed", "retries": 0} for i in range(40)
         ]
         records[23]["message"] = payload
         return json.dumps(records, indent=2)
@@ -217,12 +215,8 @@ class TestPreProcessorsDoNotSuppressAttacks:
         [c for c in CORPUS if c.expect_injection and c.survives_preprocessing],
         ids=lambda c: c.id,
     )
-    @pytest.mark.parametrize(
-        "carrier", ["syslog", "json", "mail"]
-    )
-    async def test_the_payload_survives_reduction(
-        self, case: Case, carrier: str
-    ) -> None:
+    @pytest.mark.parametrize("carrier", ["syslog", "json", "mail"])
+    async def test_the_payload_survives_reduction(self, case: Case, carrier: str) -> None:
         build = {
             "syslog": self._syslog_carrier,
             "json": self._json_carrier,
@@ -240,9 +234,7 @@ class TestPreProcessorsDoNotSuppressAttacks:
         # and emits the literal character. Both spell the same payload, so
         # accept either rather than fail a case that in fact survived.
         forms = {needle, json.dumps(needle)[1:-1]}
-        assert any(f in document for f in forms), (
-            "carrier lost the payload before reduction"
-        )
+        assert any(f in document for f in forms), "carrier lost the payload before reduction"
 
         # The order the shipped default uses (_DEFAULT_PROCESSORS), not an
         # arbitrary one: petit first would turn a JSON array into loose text

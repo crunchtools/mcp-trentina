@@ -93,9 +93,14 @@ class TestResolution:
 
 @pytest.mark.asyncio
 class TestReduction:
-    async def test_disabled_by_default_leaves_response_untouched(self) -> None:
-        """A gateway that starts rewriting payloads nobody opted into is a bug."""
+    async def test_minified_by_default(self) -> None:
+        """0.38.0: output is minified unless the operator or the agent says not."""
         out = await _run(_profile())
+        assert out.applied is True
+        assert len(out.content_blocks[0]["text"]) < len(LOGGY)
+
+    async def test_disabled_leaves_response_untouched(self) -> None:
+        out = await _run(_profile(PreProcessConfig(enabled=False)))
         assert out.applied is False
         assert out.content_blocks == _blocks(LOGGY)
 

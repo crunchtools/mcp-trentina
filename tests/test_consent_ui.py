@@ -23,22 +23,23 @@ _CONSENT_PAGE = (
 _SPENT_PAGE = "<h1>Error</h1><p>Invalid or expired consent token</p>"
 
 _CSRF_MISMATCH_PAGE = (
-    "<h1>Error</h1><p>Authorization session mismatch. "
-    "Please try authenticating again.</p>"
+    "<h1>Error</h1><p>Authorization session mismatch. Please try authenticating again.</p>"
 )
 
 
 def _app(status: int, body: str, content_type: str = "text/html") -> Any:
     async def inner(_scope: Any, _receive: Any, send: Any) -> None:
         payload = body.encode()
-        await send({
-            "type": "http.response.start",
-            "status": status,
-            "headers": [
-                (b"content-type", content_type.encode()),
-                (b"content-length", str(len(payload)).encode()),
-            ],
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [
+                    (b"content-type", content_type.encode()),
+                    (b"content-length", str(len(payload)).encode()),
+                ],
+            }
+        )
         await send({"type": "http.response.body", "body": payload})
 
     return inner
@@ -96,9 +97,7 @@ class TestSpentToken:
         assert body == _CSRF_MISMATCH_PAGE
 
     async def test_a_different_400_is_left_alone(self) -> None:
-        wrapped = ConsentUsability(
-            _app(400, "<h1>Error</h1><p>Invalid or expired transaction</p>")
-        )
+        wrapped = ConsentUsability(_app(400, "<h1>Error</h1><p>Invalid or expired transaction</p>"))
 
         _, body, _ = await _drive(wrapped, "POST")
 
@@ -146,11 +145,13 @@ class TestSubmitGuard:
 class TestFailSoft:
     async def test_undecodable_bytes_pass_through_untouched(self) -> None:
         async def inner(_scope: Any, _receive: Any, send: Any) -> None:
-            await send({
-                "type": "http.response.start",
-                "status": 200,
-                "headers": [(b"content-type", b"image/png")],
-            })
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-type", b"image/png")],
+                }
+            )
             await send({"type": "http.response.body", "body": b"\x89PNG\xff\xfe"})
 
         captured: list[bytes] = []
@@ -162,9 +163,7 @@ class TestFailSoft:
         async def receive() -> dict[str, Any]:
             return {"type": "http.request", "body": b"", "more_body": False}
 
-        await ConsentUsability(inner)(
-            {"type": "http", "method": "GET"}, receive, send
-        )
+        await ConsentUsability(inner)({"type": "http", "method": "GET"}, receive, send)
 
         assert captured == [b"\x89PNG\xff\xfe"]
 
