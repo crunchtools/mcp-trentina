@@ -30,7 +30,7 @@ One rule separates the roles:
 
 An earlier revision of this page ruled the opposite: that a pre-processor may never open a gap between what is scanned and what is delivered, and used that to make scan-view extraction a separate kind of driver. The rule does not survive contact with L1, and the split it justified is gone. It is recorded here because the reasoning was plausible and someone will reconstruct it.
 
-Failure modes point in whichever direction hides nothing. A text pre-processor that fails delivers and scans the **original**; one that selects what to read fails to reading **everything**. Same rule, different thing owned. The exception is a processor the call depends on: a profile's `required` floor, and anything an internal tool was asked to run, fail **closed** — the call is refused rather than handed something other than what was asked for.
+Failure modes point in whichever direction hides nothing. A text pre-processor that fails delivers and scans **its own input** — the original, or the floor's output when a required processor ran first; one that selects what to read fails to reading **everything**. Same rule, different thing owned. The exception is a processor the call depends on: a profile's `required` floor, and anything an internal tool was asked to run, fail **closed** — the call is refused rather than handed something other than what was asked for.
 
 The agent chooses its pre-processors per call with `trentina_preprocess`, within the profile's ceiling (plus a tool's own default, such as `html` on `fetch`) and above its floor ([Profiles](profiles.md#pre-processors-per-call)). The choice changes what is delivered, and so what is judged, never whether it is judged.
 

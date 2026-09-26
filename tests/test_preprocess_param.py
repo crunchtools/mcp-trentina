@@ -392,6 +392,19 @@ class TestProxiedCall:
             _, _, scan, _ = await self._call(profile, {"id": "1"})
         assert scan.call_args.kwargs["provenance"] is Provenance.MODEL_OUTPUT
 
+    async def test_an_optional_failure_keeps_the_floors_output(self) -> None:
+        profile = _profile(
+            PreProcessConfig(processors=["html", "petit"], required=["html"], selectable=True)
+        )
+        with patch(
+            "mcp_trentina_crunchtools.preprocess.petit.PetitProcessor.run",
+            side_effect=RuntimeError("boom"),
+        ):
+            resp, _, scan, _ = await self._call(profile, {"id": "1", PREPROCESS_PARAM: ["petit"]})
+        delivered = resp["result"]["content"][0]["text"]
+        assert delivered.startswith("# Release notes")
+        assert scan.call_args.kwargs["content_blocks"][0]["text"] == delivered
+
     async def test_an_optional_processor_that_raises_still_fails_open(self) -> None:
         profile = _profile(PreProcessConfig(processors=["html"], selectable=True))
         with patch(HTML_RUN, side_effect=RuntimeError("parser exploded")):
