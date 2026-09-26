@@ -80,7 +80,16 @@ class PreProcessPolicy:
         defaults: Iterable[str] = (),
         permits: Callable[[str], bool] | None = None,
     ) -> PreProcessPolicy:
-        """Build a selectable policy. ``permits(name) -> bool`` is a parameter guard."""
+        """Build a selectable policy.
+
+        Args:
+            ceiling: the profile's ``processors``, in the order they run.
+            required: the floor; removed from what is offered.
+            defaults: the tool's own default, offered even when the ceiling
+                omits it, and ordered ahead of it.
+            permits: a parameter guard, ``permits(name) -> bool``; it narrows
+                what is offered and nothing else.
+        """
         floor = tuple(dict.fromkeys(required))
         offered = tuple(
             n

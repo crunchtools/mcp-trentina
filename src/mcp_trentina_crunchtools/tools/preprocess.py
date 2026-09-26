@@ -96,6 +96,19 @@ async def prepare(
 ) -> Prepared:
     """Resolve the call's selection under the bound policy and run it.
 
+    Args:
+        content: the payload as it arrived.
+        requested: the agent's ``trentina_preprocess``, or None.
+        default: what runs when ``requested`` is None — the tool's product,
+            already narrowed by what arrived (fetch passes ``html`` only for
+            a page its server calls HTML).
+        source: the URL, path or hash, for the processors' context.
+
+    Returns:
+        ``Prepared``: the content every layer judges and the agent receives,
+        plus what the tool attaches to the result, L1's run and L3's briefing
+        when ``html`` applied, and the provenance.
+
     Raises:
         PreProcessNotPermittedError: the agent named a processor its policy
             does not offer.
