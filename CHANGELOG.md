@@ -42,6 +42,13 @@ under that name.
   somewhere that would.
 
 ### Fixed
+- **`FASTMCP_HOME` is baked into the image.** The OAuth proxy's DCR
+  registrations and token metadata live under `FASTMCP_HOME`; it had to be set
+  in the operator env-file, and a deploy that dropped that line silently
+  reverted to ephemeral storage, so the next container restart wiped every web
+  client's registration and each one hit "Client Not Registered" on reconnect.
+  The Containerfile now sets `ENV FASTMCP_HOME=/data/fastmcp`, so persistence
+  is the default and the env var only needs setting to relocate the store.
 - **fetch delivered raw HTML.** 0.28.0 moved HTML-to-Markdown conversion out
   of L1 onto the gateway's pre-processor chain, which the internal tools never
   pass through, so `fetch_tool` delivered markup, hidden elements included,

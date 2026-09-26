@@ -149,6 +149,11 @@ COPY --from=pip-builder /etc/machine-id.seed /etc/machine-id
 
 ENV QUARANTINE_DB=/data/quarantine.db
 ENV CLASSIFIER_MODEL_PATH=/models/prompt-guard-2-86m
+# The OAuth proxy's DCR registrations and token metadata live under
+# FASTMCP_HOME. Baked in so a deploy that forgets the operator env-file does
+# not silently fall back to ephemeral storage and drop every web client's
+# registration on the next restart. See docs/authentication.md.
+ENV FASTMCP_HOME=/data/fastmcp
 
 # Left on, onnxruntime's init reads /etc/machine-id and /proc/cpuinfo, reads
 # /etc/os-release four times, writes /tmp/mat-debug-1.log and creates a session
