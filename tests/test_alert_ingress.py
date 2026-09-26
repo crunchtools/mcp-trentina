@@ -247,7 +247,7 @@ class TestHandleAlertClassifierAndQAgent:
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):
-            mock_config.return_value.has_api_key = True
+            mock_config.return_value.has_llm = True
             mock_config.return_value.max_content = 100000
             mock_detect.return_value = {
                 "injection_detected": True,
@@ -282,7 +282,7 @@ class TestHandleAlertClassifierAndQAgent:
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):
-            mock_config.return_value.has_api_key = False
+            mock_config.return_value.has_llm = False
             mock_config.return_value.max_content = 100000
             resp = client.post("/alert/tok", json={"host": "web1", "output": "text"})
 

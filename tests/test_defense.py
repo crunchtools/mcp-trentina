@@ -70,7 +70,7 @@ def _patches(
         "emit_detection_event": p("emit_detection_event"),
     }
     cfg = p("get_config")
-    cfg.return_value.has_api_key = has_api_key
+    cfg.return_value.has_llm = has_api_key
     cfg.return_value.max_content = 100_000
     mocks["get_config"] = cfg
     return mocks

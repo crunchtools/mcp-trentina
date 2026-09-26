@@ -26,8 +26,9 @@ pytestmark = pytest.mark.asyncio
 
 _S = "mcp_trentina_crunchtools.preprocess.summarize"
 
-BIG_PAYLOAD = ("An operational log line that resists petit because every "
-               "sentence differs in words. " * 200)
+BIG_PAYLOAD = (
+    "An operational log line that resists petit because every sentence differs in words. " * 200
+)
 
 
 def _patch_worker(**kwargs: Any) -> Any:
@@ -37,13 +38,15 @@ def _patch_worker(**kwargs: Any) -> Any:
 class TestSummarizeProcessor:
     async def test_summarizes_large_payload(self) -> None:
         with (
-            _patch_worker(return_value={
-                "summary": "200 repetitions of one operational line.",
-                "usage": {"input_tokens": 4000, "output_tokens": 12},
-            }) as worker,
-            patch(f"{_S}.get_config") as cfg,
+            _patch_worker(
+                return_value={
+                    "summary": "200 repetitions of one operational line.",
+                    "usage": {"input_tokens": 4000, "output_tokens": 12},
+                }
+            ) as worker,
+            patch(f"{_S}.llm_available") as cfg,
         ):
-            cfg.return_value.has_api_key = True
+            cfg.return_value = True
             result = await SummarizeProcessor().run(
                 BIG_PAYLOAD, PreProcessContext(source="jira:SEC-1")
             )
@@ -63,9 +66,9 @@ class TestSummarizeProcessor:
     async def test_no_api_key_declines(self) -> None:
         with (
             _patch_worker() as worker,
-            patch(f"{_S}.get_config") as cfg,
+            patch(f"{_S}.llm_available") as cfg,
         ):
-            cfg.return_value.has_api_key = False
+            cfg.return_value = False
             result = await SummarizeProcessor().run(BIG_PAYLOAD, PreProcessContext())
         assert not result.applied
         assert result.details["declined"] == "no_api_key"
@@ -77,9 +80,9 @@ class TestSummarizeProcessor:
         continues to the perimeter unreduced."""
         with (
             _patch_worker(side_effect=QuarantineAgentError("canary leaked")),
-            patch(f"{_S}.get_config") as cfg,
+            patch(f"{_S}.llm_available") as cfg,
         ):
-            cfg.return_value.has_api_key = True
+            cfg.return_value = True
             result = await SummarizeProcessor().run(BIG_PAYLOAD, PreProcessContext())
         assert not result.applied
         assert result.content == BIG_PAYLOAD
@@ -88,9 +91,9 @@ class TestSummarizeProcessor:
     async def test_non_reducing_summary_declines(self) -> None:
         with (
             _patch_worker(return_value={"summary": BIG_PAYLOAD}),
-            patch(f"{_S}.get_config") as cfg,
+            patch(f"{_S}.llm_available") as cfg,
         ):
-            cfg.return_value.has_api_key = True
+            cfg.return_value = True
             result = await SummarizeProcessor().run(BIG_PAYLOAD, PreProcessContext())
         assert not result.applied
         assert result.content == BIG_PAYLOAD
@@ -99,9 +102,9 @@ class TestSummarizeProcessor:
     async def test_empty_summary_declines(self) -> None:
         with (
             _patch_worker(return_value={"summary": "   "}),
-            patch(f"{_S}.get_config") as cfg,
+            patch(f"{_S}.llm_available") as cfg,
         ):
-            cfg.return_value.has_api_key = True
+            cfg.return_value = True
             result = await SummarizeProcessor().run(BIG_PAYLOAD, PreProcessContext())
         assert not result.applied
         assert result.details["declined"] == "empty_summary"
@@ -110,9 +113,9 @@ class TestSummarizeProcessor:
         """The laundering defense, end to end at the composition level."""
         with (
             _patch_worker(return_value={"summary": "a compact summary"}),
-            patch(f"{_S}.get_config") as cfg,
+            patch(f"{_S}.llm_available") as cfg,
         ):
-            cfg.return_value.has_api_key = True
+            cfg.return_value = True
             outcome = await run_preprocessors(
                 BIG_PAYLOAD,
                 processors=[SummarizeProcessor()],

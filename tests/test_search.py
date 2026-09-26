@@ -75,7 +75,7 @@ def _mock_gemini_grounding_response(
 
 
 class TestL0SearchGrounded:
-    """Tests for L0 Gemini grounding call."""
+    """Tests for L0 Gemini grounding, the standalone fallback route."""
 
     @pytest.mark.asyncio
     async def test_l0_returns_text_and_metadata(self) -> None:
@@ -93,6 +93,8 @@ class TestL0SearchGrounded:
             cfg = MagicMock()
             cfg.has_api_key = True
             cfg.api_key.get_secret_value.return_value = "fake-key"
+            cfg.openrouter_api_key.get_secret_value.return_value = ""
+            cfg.search_model = "google/gemini-2.5-flash"
             cfg.model = "gemini-2.5-flash-lite"
             mock_config.return_value = cfg
 
@@ -122,9 +124,10 @@ class TestL0SearchGrounded:
         ) as mock_config:
             cfg = MagicMock()
             cfg.has_api_key = False
+            cfg.openrouter_api_key.get_secret_value.return_value = ""
             mock_config.return_value = cfg
 
-            with pytest.raises(QuarantineAgentError, match="GEMINI_API_KEY"):
+            with pytest.raises(QuarantineAgentError, match="no search provider"):
                 await search_grounded("test query")
 
     @pytest.mark.asyncio
@@ -145,6 +148,8 @@ class TestL0SearchGrounded:
             cfg = MagicMock()
             cfg.has_api_key = True
             cfg.api_key.get_secret_value.return_value = "fake-key"
+            cfg.openrouter_api_key.get_secret_value.return_value = ""
+            cfg.search_model = "google/gemini-2.5-flash"
             cfg.model = "gemini-2.5-flash-lite"
             mock_config.return_value = cfg
 

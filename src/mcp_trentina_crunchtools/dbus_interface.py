@@ -97,7 +97,7 @@ def _build_interface() -> Any:
                     "layers": {
                         "l1": True,
                         "l2": is_classifier_available(),
-                        "l3": config.has_api_key,
+                        "l3": config.has_llm,
                     },
                 }
             )
@@ -125,8 +125,8 @@ def _build_interface() -> Any:
                         "description": "Prompt Guard 2 classifier",
                     },
                     "l3": {
-                        "active": config.has_api_key,
-                        "description": "Gemini semantic judge",
+                        "active": config.has_llm,
+                        "description": f"Semantic judge ({config.provider})",
                         "model": config.model,
                     },
                 }

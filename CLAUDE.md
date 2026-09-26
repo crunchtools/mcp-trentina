@@ -11,12 +11,23 @@ uv run mcp-trentina-crunchtools
 
 ## Environment Variables
 
-- `GEMINI_API_KEY` — Required for Layer 2 (Q-Agent)
+- `TRENTINA_MODEL_PROVIDER` + that provider's key (`OPENROUTER_API_KEY`,
+  `ANTHROPIC_API_KEY`, ...) — L3 when no gateway profile is bound. Behind the
+  gateway each profile's `llm_keys` is used instead. `config.has_llm` and
+  `agent.llm_available()` answer "is there an LLM"; `has_api_key` is Gemini's
+  key only. Since 0.41.0 it no longer gates L3 or summarize; it only picks
+  Gemini grounding as the standalone search fallback.
+- `GEMINI_API_KEY` — optional since 0.41.0: Gemini as an L3 provider, and
+  search grounding ONLY when there is no OpenRouter key. The lotor gateway
+  holds none, so it never calls Google directly.
 - `OPENROUTER_API_KEY` — standalone key for `TRENTINA_MODEL_PROVIDER=openrouter`;
   a gateway profile uses `llm_keys.openrouter`. Model ids are OpenRouter's
   (`google/gemini-2.5-flash-lite`).
 - `QUARANTINE_MODEL` — Gemini model for Q-Agent (default: gemini-2.5-flash-lite)
-- `QUARANTINE_SEARCH_MODEL` — Gemini model for L0 search grounding (default: gemini-2.5-flash; must support google_search)
+- `QUARANTINE_SEARCH_MODEL` — L0 web search model, an OpenRouter id (default
+  `google/gemini-2.5-flash`). L0 is OpenRouter's `web` plugin and nothing else
+  (`_enforce_openrouter_search_quarantine`); the Gemini grounding route strips
+  the `google/` prefix.
 - `TRENTINA_REQUIRE_L2` / `TRENTINA_REQUIRE_L3` — default true: block and redact
   refuse when that layer is ABSENT. `false` turns absence into a warning; a
   partial read is never excused. `QUARANTINE_FALLBACK` was removed in 0.31.0
@@ -114,7 +125,7 @@ Every call runs L1 ∥ L2 on the arrived bytes, then L3 briefed with both. The
   security-researcher grant; leave it out of agent policies.
 - `redact` — L3 detect, extract, verify; any objection refuses. Spelled
   `{"redact": "<question>"}` since 0.39.0: the question travels inside the
-  mode (`modes.parse_mode_arg`); `trentina_prompt` is read until 0.41.0. No
+  mode (`modes.parse_mode_arg`); `trentina_prompt` is read until 0.42.0. No
   tool declares `trentina_mode` unless the profile sets `declare_modes`.
 
 "Arrived" means arrived at the perimeter, AFTER pre-processing. Output is
@@ -165,6 +176,8 @@ profile or call still using one is refused like any unknown mode. The names are 
 rewrite, not their span substitution. Precedence: block > redact > flag.
 
 ### Stats
+- quarantine_stats — operator `config` carries `provider` and `llm_available`
+  (0.41.0); `has_api_key` there is Gemini's key only, deprecated for dashboards.
 - quarantine_stats — role-scoped like the gateway admin tools below: an agent
   profile gets its own audit rows, its own detections and the defense settings
   it runs under; an operator gets the gateway.

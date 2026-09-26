@@ -98,6 +98,9 @@ async def get_trentina_stats() -> dict[str, Any]:
             "require_l2": config.require_l2,
             "require_l3": config.require_l3,
             "max_content": config.max_content,
+            "provider": config.provider,
+            "llm_available": config.has_llm,
+            # Gemini's key only; kept for dashboards, removed in 0.43.0.
             "has_api_key": config.has_api_key,
             "classifier_threshold": config.classifier_threshold,
             "classifier_model_path": config.classifier_model_path,

@@ -87,7 +87,7 @@ profiles:
 With more than one mode, every tool accepts `trentina_mode`: `"block"`,
 `"flag"`, or `{"redact": "<question>"}`, where the question says what to
 extract (0.39.0; it was a separate `trentina_prompt`, still read with a warning
-until 0.41.0). The session instructions explain it once. Tool schemas do not
+until 0.42.0). The session instructions explain it once. Tool schemas do not
 declare it, because the enum alone on every tool cost a 376-tool profile
 ~39 KB; `declare_modes: true` on a profile declares it again, for a client
 that drops arguments a tool does not declare. On a call the gateway resolves
