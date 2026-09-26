@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from ..client import MAX_RESPONSE_SIZE
 from ..config import DEFAULT_SEARCH_MODEL, get_config
 from ..errors import QuarantineAgentError
 from ..l1.pipeline import run_l1
@@ -800,7 +801,13 @@ def _citation_sources(message: dict[str, Any]) -> list[dict[str, str]]:
         if not isinstance(cite, dict):
             continue
         uri = cite.get("url", "")
-        if not isinstance(uri, str) or urlparse(uri).scheme not in ("http", "https"):
+        if not isinstance(uri, str):
+            continue
+        try:
+            scheme = urlparse(uri).scheme
+        except ValueError:
+            continue
+        if scheme not in ("http", "https"):
             continue
         if uri not in seen:
             seen.add(uri)
@@ -828,6 +835,10 @@ async def _search_openrouter(query: str, num_results: int, api_key: str) -> dict
                 headers={"Authorization": f"Bearer {api_key}"},
             )
             resp.raise_for_status()
+            # The fetch limit (client.MAX_RESPONSE_SIZE), before parsing: the
+            # completion is capped by max_tokens, the citation excerpts are not.
+            if len(resp.content) > MAX_RESPONSE_SIZE:
+                raise QuarantineAgentError(f"L0 search response exceeds {MAX_RESPONSE_SIZE} bytes")
             resp_json = resp.json()
     except httpx.HTTPStatusError as exc:
         raise QuarantineAgentError(f"HTTP {exc.response.status_code}") from exc

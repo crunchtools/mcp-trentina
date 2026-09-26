@@ -77,8 +77,9 @@ def _openrouter_reply(text: str = "RHEL 10 ships bootc.") -> dict[str, Any]:
     }
 
 
-def _http(reply: dict[str, Any]) -> tuple[MagicMock, AsyncMock]:
+def _http(reply: dict[str, Any], size: int = 100) -> tuple[MagicMock, AsyncMock]:
     resp = MagicMock()
+    resp.content = b"x" * size
     resp.json.return_value = reply
     http = AsyncMock()
     http.post.return_value = resp
@@ -129,7 +130,12 @@ def test_only_http_citations_are_kept() -> None:
 
 
 def test_a_malformed_citation_is_skipped() -> None:
-    message = {"annotations": [{"type": "url_citation", "url_citation": "nope"}]}
+    message = {
+        "annotations": [
+            {"type": "url_citation", "url_citation": "nope"},
+            {"type": "url_citation", "url_citation": {"url": "http://["}},
+        ]
+    }
 
     assert _citation_sources(message) == []
 
@@ -245,6 +251,16 @@ class TestRoute:
 
         url = http.post.call_args.args[0]
         assert "/gemini-2.5-flash:generateContent" in url
+
+    async def test_an_oversized_response_is_refused_before_parsing(self) -> None:
+        cls, _ = _http(_openrouter_reply(), size=5_000_001)
+        with (
+            patch(f"{_AGENT}.get_config", return_value=_cfg(openrouter="k")),
+            patch(f"{_AGENT}.get_current_profile", return_value=None),
+            patch(f"{_AGENT}.httpx.AsyncClient", cls),
+            pytest.raises(QuarantineAgentError, match="exceeds"),
+        ):
+            await search_grounded("bootc")
 
     async def test_no_choices_is_an_error(self) -> None:
         cls, _ = _http({"choices": []})

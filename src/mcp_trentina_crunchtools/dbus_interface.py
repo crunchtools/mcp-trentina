@@ -65,7 +65,7 @@ async def start_dbus() -> None:
 
 
 def l3_status(config: Any) -> dict[str, Any]:
-    """L3 as D-Bus reports it: live when the configured provider chain has a key."""
+    """L3 as D-Bus reports it: live when a provider has its key, or is keyless (ollama)."""
     return {
         "active": config.has_llm,
         "description": f"Semantic judge ({config.provider})",
