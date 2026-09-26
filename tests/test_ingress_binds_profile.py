@@ -167,3 +167,33 @@ def test_a_profile_without_its_own_key_is_warned_about(
     )
     _check_judges({"agent1": profile})
     assert ("has no llm_keys" in caplog.text) is warns
+
+
+@pytest.mark.asyncio
+async def test_a_profile_without_its_key_never_falls_back_to_the_global_one(
+    judged: list[tuple[str, str | None]],
+) -> None:
+    """Refused, not rerouted: L3 is reported unavailable and no provider is called."""
+    profile = _profile()
+    profile.llm_keys = {}
+    reply = BackendCall(
+        content=[{"type": "text", "text": PAYLOAD}], is_error=False, structured_content=None
+    )
+    with (
+        patch(
+            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+            AsyncMock(return_value=reply),
+        ),
+        patch("mcp_trentina_crunchtools.gateway.router._audit"),
+    ):
+        resp = await route_jsonrpc(
+            profile,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "cms__get_page", "arguments": {}},
+            },
+        )
+    assert judged == []
+    assert resp["result"]["_trentina_warning"]["l3_unavailable"] is True
