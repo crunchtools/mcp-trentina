@@ -140,3 +140,43 @@ class TestUnknownCaller:
 
         assert result["scope"] == "none"
         assert "gateway_audit" not in result
+
+
+class TestSurface:
+    @pytest.fixture
+    def surfaces(self, gateway: dict) -> Iterator[dict]:
+        from mcp_trentina_crunchtools.gateway import surface as s
+
+        def one(offered: int, allowed: int, shaped: int) -> s.BackendSurface:
+            return s.BackendSurface(s.Stage(10, offered), s.Stage(4, allowed), s.Stage(4, shaped))
+
+        s.record_surface("alpha", s.Surface({"jira": one(8000, 4000, 3000)}, s.Stage(4, 2800)))
+        s.record_surface("beta", s.Surface({"wiki": one(4000, 2000, 1600)}, s.Stage(4, 1500)))
+        yield gateway
+        s._surfaces.clear()
+
+    async def test_an_agent_sees_its_own_surface_only(self, surfaces: dict) -> None:
+        with profile_context(surfaces["beta"]):
+            result = await get_trentina_stats()
+
+        surface = result["surface"]
+        assert list(surface["by_backend"]) == ["wiki"]
+        assert surface["offered"]["bytes"] == 4000
+        assert surface["served"]["bytes"] == 1500
+        assert surface["saved"]["by_allowlist"]["bytes"] == 2000
+        assert surface["saved"]["by_shaping"]["bytes"] == 400
+        assert surface["saved"]["by_short_names"]["bytes"] == 100
+        assert surface["saved"]["total"]["est_tokens"] == 625
+        assert "jira" not in str(surface)
+
+    async def test_the_operator_sees_every_profile(self, surfaces: dict) -> None:
+        with profile_context(surfaces["alpha"]):
+            result = await get_trentina_stats()
+
+        assert set(result["surface"]) == {"alpha", "beta"}
+
+    async def test_an_unbuilt_profile_says_so(self, gateway: dict) -> None:
+        with profile_context(gateway["beta"]):
+            result = await get_trentina_stats()
+
+        assert "error" in result["surface"]

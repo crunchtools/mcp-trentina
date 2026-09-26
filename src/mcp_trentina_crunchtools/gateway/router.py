@@ -22,6 +22,7 @@ import functools
 import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mcp_types.version import (
@@ -63,6 +64,7 @@ from .modes_policy import (
 )
 from .names import NAMESPACE_SEP, forget_issued_names, resolve_name, serve_short_names
 from .schema_compact import compact_tool
+from .surface import BackendSurface, Stage, Surface, forget_surface, record_surface, wire_bytes
 from .transform import transform_response
 
 if TYPE_CHECKING:
@@ -166,6 +168,7 @@ def invalidate_profile_cache(profile_name: str) -> bool:
     """
     _bump(profile_name)
     _profile_backend_urls.pop(profile_name, None)
+    forget_surface(profile_name)
     return _profile_tools_cache.pop(profile_name, None) is not None
 
 
@@ -188,9 +191,35 @@ def _audit(
     outcome: Outcome,
     duration_ms: int,
     error_message: str | None = None,
+    *,
+    bytes_arrived: int | None = None,
+    bytes_delivered: int | None = None,
 ) -> None:
     with contextlib.suppress(Exception):
-        record_gateway_call(profile, backend, tool, outcome.value, duration_ms, error_message)
+        record_gateway_call(
+            profile,
+            backend,
+            tool,
+            outcome.value,
+            duration_ms,
+            error_message,
+            bytes_arrived=bytes_arrived,
+            bytes_delivered=bytes_delivered,
+        )
+
+
+@dataclass
+class Assembled:
+    """A tools/call result and what the audit row should say about it.
+
+    Assembly decides the outcome — the perimeter may block what the backend
+    returned — so the one audit row is written after it, not before. Writing
+    ``ok`` first and ``blocked_defense`` later counted every block twice.
+    """
+
+    result: dict[str, Any]
+    outcome: Outcome
+    error: str | None = None
 
 
 def _ok(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -372,12 +401,17 @@ async def _build_profile_tools(
     async def _fetch_one(
         backend_name: str,
         backend: Backend,
-    ) -> list[dict[str, Any]]:
-        """Fetch, filter, compress, and namespace tools for one backend."""
+    ) -> tuple[list[dict[str, Any]], BackendSurface]:
+        """Fetch, filter, compress, and namespace tools for one backend.
+
+        Also measures the list as offered, as allowed, and as shaped, for the
+        surface report (``surface.py``).
+        """
         if backend.is_internal:
             raw_tools = await list_internal_tools()
         else:
             raw_tools = await list_backend_tools(backend_name, backend)
+        offered = await asyncio.to_thread(Stage.of, raw_tools)
         # An internal tool takes a mode only if it declares one: the admin
         # tools return gateway-authored data that no mode applies to. Every
         # REMOTE tool takes one, because its response crosses the perimeter.
@@ -391,6 +425,7 @@ async def _build_profile_tools(
         # re-inserted after, so gateway text is never judged as backend text.
         raw_tools = [strip_params(t) for t in raw_tools]
         filtered = filter_tools(raw_tools, backend)
+        allowed = await asyncio.to_thread(Stage.of, filtered)
         pre_compress = filtered
         if backend.compresses_descriptions:
             filtered = compress_tools(filtered)
@@ -425,12 +460,14 @@ async def _build_profile_tools(
             )
             namespaced_tool["name"] = f"{backend_name}{NAMESPACE_SEP}{tool['name']}"
             namespaced.append(namespaced_tool)
-        return namespaced
+        shaped = await asyncio.to_thread(Stage.of, namespaced)
+        return namespaced, BackendSurface(offered, allowed, shaped)
 
     tasks = [_fetch_one(name, backend) for name, backend in profile.backends.items()]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     aggregated: list[dict[str, Any]] = []
+    measured: dict[str, BackendSurface] = {}
     any_hard_failed = False
     for (backend_name, _backend), outcome in zip(
         profile.backends.items(),
@@ -446,11 +483,17 @@ async def _build_profile_tools(
                 outcome,
             )
             continue
-        aggregated.extend(outcome)
+        tools, measured[backend_name] = outcome
+        aggregated.extend(tools)
 
     aggregated = serve_short_names(profile, aggregated)
+    # Measured BEFORE the generation check: an await between the check and
+    # the write would let an invalidation land in between and a stale
+    # surface outlive the aggregate it describes.
+    served = await asyncio.to_thread(Stage.of, aggregated)
     if not any_hard_failed and generation == _cache_generation.get(profile.name, 0):
         _profile_tools_cache[profile.name] = aggregated
+        record_surface(profile.name, Surface(measured, served))
         _profile_backend_urls[profile.name] = {
             b.url for b in profile.backends.values() if not b.is_internal
         }
@@ -564,10 +607,7 @@ async def _route_tools_call(
         )
         return _err(req_id, JSONRPC_INVALID_PARAMS, response_err)
 
-    call_outcome = Outcome.TOOL_ERROR if call_result.is_error else Outcome.OK
-    _audit(profile.name, backend_name, tool_name, call_outcome, duration_ms)
-
-    result = await _assemble_call_result(
+    assembled = await _assemble_call_result(
         profile,
         backend,
         backend_name,
@@ -578,7 +618,27 @@ async def _route_tools_call(
         policy=policy,
         minify=minify,
     )
-    return _ok(req_id, result)
+    # An internal tool minifies inside itself, so what arrived here is
+    # already the delivered form: its arrived size stays NULL, not equal.
+    arrived = (
+        None
+        if backend.is_internal
+        else await asyncio.to_thread(
+            wire_bytes,
+            {"content": call_result.content, "structuredContent": call_result.structured_content},
+        )
+    )
+    _audit(
+        profile.name,
+        backend_name,
+        tool_name,
+        assembled.outcome,
+        int((time.monotonic() - t0) * 1000),
+        assembled.error,
+        bytes_arrived=arrived,
+        bytes_delivered=await asyncio.to_thread(wire_bytes, assembled.result),
+    )
+    return _ok(req_id, assembled.result)
 
 
 async def _dispatch(
@@ -711,13 +771,14 @@ async def _assemble_call_result(
     prompt: str | None = None,
     policy: ModePolicy | None = None,
     minify: bool | None = None,
-) -> dict[str, Any]:
+) -> Assembled:
     """Shape the MCP result and run it through the perimeter.
 
     Flag mode: remote backends only. Internal tools run the pipeline at
     their own ingress — the firewall filters where content ENTERS, and
     scanning the same bytes twice is cost, not defense.
     """
+    ok = Outcome.TOOL_ERROR if call_result.is_error else Outcome.OK
     content_blocks = call_result.content
     structured = await asyncio.to_thread(
         _drop_duplicate_structured, call_result.structured_content, content_blocks
@@ -743,10 +804,9 @@ async def _assemble_call_result(
             minify=minify,
         )
         if reduced.failed is not None:
-            _audit(
-                profile.name, backend_name, tool_name, Outcome.BLOCKED_DEFENSE, 0, reduced.failed
+            return Assembled(
+                _preprocess_refusal(reduced.failed, mode), Outcome.BLOCKED_DEFENSE, reduced.failed
             )
-            return _preprocess_refusal(reduced.failed, mode)
         content_blocks = reduced.content_blocks
         provenance = reduced.provenance
 
@@ -778,15 +838,11 @@ async def _assemble_call_result(
             # as a defense block so a misfiring threshold is visible in the
             # outcome column, not just in an agent's confusion.
             risk = decision.warning.get("risk_level") if decision.warning else "?"
-            _audit(
-                profile.name,
-                backend_name,
-                tool_name,
+            return Assembled(
+                _blocked_result(decision),
                 Outcome.BLOCKED_DEFENSE,
-                0,
                 f"response blocked by defense (risk={risk})",
             )
-            return _blocked_result(decision)
         if decision.extraction is not None:
             # redact: the verified extraction REPLACES the response, and
             # structuredContent goes with it — redact never re-delivers what
@@ -797,7 +853,7 @@ async def _assemble_call_result(
             }
             if decision.warning is not None:
                 result["_trentina_warning"] = decision.warning
-            return result
+            return Assembled(result, ok)
         if decision.warning is not None:
             result["_trentina_warning"] = decision.warning
             if decision.warning.get("flagged_by"):
@@ -818,4 +874,4 @@ async def _assemble_call_result(
                     },
                 ]
 
-    return result
+    return Assembled(result, ok)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -1033,3 +1034,76 @@ class TestProfileContext:
 
         assert seen["profile_during_call"] is not None
         assert get_current_profile() is None
+
+
+class TestOneAuditRowPerCall:
+    """The row is written after assembly, so it says what the agent received.
+
+    Until 0.40.0 a blocked response wrote ``ok`` before the perimeter ran and
+    ``blocked_defense`` after it: every block was counted twice.
+    """
+
+    @staticmethod
+    async def _call(
+        tmp_path: Any, decision: Any, content: list[dict[str, Any]]
+    ) -> tuple[dict[str, Any], Any]:
+        import mcp_trentina_crunchtools.database as db_mod
+
+        db_mod._db = None
+
+        async def fake_call(_bn: str, _b: Backend, _tn: str, _a: dict[str, Any]) -> BackendCall:
+            return BackendCall(content=content, is_error=False, structured_content=None)
+
+        async def fake_scan(**_kwargs: Any) -> Any:
+            return decision
+
+        with (
+            patch(
+                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                side_effect=fake_call,
+            ),
+            patch(
+                "mcp_trentina_crunchtools.gateway.router.scan_tool_response",
+                side_effect=fake_scan,
+            ),
+            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value.db_path = str(tmp_path / "one_row.db")
+            mock_cfg.return_value.ensure_db_dir = lambda: None
+            resp = await route_jsonrpc(
+                _profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 90,
+                    "method": "tools/call",
+                    "params": {
+                        "name": f"mcp-slack{NAMESPACE_SEP}slack_list_channels",
+                        "arguments": {},
+                    },
+                },
+            )
+            rows = db_mod.get_db().execute("SELECT * FROM gateway_calls").fetchall()
+        db_mod._db = None
+        return resp, rows
+
+    async def test_a_blocked_response_writes_one_blocked_row(self, tmp_path: Any) -> None:
+        decision = SimpleNamespace(
+            blocked=True, warning={"risk_level": "high"}, refusal=None, extraction=None
+        )
+        _resp, rows = await self._call(tmp_path, decision, [{"type": "text", "text": "evil"}])
+
+        assert [r["outcome"] for r in rows] == ["blocked_defense"]
+        assert "risk=high" in rows[0]["error_message"]
+
+    async def test_a_delivered_response_carries_both_sizes(self, tmp_path: Any) -> None:
+        from mcp_trentina_crunchtools.gateway.surface import wire_bytes
+
+        decision = SimpleNamespace(blocked=False, warning=None, refusal=None, extraction=None)
+        content = [{"type": "text", "text": "x" * 500}]
+        resp, rows = await self._call(tmp_path, decision, content)
+
+        assert [r["outcome"] for r in rows] == ["ok"]
+        assert rows[0]["bytes_arrived"] == wire_bytes(
+            {"content": content, "structuredContent": None}
+        )
+        assert rows[0]["bytes_delivered"] == wire_bytes(resp["result"])

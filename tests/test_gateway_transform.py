@@ -200,9 +200,10 @@ class TestRouterOrdering:
             is_error = False
             structured_content = None
 
-        result = await router._assemble_call_result(
+        assembled = await router._assemble_call_result(
             profile, profile.backends["syslog"], "syslog", "syslog_tail_tool", _Result()
         )
+        result = assembled.result
 
         scanned = seen["blocks"][0]["text"]
         assert len(scanned) < len(LOGGY), "scanner saw the unreduced payload"

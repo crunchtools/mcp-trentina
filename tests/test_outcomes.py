@@ -212,3 +212,60 @@ def test_refusal_of_finds_a_nested_refusal() -> None:
     outer.__cause__ = inner
     assert refusal_of(outer) == {"alternatives": ["redact"]}
     assert refusal_of(RuntimeError("x")) is None
+
+
+class TestDeliverySizes:
+    @pytest.fixture
+    def db(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+        import mcp_trentina_crunchtools.database as db_mod
+
+        db_mod._db = None
+        cfg = type(
+            "Cfg",
+            (),
+            {"db_path": str(tmp_path / "sizes.db"), "ensure_db_dir": lambda self: None},
+        )()
+        monkeypatch.setattr(db_mod, "get_config", lambda: cfg)
+        yield db_mod
+        db_mod._db = None
+
+    def test_only_rows_with_both_sizes_count(self, db: Any) -> None:
+        """An internal tool's delivered bytes have no arrived size to save against."""
+        db.record_gateway_call("p", "a", "t", "ok", 1, bytes_arrived=1000, bytes_delivered=400)
+        db.record_gateway_call("p", "web", "fetch", "ok", 1, bytes_delivered=900)
+        db.record_gateway_call("p", "a", "t", "denied_guard", 0, "no")
+
+        delivery = db.get_gateway_call_stats(days=1)["delivery"]
+        assert delivery["calls_measured"] == 1
+        assert delivery["bytes_arrived"] == 1000
+        assert delivery["bytes_delivered"] == 400
+        assert delivery["savings_percent"] == 60
+        assert delivery["estimated_tokens_saved"] == 150
+        assert delivery["top_tools"][0]["tool"] == "t"
+
+    def test_delivery_is_profile_filtered(self, db: Any) -> None:
+        db.record_gateway_call("p", "a", "t", "ok", 1, bytes_arrived=10, bytes_delivered=5)
+        db.record_gateway_call("q", "a", "t", "ok", 1, bytes_arrived=99, bytes_delivered=1)
+
+        assert db.get_gateway_call_stats(profile="p", days=1)["delivery"]["bytes_arrived"] == 10
+
+    def test_migration_adds_size_columns(self, tmp_path: Any) -> None:
+        import mcp_trentina_crunchtools.database as db_mod
+
+        path = str(tmp_path / "old_sizes.db")
+        old = sqlite3.connect(path)
+        old.executescript(
+            "CREATE TABLE gateway_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "timestamp REAL NOT NULL, profile TEXT NOT NULL, backend TEXT NOT NULL, "
+            "tool TEXT NOT NULL, success BOOLEAN NOT NULL, "
+            "duration_ms INTEGER NOT NULL, error_message TEXT, outcome TEXT);"
+        )
+        old.close()
+
+        db_mod._db = None
+        conn = db_mod.get_db(path)
+        try:
+            columns = {r["name"] for r in conn.execute("PRAGMA table_info(gateway_calls)")}
+            assert {"bytes_arrived", "bytes_delivered"} <= columns
+        finally:
+            db_mod._db = None
