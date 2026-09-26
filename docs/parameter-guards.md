@@ -103,19 +103,6 @@ parameter_guards:
 
 The guard is checked against the RESOLVED mode — an omitted `trentina_mode` becomes the profile default first — so leaving the argument out cannot skip it, which is what a guard does with any other absent argument. The tool's schema offers only what survives the guard. Every value, glob or not, must match at least one of `block`, `flag` or `redact`, or the profile fails to load: a value that matches no mode (`warn`, the pre-0.35.0 name for `flag`, or `warn*`) could never fire, and a guard that silently denies nothing is worse than a load error.
 
-### Narrow the pre-processors on one tool
-
-`trentina_preprocess` ([Pre-processors per call](profiles.md#pre-processors-per-call)) is guarded name by name: each processor the profile offers is checked against the constraint, and the tool's enum carries only the survivors.
-
-```yaml
-parameter_guards:
-  fetch_tool:
-    trentina_preprocess:
-      deny: ["summarize"]
-```
-
-A guard judges the argument, like any other guard: it can take a processor away from the agent's choice, but it does not edit the tool's default, and it cannot make a processor run. That is `preprocess.required`, which an absent or empty argument cannot remove.
-
 ## Pipeline Position
 
 Parameter guards run after the tool-name allowlist check and before the backend call:

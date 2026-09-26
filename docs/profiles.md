@@ -30,7 +30,7 @@ profiles:
         url: "http://gws-personal:8000/mcp"
         tools_allow: ["*"]
         tools_deny: ["delete*"]
-        compress_descriptions: true
+        preprocess_tool_descriptions: {processors: [summarize]}
         # compact_schemas: true   (default — see compression.md#schema-compaction)
     defense:
       enforcement: flag
@@ -49,7 +49,7 @@ profiles:
           - search_gmail_messages
           - get_gmail_message_content
           - draft_gmail_message
-        compress_descriptions: true
+        preprocess_tool_descriptions: {processors: [summarize]}
     defense:
       enforcement: block      # the default mode: flagged content is refused
       modes: [block, redact]   # what the agent may choose per call; no flag
@@ -110,54 +110,77 @@ backend overrides the profile's set for that backend (it must include the
 default), and a [parameter guard](parameter-guards.md) on `trentina_mode`
 narrows one tool.
 
-## Pre-processors per call
+## Minifying and exact text
 
-`trentina_preprocess` lets the agent pick, per call, which pre-processors run
-before judging — HTML to Markdown or the raw page, a quoted email chain
-collapsed or not (#183). The profile's `preprocess` block bounds the choice:
+Tool output is minified before it is judged and delivered (0.38.0). The
+default processor, `detect`, looks at each payload and runs what fits it:
+HTML to Markdown then `petit` for a page, `structured` for JSON (compacted,
+repeated elements collapsed to a count), `email` then `petit` for everything
+else. Undeclared text is converted only when it is unmistakably HTML, so a
+mail header's `<alice@example.com>` and code's `Vec<String>` survive.
+
+The agent has one switch per call, explained once in the session
+instructions:
+
+- `trentina_preprocess: false` returns the text unminified, for editing and
+  saving it back: exact, unless the profile pins a `required` processor, which
+  runs either way. It is unminified, not unscanned: all three layers still run.
+- `true` minifies a tool whose default is exact.
+- Omitted, the tool's default runs.
+
+Every tool accepts the switch. A proxied tool's schema declares it only where
+`selectable` is set, because a declaration on every tool costs a 376-tool
+profile ~15 KB and the instructions already say it. The internal `fetch`,
+`read` and `content` tools always declare it. `read` returns the file exactly
+by default, because an agent that reads a file usually means to edit it.
+
+Tools whose output an agent edits and writes back should default to exact
+text. That is configuration, next to the tool:
 
 ```yaml
 preprocess:
-  processors: [html, email, petit]   # the CEILING: what may be selected
+  processors: [detect]               # what minifying runs (the default)
   required: [html]                   # the FLOOR: runs on every call, first
 backends:
-  gw:
-    url: http://gw:8000/mcp
+  wiki:
+    url: http://wiki:8000/mcp
     preprocess_tools:
-      get_gmail_thread_content:
-        selectable: true             # offer the argument on this proxied tool
+      get_page_tool:
+        enabled: false               # exact unless the agent passes true
 ```
 
-- The argument selects within `processors` — plus the tool's own default,
-  below — and cannot extend it. The enum in `tools/list` is that set minus
-  the floor, narrowed by a
-  [parameter guard](parameter-guards.md#narrow-the-pre-processors-on-one-tool).
-  A guard narrows the argument only; it changes neither the default nor the
-  floor.
-- `required` runs whatever the agent asks for — `[]` included — ahead of the
+- `required` runs whatever the agent asks for, `false` included, ahead of the
   rest, regardless of `enabled` and `min_bytes`, so `best_of` never discards
   it. It applies wherever a payload is pre-processed: proxied responses and
   `fetch`, `read` and `content`. `search` and `dir` deliver documents Trentina
-  assembles itself, and no processor runs on them. A required processor that breaks, or cannot parse the payload
-  (`too_large`), refuses the call: nothing is delivered in its place.
-- Omitted, the tool's default runs: `fetch` converts a page its server calls
-  HTML, `content` converts `content_type: text/html`, `read` converts nothing,
-  and a proxied tool runs the configured chain when `enabled`. `html` stays
-  selectable on `fetch` and `content` even when `processors` leaves it out,
-  so a petit-only profile does not silently lose conversion.
-- The internal `fetch`, `read` and `content` tools always offer it; `search`
-  and `dir` never do. A proxied tool offers it only where `selectable` is set,
-  profile-wide or per tool, because the enum costs tokens on every tool and
-  most tools return one format. Where it is not offered, any value is refused.
+  assembles itself, and no processor runs on them.
+- One failure rule. A required processor that breaks, or cannot parse the
+  payload (`too_large`), refuses the call: nothing is delivered in its place.
+  A minifier that breaks costs tokens, not content: the original is judged
+  and delivered.
+- The internal tools minify with `detect` whatever `processors` says, so a
+  profile tuned for proxied logs does not cost `fetch` its HTML conversion.
 - A per-tool `required` REPLACES the profile's floor; unset, it inherits.
   An agent reload cannot lower a floor, by either road.
+- 0.37.0 took a list of processor names. A list is still read, non-empty as
+  `true` and `[]` as `false`, with a warning, until 0.40.0.
 
-What is judged is always what is delivered. `[]` is unconverted, not
-unscanned: all three layers still run, and `l1/hidden.py` still counts the
-hiding that conversion would have removed. On the internal tools everything
-that runs fails closed, `too_large` included; on a proxied tool only the floor
-does, and an optional processor that breaks delivers the response
-untransformed.
+## Tool names
+
+Tools are served under short names, tagged with a backend only where two
+backends collide ([Tool Names](gateway.md#tool-names)). Two settings:
+
+```yaml
+profiles:
+  agent1:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_AGENT1_TOKEN
+    short_names: true        # the default; false serves <backend>__<tool>
+    backends:
+      mail-work:
+        url: http://mail-work:8000/mcp
+        name_tag: work       # work_send_gmail_message, not mail_work_send_...
+```
 
 ## Roles
 
