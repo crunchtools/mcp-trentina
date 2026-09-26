@@ -31,8 +31,9 @@ from mcp_types.version import (
 from .. import __version__
 from ..database import record_gateway_call
 from ..defense import Provenance
-from ..errors import ModeNotPermittedError
+from ..errors import ModeNotPermittedError, PreProcessNotPermittedError
 from ..outcomes import Outcome, classify_exception, refusal_of
+from ..preprocess.policy import PREPROCESS_PARAM
 from .backend import call_backend_tool, list_backend_tools, on_backend_cache_evict
 from .compress import compress_tools, maybe_trigger_compression
 from .errors import BackendCallError, BackendNotInProfileError
@@ -44,9 +45,12 @@ from .modes_policy import (
     MODE_PARAM,
     PROMPT_PARAM,
     insert_params,
+    insert_preprocess,
     mode_instructions,
     policy_for,
+    preprocess_policy_for,
     resolve_call,
+    resolve_preprocess,
     strip_params,
 )
 from .schema_compact import compact_tool
@@ -54,6 +58,7 @@ from .transform import transform_response
 
 if TYPE_CHECKING:
     from ..modes import Mode, ModePolicy
+    from ..preprocess.policy import PreProcessPolicy
     from .profile import Backend, Profile
 
 logger = logging.getLogger(__name__)
@@ -355,6 +360,11 @@ async def _build_profile_tools(
                 if tool.get("name") in modal
                 else dict(tool)
             )
+            namespaced_tool = dict(
+                insert_preprocess(
+                    namespaced_tool, preprocess_policy_for(profile, backend, tool["name"])
+                )
+            )
             namespaced_tool["name"] = f"{backend_name}{NAMESPACE_SEP}{tool['name']}"
             namespaced.append(namespaced_tool)
         return namespaced
@@ -438,7 +448,10 @@ async def _route_tools_call(
     # the default and is checked as that, never skipped as absent.
     try:
         policy, mode, prompt, forwarded = resolve_call(profile, backend, tool_name, arguments)
-    except ModeNotPermittedError as exc:
+        preprocess, requested, selection = resolve_preprocess(
+            profile, backend, tool_name, arguments
+        )
+    except (ModeNotPermittedError, PreProcessNotPermittedError) as exc:
         _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, str(exc))
         return _err(req_id, JSONRPC_INVALID_PARAMS, str(exc))
 
@@ -460,6 +473,8 @@ async def _route_tools_call(
             policy=policy,
             mode=mode,
             prompt=prompt,
+            preprocess=preprocess,
+            requested=requested,
         )
     except BackendCallError as exc:
         duration_ms = int((time.monotonic() - t0) * 1000)
@@ -505,6 +520,7 @@ async def _route_tools_call(
         mode=mode,
         prompt=prompt,
         policy=policy,
+        selection=selection,
     )
     return _ok(req_id, result)
 
@@ -519,6 +535,8 @@ async def _dispatch(
     policy: ModePolicy,
     mode: Mode,
     prompt: str | None,
+    preprocess: PreProcessPolicy | None = None,
+    requested: Any = None,
 ) -> Any:
     """Forward the call: in-process for internal://, streamable-http otherwise."""
     if not backend.is_internal:
@@ -527,12 +545,77 @@ async def _dispatch(
 
     # The internal tools judge their own ingress, so they get the RESOLVED
     # mode; the bound policy is what their refusals offer as alternatives.
-    with profile_context(profile, policy):
+    # The pre-processor request goes through as asked: its default depends on
+    # what arrives, so the tool resolves it under the bound policy.
+    with profile_context(profile, policy, preprocess):
         return await call_internal_tool(
             tool_name,
             forwarded,
-            modal_arguments={MODE_PARAM: mode.value, PROMPT_PARAM: prompt},
+            modal_arguments={
+                MODE_PARAM: mode.value,
+                PROMPT_PARAM: prompt,
+                PREPROCESS_PARAM: requested,
+            },
         )
+
+
+def _l3_context(backend: Backend, sidecar: dict[str, Any] | None) -> str | None:
+    """The operator's word on what this backend returns (#204), then invariant 3.
+
+    The transform sidecar travels to L3's briefing too. "This is the 3% that
+    survived reduction" is context a judge should have.
+    """
+    notes = [backend.l3_briefing]
+    if sidecar:
+        notes.append(
+            f"This artifact was transformed by trentina pre-processors "
+            f"({sidecar['bytes_in']} -> {sidecar['bytes_out']} "
+            f"bytes); where it shrank, it is a sample of a larger payload."
+        )
+    return "\n".join(n for n in notes if n) or None
+
+
+def _blocked_result(decision: Any) -> dict[str, Any]:
+    """The refusal delivered in place of a response the perimeter blocked."""
+    refused: dict[str, Any] = {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    _refusal_text(decision.refusal)
+                    if decision.refusal
+                    else "[TRENTINA] This tool response was blocked by the defense pipeline."
+                )
+                + " Details are in _trentina_warning; the original content was not delivered.",
+            }
+        ],
+        "isError": True,
+        "_trentina_warning": decision.warning,
+    }
+    if decision.refusal:
+        refused["_trentina_refusal"] = decision.refusal
+    return refused
+
+
+def _preprocess_refusal(failed: str, mode: Mode | None) -> dict[str, Any]:
+    """A required processor did not run: nothing is delivered in its place.
+
+    Same shape as a defense block. No mode would help, so no alternatives.
+    """
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": f"[TRENTINA] Refused: {failed}. The original content was not delivered.",
+            }
+        ],
+        "isError": True,
+        "_trentina_refusal": {
+            "reason": "preprocess_failed",
+            "mode": mode.value if mode else None,
+            "alternatives": [],
+        },
+    }
 
 
 async def _assemble_call_result(
@@ -545,6 +628,7 @@ async def _assemble_call_result(
     mode: Mode | None = None,
     prompt: str | None = None,
     policy: ModePolicy | None = None,
+    selection: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Shape the MCP result and run it through the perimeter.
 
@@ -571,7 +655,13 @@ async def _assemble_call_result(
             backend_name=backend_name,
             tool_name=tool_name,
             content_blocks=content_blocks,
+            selection=selection,
         )
+        if reduced.failed is not None:
+            _audit(
+                profile.name, backend_name, tool_name, Outcome.BLOCKED_DEFENSE, 0, reduced.failed
+            )
+            return _preprocess_refusal(reduced.failed, mode)
         content_blocks = reduced.content_blocks
         provenance = reduced.provenance
         reduce_sidecar = reduced.sidecar
@@ -594,24 +684,7 @@ async def _assemble_call_result(
             mode=mode,
             prompt=prompt,
             policy=policy,
-            # The operator's word on what this backend returns (#204), then
-            # invariant 3: the sidecar travels to L3's briefing too. "This is
-            # the 3% that survived reduction" is context a judge should have.
-            l3_context="\n".join(
-                note
-                for note in (
-                    backend.l3_briefing,
-                    (
-                        f"This artifact was transformed by trentina pre-processors "
-                        f"({reduce_sidecar['bytes_in']} -> {reduce_sidecar['bytes_out']} "
-                        f"bytes); where it shrank, it is a sample of a larger payload."
-                    )
-                    if reduce_sidecar
-                    else None,
-                )
-                if note
-            )
-            or None,
+            l3_context=_l3_context(backend, reduce_sidecar),
         )
         if decision.blocked:
             # The content never reaches the agent; the warning does. Audited
@@ -626,26 +699,7 @@ async def _assemble_call_result(
                 0,
                 f"response blocked by defense (risk={risk})",
             )
-            refused: dict[str, Any] = {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            _refusal_text(decision.refusal)
-                            if decision.refusal
-                            else "[TRENTINA] This tool response was blocked by the "
-                            "defense pipeline."
-                        )
-                        + " Details are in _trentina_warning; the original "
-                        "content was not delivered.",
-                    }
-                ],
-                "isError": True,
-                "_trentina_warning": decision.warning,
-            }
-            if decision.refusal:
-                refused["_trentina_refusal"] = decision.refusal
-            return refused
+            return _blocked_result(decision)
         if decision.extraction is not None:
             # redact: the verified extraction REPLACES the response, and
             # structuredContent goes with it — redact never re-delivers what

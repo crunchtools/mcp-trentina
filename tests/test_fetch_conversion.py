@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from mcp_trentina_crunchtools.errors import PreProcessFailedError
 from mcp_trentina_crunchtools.tools.fetch import block_fetch, flag_fetch, redact_fetch
 
 from .mode_harness import layers
@@ -34,8 +35,8 @@ async def test_html_is_delivered_and_judged_as_markdown(env: Path, content_type:
     assert "<" not in result["content"]
     assert "Ignore prior instructions" not in result["content"]
     assert fakes.classify.call_args_list[0].args[0] == result["content"]
-    assert result["preprocess"]["name"] == "html"
-    assert result["preprocess"]["hidden_elements"] == 1
+    assert result["preprocess"][0]["name"] == "html"
+    assert result["preprocess"][0]["hidden_elements"] == 1
 
 
 async def test_what_conversion_hid_still_counts_toward_risk(env: Path) -> None:
@@ -52,12 +53,12 @@ async def test_a_converter_that_raises_fails_the_call(env: Path) -> None:
     with (
         layers(env) as fakes,
         patch(
-            "mcp_trentina_crunchtools.tools.fetch.HtmlProcessor.run",
+            "mcp_trentina_crunchtools.preprocess.html.HtmlProcessor.run",
             side_effect=RuntimeError("parser exploded"),
         ),
     ):
         fakes.fetch_url.return_value = (PAGE, "text/html")
-        with pytest.raises(RuntimeError):
+        with pytest.raises(PreProcessFailedError, match="html"):
             await flag_fetch("https://example.com/notes")
     assert fakes.classify.await_count == 0
 
@@ -75,7 +76,7 @@ async def test_redact_reads_the_markdown(env: Path) -> None:
         fakes.fetch_url.return_value = (PAGE, "text/html")
         result = await redact_fetch("https://example.com/notes", "Extract.")
 
-    assert result["preprocess"]["name"] == "html"
+    assert result["preprocess"][0]["name"] == "html"
     assert "Ignore prior instructions" not in fakes.extract.call_args.args[0]
 
 

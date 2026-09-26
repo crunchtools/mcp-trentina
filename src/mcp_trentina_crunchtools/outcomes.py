@@ -30,6 +30,8 @@ from .errors import (
     FileReadError,
     L1Error,
     ModeNotPermittedError,
+    PreProcessFailedError,
+    PreProcessNotPermittedError,
     QuarantineAgentError,
     TrentinaError,
     UnscannableContentError,
@@ -98,6 +100,8 @@ FAILED_OUTCOMES: frozenset[Outcome] = frozenset(
 
 _CLASSIFICATION: tuple[tuple[type[BaseException], Outcome], ...] = (
     (ModeNotPermittedError, Outcome.DENIED_GUARD),
+    (PreProcessNotPermittedError, Outcome.DENIED_GUARD),
+    (PreProcessFailedError, Outcome.BLOCKED_DEFENSE),
     (BlockedSourceError, Outcome.BLOCKED_DEFENSE),
     (UnscannableContentError, Outcome.BLOCKED_DEFENSE),
     (UnsupportedContentTypeError, Outcome.BLOCKED_DEFENSE),

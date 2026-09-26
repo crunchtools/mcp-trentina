@@ -124,7 +124,9 @@ An allowlisted source runs all three layers and its flags stand. What changes is
 
 **fetch** — a suspicious HTTP status (415, 406, or a 4xx whose body the pipeline flags) or a redirect to a binary download returns a `security_advisory` instead of content. Advisories carry structured findings only.
 
-**fetch** — a page whose server says `text/html` or `application/xhtml+xml` is converted to Markdown before it is judged, so every mode judges and delivers the page a human would read, not its markup. Hidden elements, `<script>`, `<style>`, `<template>` and comments are gone. The response carries a `preprocess` section counting what conversion removed; L1's hiding counts come from the original page, and L3 is told when the page hid text. If the converter raises, the call fails; it never falls back to raw markup. Other content types arrive as sent. `read` and `content` never convert.
+**fetch** — a page whose server says `text/html` or `application/xhtml+xml` is converted to Markdown before it is judged, so every mode judges and delivers the page a human would read, not its markup. Hidden elements, `<script>`, `<style>`, `<template>` and comments are gone. The response carries a `preprocess` section counting what conversion removed; L1's hiding counts come from the original page, and L3 is told when the page hid text. If the converter raises, the call fails; it never falls back to raw markup. Other content types arrive as sent.
+
+`trentina_preprocess` (fetch, read, content) overrides that default within the profile's policy: `[]` delivers the raw page (after any processor the profile `required`), `["html"]` converts a file `read` would deliver as-is, and `content` converts when `content_type` is `text/html`. What is judged is what is delivered either way — see [Pre-processors per call](profiles.md#pre-processors-per-call).
 
 ## Gateway Integration
 

@@ -113,13 +113,16 @@ def _check_drivers(name: str, profile: Profile) -> None:
     build_preprocessors(profile.preprocess, channel=Channel.TOOL, profile_name=name)
     for backend_name, backend in profile.backends.items():
         for tool_name, override in backend.preprocess_tools.items():
-            if override.processors is None:
+            if override.processors is None and override.required is None:
                 continue
-            build_preprocessors(
-                resolve(profile, backend, tool_name),
-                channel=Channel.TOOL,
-                profile_name=f"{name}:{backend_name}:{tool_name}",
-            )
+            label = f"{name}:{backend_name}:{tool_name}"
+            try:
+                cfg = resolve(profile, backend, tool_name)
+            except ValidationError as exc:
+                # A tool override that narrows processors below the profile's
+                # required floor. Refused here, not on the first call.
+                raise ProfileConfigError(f"Profile {label!r}: {exc}") from exc
+            build_preprocessors(cfg, channel=Channel.TOOL, profile_name=label)
     if profile.matrix_ingress is not None:
         # Built without its key provider: that needs the network and belongs
         # on the request path. What is checked here is the name, the channel

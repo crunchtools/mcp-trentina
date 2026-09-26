@@ -110,6 +110,55 @@ backend overrides the profile's set for that backend (it must include the
 default), and a [parameter guard](parameter-guards.md) on `trentina_mode`
 narrows one tool.
 
+## Pre-processors per call
+
+`trentina_preprocess` lets the agent pick, per call, which pre-processors run
+before judging — HTML to Markdown or the raw page, a quoted email chain
+collapsed or not (#183). The profile's `preprocess` block bounds the choice:
+
+```yaml
+preprocess:
+  processors: [html, email, petit]   # the CEILING: what may be selected
+  required: [html]                   # the FLOOR: runs on every call, first
+backends:
+  gw:
+    url: http://gw:8000/mcp
+    preprocess_tools:
+      get_gmail_thread_content:
+        selectable: true             # offer the argument on this proxied tool
+```
+
+- The argument selects within `processors` — plus the tool's own default,
+  below — and cannot extend it. The enum in `tools/list` is that set minus
+  the floor, narrowed by a
+  [parameter guard](parameter-guards.md#narrow-the-pre-processors-on-one-tool).
+  A guard narrows the argument only; it changes neither the default nor the
+  floor.
+- `required` runs whatever the agent asks for — `[]` included — ahead of the
+  rest, regardless of `enabled` and `min_bytes`, so `best_of` never discards
+  it. It applies wherever a payload is pre-processed: proxied responses and
+  `fetch`, `read` and `content`. `search` and `dir` deliver documents Trentina
+  assembles itself, and no processor runs on them. A required processor that breaks, or cannot parse the payload
+  (`too_large`), refuses the call: nothing is delivered in its place.
+- Omitted, the tool's default runs: `fetch` converts a page its server calls
+  HTML, `content` converts `content_type: text/html`, `read` converts nothing,
+  and a proxied tool runs the configured chain when `enabled`. `html` stays
+  selectable on `fetch` and `content` even when `processors` leaves it out,
+  so a petit-only profile does not silently lose conversion.
+- The internal `fetch`, `read` and `content` tools always offer it; `search`
+  and `dir` never do. A proxied tool offers it only where `selectable` is set,
+  profile-wide or per tool, because the enum costs tokens on every tool and
+  most tools return one format. Where it is not offered, any value is refused.
+- A per-tool `required` REPLACES the profile's floor; unset, it inherits.
+  An agent reload cannot lower a floor, by either road.
+
+What is judged is always what is delivered. `[]` is unconverted, not
+unscanned: all three layers still run, and `l1/hidden.py` still counts the
+hiding that conversion would have removed. On the internal tools everything
+that runs fails closed, `too_large` included; on a proxied tool only the floor
+does, and an optional processor that breaks delivers the response
+untransformed.
+
 ## Roles
 
 One gateway process serves every profile out of one config file, one database

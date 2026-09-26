@@ -68,6 +68,8 @@ from ..gateway.service import find_operator, judge_of, log_service_identity
 from ..gateway.sessions import session_registry
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ..gateway.loader import ActiveConfig, GatewayConfig
     from ..gateway.profile import Backend, Profile
 
@@ -301,11 +303,11 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
     The held values are reported back, so an operator whose edit did not take
     effect is told rather than left to discover it.
     """
+    held = _hold_preprocess_floor(before, after)
     b = before.matrix_ingress
     a = after.matrix_ingress
     if b is None or a is None:
-        return []
-    held: list[str] = []
+        return held
     for field_name in type(a.preprocess).model_fields:
         if field_name in PREPROCESS_AGENT_FIELDS:
             continue
@@ -313,6 +315,64 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
         if old != getattr(a.preprocess, field_name):
             setattr(a.preprocess, field_name, old)
             held.append(f"matrix_ingress.preprocess.{field_name}")
+    return held
+
+
+def _hold_floor(
+    label: str, floor: Sequence[str], new: Any, inherited: Sequence[str], ceiling: Sequence[str]
+) -> list[str]:
+    """Raise one ``required`` back to at least ``floor``, and keep its processors.
+
+    ``required`` None inherits ``inherited``; unsetting a tool's floor is
+    lowering it when the profile's is weaker.
+    """
+    effective = inherited if new.required is None else new.required
+    if not [n for n in floor if n not in effective]:
+        return []
+    new.required = [*floor, *(n for n in effective if n not in floor)]
+    processors = ceiling if new.processors is None else new.processors
+    missing = [n for n in new.required if n not in processors]
+    if missing:
+        new.processors = [*processors, *missing]
+    return [f"{label}.required", *([f"{label}.processors"] if missing else [])]
+
+
+def _hold_preprocess_floor(before: Profile, after: Profile) -> list[str]:
+    """An agent may not lower its own pre-processor floor (#183).
+
+    ``required`` is what the agent's ``trentina_preprocess`` cannot remove;
+    a reload that could remove it would be the same argument by another road.
+    That includes a NEW tool override: its ``required`` replaces the
+    profile's, so it is held to the floor the tool had before.
+    """
+    held = _hold_floor(
+        "preprocess",
+        before.preprocess.required,
+        after.preprocess,
+        [],
+        after.preprocess.processors,
+    )
+    for name, backend in after.backends.items():
+        old_backend = before.backends.get(name)
+        # A deleted override would drop its floor to the profile's: keep it.
+        for tool, dropped in (old_backend.preprocess_tools if old_backend else {}).items():
+            if dropped.required is not None and tool not in backend.preprocess_tools:
+                backend.preprocess_tools[tool] = dropped
+                held.append(f"backends.{name}.preprocess_tools.{tool}")
+        for tool, override in backend.preprocess_tools.items():
+            old = old_backend.preprocess_tools.get(tool) if old_backend else None
+            floor = (
+                old.required
+                if old is not None and old.required is not None
+                else before.preprocess.required
+            )
+            held += _hold_floor(
+                f"backends.{name}.preprocess_tools.{tool}",
+                floor,
+                override,
+                after.preprocess.required,
+                after.preprocess.processors,
+            )
     return held
 
 
