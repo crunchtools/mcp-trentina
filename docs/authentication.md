@@ -184,8 +184,9 @@ TRENTINA_OAUTH_JWT_SIGNING_KEY=...         # pin it so issued tokens and client
 ```
 
 `enabled: true` requires a non-empty `allowed_emails`; a seat open to any Google
-account fails validation. Set `FASTMCP_HOME=/data/fastmcp` so registrations
-persist across a restart.
+account fails validation. Registrations persist across a restart under
+`FASTMCP_HOME`, which the image sets to `/data/fastmcp`; mount that path to a
+volume. Override the env var only if you relocate the store.
 
 Endpoints mounted: `/authorize`, `/token`, `/register`, `/consent`,
 `/auth/callback`, and a root `/.well-known/oauth-authorization-server`.
