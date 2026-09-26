@@ -144,3 +144,26 @@ def test_a_matrix_sync(
     profile.matrix_ingress.token = SecretStr("sekrit")
     TestClient(_matrix_app({"agent1": profile})).get("/matrix/sekrit/_matrix/client/v3/sync")
     _only_own(judged)
+
+
+@pytest.mark.parametrize(
+    ("provider", "keys", "warns"),
+    [
+        ("openrouter", {}, True),
+        ("openrouter", {"openrouter": LlmKeyOverride(api_key=SecretStr("k"))}, False),
+        ("ollama", {}, False),
+    ],
+)
+def test_a_profile_without_its_own_key_is_warned_about(
+    provider: str, keys: dict[str, Any], warns: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    from mcp_trentina_crunchtools.gateway.loader import _check_judges
+
+    profile = Profile(
+        name="agent1",
+        auth=AuthConfig(bearer_token_env="TEST"),
+        defense=DefenseConfig(enforcement="flag", provider=provider),
+        llm_keys=keys,
+    )
+    _check_judges({"agent1": profile})
+    assert ("has no llm_keys" in caplog.text) is warns
