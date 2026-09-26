@@ -168,6 +168,9 @@ rewrite, not their span substitution. Precedence: block > redact > flag.
 - quarantine_stats — role-scoped like the gateway admin tools below: an agent
   profile gets its own audit rows, its own detections and the defense settings
   it runs under; an operator gets the gateway.
+  `surface` (`gateway/surface.py`) is the tool list offered vs. served;
+  `gateway_audit.delivery` is response bytes arrived vs. delivered. Tokens are
+  bytes/4 — a comparison, not a bill.
 
 ### Operator profile / service identity (#138)
 

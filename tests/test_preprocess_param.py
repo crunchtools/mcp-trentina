@@ -109,11 +109,7 @@ class TestPolicy:
         off = PreProcessPolicy(["detect"], default=False)
         assert off.resolve(True) == ("detect",)
 
-    @pytest.mark.parametrize(("legacy", "on"), [(["html"], True), ([], False)])
-    def test_the_0_37_list_form_still_works(self, legacy: list[str], on: bool) -> None:
-        assert self.POLICY.minifies(legacy) is on
-
-    @pytest.mark.parametrize("bad", ["false", 0, {"html": 1}])
+    @pytest.mark.parametrize("bad", ["false", 0, {"html": 1}, ["html"], []])
     def test_anything_but_a_switch_is_refused(self, bad: Any) -> None:
         with pytest.raises(PreProcessNotPermittedError, match="trentina_preprocess"):
             self.POLICY.resolve(bad)

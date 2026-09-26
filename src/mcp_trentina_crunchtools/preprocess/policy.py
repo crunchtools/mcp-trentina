@@ -87,21 +87,15 @@ class PreProcessPolicy:
         object.__setattr__(self, "chain", chain)
 
     def minifies(self, requested: Any) -> bool:
-        """Whether this call runs the chain; 0.37.0's list form is read as a switch.
+        """Whether this call runs the chain.
 
         Raises:
-            PreProcessNotPermittedError: anything but a bool, a list, or None.
+            PreProcessNotPermittedError: anything but a bool or None.
         """
         if requested is None:
             return self.default
         if isinstance(requested, bool):
             return requested
-        if isinstance(requested, (list, tuple)):
-            logger.warning(
-                "%s as a list is deprecated and removed in 0.40.0; pass true or false",
-                PREPROCESS_PARAM,
-            )
-            return bool(requested)
         raise PreProcessNotPermittedError(["true", "false"])
 
     def resolve(self, requested: Any) -> tuple[str, ...]:

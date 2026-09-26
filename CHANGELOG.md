@@ -10,6 +10,42 @@ under that name.
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-09-26
+
+### Added
+
+- **`quarantine_stats` reports what Trentina saves a client, in bytes and
+  estimated tokens.** `surface` is the profile's tool list as its backends
+  offer it, as the allowlist allows it, and as the gateway serves it, with
+  the saving split by allowlist, shaping (compression, compaction) and short
+  names; `by_backend` gives each backend's offered, allowed and shaped
+  (pre-short-name) sizes. `gateway_audit.delivery` is response bytes as they
+  arrived against as they were delivered (minify, duplicate
+  `structuredContent`, redact), with the top tools. Agents see their own
+  profile; the operator sees every profile.
+- `gateway_calls` gains `bytes_arrived` and `bytes_delivered` (additive
+  migration). Internal tools minify inside the tool, so their arrived size
+  is NULL and they are left out of the saving.
+
+### Removed
+
+- `compress_descriptions` on a backend. Use `preprocess_tool_descriptions:
+  {processors: [summarize]}`; the old key is now a load error.
+- `trentina_preprocess` as a list (the 0.37.0 form). Pass `true` or `false`.
+
+### Deprecated
+
+- The `<backend>__<tool>` fallback on a short-names profile now routes until
+  0.41.0, not 0.40.0. Clients holding a pre-0.38.0 tool list still call by
+  it, so removing it now would break live callers.
+
+### Fixed
+
+- **A blocked tool response was audited twice**, as `ok` before the
+  perimeter ran and `blocked_defense` after it, inflating the ok column by
+  every block. The one row is now written after assembly, with the real
+  duration (blocked rows carried 0).
+
 ## [0.39.1] - 2026-09-26
 
 ### Fixed

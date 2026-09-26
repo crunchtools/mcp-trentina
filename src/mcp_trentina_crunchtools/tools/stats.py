@@ -19,6 +19,7 @@ from ..config import get_config
 from ..database import get_blocklist_stats, get_compression_stats, get_gateway_call_stats
 from ..gateway.errors import ScopeError
 from ..gateway.scope import CallerScope, require_caller
+from ..gateway.surface import TOKEN_NOTE, surface_profiles, surface_report
 from ..quarantine.classifier import is_classifier_available
 
 GATEWAY_AUDIT_LOOKBACK_DAYS = 30
@@ -39,6 +40,8 @@ COLUMN_MEANINGS = {
     ),
     "unknown": "Row predates the outcome taxonomy.",
 }
+
+NOT_BUILT = {"error": "tool list not built yet; it is measured on the first tools/list"}
 
 
 def _agent_stats(scope: CallerScope) -> dict[str, Any]:
@@ -64,6 +67,8 @@ def _agent_stats(scope: CallerScope) -> dict[str, Any]:
             **get_gateway_call_stats(profile=scope.name, days=GATEWAY_AUDIT_LOOKBACK_DAYS),
             "column_meanings": COLUMN_MEANINGS,
         },
+        "surface": (surface_report(scope.name) if scope.name else None) or NOT_BUILT,
+        "token_note": TOKEN_NOTE,
     }
 
 
@@ -72,7 +77,8 @@ async def get_trentina_stats() -> dict[str, Any]:
 
     Returns:
         The caller's own audit rows, detections and effective defense settings,
-        under ``scope: "<profile>"``; or, for an operator, the gateway-wide
+        under ``scope: "<profile>"``, with its tool ``surface`` (offered, allowed,
+        served) and the response ``delivery`` sizes; or, for an operator, the gateway-wide
         view under ``scope: "gateway"``, including compression savings and the
         classifier's configured path. A caller the gateway cannot identify
         gets ``{"scope": "none", "error": ...}`` and no numbers at all.
@@ -107,4 +113,6 @@ async def get_trentina_stats() -> dict[str, Any]:
             "column_meanings": COLUMN_MEANINGS,
         },
         "compression": get_compression_stats(),
+        "surface": {name: surface_report(name) for name in surface_profiles()},
+        "token_note": TOKEN_NOTE,
     }

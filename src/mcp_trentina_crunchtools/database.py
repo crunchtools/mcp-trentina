@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     success BOOLEAN NOT NULL,
     duration_ms INTEGER NOT NULL,
     error_message TEXT,
-    outcome TEXT
+    outcome TEXT,
+    bytes_arrived INTEGER,
+    bytes_delivered INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_gateway_calls_timestamp ON gateway_calls(timestamp);
@@ -121,6 +123,13 @@ def _migrate(db: sqlite3.Connection) -> None:
     columns = {row["name"] for row in db.execute("PRAGMA table_info(gateway_calls)")}
     if "outcome" not in columns:
         db.execute("ALTER TABLE gateway_calls ADD COLUMN outcome TEXT")
+    # Response sizes as they arrived and as they were delivered. Nullable:
+    # older rows, denials that never reached a backend, and internal tools
+    # (which minify inside the tool) have no arrived size.
+    for column in ("bytes_arrived", "bytes_delivered"):
+        if column not in columns:
+            db.execute(f"ALTER TABLE gateway_calls ADD COLUMN {column} INTEGER")
+    db.commit()
 
     detection_columns = {row["name"] for row in db.execute("PRAGMA table_info(detections)")}
     # Gateway attribution columns (which profile, which backend and tool,
@@ -273,6 +282,8 @@ def record_gateway_call(
     outcome: str,
     duration_ms: int,
     error_message: str | None = None,
+    bytes_arrived: int | None = None,
+    bytes_delivered: int | None = None,
 ) -> None:
     """Record a gateway tools/call invocation.
 
@@ -286,7 +297,7 @@ def record_gateway_call(
     db.execute(
         "INSERT INTO gateway_calls "
         "(timestamp, profile, backend, tool, success, duration_ms, error_message, "
-        "outcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "outcome, bytes_arrived, bytes_delivered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             time.time(),
             profile,
@@ -296,6 +307,8 @@ def record_gateway_call(
             duration_ms,
             error_message,
             outcome,
+            bytes_arrived,
+            bytes_delivered,
         ),
     )
     db.commit()
@@ -377,6 +390,49 @@ def get_gateway_call_stats(
         "profile_filter": profile,
         "totals": totals,
         "by_tool": by_tool,
+        "delivery": _delivery_stats(db, cutoff, profile),
+    }
+
+
+def _delivery_stats(db: sqlite3.Connection, cutoff: float, profile: str | None) -> dict[str, Any]:
+    """Response bytes as they arrived from backends vs. as agents received them.
+
+    Only rows carrying BOTH sizes count. An internal tool minifies inside the
+    tool, so the router never saw what arrived; counting its delivered bytes
+    against nothing would report a saving that was never measured.
+    """
+    query = (
+        "SELECT backend, tool, COUNT(*) AS cnt, SUM(bytes_arrived) AS arrived, "
+        "SUM(bytes_delivered) AS delivered FROM gateway_calls "
+        "WHERE timestamp > ? AND bytes_arrived IS NOT NULL "
+        "AND bytes_delivered IS NOT NULL{profile_clause} GROUP BY backend, tool"
+    )
+    if profile:
+        rows = db.execute(
+            query.format(profile_clause=" AND profile = ?"), (cutoff, profile)
+        ).fetchall()
+    else:
+        rows = db.execute(query.format(profile_clause=""), (cutoff,)).fetchall()
+
+    arrived = sum(int(r["arrived"]) for r in rows)
+    delivered = sum(int(r["delivered"]) for r in rows)
+    by_saving = sorted(rows, key=lambda r: int(r["arrived"]) - int(r["delivered"]), reverse=True)
+    return {
+        "calls_measured": sum(int(r["cnt"]) for r in rows),
+        "bytes_arrived": arrived,
+        "bytes_delivered": delivered,
+        "savings_percent": round((1 - delivered / arrived) * 100) if arrived > 0 else 0,
+        "estimated_tokens_saved": (arrived - delivered) // 4,
+        "top_tools": [
+            {
+                "backend": r["backend"],
+                "tool": r["tool"],
+                "calls": int(r["cnt"]),
+                "bytes_arrived": int(r["arrived"]),
+                "bytes_delivered": int(r["delivered"]),
+            }
+            for r in by_saving[:10]
+        ],
     }
 
 

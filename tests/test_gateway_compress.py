@@ -31,6 +31,9 @@ def _tool(name: str, description: str, schema: dict | None = None) -> dict[str, 
     }
 
 
+SUMMARIZE = {"processors": ["summarize"]}
+
+
 class TestCompressTools:
     """Sync cache-lookup tests for compress_tools()."""
 
@@ -277,7 +280,12 @@ class TestMaybeTriggerCompression:
         profile = Profile(
             name="test",
             auth=auth,
-            backends={"b": Backend(url="http://x:8000/mcp", compress_descriptions=True)},
+            backends={
+                "b": Backend(
+                    url="http://x:8000/mcp",
+                    preprocess_tool_descriptions={"processors": ["summarize"]},
+                )
+            },
         )
         set_profiles({"test": profile})
 
@@ -311,7 +319,12 @@ class TestMaybeTriggerCompression:
         profile = Profile(
             name="test",
             auth=auth,
-            backends={"b": Backend(url="http://x:8000/mcp", compress_descriptions=True)},
+            backends={
+                "b": Backend(
+                    url="http://x:8000/mcp",
+                    preprocess_tool_descriptions={"processors": ["summarize"]},
+                )
+            },
         )
         set_profiles({"test": profile})
 
@@ -498,7 +511,12 @@ class TestParameterDescriptions:
         profile = Profile(
             name="p",
             auth=AuthConfig(bearer_token_env="T"),
-            backends={"b": Backend(url="http://x:8000/mcp", compress_descriptions=True)},
+            backends={
+                "b": Backend(
+                    url="http://x:8000/mcp",
+                    preprocess_tool_descriptions={"processors": ["summarize"]},
+                )
+            },
         )
         rebuilt = MagicMock()
         saved = compress_mod._on_compressed
@@ -521,27 +539,14 @@ class TestParameterDescriptions:
 class TestPreprocessToolDescriptions:
     """#176: compression is the summarize pre-processor on its own channel."""
 
-    def test_the_old_key_is_read_as_summarize(self) -> None:
-        from mcp_trentina_crunchtools.gateway.profile import Backend
-
-        backend = Backend(url="http://x:8000/mcp", compress_descriptions=True)
-        assert backend.preprocess_tool_descriptions.processors == ["summarize"]
-        assert backend.compresses_descriptions
-        assert not Backend(
-            url="http://x:8000/mcp", compress_descriptions=False
-        ).compresses_descriptions
-
-    def test_both_keys_do_not_load(self) -> None:
+    def test_the_old_key_does_not_load(self) -> None:
+        """Removed in 0.40.0; extra="forbid" makes it a load error, not a no-op."""
         from pydantic import ValidationError
 
         from mcp_trentina_crunchtools.gateway.profile import Backend
 
-        with pytest.raises(ValidationError, match="not both"):
-            Backend(
-                url="http://x:8000/mcp",
-                compress_descriptions=True,
-                preprocess_tool_descriptions={"processors": ["summarize"]},
-            )
+        with pytest.raises(ValidationError, match="compress_descriptions"):
+            Backend(url="http://x:8000/mcp", compress_descriptions=True)
 
     def test_only_summarize_runs_on_the_description_channel(self) -> None:
         from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
