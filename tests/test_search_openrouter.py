@@ -155,6 +155,20 @@ def test_a_malformed_citation_is_skipped() -> None:
     assert _citation_sources(message) == []
 
 
+def test_annotations_that_are_not_a_list_yield_nothing() -> None:
+    assert _citation_sources({"annotations": 7}) == []
+
+
+def test_a_non_string_title_keeps_the_url() -> None:
+    message = {
+        "annotations": [
+            {"type": "url_citation", "url_citation": {"url": "https://ok.example/", "title": 3}}
+        ]
+    }
+
+    assert _citation_sources(message) == [{"uri": "https://ok.example/", "title": ""}]
+
+
 def test_citations_become_sources_once_each() -> None:
     message = _openrouter_reply()["choices"][0]["message"]
 

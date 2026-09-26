@@ -794,7 +794,8 @@ def _citation_sources(message: dict[str, Any]) -> list[dict[str, str]]:
     """
     sources: list[dict[str, str]] = []
     seen: set[str] = set()
-    for note in message.get("annotations") or []:
+    notes = message.get("annotations")
+    for note in notes if isinstance(notes, list) else []:
         if not isinstance(note, dict) or note.get("type") != "url_citation":
             continue
         cite = note.get("url_citation")
