@@ -270,17 +270,15 @@ class UnauthenticatedWriteGuard:
                 address = client_address(scope)
                 logger.warning(
                     "ratelimit: refused oversized %s body from %s (cap %d bytes)",
-                    self._limiter.name,
-                    address,
-                    self._max_body_bytes,
+                    self._limiter.name, address, self._max_body_bytes,
                 )
                 await _send_json(
-                    send,
-                    STATUS_TOO_LARGE,
+                    send, STATUS_TOO_LARGE,
                     {
                         "error": "invalid_client_metadata",
                         "error_description": (
-                            f"Registration request body exceeds {self._max_body_bytes} bytes."
+                            "Registration request body exceeds "
+                            f"{self._max_body_bytes} bytes."
                         ),
                     },
                 )
@@ -293,12 +291,10 @@ class UnauthenticatedWriteGuard:
                 "ratelimit: refused %s from %s — bucket empty; if this is a "
                 "shared address or your reverse proxy, see "
                 "TRENTINA_FORWARDED_ALLOW_IPS and TRENTINA_RATE_LIMIT",
-                self._limiter.name,
-                address,
+                self._limiter.name, address,
             )
             await _send_text(
-                send,
-                STATUS_TOO_MANY,
+                send, STATUS_TOO_MANY,
                 "Too Many Requests: slow down and retry shortly.\n",
                 headers=[(b"retry-after", b"60")],
             )
@@ -306,7 +302,9 @@ class UnauthenticatedWriteGuard:
 
         await self._inner(scope, receive, send)
 
-    async def _read_capped(self, scope: Any, receive: Any) -> tuple[bytes, bool]:
+    async def _read_capped(
+        self, scope: Any, receive: Any
+    ) -> tuple[bytes, bool]:
         """Drain the request body, stopping one byte past the cap.
 
         A declared ``content-length`` is checked first so an oversized body is
@@ -345,30 +343,26 @@ async def _send_text(
     send: Any, status: int, text: str, *, headers: list[tuple[bytes, bytes]] | None = None
 ) -> None:
     body = text.encode()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": status,
-            "headers": [
-                (b"content-type", b"text/plain; charset=utf-8"),
-                (b"content-length", str(len(body)).encode()),
-                *(headers or []),
-            ],
-        }
-    )
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": [
+            (b"content-type", b"text/plain; charset=utf-8"),
+            (b"content-length", str(len(body)).encode()),
+            *(headers or []),
+        ],
+    })
     await send({"type": "http.response.body", "body": body})
 
 
 async def _send_json(send: Any, status: int, document: dict[str, Any]) -> None:
     body = json.dumps(document).encode()
-    await send(
-        {
-            "type": "http.response.start",
-            "status": status,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(body)).encode()),
-            ],
-        }
-    )
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+        ],
+    })
     await send({"type": "http.response.body", "body": body})

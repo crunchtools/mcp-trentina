@@ -237,7 +237,9 @@ class TestStartupLogsCarryNoSecrets:
     def _secrets(self) -> list[str]:
         return [self.UPSTREAM_SECRET, self.SIGNING_KEY, self.BEARER]
 
-    def test_proxy_startup_logs_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_proxy_startup_logs_no_secret(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         profile = _proxy_profile()
         profile.auth.bearer_token = SecretStr(self.BEARER)
         with caplog.at_level("DEBUG"):
@@ -247,7 +249,9 @@ class TestStartupLogsCarryNoSecrets:
         for secret in self._secrets():
             assert secret not in caplog.text
 
-    def test_delegated_startup_logs_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_delegated_startup_logs_no_secret(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         profile = _delegated_profile()
         profile.auth.bearer_token = SecretStr(self.BEARER)
         with caplog.at_level("DEBUG"):
@@ -255,7 +259,9 @@ class TestStartupLogsCarryNoSecrets:
         for secret in self._secrets():
             assert secret not in caplog.text
 
-    def test_mixed_startup_logs_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_mixed_startup_logs_no_secret(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Exercises the multi-proxy warning and the operator-role warning too."""
         proxy_a = _proxy_profile("agent2")
         proxy_b = _proxy_profile("agent1")
@@ -297,9 +303,13 @@ class TestStartupLogsCarryNoSecrets:
         for secret in self._secrets():
             assert secret not in caplog.text
 
-    def test_the_guard_would_catch_a_real_leak(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_the_guard_would_catch_a_real_leak(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """A canary: the assertion above only means something if caplog is
         actually capturing this logger."""
         with caplog.at_level("DEBUG"):
-            logging.getLogger("mcp_trentina_crunchtools").info("canary %s", self.UPSTREAM_SECRET)
+            logging.getLogger("mcp_trentina_crunchtools").info(
+                "canary %s", self.UPSTREAM_SECRET
+            )
         assert self.UPSTREAM_SECRET in caplog.text

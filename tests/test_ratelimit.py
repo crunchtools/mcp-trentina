@@ -40,13 +40,11 @@ class _Recorder:
             if not message.get("more_body"):
                 break
         self.bodies.append(b"".join(chunks))
-        await send(
-            {
-                "type": "http.response.start",
-                "status": 200,
-                "headers": [(b"content-type", b"application/json")],
-            }
-        )
+        await send({
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"application/json")],
+        })
         await send({"type": "http.response.body", "body": b"{}"})
 
 
@@ -147,8 +145,7 @@ class TestGuardRateLimiting:
     async def test_guard_refuses_with_429_and_retry_after(self) -> None:
         inner = _Recorder()
         guard = UnauthenticatedWriteGuard(
-            inner,
-            limiter=RateLimiter(1, 1, name="/register"),
+            inner, limiter=RateLimiter(1, 1, name="/register"),
         )
 
         status, _, _ = await _drive(guard, _scope())
@@ -164,8 +161,7 @@ class TestGuardRateLimiting:
     async def test_guard_limits_per_address(self) -> None:
         inner = _Recorder()
         guard = UnauthenticatedWriteGuard(
-            inner,
-            limiter=RateLimiter(1, 1, name="/register"),
+            inner, limiter=RateLimiter(1, 1, name="/register"),
         )
         assert (await _drive(guard, _scope(address="198.51.100.1")))[0] == 200
         assert (await _drive(guard, _scope(address="198.51.100.1")))[0] == 429
@@ -176,8 +172,7 @@ class TestGuardRateLimiting:
         break the browser flow the real request depends on."""
         inner = _Recorder()
         guard = UnauthenticatedWriteGuard(
-            inner,
-            limiter=RateLimiter(1, 1, name="/register"),
+            inner, limiter=RateLimiter(1, 1, name="/register"),
         )
         for _ in range(20):
             status, _, _ = await _drive(guard, _scope(method="OPTIONS"))
@@ -251,9 +246,7 @@ class TestGuardBodyCap:
         what happened."""
         limiter = RateLimiter(1, 1, name="/register")
         guard = UnauthenticatedWriteGuard(
-            _Recorder(),
-            limiter=limiter,
-            max_body_bytes=8,
+            _Recorder(), limiter=limiter, max_body_bytes=8,
         )
 
         assert (await _drive(guard, _scope(), body=b"z" * 100))[0] == 413
@@ -261,7 +254,9 @@ class TestGuardBodyCap:
 
 
 class TestConfiguration:
-    def test_rate_limiting_is_on_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_rate_limiting_is_on_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("TRENTINA_RATE_LIMIT", raising=False)
         assert enabled() is True
 
@@ -274,7 +269,9 @@ class TestConfiguration:
         monkeypatch.setenv("TRENTINA_RATE_LIMIT", value)
         assert enabled() is False
 
-    def test_registration_cap_defaults_and_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_registration_cap_defaults_and_overrides(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("TRENTINA_MAX_REGISTRATION_BYTES", raising=False)
         assert max_registration_bytes() == 8192
         monkeypatch.setenv("TRENTINA_MAX_REGISTRATION_BYTES", "1024")
@@ -301,7 +298,9 @@ class TestConfiguration:
         assert client_address({"type": "http"}) == "unknown"
         assert client_address({"type": "http", "client": None}) == "unknown"
 
-    def test_startup_line_names_the_trust_boundary(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_startup_line_names_the_trust_boundary(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The one question after a refused login is 'what address is this
         keyed on'. That answer has to be in the journal before anyone asks."""
         monkeypatch.delenv("TRENTINA_RATE_LIMIT", raising=False)
@@ -310,7 +309,9 @@ class TestConfiguration:
         assert "10.88.0.1" in line
         assert "ONE bucket" in line
 
-    def test_startup_line_says_so_when_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_startup_line_says_so_when_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv("TRENTINA_RATE_LIMIT", "off")
         assert "DISABLED" in describe_limits()
 
@@ -348,7 +349,9 @@ class TestRouteWiring:
         monkeypatch.delenv("TRENTINA_RATE_LIMIT", raising=False)
         assert "UnauthenticatedWriteGuard" in self._layers(path)
 
-    def test_the_token_endpoint_is_not_limited(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_the_token_endpoint_is_not_limited(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """`/token` is reached with a code or refresh token this gateway
         itself issued, so it is not an unauthenticated write path — limiting
         it would throttle a legitimate client's refresh for no gain."""
@@ -379,7 +382,9 @@ class TestRouteWiring:
         limiter is not a consent page and has nothing to patch."""
         monkeypatch.delenv("TRENTINA_RATE_LIMIT", raising=False)
         layers = self._layers("/consent", methods=["GET", "POST"])
-        assert layers.index("UnauthenticatedWriteGuard") < layers.index("ConsentUsability")
+        assert layers.index("UnauthenticatedWriteGuard") < layers.index(
+            "ConsentUsability"
+        )
 
     def test_the_route_keeps_its_path_and_methods(self) -> None:
         """Rebuilding a Route is how the wrapper is attached; dropping a method

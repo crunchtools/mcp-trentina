@@ -77,7 +77,9 @@ async def run_l1(
             extractor.name,
             ctx.path or ctx.source,
         )
-        return read_everything(payload, extractor=extractor.name, why=extractor.name)
+        return read_everything(
+            payload, extractor=extractor.name, why=extractor.name
+        )
 
 
 def describe(view: Selection, cfg: MatrixPreProcessConfig) -> dict[str, Any]:

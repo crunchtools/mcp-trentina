@@ -163,7 +163,9 @@ class GoogleTokeninfoVerifier:
         form = {"access_token": token}
         try:
             if client is None:
-                async with httpx2.AsyncClient(timeout=VERIFY_TIMEOUT_SECONDS) as fresh:
+                async with httpx2.AsyncClient(
+                    timeout=VERIFY_TIMEOUT_SECONDS
+                ) as fresh:
                     response = await fresh.post(TOKENINFO_URL, data=form)
             else:
                 response = await client.post(TOKENINFO_URL, data=form)
@@ -206,9 +208,7 @@ class GoogleTokeninfoVerifier:
                 logger.warning(
                     "gateway: could not verify token with Google for "
                     "profile=%s (token sha256=%s…): %s",
-                    self.profile_name,
-                    digest[:8],
-                    exc,
+                    self.profile_name, digest[:8], exc,
                 )
                 return None
 
@@ -244,10 +244,7 @@ class GoogleTokeninfoVerifier:
         logger.info(
             "gateway: delegated token refused profile=%s expected_aud=%s "
             "token sha256=%s… reason=%s",
-            self.profile_name,
-            self.audience,
-            digest[:8],
-            reason,
+            self.profile_name, self.audience, digest[:8], reason,
         )
 
     def _reject_reason(self, tokeninfo: dict[str, Any]) -> str | None:

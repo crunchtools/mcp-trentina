@@ -163,7 +163,9 @@ async def reconnect_backend(backend: str) -> dict[str, Any]:
             "backend": backend,
             "reconnected": False,
             "error": "backend not found in any profile",
-            "available": sorted(name for p in profiles.values() for name in p.backends),
+            "available": sorted(
+                name for p in profiles.values() for name in p.backends
+            ),
         }
 
     results = []
@@ -180,3 +182,4 @@ async def reconnect_backend(backend: str) -> dict[str, Any]:
         "reconnected": all(r["reconnected"] for r in results),
         "targets": results,
     }
+

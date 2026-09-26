@@ -39,7 +39,10 @@ def _backend(
 # types means a future rename fails here instead of in production.
 def _tools_result(names: list[str] | None = None) -> ListToolsResult:
     return ListToolsResult(
-        tools=[Tool(name=n, description="", input_schema={}) for n in (names or ["some_tool"])]
+        tools=[
+            Tool(name=n, description="", input_schema={})
+            for n in (names or ["some_tool"])
+        ]
     )
 
 
@@ -282,7 +285,6 @@ class TestBackendToolListCache:
         Behavior change: serving the last-known-good list through an outage is
         the whole point — a backend blip must not collapse the tool list.
         """
-
         async def ok_transport(_url: str, _headers: Any) -> ListToolsResult:
             return _tools_result()
 
@@ -312,7 +314,6 @@ class TestBackendToolListCache:
 
     async def test_call_failure_does_not_evict_list_cache(self) -> None:
         """A failed tool call must not evict the cached tool list."""
-
         async def ok_list(_url: str, _headers: Any) -> ListToolsResult:
             return _tools_result()
 
@@ -363,7 +364,8 @@ class TestBackendToolListCache:
             side_effect=slow_transport,
         ):
             tasks = [
-                asyncio.ensure_future(list_backend_tools("rotv", _backend())) for _ in range(5)
+                asyncio.ensure_future(list_backend_tools("rotv", _backend()))
+                for _ in range(5)
             ]
             await asyncio.sleep(0)
             release.set()
