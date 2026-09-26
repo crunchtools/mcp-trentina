@@ -24,6 +24,13 @@ under that name.
   finds each provider's ceiling instead of being configured with one.
   `TRENTINA_L3_CONCURRENCY_START` (4) and `TRENTINA_L3_CONCURRENCY_MAX` (64)
   bound it. L2 scans are capped by `TRENTINA_L2_CONCURRENCY` (2).
+- **OpenRouter as an L3 provider.** `defense.provider: openrouter` with
+  `llm_keys.openrouter`, or `OPENROUTER_API_KEY` standalone. The model is
+  OpenRouter's id (`google/gemini-2.5-flash-lite` by default). Every request
+  asks OpenRouter for a host that honours `response_format` and does not
+  retain or train on the payload (`require_parameters`, `data_collection:
+  deny`); a model with no such host fails with a 404 rather than routing
+  somewhere that would.
 
 ### Fixed
 L1 detection gaps, found by adversarial testing (#179, three reported and

@@ -12,6 +12,9 @@ uv run mcp-trentina-crunchtools
 ## Environment Variables
 
 - `GEMINI_API_KEY` — Required for Layer 2 (Q-Agent)
+- `OPENROUTER_API_KEY` — standalone key for `TRENTINA_MODEL_PROVIDER=openrouter`;
+  a gateway profile uses `llm_keys.openrouter`. Model ids are OpenRouter's
+  (`google/gemini-2.5-flash-lite`).
 - `QUARANTINE_MODEL` — Gemini model for Q-Agent (default: gemini-2.5-flash-lite)
 - `QUARANTINE_SEARCH_MODEL` — Gemini model for L0 search grounding (default: gemini-2.5-flash; must support google_search)
 - `TRENTINA_REQUIRE_L2` / `TRENTINA_REQUIRE_L3` — default true: block and redact

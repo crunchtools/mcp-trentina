@@ -1,4 +1,4 @@
-"""OpenAI provider — also covers Azure OpenAI via base_url override."""
+"""OpenAI provider — also covers Azure OpenAI and OpenRouter via base_url override."""
 
 from __future__ import annotations
 
@@ -13,6 +13,13 @@ from .base import Provider, ProviderResult, status_error
 OPENAI_API_BASE = "https://api.openai.com/v1"
 OPENAI_TIMEOUT = 60.0
 DEFAULT_MODEL = "gpt-4o-mini"
+OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
+
+#: OpenRouter's per-request host selection. ``require_parameters`` keeps a
+#: request off any host that would ignore ``response_format`` and answer in
+#: free text; ``data_collection: deny`` keeps judged payloads — which include
+#: a tenant's own mail and documents — off hosts that retain or train on them.
+OPENROUTER_ROUTING: dict[str, Any] = {"require_parameters": True, "data_collection": "deny"}
 
 
 _UNSUPPORTED_KEYS = {"maxLength", "minLength", "minimum", "maximum", "multipleOf"}
@@ -47,10 +54,12 @@ class OpenAIProvider(Provider):
         api_key: str,
         model: str = DEFAULT_MODEL,
         base_url: str = OPENAI_API_BASE,
+        routing: dict[str, Any] | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._base_url = base_url.rstrip("/")
+        self._routing = routing
 
     async def generate(
         self,
@@ -71,6 +80,8 @@ class OpenAIProvider(Provider):
             "temperature": temperature,
             "max_tokens": max_output_tokens,
         }
+        if self._routing is not None:
+            request_body["provider"] = self._routing
 
         if response_schema is not None:
             schema_copy = _add_additional_properties(response_schema)

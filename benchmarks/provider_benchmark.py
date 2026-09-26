@@ -37,7 +37,7 @@ import os
 import statistics
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -65,6 +65,7 @@ PROVIDER_ENV_KEY: dict[str, str | None] = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "ollama": None,
+    "openrouter": "OPENROUTER_API_KEY",
 }
 
 _DETECTION_FAILED_PREFIX = "Q-Agent detection failed"
@@ -83,13 +84,11 @@ def resolved_model(provider: str) -> str:
     if provider == "openai":
         return config.model if config.model != default_gemini else "gpt-4o-mini"
     if provider == "anthropic":
-        return (
-            config.model
-            if config.model != default_gemini
-            else "claude-haiku-4-5-20251001"
-        )
+        return config.model if config.model != default_gemini else "claude-haiku-4-5-20251001"
     if provider == "ollama":
         return config.ollama_model
+    if provider == "openrouter":
+        return config.model if config.model != default_gemini else f"google/{default_gemini}"
     return "unknown"
 
 
@@ -213,23 +212,28 @@ class ProviderReport:
 
 def _cost(provider: str, input_tokens: int, output_tokens: int) -> float:
     in_price, out_price = PRICING.get(provider, (0.0, 0.0))
-    return (
-        (input_tokens / TOKENS_PER_MILLION) * in_price
-        + (output_tokens / TOKENS_PER_MILLION) * out_price
-    )
+    return (input_tokens / TOKENS_PER_MILLION) * in_price + (
+        output_tokens / TOKENS_PER_MILLION
+    ) * out_price
 
 
 RETRY_BASE_DELAY = 1.0
 RETRY_MAX_DELAY = 15.0
 RETRYABLE_MARKERS = (
-    "503", "429", "500", "502", "504", "overload",
-    "timed out", "timeout", "unavailable", "connect",
+    "503",
+    "429",
+    "500",
+    "502",
+    "504",
+    "overload",
+    "timed out",
+    "timeout",
+    "unavailable",
+    "connect",
 )
 
 
-async def _run_case(
-    provider: str, case: Case, delay: float, retries: int
-) -> CaseResult:
+async def _run_case(provider: str, case: Case, delay: float, retries: int) -> CaseResult:
     """Run a single case through one provider, timing and pricing the call.
 
     Transient failures (503/429/timeouts/connection errors) are retried up to
@@ -303,8 +307,7 @@ async def run_provider(
         res = await coro
         mark = "ERR" if res.error else ("HIT" if res.detected else "   ")
         print(
-            f"  [{provider}] {done}/{len(cases)} {mark} {res.id} "
-            f"({res.latency_ms:.0f}ms)",
+            f"  [{provider}] {done}/{len(cases)} {mark} {res.id} ({res.latency_ms:.0f}ms)",
             file=sys.stderr,
         )
         report.results.append(res)
@@ -381,22 +384,30 @@ def render_markdown(reports: list[ProviderReport], meta: dict) -> str:
     out = [
         "# Q-Agent provider benchmark",
         "",
-        "Detection = share of attacks flagged. FP = share of benign content "
-        "wrongly flagged. Risk-cal = share of caught attacks that met the "
-        "expected minimum severity. Cost is an estimate from the harness "
-        "PRICING table.",
+        (
+            "Detection = share of attacks flagged. FP = share of benign content "
+            "wrongly flagged. Risk-cal = share of caught attacks that met the "
+            "expected minimum severity. Cost is an estimate from the harness "
+            "PRICING table."
+        ),
         "",
         f"- Generated: {meta['timestamp']}",
-        f"- Corpus: {meta['n_attacks']} attacks + {meta['n_benign']} benign "
-        f"= {meta['n_total']} cases across {meta['n_categories']} categories",
+        (
+            f"- Corpus: {meta['n_attacks']} attacks + {meta['n_benign']} benign "
+            f"= {meta['n_total']} cases across {meta['n_categories']} categories"
+        ),
         f"- Providers: {', '.join(r.provider for r in reports)}",
         "",
         "## Summary",
         "",
-        "| Provider | Model | Detection | FP rate | Risk-cal | "
-        "Median latency | $/1k calls | Errors |",
-        "|----------|-------|-----------|---------|----------|"
-        "----------------|------------|--------|",
+        (
+            "| Provider | Model | Detection | FP rate | Risk-cal | "
+            "Median latency | $/1k calls | Errors |"
+        ),
+        (
+            "|----------|-------|-----------|---------|----------|"
+            "----------------|------------|--------|"
+        ),
     ]
     for r in reports:
         out.append(
@@ -407,18 +418,22 @@ def render_markdown(reports: list[ProviderReport], meta: dict) -> str:
         )
     out.append("")
 
-    out.append(_category_table(
-        "Detection by attack category",
-        reports,
-        attack_cats,
-        {r.provider: r.detection_by_category() for r in reports},
-    ))
-    out.append(_category_table(
-        "False positives by benign category",
-        reports,
-        benign_cats,
-        {r.provider: r.fp_by_category() for r in reports},
-    ))
+    out.append(
+        _category_table(
+            "Detection by attack category",
+            reports,
+            attack_cats,
+            {r.provider: r.detection_by_category() for r in reports},
+        )
+    )
+    out.append(
+        _category_table(
+            "False positives by benign category",
+            reports,
+            benign_cats,
+            {r.provider: r.fp_by_category() for r in reports},
+        )
+    )
 
     by_id: dict[str, list[CaseResult]] = {}
     for r in reports:
@@ -451,7 +466,7 @@ def build_meta(providers: list[str]) -> dict:
     attacks = [c for c in CORPUS if c.expect_injection]
     benign = [c for c in CORPUS if not c.expect_injection]
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
         "n_total": len(CORPUS),
         "n_attacks": len(attacks),
         "n_benign": len(benign),
@@ -473,12 +488,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Comma-separated category filter (e.g. detector_meta,exfil_action).",
     )
     p.add_argument("--limit", type=int, help="Run only the first N cases (smoke test).")
-    p.add_argument(
-        "--concurrency", type=int, default=4, help="Max concurrent calls per provider."
-    )
-    p.add_argument(
-        "--delay", type=float, default=0.0, help="Seconds to sleep after each call."
-    )
+    p.add_argument("--concurrency", type=int, default=4, help="Max concurrent calls per provider.")
+    p.add_argument("--delay", type=float, default=0.0, help="Seconds to sleep after each call.")
     p.add_argument(
         "--retries",
         type=int,
@@ -510,9 +521,7 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
 
 
 async def main_async(args: argparse.Namespace) -> int:
-    requested = (
-        [p.strip() for p in args.providers.split(",")] if args.providers else None
-    )
+    requested = [p.strip() for p in args.providers.split(",")] if args.providers else None
     providers = available_providers(requested)
     cases = select_cases(args)
 
@@ -539,9 +548,7 @@ async def main_async(args: argparse.Namespace) -> int:
     for provider in providers:
         print(f"Running {len(cases)} cases against {provider}…", file=sys.stderr)
         reports.append(
-            await run_provider(
-                provider, cases, args.concurrency, args.delay, args.retries
-            )
+            await run_provider(provider, cases, args.concurrency, args.delay, args.retries)
         )
 
     meta = build_meta(providers)

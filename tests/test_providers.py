@@ -7,13 +7,18 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from mcp_trentina_crunchtools.errors import QuarantineAgentError
 from mcp_trentina_crunchtools.quarantine.providers import get_provider, reset_provider
 from mcp_trentina_crunchtools.quarantine.providers.anthropic import AnthropicProvider
 from mcp_trentina_crunchtools.quarantine.providers.gemini import GeminiProvider
 from mcp_trentina_crunchtools.quarantine.providers.ollama import OllamaProvider
-from mcp_trentina_crunchtools.quarantine.providers.openai import OpenAIProvider
+from mcp_trentina_crunchtools.quarantine.providers.openai import (
+    OPENROUTER_API_BASE,
+    OPENROUTER_ROUTING,
+    OpenAIProvider,
+)
 
 
 def _gemini_response(text: str) -> httpx.Response:
@@ -70,7 +75,6 @@ SAMPLE_SCHEMA: dict[str, Any] = {
 
 @pytest.mark.asyncio
 class TestGeminiProvider:
-
     async def test_generate_returns_text(self) -> None:
         provider = GeminiProvider(api_key="test-key", model="gemini-2.5-flash-lite")
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
@@ -95,9 +99,7 @@ class TestGeminiProvider:
         url = mock_post.call_args.args[0]
         assert "super-secret-key" not in url
         assert "key=" not in url
-        assert mock_post.call_args.kwargs["headers"]["x-goog-api-key"] == (
-            "super-secret-key"
-        )
+        assert mock_post.call_args.kwargs["headers"]["x-goog-api-key"] == ("super-secret-key")
 
     async def test_generate_with_schema(self) -> None:
         provider = GeminiProvider(api_key="test-key", model="test")
@@ -129,7 +131,6 @@ class TestGeminiProvider:
 
 @pytest.mark.asyncio
 class TestOpenAIProvider:
-
     async def test_generate_returns_text(self) -> None:
         provider = OpenAIProvider(api_key="sk-test")
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
@@ -154,10 +155,37 @@ class TestOpenAIProvider:
             headers = mock_post.call_args.kwargs["headers"]
             assert headers["Authorization"] == "Bearer sk-test"
 
+    async def test_plain_openai_sends_no_routing(self) -> None:
+        provider = OpenAIProvider(api_key="sk-test")
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = _openai_response("{}")
+            await provider.generate("sys", "user")
+        assert "provider" not in mock_post.call_args.kwargs["json"]
+
+
+@pytest.mark.asyncio
+class TestOpenRouterProvider:
+    """OpenRouter is the OpenAI driver pointed at OpenRouter, with host routing."""
+
+    async def test_posts_to_openrouter_with_routing(self) -> None:
+        provider = OpenAIProvider(
+            api_key="sk-or-test",
+            model="google/gemini-2.5-flash-lite",
+            base_url=OPENROUTER_API_BASE,
+            routing=OPENROUTER_ROUTING,
+        )
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = _openai_response('{"answer":"hi"}')
+            await provider.generate("sys", "user", response_schema=SAMPLE_SCHEMA)
+        assert mock_post.call_args.args[0] == f"{OPENROUTER_API_BASE}/chat/completions"
+        body = mock_post.call_args.kwargs["json"]
+        # A host that would ignore response_format, or keep the payload, is not eligible.
+        assert body["provider"] == {"require_parameters": True, "data_collection": "deny"}
+        assert body["response_format"]["type"] == "json_schema"
+
 
 @pytest.mark.asyncio
 class TestAnthropicProvider:
-
     async def test_generate_returns_text(self) -> None:
         provider = AnthropicProvider(api_key="sk-ant-test")
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
@@ -188,7 +216,6 @@ class TestAnthropicProvider:
 
 @pytest.mark.asyncio
 class TestOllamaProvider:
-
     async def test_generate_returns_text(self) -> None:
         provider = OllamaProvider(model="qwen2.5:0.5b")
         with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
@@ -214,7 +241,6 @@ class TestOllamaProvider:
 
 
 class TestGetProviderFactory:
-
     def setup_method(self) -> None:
         reset_provider()
 
@@ -225,6 +251,7 @@ class TestGetProviderFactory:
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.delenv("TRENTINA_MODEL_PROVIDER", raising=False)
         from mcp_trentina_crunchtools import config as config_mod
+
         config_mod._config = None
         provider = get_provider()
         assert isinstance(provider, GeminiProvider)
@@ -234,14 +261,53 @@ class TestGetProviderFactory:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openai")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         from mcp_trentina_crunchtools import config as config_mod
+
         config_mod._config = None
         provider = get_provider()
         assert isinstance(provider, OpenAIProvider)
         config_mod._config = None
 
+    def test_openrouter_provider(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openrouter")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+        monkeypatch.delenv("QUARANTINE_MODEL", raising=False)
+        from mcp_trentina_crunchtools import config as config_mod
+
+        config_mod._config = None
+        provider = get_provider()
+        assert isinstance(provider, OpenAIProvider)
+        # The default model, spelled the way OpenRouter names it.
+        assert provider.judge == ("openrouter", "google/gemini-2.5-flash-lite")
+        config_mod._config = None
+
+    def test_openrouter_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openrouter")
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        from mcp_trentina_crunchtools import config as config_mod
+
+        config_mod._config = None
+        with pytest.raises(QuarantineAgentError, match="OPENROUTER_API_KEY"):
+            get_provider()
+        config_mod._config = None
+
+    async def test_openrouter_profile_key_needs_no_global(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        from mcp_trentina_crunchtools import config as config_mod
+
+        config_mod._config = None
+        provider = get_provider("openrouter", api_key=SecretStr("sk-or-profile"))
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = _openai_response("{}")
+            await provider.generate("sys", "user")
+        assert mock_post.call_args.kwargs["headers"]["Authorization"] == "Bearer sk-or-profile"
+        config_mod._config = None
+
     def test_unknown_provider_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "unknown")
         from mcp_trentina_crunchtools import config as config_mod
+
         config_mod._config = None
         with pytest.raises(QuarantineAgentError, match="Unknown provider"):
             get_provider()
@@ -251,18 +317,21 @@ class TestGetProviderFactory:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openai")
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         from mcp_trentina_crunchtools import config as config_mod
+
         config_mod._config = None
         with pytest.raises(QuarantineAgentError, match="OPENAI_API_KEY"):
             get_provider()
         config_mod._config = None
 
     def test_explicit_provider_name_overrides_global(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "gemini")
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         from mcp_trentina_crunchtools import config as config_mod
+
         config_mod._config = None
         default_provider = get_provider()
         assert isinstance(default_provider, GeminiProvider)
@@ -274,6 +343,7 @@ class TestGetProviderFactory:
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         from mcp_trentina_crunchtools import config as config_mod
+
         config_mod._config = None
         p1 = get_provider("gemini")
         p2 = get_provider("gemini")
@@ -287,6 +357,7 @@ class TestGetProviderFactory:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "gemini")
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         from mcp_trentina_crunchtools import config as config_mod
+
         config_mod._config = None
         p = get_provider(None)
         assert isinstance(p, GeminiProvider)
