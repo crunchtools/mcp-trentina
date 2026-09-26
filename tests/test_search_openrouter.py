@@ -7,6 +7,7 @@ no tools), the route choice, and the citation parsing.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -77,16 +78,30 @@ def _openrouter_reply(text: str = "RHEL 10 ships bootc.") -> dict[str, Any]:
     }
 
 
-def _http(reply: dict[str, Any], size: int = 100) -> tuple[MagicMock, AsyncMock]:
+def _http(
+    reply: dict[str, Any] | None = None,
+    *,
+    body: bytes | None = None,
+    raises: Exception | None = None,
+) -> tuple[MagicMock, MagicMock]:
+    """A mocked AsyncClient whose ``stream()`` yields *reply* as JSON bytes."""
+    payload = body if body is not None else json.dumps(reply).encode()
+
+    async def chunks() -> Any:
+        for i in range(0, len(payload), 65536):
+            yield payload[i : i + 65536]
+
     resp = MagicMock()
-    resp.content = b"x" * size
-    resp.json.return_value = reply
-    http = AsyncMock()
-    http.post.return_value = resp
+    resp.aiter_bytes = chunks
+    stream_cm = MagicMock()
+    stream_cm.__aenter__ = AsyncMock(return_value=resp)
+    stream_cm.__aexit__ = AsyncMock(return_value=False)
+    http = MagicMock()
+    http.stream = MagicMock(return_value=stream_cm, side_effect=raises)
+    http.post = AsyncMock()  # the Gemini route
     http.__aenter__ = AsyncMock(return_value=http)
     http.__aexit__ = AsyncMock(return_value=False)
-    cls = MagicMock(return_value=http)
-    return cls, http
+    return MagicMock(return_value=http), http
 
 
 class TestRequestShape:
@@ -160,9 +175,10 @@ class TestRoute:
         ):
             result = await search_grounded("bootc", 3)
 
-        url = http.post.call_args.args[0]
+        method, url = http.stream.call_args.args
+        assert method == "POST"
         assert url.startswith("https://openrouter.ai/")
-        assert http.post.call_args.kwargs["headers"]["Authorization"] == "Bearer p-key"
+        assert http.stream.call_args.kwargs["headers"]["Authorization"] == "Bearer p-key"
         assert result["sources"][0]["uri"] == "https://docs.redhat.com/a"
         assert result["usage"] == {"input_tokens": 11, "output_tokens": 7}
 
@@ -175,7 +191,8 @@ class TestRoute:
         ):
             await search_grounded("bootc")
 
-        assert "googleapis" not in http.post.call_args.args[0]
+        assert "googleapis" not in http.stream.call_args.args[1]
+        http.post.assert_not_called()
 
     async def test_a_bound_profile_never_borrows_the_global_key(self) -> None:
         """No OpenRouter key on the profile: refuse, even with global keys set."""
@@ -205,8 +222,7 @@ class TestRoute:
     async def test_transport_failures_become_agent_errors(
         self, raised: Exception, message: str
     ) -> None:
-        cls, http = _http(_openrouter_reply())
-        http.post.side_effect = raised
+        cls, _ = _http(raises=raised)
         with (
             patch(f"{_AGENT}.get_config", return_value=_cfg(openrouter="k")),
             patch(f"{_AGENT}.get_current_profile", return_value=None),
@@ -241,7 +257,10 @@ class TestRoute:
     async def test_the_gemini_route_only_sends_a_gemini_model(self) -> None:
         cfg = _cfg(gemini="g")
         cfg.search_model = "openai/gpt-6-luna"
-        cls, http = _http({"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+        cls, http = _http()
+        gemini_resp = MagicMock()
+        gemini_resp.json.return_value = {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+        http.post.return_value = gemini_resp
         with (
             patch(f"{_AGENT}.get_config", return_value=cfg),
             patch(f"{_AGENT}.get_current_profile", return_value=None),
@@ -253,12 +272,24 @@ class TestRoute:
         assert "/gemini-2.5-flash:generateContent" in url
 
     async def test_an_oversized_response_is_refused_before_parsing(self) -> None:
-        cls, _ = _http(_openrouter_reply(), size=5_000_001)
+        cls, _ = _http(body=b"{" + b" " * 5_000_001)
         with (
             patch(f"{_AGENT}.get_config", return_value=_cfg(openrouter="k")),
             patch(f"{_AGENT}.get_current_profile", return_value=None),
             patch(f"{_AGENT}.httpx.AsyncClient", cls),
+            patch(f"{_AGENT}.json.loads") as parse,
             pytest.raises(QuarantineAgentError, match="exceeds"),
+        ):
+            await search_grounded("bootc")
+        parse.assert_not_called()
+
+    async def test_a_non_json_body_is_an_agent_error(self) -> None:
+        cls, _ = _http(body=b"<html>gateway error</html>")
+        with (
+            patch(f"{_AGENT}.get_config", return_value=_cfg(openrouter="k")),
+            patch(f"{_AGENT}.get_current_profile", return_value=None),
+            patch(f"{_AGENT}.httpx.AsyncClient", cls),
+            pytest.raises(QuarantineAgentError, match="not JSON"),
         ):
             await search_grounded("bootc")
 

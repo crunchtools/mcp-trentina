@@ -816,6 +816,21 @@ def _citation_sources(message: dict[str, Any]) -> list[dict[str, str]]:
     return sources
 
 
+async def _read_bounded(resp: httpx.Response) -> bytes:
+    """The body, read as it arrives and abandoned past the fetch limit.
+
+    The completion is capped by max_tokens, the web plugin's excerpts are
+    not, so the limit is enforced while streaming rather than after httpx
+    has buffered whatever the upstream chose to send.
+    """
+    buf = bytearray()
+    async for chunk in resp.aiter_bytes():
+        buf.extend(chunk)
+        if len(buf) > MAX_RESPONSE_SIZE:
+            raise QuarantineAgentError(f"L0 search response exceeds {MAX_RESPONSE_SIZE} bytes")
+    return bytes(buf)
+
+
 async def _search_openrouter(query: str, num_results: int, api_key: str) -> dict[str, Any]:
     """L0 through OpenRouter's web plugin. Same contract as the Gemini path."""
     from .providers.openai import OPENROUTER_API_BASE
@@ -828,24 +843,29 @@ async def _search_openrouter(query: str, num_results: int, api_key: str) -> dict
     _enforce_openrouter_search_quarantine(body)
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(L0_SEARCH_TIMEOUT)) as http_client:
-            resp = await http_client.post(
+        async with (
+            httpx.AsyncClient(timeout=httpx.Timeout(L0_SEARCH_TIMEOUT)) as http_client,
+            http_client.stream(
+                "POST",
                 f"{OPENROUTER_API_BASE}/chat/completions",
                 json=body,
                 headers={"Authorization": f"Bearer {api_key}"},
-            )
+            ) as resp,
+        ):
             resp.raise_for_status()
-            # The fetch limit (client.MAX_RESPONSE_SIZE), before parsing: the
-            # completion is capped by max_tokens, the citation excerpts are not.
-            if len(resp.content) > MAX_RESPONSE_SIZE:
-                raise QuarantineAgentError(f"L0 search response exceeds {MAX_RESPONSE_SIZE} bytes")
-            resp_json = resp.json()
+            raw = await _read_bounded(resp)
     except httpx.HTTPStatusError as exc:
         raise QuarantineAgentError(f"HTTP {exc.response.status_code}") from exc
     except httpx.TimeoutException as exc:
         raise QuarantineAgentError("Request timed out") from exc
     except httpx.RequestError as exc:
         raise QuarantineAgentError(str(exc)) from exc
+    try:
+        resp_json = json.loads(raw)
+    except (ValueError, RecursionError) as exc:
+        raise QuarantineAgentError("L0 search response is not JSON") from exc
+    if not isinstance(resp_json, dict):
+        raise QuarantineAgentError("L0 search response is not a JSON object")
 
     choices = resp_json.get("choices") or []
     if not choices:
