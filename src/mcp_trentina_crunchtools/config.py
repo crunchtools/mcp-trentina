@@ -43,7 +43,7 @@ contend for the same quota and make scans slower — measured on host01
 """
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "qwen2.5:0.5b"
-SUPPORTED_PROVIDERS = ("gemini", "openai", "anthropic", "ollama")
+SUPPORTED_PROVIDERS = ("gemini", "openai", "anthropic", "ollama", "openrouter")
 
 
 def bool_env(name: str, default: bool) -> bool:
@@ -160,6 +160,7 @@ class Config:
         self.api_key: SecretStr = SecretStr(raw_key) if raw_key else SecretStr("")
         self.openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
         self.anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
+        self.openrouter_api_key = SecretStr(os.environ.get("OPENROUTER_API_KEY", ""))
         self.ollama_base_url: str = os.environ.get(
             "OLLAMA_BASE_URL",
             DEFAULT_OLLAMA_BASE_URL,

@@ -33,6 +33,7 @@ ones you want to compare:
 export GEMINI_API_KEY=...
 export OPENAI_API_KEY=...
 export ANTHROPIC_API_KEY=...
+export OPENROUTER_API_KEY=...   # one model per run: QUARANTINE_MODEL=vendor/model
 # Ollama is auto-detected by probing OLLAMA_BASE_URL (default localhost:11434)
 ```
 
@@ -116,3 +117,25 @@ Run it locally the same way:
 GEMINI_API_KEY=... TRENTINA_LIVE_L3=1 QUARANTINE_MODEL=gemini-2.5-flash \
   uv run pytest tests/test_l3_live.py -v
 ```
+
+## OpenRouter comparison (2026-09-25)
+
+Cheap models with strict structured output, full corpus (39 attacks, 9
+benign), through OpenRouter with `data_collection: deny`. Latency is what
+decides: L3 runs on every tool response, and a user-facing call waits at most
+`TRENTINA_L3_THROTTLE_BUDGET` (20s).
+
+| Model | Detection | FP | p50 | p95 | $/1k calls |
+|-------|-----------|----|-----|-----|------------|
+| `google/gemini-2.5-flash-lite` | 37/39 | 1–2/9 | 1.0s | 1.5s | $0.09 |
+| `deepseek/deepseek-v4-flash` (reasoning off) | 36/39 | 0/9 | 6.0s | 11.6s | $0.05 |
+| `deepseek/deepseek-v4-flash` | 37/38 | 1/9 | 11.7s | 31.3s | $0.08 |
+| `z-ai/glm-5.3-flash` | 37/37 | 1/9 | 12.2s | 39.7s | $0.23 |
+| `qwen/qwen3-235b-a22b-2507` | 34/39 | 0–1/9 | 6.0s | 11.6s | $0.09 |
+| `xiaomi/mimo-v2.6-flash` (reasoning off) | 37/38 | 1/9 | 17.4s | 73.5s | $0.09 |
+| `openai/gpt-oss-120b` | 38/39 | 2/9 | 9.5s | 20.2s | $0.06 |
+| `openai/gpt-oss-safeguard-20b` | 35/39 | 1/9 | 1.0s | 2.0s | $0.18 |
+
+`qwen/qwen3.5-flash` has no host that passes `data_collection: deny` (404 on
+every call). Detection differences are one or two cases on a 48-case corpus;
+latency differences are an order of magnitude.

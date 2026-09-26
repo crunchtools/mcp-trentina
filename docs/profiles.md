@@ -204,7 +204,7 @@ Each profile configures its defense **policy** — never the layers' existence. 
 | `modes` | list | `[enforcement]` | The modes the agent may choose per call — see [Content modes](#content-modes) |
 | `l2_threshold` | float | `0.5` | L2 score at/above which content is flagged, in addition to the model's own MALICIOUS label. Lower is more sensitive: more content is flagged, whatever the mode then does with a flag. Below 0.5 it flags content the classifier itself labels BENIGN, so lower it knowingly. |
 | `audit` | bool | `true` | Write detection rows to SQLite |
-| `provider` | string | `null` | LLM provider override (`gemini`, `openai`, `anthropic`, `ollama`) |
+| `provider` | string | `null` | LLM provider override (`gemini`, `openai`, `anthropic`, `ollama`, `openrouter`) |
 
 An autonomous agent runs `enforcement: block`; a human-supervised agent runs `flag`. The mode decides what a flag costs and `l2_threshold` decides how readily L2 flags, so make an agent stricter through its mode. Below 0.5 the threshold flags content Prompt Guard labels BENIGN, and under `block` each of those is a refused call (#204). `TRENTINA_ENFORCEMENT_OVERRIDE=flag` is the global kill switch for the night a block threshold misfires.
 

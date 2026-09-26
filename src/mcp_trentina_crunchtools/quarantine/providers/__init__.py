@@ -19,6 +19,22 @@ __all__ = ["Provider", "ProviderResult", "get_fallback_providers", "get_provider
 _DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 
+def _openrouter(key_value: str, model: str) -> Provider:
+    """The OpenAI driver pointed at OpenRouter, where model ids carry a vendor."""
+    from .openai import OPENROUTER_API_BASE, OPENROUTER_ROUTING, OpenAIProvider
+
+    if not key_value:
+        raise QuarantineAgentError("OPENROUTER_API_KEY not configured")
+    if model == _DEFAULT_GEMINI_MODEL:
+        model = f"google/{_DEFAULT_GEMINI_MODEL}"
+    return OpenAIProvider(
+        api_key=key_value,
+        model=model,
+        base_url=OPENROUTER_API_BASE,
+        routing=OPENROUTER_ROUTING,
+    )
+
+
 def get_provider(
     provider_name: str | None = None,
     api_key: SecretStr | None = None,
@@ -70,6 +86,12 @@ def get_provider(
             )
             provider = OpenAIProvider(api_key=key_value, model=default_model)
 
+        case "openrouter":
+            provider = _openrouter(
+                (api_key or config.openrouter_api_key).get_secret_value(),
+                resolved_model,
+            )
+
         case "anthropic":
             from .anthropic import AnthropicProvider
 
@@ -97,7 +119,7 @@ def get_provider(
         case _:
             raise QuarantineAgentError(
                 f"Unknown provider {resolved_provider!r}. "
-                "Supported: gemini, openai, anthropic, ollama"
+                "Supported: gemini, openai, anthropic, ollama, openrouter"
             )
 
     provider.judge = (resolved_provider, provider.model)
