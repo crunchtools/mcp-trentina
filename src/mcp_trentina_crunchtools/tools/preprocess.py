@@ -128,7 +128,12 @@ async def prepare(
         final,
         extras={
             "preprocess": [
-                {"name": r.name, "bytes_in": r.bytes_in, "bytes_out": r.bytes_out, **r.details}
+                {
+                    "name": r.name,
+                    "bytes_in": r.bytes_in,
+                    "bytes_out": r.bytes_out,
+                    **{k: v for k, v in r.details.items() if v != 0},
+                }
                 for r in applied
             ]
         },

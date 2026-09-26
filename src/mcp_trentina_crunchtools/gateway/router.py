@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
+import json
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -69,6 +71,7 @@ logger = logging.getLogger(__name__)
 # the protocol registry instead of drifting behind it.
 PROTOCOL_VERSION = LATEST_HANDSHAKE_VERSION
 NAMESPACE_SEP = "__"
+_CANONICAL = functools.partial(json.dumps, sort_keys=True, ensure_ascii=False)
 
 # JSON-RPC 2.0 reserved error codes (https://www.jsonrpc.org/specification#error_object)
 JSONRPC_METHOD_NOT_FOUND = -32601
@@ -619,6 +622,32 @@ def _preprocess_refusal(failed: str, mode: Mode | None) -> dict[str, Any]:
     }
 
 
+def _drop_duplicate_structured(structured: Any, content_blocks: list[Any] | None) -> Any:
+    """``structuredContent``, or None when it is the one text block again, as data.
+
+    FastMCP sends a tool's return value twice, as text and as structured
+    content, and the agent reads both: every result costs double (0.38.0).
+    The copy is dropped only when it says nothing the text does not, and
+    before the transform and the scan, so the perimeter judges what is
+    delivered. Response guards already ran on the result as it arrived.
+
+    Compared as canonical JSON, not with ``==``: Python's ``True == 1`` would
+    let a structured ``true`` stand in for a textual ``1``.
+    """
+    blocks = content_blocks or []
+    text = blocks[0].get("text") if len(blocks) == 1 and isinstance(blocks[0], dict) else None
+    if structured is None or not isinstance(text, str) or blocks[0].get("type") != "text":
+        return structured
+    try:
+        parsed = json.loads(text)
+    except (ValueError, RecursionError):
+        # Not JSON, so the only copy it can be is the string itself; a str
+        # never compares equal to a number or a bool.
+        return None if structured == {"result": text} else structured
+    copies = {_CANONICAL(c) for c in ({"result": text}, parsed, {"result": parsed})}
+    return None if _CANONICAL(structured) in copies else structured
+
+
 async def _assemble_call_result(
     profile: Profile,
     backend: Backend,
@@ -638,6 +667,9 @@ async def _assemble_call_result(
     scanning the same bytes twice is cost, not defense.
     """
     content_blocks = call_result.content
+    structured = await asyncio.to_thread(
+        _drop_duplicate_structured, call_result.structured_content, content_blocks
+    )
     provenance = Provenance.EXTERNAL
     reduced: TransformOutcome | None = None
 
@@ -670,8 +702,8 @@ async def _assemble_call_result(
         "content": content_blocks,
         "isError": call_result.is_error,
     }
-    if call_result.structured_content is not None:
-        result["structuredContent"] = call_result.structured_content
+    if structured is not None:
+        result["structuredContent"] = structured
 
     if not backend.is_internal:
         decision = await scan_tool_response(
@@ -679,7 +711,7 @@ async def _assemble_call_result(
             backend_name=backend_name,
             tool_name=tool_name,
             content_blocks=content_blocks,
-            structured_content=call_result.structured_content,
+            structured_content=structured,
             provenance=provenance,
             mode=mode,
             prompt=prompt,

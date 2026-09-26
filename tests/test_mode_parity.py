@@ -53,7 +53,9 @@ async def test_every_cell_runs_every_layer(env: Path, family: str, mode: Mode) -
     assert fakes.verify.await_count == int(cleans), f"{family}/{mode.value}: t3"
 
     layers_state = result["scan"]["layers"]
-    assert layers_state == {"l1": "complete", "l2": "complete", "l3": "complete"}
+    # A clean delivery says it in one word (0.38.0); anything else itemizes.
+    assert layers_state in ("complete", {"l1": "complete", "l2": "complete", "l3": "complete"})
+    assert (layers_state == "complete") is (not cleans and "l1" not in result)
     if cleans:
         assert result["scan"]["disposition"] == "extracted"
         assert set(result["content"]) <= {"extracted_text", "title", "confidence"}

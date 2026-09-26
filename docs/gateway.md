@@ -72,6 +72,21 @@ Trentina supports two backend URL schemes:
 
 Both return identical wire shapes to the agent. The `internal://web` backend is how Trentina's original quarantine tools are exposed through the gateway — they're just another backend.
 
+### Results
+
+A proxied result reaches the agent as the backend sent it, less two kinds of
+bytes the agent would pay for and not read (0.38.0):
+
+- **The repeated copy.** FastMCP servers return every value twice: as a text
+  block and as `structuredContent`. When `structuredContent` is exactly the one
+  text block again, as JSON or as `{"result": ...}`, it is dropped before
+  pre-processing and the scan, so what the perimeter judges is what is
+  delivered. Anything else, including a structured copy that differs in one
+  value, is kept and judged. Response guards run on the result as it arrived.
+- **Minified text.** The text blocks go through the profile's pre-processors,
+  `detect` by default, unless the call passes `trentina_preprocess: false`.
+  See [Minifying and exact text](profiles.md#minifying-and-exact-text).
+
 ### Tool Namespacing
 
 Backend tools are namespaced with a double-underscore separator to avoid collisions:
