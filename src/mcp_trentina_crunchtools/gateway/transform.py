@@ -263,7 +263,9 @@ async def transform_response(
 
     floor = _processors_for(cfg, profile.name, backend_name, tool_name, required)
     if len(floor) != len(required):
-        return TransformOutcome(content_blocks=None, failed="required pre-processor unusable")
+        return TransformOutcome(
+            content_blocks=None, failed=f"required pre-processors {required} unusable"
+        )
     processors = _processors_for(cfg, profile.name, backend_name, tool_name, optional)
     if not floor and not processors:
         return TransformOutcome(content_blocks=content_blocks)

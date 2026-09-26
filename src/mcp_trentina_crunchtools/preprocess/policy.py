@@ -59,9 +59,11 @@ INTERNAL_DEFAULTS: dict[str, tuple[str, ...]] = {
 class PreProcessPolicy:
     """What a call may select, and what it runs regardless.
 
-    ``offered`` never contains a ``required`` name: there is nothing to
-    choose about a processor that always runs, so the enum leaves it out.
-    ``selectable`` False means the tool does not take the argument at all,
+    ``offered``: the names the agent may pick, in the order they run — the
+    tool's enum. Never contains a ``required`` name: there is nothing to
+    choose about a processor that always runs.
+    ``required``: the floor, run first on every call.
+    ``selectable``: False means the tool does not take the argument at all,
     so even ``[]`` is refused: it would switch off the operator's default.
     """
 

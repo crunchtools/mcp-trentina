@@ -43,11 +43,11 @@ _HIDING_DETAILS = ("hidden_elements", "off_screen_elements", "same_color_text", 
 class Prepared:
     """What a tool judges and delivers, and what pre-processing did to it."""
 
-    content: str
-    extras: dict[str, Any] = field(default_factory=dict)
-    pipeline: PipelineResult | None = None
-    briefing: str | None = None
-    provenance: Provenance = Provenance.EXTERNAL
+    content: str  # judged and delivered, byte for byte
+    extras: dict[str, Any] = field(default_factory=dict)  # the result's `preprocess` list
+    pipeline: PipelineResult | None = None  # L1 with the original's hiding counts
+    briefing: str | None = None  # L3 context: what conversion removed
+    provenance: Provenance = Provenance.EXTERNAL  # MODEL_OUTPUT after a METERED rewrite
 
 
 def is_html_type(content_type: str | None) -> bool:
