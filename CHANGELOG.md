@@ -10,6 +10,23 @@ under that name.
 
 ## [Unreleased]
 
+## [0.40.1] - 2026-09-26
+
+### Fixed
+
+- **A backend refusing bad arguments no longer opens its circuit breaker**
+  (RT #1505). The SDK surfaces the backend's JSON-RPC error inside a
+  TaskGroup, so an `invalid params` reply counted as an outage. Three bad
+  calls from one client took a healthy backend away from every caller for
+  the cooldown. A rejection (`-32600`, `-32601`, `-32602`) now counts as the
+  backend answering, audits as `tool_error`, and names the reason in the
+  gateway's own words, never the backend's unjudged text.
+- **Empty optional arguments are dropped before forwarding.** A client that
+  fills every optional with `""` or `null` sent `published_after: ""` where it
+  meant no filter. Values in a parameter the schema marks required are
+  forwarded unchanged, and so are `0` and `false`. With no cached schema,
+  nothing is dropped.
+
 ## [0.40.0] - 2026-09-26
 
 ### Added

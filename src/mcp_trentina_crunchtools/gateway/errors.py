@@ -75,3 +75,15 @@ class BackendCallError(GatewayError):
 
     Maps to JSON-RPC error -32603 (internal error) and HTTP 502 to the consumer.
     """
+
+
+class BackendRejectedCallError(BackendCallError):
+    """The backend answered and refused the request itself.
+
+    Bad arguments, an unknown method, a malformed request: the caller's
+    mistake, reported by a backend that is up. It never counts toward the
+    circuit breaker, which tracks whether a backend is reachable, and it
+    audits as ``tool_error`` rather than ``backend_error``.
+    """
+
+    outcome_hint = "tool_error"

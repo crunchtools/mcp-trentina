@@ -163,6 +163,12 @@ def classify_exception(exc: BaseException) -> Outcome:
     should page someone meaningless.
     """
     chain = cause_chain(exc)
+    # Duck-typed so this module need not import the gateway package, which
+    # imports this one. See gateway.errors.BackendRejectedCallError.
+    for err in chain:
+        hint = getattr(err, "outcome_hint", None)
+        if isinstance(hint, str):
+            return Outcome(hint)
     for err in chain:
         for exc_type, outcome in _CLASSIFICATION:
             if isinstance(err, exc_type):

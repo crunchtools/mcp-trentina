@@ -37,7 +37,13 @@ from ..errors import ModeNotPermittedError, PreProcessNotPermittedError
 from ..outcomes import Outcome, classify_exception, refusal_of
 from ..preprocess.policy import PREPROCESS_PARAM
 from ..quarantine.limiter import Priority, l3_priority
-from .backend import call_backend_tool, list_backend_tools, on_backend_cache_evict
+from .args import drop_empty_optional
+from .backend import (
+    cached_tool_schema,
+    call_backend_tool,
+    list_backend_tools,
+    on_backend_cache_evict,
+)
 from .compress import (
     compress_tools,
     get_profiles,
@@ -554,6 +560,9 @@ async def _route_tools_call(
         _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, str(exc))
         return _err(req_id, JSONRPC_INVALID_PARAMS, str(exc))
 
+    # Before the guards, so they judge exactly what is forwarded.
+    forwarded = _clean_arguments(profile, backend, backend_name, tool_name, forwarded)
+
     guard_err = check_parameter_guards(
         tool_name, {**forwarded, MODE_PARAM: mode.value, PROMPT_PARAM: prompt}, backend
     )
@@ -620,6 +629,31 @@ async def _route_tools_call(
         minify=minify,
     )
     return _ok(req_id, result)
+
+
+def _clean_arguments(
+    profile: Profile,
+    backend: Backend,
+    backend_name: str,
+    tool_name: str,
+    forwarded: dict[str, Any],
+) -> dict[str, Any]:
+    """Drop empty optional arguments before a remote call (``args.py``).
+
+    Internal tools are ours and already read an empty value as unset.
+    """
+    if backend.is_internal:
+        return forwarded
+    cleaned, dropped = drop_empty_optional(forwarded, cached_tool_schema(backend.url, tool_name))
+    if dropped:
+        logger.info(
+            "gateway: profile=%s %s/%s dropped empty optional args %s",
+            profile.name,
+            backend_name,
+            tool_name,
+            dropped,
+        )
+    return cleaned
 
 
 async def _deliver(
