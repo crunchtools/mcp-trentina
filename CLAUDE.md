@@ -115,10 +115,16 @@ Every call runs L1 ∥ L2 on the arrived bytes, then L3 briefed with both. The
 - `redact` — L3 detect, extract (guided by `trentina_prompt`), verify; any
   objection refuses.
 
-"Arrived" means arrived at the perimeter. `fetch` converts a page its server
-calls HTML to Markdown first (`tools/fetch.py`), always on and fail-closed,
-because the internal tools never pass through the gateway's opt-in
-pre-processor chain. `read` and `content` deliver what they were given.
+"Arrived" means arrived at the perimeter, AFTER pre-processing. The agent
+picks its pre-processors per call with `trentina_preprocess` (0.37.0, #183),
+within the profile's `preprocess.processors` (ceiling) and above its
+`required` (floor, which `[]` cannot remove). Omitted: `fetch` converts a page
+its server calls HTML, `content` converts `content_type: text/html`, `read`
+converts nothing, a proxied tool runs its configured chain. The internal tools
+run it in `tools/preprocess.py` (the router skips `transform_response` for
+them) and fail closed on anything asked for; proxied tools offer it only where
+`selectable`, and there only the floor fails closed. Policy:
+`preprocess/policy.py`; gateway side rides `modes_policy.py` like the mode.
 
 Until 0.32.0 the mode was the tool's NAME prefix (#193), so the agent chose
 its own posture and nothing enforced it. Now the policy does:

@@ -10,6 +10,34 @@ under that name.
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-09-25
+
+### Added
+- **`trentina_preprocess`** (#183). The agent picks its pre-processors per
+  call, the way it picks `trentina_mode`: `[]` for a page's raw markup,
+  `["html"]` to convert a file `read` would deliver as-is. The profile bounds
+  it. `preprocess.processors` is the ceiling, the new `preprocess.required`
+  is a floor the argument cannot remove, and a parameter guard narrows what
+  is offered. `fetch`, `read` and `content` always offer it; a proxied tool
+  only with the new `selectable: true`, profile-wide or per tool. What is
+  judged is exactly what is delivered, whatever is chosen. See
+  [Pre-processors per call](docs/profiles.md#pre-processors-per-call).
+- **`preprocess.required`** runs ahead of everything else on every response,
+  regardless of `enabled` and `min_bytes`, and fails closed: a required
+  processor that breaks or cannot parse the payload refuses the call
+  (`preprocess_failed`, audited `blocked_defense`). An agent reload cannot
+  lower a floor.
+
+### Changed
+- **`content`'s `content_type` selects again.** `text/html` is converted to
+  Markdown by default, as `fetch` converts a page its server calls HTML; the
+  parameter is now on `content_tool` itself.
+- **Internal tools fail closed on any processor they run**, not only a
+  raising converter: `fetch` on an HTML page between the 4 MB parse cap and
+  the 5 MB fetch cap now refuses instead of delivering raw markup.
+- The `preprocess` section of a `fetch`/`read`/`content` result is a LIST of
+  what applied, not one processor's dict.
+
 ## [0.36.0] - 2026-09-25
 
 ### Removed
