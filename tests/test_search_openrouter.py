@@ -116,6 +116,18 @@ class TestRequestShape:
             _enforce_openrouter_search_quarantine(body)
 
 
+def test_only_http_citations_are_kept() -> None:
+    message = {
+        "annotations": [
+            {"type": "url_citation", "url_citation": {"url": "javascript:alert(1)"}},
+            {"type": "url_citation", "url_citation": {"url": "file:///etc/passwd"}},
+            {"type": "url_citation", "url_citation": {"url": "http://ok.example/", "title": "t"}},
+        ]
+    }
+
+    assert _citation_sources(message) == [{"uri": "http://ok.example/", "title": "t"}]
+
+
 def test_citations_become_sources_once_each() -> None:
     message = _openrouter_reply()["choices"][0]["message"]
 
@@ -191,6 +203,16 @@ class TestRoute:
         ):
             await search_grounded("bootc")
 
+    async def test_an_empty_answer_is_an_error(self) -> None:
+        cls, _ = _http({"choices": [{"message": {"content": None}}]})
+        with (
+            patch(f"{_AGENT}.get_config", return_value=_cfg(openrouter="k")),
+            patch(f"{_AGENT}.get_current_profile", return_value=None),
+            patch(f"{_AGENT}.httpx.AsyncClient", cls),
+            pytest.raises(QuarantineAgentError, match="Empty answer"),
+        ):
+            await search_grounded("bootc")
+
     async def test_no_choices_is_an_error(self) -> None:
         cls, _ = _http({"choices": []})
         with (
@@ -257,6 +279,22 @@ class TestConfigHasLLM:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         assert Config().has_llm is False
+
+    def test_global_ollama_needs_no_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from mcp_trentina_crunchtools.config import Config
+
+        monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "ollama")
+
+        assert Config().has_llm is True
+
+    def test_an_ollama_fallback_counts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from mcp_trentina_crunchtools.config import Config
+
+        monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "anthropic")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("TRENTINA_PROVIDER_FALLBACK", "ollama")
+
+        assert Config().has_llm is True
 
     def test_a_keyed_fallback_counts(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from mcp_trentina_crunchtools.config import Config

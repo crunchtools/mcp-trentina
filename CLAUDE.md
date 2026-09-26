@@ -18,7 +18,9 @@ uv run mcp-trentina-crunchtools
   key only. Since 0.41.0 it no longer gates L3 or summarize; it only picks
   Gemini grounding as the standalone search fallback.
 - `GEMINI_API_KEY` — optional since 0.41.0: Gemini as an L3 provider, and
-  search grounding ONLY when there is no OpenRouter key. The lotor gateway
+  search grounding ONLY standalone (no profile bound) with no
+  `OPENROUTER_API_KEY`; a bound profile searches on its own OpenRouter key or
+  is refused. The lotor gateway
   holds none, so it never calls Google directly.
 - `OPENROUTER_API_KEY` — standalone key for `TRENTINA_MODEL_PROVIDER=openrouter`;
   a gateway profile uses `llm_keys.openrouter`. Model ids are OpenRouter's

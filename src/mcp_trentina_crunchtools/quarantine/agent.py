@@ -16,6 +16,7 @@ import logging
 import secrets
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -736,7 +737,7 @@ def _search_route() -> tuple[str, str]:
     if config.has_api_key:
         return "gemini", config.api_key.get_secret_value()
     raise QuarantineAgentError(
-        "no search provider: set llm_keys.openrouter on the profile, or OPENROUTER_API_KEY"
+        "no search provider: set OPENROUTER_API_KEY, or GEMINI_API_KEY for grounding"
     )
 
 
@@ -783,7 +784,11 @@ def _build_openrouter_search_body(
 
 
 def _citation_sources(message: dict[str, Any]) -> list[dict[str, str]]:
-    """``url_citation`` annotations as ``{uri, title}``, first mention kept."""
+    """``url_citation`` annotations as ``{uri, title}``, first mention kept.
+
+    Only http(s): a citation is untrusted model output, and a ``javascript:``
+    or ``file:`` link has no business reaching an agent as a source.
+    """
     sources: list[dict[str, str]] = []
     seen: set[str] = set()
     for note in message.get("annotations") or []:
@@ -791,7 +796,9 @@ def _citation_sources(message: dict[str, Any]) -> list[dict[str, str]]:
             continue
         cite = note.get("url_citation") or {}
         uri = cite.get("url", "")
-        if uri and uri not in seen:
+        if not isinstance(uri, str) or urlparse(uri).scheme not in ("http", "https"):
+            continue
+        if uri not in seen:
             seen.add(uri)
             sources.append({"uri": uri, "title": cite.get("title", "")})
     return sources
@@ -828,7 +835,9 @@ async def _search_openrouter(query: str, num_results: int, api_key: str) -> dict
     if not choices:
         raise QuarantineAgentError("No choices in OpenRouter search response")
     message = choices[0].get("message") or {}
-    text = message.get("content") or ""
+    text = message.get("content")
+    if not isinstance(text, str) or not text.strip():
+        raise QuarantineAgentError("Empty answer in OpenRouter search response")
     if canary in text:
         raise QuarantineAgentError("SECURITY: canary leaked in L0 search response")
     usage = resp_json.get("usage") or {}
