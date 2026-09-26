@@ -293,6 +293,50 @@ class TestRoute:
         ):
             await search_grounded("bootc")
 
+    @pytest.mark.parametrize(
+        ("reply", "message"),
+        [
+            ({"choices": [None]}, "No message"),
+            ({"choices": [{"message": "text"}]}, "No message"),
+            ({"choices": "nope"}, "No choices"),
+        ],
+    )
+    async def test_a_malformed_choice_is_an_agent_error(
+        self, reply: dict[str, Any], message: str
+    ) -> None:
+        cls, _ = _http(reply)
+        with (
+            patch(f"{_AGENT}.get_config", return_value=_cfg(openrouter="k")),
+            patch(f"{_AGENT}.get_current_profile", return_value=None),
+            patch(f"{_AGENT}.httpx.AsyncClient", cls),
+            pytest.raises(QuarantineAgentError, match=message),
+        ):
+            await search_grounded("bootc")
+
+    async def test_valid_json_that_is_not_an_object_is_refused(self) -> None:
+        cls, _ = _http(body=b"[]")
+        with (
+            patch(f"{_AGENT}.get_config", return_value=_cfg(openrouter="k")),
+            patch(f"{_AGENT}.get_current_profile", return_value=None),
+            patch(f"{_AGENT}.httpx.AsyncClient", cls),
+            pytest.raises(QuarantineAgentError, match="not a JSON object"),
+        ):
+            await search_grounded("bootc")
+
+    async def test_a_body_exactly_at_the_limit_is_parsed(self) -> None:
+        from mcp_trentina_crunchtools.client import MAX_RESPONSE_SIZE
+
+        reply = json.dumps(_openrouter_reply()).encode()
+        cls, _ = _http(body=reply + b" " * (MAX_RESPONSE_SIZE - len(reply)))
+        with (
+            patch(f"{_AGENT}.get_config", return_value=_cfg(openrouter="k")),
+            patch(f"{_AGENT}.get_current_profile", return_value=None),
+            patch(f"{_AGENT}.httpx.AsyncClient", cls),
+        ):
+            result = await search_grounded("bootc")
+
+        assert result["text"]
+
     async def test_no_choices_is_an_error(self) -> None:
         cls, _ = _http({"choices": []})
         with (

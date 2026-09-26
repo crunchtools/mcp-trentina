@@ -867,16 +867,19 @@ async def _search_openrouter(query: str, num_results: int, api_key: str) -> dict
     if not isinstance(resp_json, dict):
         raise QuarantineAgentError("L0 search response is not a JSON object")
 
-    choices = resp_json.get("choices") or []
-    if not choices:
+    choices = resp_json.get("choices")
+    if not isinstance(choices, list) or not choices:
         raise QuarantineAgentError("No choices in OpenRouter search response")
-    message = choices[0].get("message") or {}
+    first = choices[0]
+    message = first.get("message") if isinstance(first, dict) else None
+    if not isinstance(message, dict):
+        raise QuarantineAgentError("No message in OpenRouter search response")
     text = message.get("content")
     if not isinstance(text, str) or not text.strip():
         raise QuarantineAgentError("Empty answer in OpenRouter search response")
     sources = _citation_sources(message)
     # Everything returned came from the same untrusted message, citations too.
-    if any(canary in part for part in (text, *(v for s in sources for v in s.values()))):
+    if canary in text or any(canary in value for src in sources for value in src.values()):
         raise QuarantineAgentError("SECURITY: canary leaked in L0 search response")
     usage = resp_json.get("usage") or {}
     return {
