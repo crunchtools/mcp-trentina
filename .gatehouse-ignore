@@ -1,0 +1,6 @@
+# Paths Gatehouse never reviews (gitignore syntax). Read from the base branch in CI.
+uv.lock
+.specify/templates/
+# Prompt-injection payloads: reviewing them feeds live injections to the reviewer
+tests/adversarial_corpus.py
+demo/attack-sim/payload/
