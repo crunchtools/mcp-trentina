@@ -171,9 +171,15 @@ class TestModeArg:
         with pytest.raises(ModeNotPermittedError, match=MODE_PARAM):
             parse_mode_arg(bad)
 
-    def test_the_old_prompt_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_the_old_prompt_warns_once(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from mcp_trentina_crunchtools import modes
+
+        monkeypatch.setattr(modes, "_legacy_prompt_warned", False)
         parse_mode_arg("redact", "What ships?")
-        assert "trentina_prompt is deprecated" in caplog.text
+        parse_mode_arg("redact", "What ships?")
+        assert caplog.text.count("trentina_prompt is deprecated") == 1
 
 
 class TestSchema:

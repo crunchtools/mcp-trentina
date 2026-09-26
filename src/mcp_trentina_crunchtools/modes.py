@@ -45,6 +45,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_legacy_prompt_warned = False
+
+
+def _warn_legacy_prompt() -> None:
+    """Once per process: a client on the old spelling sends it on every call."""
+    global _legacy_prompt_warned
+    _legacy_prompt_warned = True
+    logger.warning(
+        "trentina_prompt is deprecated and removed in 0.41.0; "
+        'pass trentina_mode={"redact": "<question>"}'
+    )
+
+
 #: What a malformed ``trentina_mode`` is told it may send instead.
 MODE_SHAPES = ["block", "flag", '{"redact": "<what you need>"}']
 
@@ -86,10 +99,8 @@ def parse_mode_arg(value: Any, legacy_prompt: Any = None) -> tuple[str | None, s
     if value is not None and not isinstance(value, str):
         raise ModeNotPermittedError(str(value), MODE_SHAPES)
     if isinstance(legacy_prompt, str) and legacy_prompt.strip():
-        logger.warning(
-            "trentina_prompt is deprecated and removed in 0.41.0; "
-            'pass trentina_mode={"redact": "<question>"}'
-        )
+        if not _legacy_prompt_warned:
+            _warn_legacy_prompt()
         return value, legacy_prompt
     return value, None
 

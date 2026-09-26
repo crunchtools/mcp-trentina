@@ -77,12 +77,13 @@ mcp = FastMCP(
 class RedactMode(BaseModel):
     """``trentina_mode: {"redact": "<question>"}``: extract, instead of deliver."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     redact: str = Field(min_length=1, description="What to extract")
 
 
 def _as_arg(mode: str | RedactMode | None) -> str | dict[str, str] | None:
+    """The validated model back as the ``{"redact": ...}`` dict ``parse_mode_arg`` reads."""
     return {"redact": mode.redact} if isinstance(mode, RedactMode) else mode
 
 
