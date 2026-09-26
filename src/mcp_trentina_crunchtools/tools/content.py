@@ -71,12 +71,16 @@ async def judge_content(
 
 
 async def block_content(content: str, content_type: str = "text/plain") -> dict[str, Any]:
-    """Refuse flagged or incompletely judged content; otherwise the same text."""
+    """Refuse flagged or incompletely judged content; otherwise what was judged.
+
+    That is the text as given, or its Markdown when ``content_type`` is HTML.
+    """
     return await judge_content(content, Mode.BLOCK, content_type=content_type)
 
 
 async def flag_content(content: str, content_type: str = "text/plain") -> dict[str, Any]:
-    """The content as given, with the verdict attached when there is one."""
+    """What was judged — the text as given, or its Markdown when declared
+    HTML — with the verdict attached when there is one."""
     return await judge_content(content, Mode.FLAG, content_type=content_type)
 
 

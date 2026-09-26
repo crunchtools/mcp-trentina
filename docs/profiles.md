@@ -136,7 +136,9 @@ backends:
   floor.
 - `required` runs whatever the agent asks for — `[]` included — ahead of the
   rest, regardless of `enabled` and `min_bytes`, so `best_of` never discards
-  it. A required processor that breaks, or cannot parse the payload
+  it. It applies wherever a payload is pre-processed: proxied responses and
+  `fetch`, `read` and `content`. `search` and `dir` deliver documents Trentina
+  assembles itself, and no processor runs on them. A required processor that breaks, or cannot parse the payload
   (`too_large`), refuses the call: nothing is delivered in its place.
 - Omitted, the tool's default runs: `fetch` converts a page its server calls
   HTML, `content` converts `content_type: text/html`, `read` converts nothing,

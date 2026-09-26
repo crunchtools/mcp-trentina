@@ -563,14 +563,24 @@ class TestInternalTools:
         assert raw["content"] == PAGE
         assert converted["content"].startswith("# Release notes")
 
-    async def test_the_gateway_hands_the_request_and_policy_to_the_tool(self) -> None:
+    @pytest.mark.parametrize(
+        ("tool", "family", "target"),
+        [
+            ("fetch_tool", "fetch_page", {"url": "https://example.com"}),
+            ("read_tool", "read_file", {"path": "/tmp/x.html"}),
+            ("content_tool", "judge_content", {"content": "<p>x</p>"}),
+        ],
+    )
+    async def test_the_gateway_hands_the_request_and_policy_to_the_tool(
+        self, tool: str, family: str, target: dict[str, str]
+    ) -> None:
         from mcp_trentina_crunchtools.gateway import internal
         from mcp_trentina_crunchtools.server import mcp
 
         seen: dict[str, Any] = {}
 
-        async def fake(*args: Any, **_kwargs: Any) -> dict[str, Any]:
-            seen["args"] = args
+        async def fake(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            seen["requested"] = kwargs.get("preprocess", args[-1])
             seen["policy"] = get_current_preprocess_policy()
             return {"content": "ok"}
 
@@ -582,7 +592,7 @@ class TestInternalTools:
         internal.register_internal_server(mcp)
         try:
             with (
-                patch("mcp_trentina_crunchtools.server.fetch_page", fake),
+                patch(f"mcp_trentina_crunchtools.server.{family}", fake),
                 patch(f"{ROUTER}._audit"),
             ):
                 resp = await route_jsonrpc(
@@ -592,16 +602,16 @@ class TestInternalTools:
                         "id": 3,
                         "method": "tools/call",
                         "params": {
-                            "name": f"cms{NAMESPACE_SEP}fetch_tool",
-                            "arguments": {"url": "https://example.com", PREPROCESS_PARAM: []},
+                            "name": f"cms{NAMESPACE_SEP}{tool}",
+                            "arguments": {**target, PREPROCESS_PARAM: []},
                         },
                     },
                 )
         finally:
             internal._server = saved
         assert "error" not in resp
-        assert seen["args"][-1] == []
-        assert seen["policy"] == PreProcessPolicy(("html",), ("petit",))
+        assert seen["requested"] == []
+        assert seen["policy"].required == ("petit",)
         assert get_current_preprocess_policy() is None, "policy leaked past the call"
 
 
