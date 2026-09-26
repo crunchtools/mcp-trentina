@@ -32,7 +32,7 @@ An earlier revision of this page ruled the opposite: that a pre-processor may ne
 
 Failure modes point in whichever direction hides nothing. A text pre-processor that fails delivers and scans the **original**; one that selects what to read fails to reading **everything**. Same rule, different thing owned. The exception is a processor the call depends on: a profile's `required` floor, and anything an internal tool was asked to run, fail **closed** — the call is refused rather than handed something other than what was asked for.
 
-The agent chooses its pre-processors per call with `trentina_preprocess`, within the profile's ceiling and above its floor ([Profiles](profiles.md#pre-processors-per-call)). The choice changes what is delivered, and so what is judged, never whether it is judged.
+The agent chooses its pre-processors per call with `trentina_preprocess`, within the profile's ceiling (plus a tool's own default, such as `html` on `fetch`) and above its floor ([Profiles](profiles.md#pre-processors-per-call)). The choice changes what is delivered, and so what is judged, never whether it is judged.
 
 ## What crosses the pipeline
 

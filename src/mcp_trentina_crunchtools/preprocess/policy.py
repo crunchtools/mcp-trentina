@@ -91,11 +91,14 @@ class PreProcessPolicy:
         """The optional names an explicit request picks, or refuse it.
 
         Raises:
-            PreProcessNotPermittedError: the tool takes no selection, a name is
-                outside ``offered``, or the value is not a list of names.
+            PreProcessNotPermittedError: the tool offers no selection, a name
+                is outside ``offered``, or the value is not a list of names.
         """
+        # Not offered — not selectable, or a guard emptied the enum — means
+        # not accepted, [] included: it would switch the default off.
         if (
             not self.selectable
+            or not self.offered
             or isinstance(requested, str)
             or not isinstance(requested, (list, tuple))
         ):

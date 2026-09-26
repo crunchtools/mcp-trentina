@@ -117,6 +117,12 @@ class TestPolicy:
         with pytest.raises(PreProcessNotPermittedError, match="trentina_preprocess"):
             self.POLICY.resolve(bad)
 
+    def test_a_guard_that_empties_the_enum_refuses_even_empty(self) -> None:
+        emptied = PreProcessPolicy.of(["petit"], permits=lambda _n: False)
+        assert emptied.resolve(None, ["petit"]) == ("petit",)
+        with pytest.raises(PreProcessNotPermittedError):
+            emptied.resolve([])
+
     def test_a_tool_that_takes_no_selection_refuses_even_empty(self) -> None:
         fixed = PreProcessPolicy((), ("html",), selectable=False)
         assert fixed.resolve(None) == ("html",)
@@ -308,7 +314,9 @@ class TestProxiedCall:
     async def test_the_floor_runs_disabled_small_and_unasked(self) -> None:
         """`required` ignores `enabled` and `min_bytes`, and `[]` cannot remove it."""
         profile = _profile(
-            PreProcessConfig(enabled=False, processors=["html"], required=["html"], selectable=True)
+            PreProcessConfig(
+                enabled=False, processors=["html", "petit"], required=["html"], selectable=True
+            )
         )
         for arguments in ({"id": "1"}, {"id": "1", PREPROCESS_PARAM: []}):
             resp, _, scan, _ = await self._call(profile, arguments)
