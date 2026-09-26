@@ -257,7 +257,8 @@ async def transform_response(
     if not (required or optional):
         return TransformOutcome(content_blocks=content_blocks)
     targets = _text_blocks(content_blocks)
-    if selection is None and sum(len(t.encode("utf-8")) for _, t in targets) < cfg.min_bytes:
+    lengths = [len(t.encode("utf-8")) for _, t in targets]
+    if selection is None and sum(lengths) < cfg.min_bytes:
         optional = []
     if not targets or not (required or optional):
         return TransformOutcome(content_blocks=content_blocks)
@@ -285,13 +286,13 @@ async def transform_response(
     results: list[Any] = []
     metered = False
     sizes = [0, 0]
-    for idx, text in targets:
+    for (idx, text), length in zip(targets, lengths, strict=True):
         block = await _transform_block(text, floor, processors, strategy, ctx)
         if block.failed is not None:
             return TransformOutcome(content_blocks=None, failed=block.failed)
         results.extend(block.results)
         metered = metered or block.metered
-        sizes[0] += len(text.encode("utf-8"))
+        sizes[0] += length
         sizes[1] += len(block.content.encode("utf-8"))
         if block.content != text:
             new_blocks[idx] = {**new_blocks[idx], "text": block.content}
