@@ -9,7 +9,9 @@ from ..config import get_config
 from ..database import is_blocked
 from ..errors import ContentSizeError
 from ..modes import Mode
+from ..preprocess.policy import INTERNAL_DEFAULTS
 from .judged import blocklisted, judge_and_deliver
+from .preprocess import is_html_type, prepare
 
 
 def _content_hash(content: str) -> str:
@@ -17,12 +19,23 @@ def _content_hash(content: str) -> str:
     return f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}"
 
 
-async def judge_content(content: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
+async def judge_content(
+    content: str,
+    mode: Mode,
+    prompt: str | None = None,
+    *,
+    content_type: str = "text/plain",
+    preprocess: Any = None,
+) -> dict[str, Any]:
     """Judge text the agent handed in. It is never allowlisted.
 
     Inline content has no provenance to appeal to: fetch asks the domain,
     read asks the path, and this has neither. The blocklist is keyed by the
-    content's hash.
+    content's hash — of what was handed in, before any pre-processing.
+
+    ``content_type`` is the hint it was kept for (#183): declared HTML is
+    converted by default, the way fetch converts a page its server calls
+    HTML. ``preprocess`` overrides the default within the policy.
     """
     max_size = get_config().max_content
     if len(content) > max_size:
@@ -33,8 +46,14 @@ async def judge_content(content: str, mode: Mode, prompt: str | None = None) -> 
     if blocked and mode is not Mode.REDACT:
         raise blocklisted(chash, mode, blocked["detected_at"])
 
-    return await judge_and_deliver(
+    page = await prepare(
         content,
+        requested=preprocess,
+        default=INTERNAL_DEFAULTS["content_tool"] if is_html_type(content_type) else (),
+        source=chash,
+    )
+    return await judge_and_deliver(
+        page.content,
         mode=mode,
         family="content",
         source=chash,
@@ -43,23 +62,22 @@ async def judge_content(content: str, mode: Mode, prompt: str | None = None) -> 
         ref=chash,
         prompt=prompt,
         blocklisted_at=blocked["detected_at"] if blocked else None,
+        provenance=page.provenance,
+        precomputed_l1=page.pipeline,
+        l3_context=page.briefing,
+        extras=page.extras,
+        redact_extras=page.extras,
     )
-
-
-# `content_type` stays in the three signatures as published tool surface. It
-# selects nothing: L1 is format-agnostic (#172).
 
 
 async def block_content(content: str, content_type: str = "text/plain") -> dict[str, Any]:
     """Refuse flagged or incompletely judged content; otherwise the same text."""
-    del content_type
-    return await judge_content(content, Mode.BLOCK)
+    return await judge_content(content, Mode.BLOCK, content_type=content_type)
 
 
 async def flag_content(content: str, content_type: str = "text/plain") -> dict[str, Any]:
     """The content as given, with the verdict attached when there is one."""
-    del content_type
-    return await judge_content(content, Mode.FLAG)
+    return await judge_content(content, Mode.FLAG, content_type=content_type)
 
 
 async def redact_content(
@@ -68,5 +86,4 @@ async def redact_content(
     content_type: str = "text/plain",
 ) -> dict[str, Any]:
     """A verified L3 extraction of the content."""
-    del content_type
-    return await judge_content(content, Mode.REDACT, prompt)
+    return await judge_content(content, Mode.REDACT, prompt, content_type=content_type)

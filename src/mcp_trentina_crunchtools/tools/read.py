@@ -11,7 +11,9 @@ from ..database import is_blocked
 from ..errors import FileReadError
 from ..models import ALLOWED_TEXT_EXTENSIONS
 from ..modes import Mode
+from ..preprocess.policy import INTERNAL_DEFAULTS
 from .judged import blocklisted, judge_and_deliver
+from .preprocess import prepare
 
 MAX_FILE_SIZE = 2_000_000
 BINARY_CHECK_BYTES = 8192
@@ -58,8 +60,17 @@ def _validate_file(path: str) -> str:
     return resolved
 
 
-async def read_file(path: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
-    """Read one text file, then hand it to the one judging path."""
+async def read_file(
+    path: str, mode: Mode, prompt: str | None = None, preprocess: Any = None
+) -> dict[str, Any]:
+    """Read one text file, then hand it to the one judging path.
+
+    ``preprocess`` is the agent's ``trentina_preprocess``. Omitted, nothing
+    runs but the policy's floor: an agent that reads a file usually means to
+    edit it, and needs the bytes on disk. A list names what to run, within the
+    bound policy (``preprocess/policy.py``); a name outside it raises
+    ``PreProcessNotPermittedError``.
+    """
     resolved = _validate_file(path)
 
     blocked = is_blocked(resolved)
@@ -69,8 +80,11 @@ async def read_file(path: str, mode: Mode, prompt: str | None = None) -> dict[st
     with open(resolved, encoding="utf-8", errors="replace") as fh:
         content = fh.read()
 
+    page = await prepare(
+        content, requested=preprocess, default=INTERNAL_DEFAULTS["read_tool"], source=resolved
+    )
     return await judge_and_deliver(
-        content,
+        page.content,
         mode=mode,
         family="read",
         source=resolved,
@@ -80,6 +94,11 @@ async def read_file(path: str, mode: Mode, prompt: str | None = None) -> dict[st
         prompt=prompt,
         allowlisted=get_config().is_trusted_path(resolved),
         blocklisted_at=blocked["detected_at"] if blocked else None,
+        provenance=page.provenance,
+        precomputed_l1=page.pipeline,
+        l3_context=page.briefing,
+        extras=page.extras,
+        redact_extras=page.extras,
     )
 
 

@@ -604,7 +604,7 @@ class TestInternalModes:
         family_fn, target = FAMILY_TOOLS[tool]
         seen: dict[str, Any] = {}
 
-        async def fake(*args: Any) -> dict[str, Any]:
+        async def fake(*args: Any, **_kwargs: Any) -> dict[str, Any]:
             seen["args"] = args
             seen["policy"] = get_current_policy()
             return {"content": "ok"}

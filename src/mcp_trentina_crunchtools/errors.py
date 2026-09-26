@@ -91,6 +91,27 @@ class ModeNotPermittedError(TrentinaError):
         self.mode = mode
 
 
+class PreProcessNotPermittedError(TrentinaError):
+    """The call named a pre-processor the caller's policy does not offer (#183)."""
+
+    def __init__(self, offered: list[str]) -> None:
+        super().__init__(
+            "Parameter 'trentina_preprocess' value not in allow list "
+            f"(permitted: {', '.join(offered) or 'none'})"
+        )
+
+
+class PreProcessFailedError(TrentinaError):
+    """A pre-processor the call depends on did not run, so nothing is delivered.
+
+    Names the processor and how it failed, never the payload.
+    """
+
+    def __init__(self, name: str, reason: str) -> None:
+        super().__init__(f"Pre-processor {name!r} could not run ({reason}); content withheld")
+        self.processor = name
+
+
 class FileReadError(TrentinaError):
     """Raised when reading a local file fails."""
 

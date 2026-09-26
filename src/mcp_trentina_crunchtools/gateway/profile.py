@@ -359,6 +359,33 @@ class PreProcessConfig(ProcessorChainConfig):
             "Reduction has a fixed cost and small payloads cannot repay it."
         ),
     )
+    required: list[ProcessorName] = Field(
+        default_factory=list,
+        description=(
+            "Processors that run on every response whatever the agent asks "
+            "for (#183), ahead of the rest, regardless of enabled and "
+            "min_bytes. A required processor that fails refuses the call. "
+            "Like every processor here it reads text blocks; structuredContent "
+            "is judged as it arrived. Must be a subset of processors."
+        ),
+    )
+    selectable: bool = Field(
+        default=False,
+        description=(
+            "Offer the agent trentina_preprocess on a PROXIED tool, to pick "
+            "from processors per call. Off by default: the enum costs tokens "
+            "on every tool, and most tools return one format. The internal "
+            "fetch, read and content tools always offer it."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def required_within_processors(self) -> PreProcessConfig:
+        """A floor above the ceiling is a config error, not a silent extension."""
+        outside = [n for n in self.required if n not in self.processors]
+        if outside:
+            raise ValueError(f"preprocess.required {outside} not in processors {self.processors}")
+        return self
 
 
 class ToolPreProcess(BaseModel):
@@ -371,6 +398,17 @@ class ToolPreProcess(BaseModel):
     processors: list[ProcessorName] | None = None
     target_bytes: int | None = Field(default=None, ge=0)
     min_bytes: int | None = Field(default=None, ge=0)
+    required: list[ProcessorName] | None = Field(
+        default=None,
+        description=(
+            "This tool's floor. Unset inherits the profile's; set, it "
+            "REPLACES it, and must be within this tool's processors."
+        ),
+    )
+    selectable: bool | None = Field(
+        default=None,
+        description="Offer trentina_preprocess on this tool. Unset inherits the profile's.",
+    )
 
 
 #: A backend's L3 briefing says what the backend IS in a sentence or two.

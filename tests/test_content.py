@@ -49,14 +49,27 @@ async def test_the_blocklist_is_keyed_by_hash(env: Path) -> None:
     is_blocked.assert_called_once_with(_hash(content))
 
 
-@pytest.mark.parametrize("content_type", ["text/plain", "text/html", "text/markdown"])
-async def test_content_type_selects_nothing(env: Path, content_type: str) -> None:
-    """L1 is format-agnostic (#172); the parameter survives as tool surface."""
+@pytest.mark.parametrize("content_type", ["text/plain", "text/markdown"])
+async def test_content_type_other_than_html_is_judged_as_given(
+    env: Path, content_type: str
+) -> None:
+    """L1 is format-agnostic (#172): only declared HTML is converted."""
     html = "<!DOCTYPE html><p>Hello</p>"
     with layers(env) as fakes:
         result = await flag_content(html, content_type)
     assert result["content"] == html
     assert fakes.classify.call_args_list[0].args[0] == html
+
+
+async def test_declared_html_is_converted_and_judged_as_delivered(env: Path) -> None:
+    """content_type is the hint it was kept for (#183)."""
+    html = '<!DOCTYPE html><p>Hello</p><span style="display:none">psst</span>'
+    with layers(env) as fakes:
+        result = await flag_content(html, "text/html; charset=utf-8")
+    assert result["content"] == "Hello"
+    assert fakes.classify.call_args_list[0].args[0] == result["content"]
+    assert result["l1"]["stripped"]["hidden_elements"] == 1
+    assert result["preprocess"][0]["name"] == "html"
 
 
 async def test_the_origin_is_the_hash_and_never_allowlisted(env: Path) -> None:
