@@ -358,6 +358,29 @@ class TestProxiedCall:
         assert resp["result"]["_trentina_refusal"]["reason"] == "preprocess_failed"
         scan.assert_not_awaited()
 
+    async def test_a_floor_that_declines_as_broken_delivers_nothing(self) -> None:
+        broken = PreProcessResult.declined("html", Cost.FREE, PAGE, reason="worker_error")
+        profile = _profile(PreProcessConfig(processors=["html"], required=["html"]))
+        with patch(HTML_RUN, AsyncMock(return_value=broken)):
+            resp, _, scan, _ = await self._call(profile, {"id": "1"})
+        assert resp["result"]["_trentina_refusal"]["reason"] == "preprocess_failed"
+        assert "worker_error" in resp["result"]["content"][0]["text"]
+        scan.assert_not_awaited()
+
+    async def test_a_metered_floor_is_judged_as_model_output(self) -> None:
+        summary = PreProcessResult(
+            name="summarize",
+            cost=Cost.METERED,
+            content="A page about release notes.",
+            applied=True,
+            bytes_in=len(PAGE),
+            bytes_out=27,
+        )
+        profile = _profile(PreProcessConfig(processors=["summarize"], required=["summarize"]))
+        with patch(SUMMARIZE_RUN, AsyncMock(return_value=summary)):
+            _, _, scan, _ = await self._call(profile, {"id": "1"})
+        assert scan.call_args.kwargs["provenance"] is Provenance.MODEL_OUTPUT
+
     async def test_an_optional_processor_that_raises_still_fails_open(self) -> None:
         profile = _profile(PreProcessConfig(processors=["html"], selectable=True))
         with patch(HTML_RUN, side_effect=RuntimeError("parser exploded")):

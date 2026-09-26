@@ -196,6 +196,7 @@ async def _transform_block(
             )
             return block
         block.results.extend(stage.results)
+        block.metered = stage.metered_used
         block.content = stage.content
     if processors:
         try:
@@ -208,7 +209,7 @@ async def _transform_block(
             )
             return block
         block.results.extend(outcome.results)
-        block.metered = outcome.metered_used
+        block.metered = block.metered or outcome.metered_used
         block.content = outcome.content
     return block
 
