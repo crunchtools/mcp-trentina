@@ -1045,7 +1045,7 @@ class TestOneAuditRowPerCall:
 
     @staticmethod
     async def _call(
-        tmp_path: Any, decision: Any, content: list[dict[str, Any]]
+        tmp_path: Any, decision: Any, content: list[dict[str, Any]], scan: Any = None
     ) -> tuple[dict[str, Any], Any]:
         import mcp_trentina_crunchtools.database as db_mod
 
@@ -1064,12 +1064,30 @@ class TestOneAuditRowPerCall:
             ),
             patch(
                 "mcp_trentina_crunchtools.gateway.router.scan_tool_response",
-                side_effect=fake_scan,
+                side_effect=scan or fake_scan,
             ),
             patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
         ):
             mock_cfg.return_value.db_path = str(tmp_path / "one_row.db")
             mock_cfg.return_value.ensure_db_dir = lambda: None
+            if scan is not None:
+                try:
+                    await route_jsonrpc(
+                        _profile(),
+                        {
+                            "jsonrpc": "2.0",
+                            "id": 92,
+                            "method": "tools/call",
+                            "params": {
+                                "name": f"mcp-slack{NAMESPACE_SEP}slack_list_channels",
+                                "arguments": {},
+                            },
+                        },
+                    )
+                finally:
+                    rows = db_mod.get_db().execute("SELECT * FROM gateway_calls").fetchall()
+                    db_mod._db = None
+                    assert [r["outcome"] for r in rows] == ["gateway_error"]
             resp = await route_jsonrpc(
                 _profile(),
                 {
@@ -1107,3 +1125,97 @@ class TestOneAuditRowPerCall:
             {"content": content, "structuredContent": None}
         )
         assert rows[0]["bytes_delivered"] == wire_bytes(resp["result"])
+
+    async def test_an_internal_tool_has_no_arrived_size(self, tmp_path: Any) -> None:
+        """It minified inside itself: what reached the router is already delivered."""
+        import mcp_trentina_crunchtools.database as db_mod
+        from mcp_trentina_crunchtools.gateway.surface import wire_bytes
+
+        db_mod._db = None
+
+        async def fake_internal(_tool: str, _args: dict[str, Any], **_: Any) -> BackendCall:
+            return BackendCall(
+                content=[{"type": "text", "text": "fetched"}],
+                is_error=False,
+                structured_content=None,
+            )
+
+        with (
+            patch(
+                "mcp_trentina_crunchtools.gateway.router.call_internal_tool",
+                side_effect=fake_internal,
+            ),
+            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+        ):
+            mock_cfg.return_value.db_path = str(tmp_path / "internal.db")
+            mock_cfg.return_value.ensure_db_dir = lambda: None
+            resp = await route_jsonrpc(
+                _mixed_profile(),
+                {
+                    "jsonrpc": "2.0",
+                    "id": 91,
+                    "method": "tools/call",
+                    "params": {"name": f"web{NAMESPACE_SEP}fetch_tool", "arguments": {}},
+                },
+            )
+            row = db_mod.get_db().execute("SELECT * FROM gateway_calls").fetchone()
+        db_mod._db = None
+
+        assert row["bytes_arrived"] is None
+        assert row["bytes_delivered"] == wire_bytes(resp["result"])
+
+    async def test_a_failed_assembly_is_still_audited(self, tmp_path: Any) -> None:
+        async def boom(**_kwargs: Any) -> Any:
+            raise RuntimeError("scanner exploded")
+
+        with pytest.raises(RuntimeError):
+            await self._call(tmp_path, None, [{"type": "text", "text": "x"}], scan=boom)
+
+    async def test_a_minified_response_delivers_fewer_bytes(self, tmp_path: Any) -> None:
+        decision = SimpleNamespace(blocked=False, warning=None, refusal=None, extraction=None)
+        html = "<html><body>" + "<div><p>hello</p></div>" * 200 + "</body></html>"
+        _resp, rows = await self._call(tmp_path, decision, [{"type": "text", "text": html}])
+
+        assert rows[0]["bytes_delivered"] < rows[0]["bytes_arrived"]
+
+
+class TestSurfaceRecording:
+    """The surface is measured on the real tools/list build, not injected."""
+
+    @staticmethod
+    async def _list(profile: Profile) -> dict[str, Any]:
+        async def fake_list(backend_name: str, _backend: Backend) -> list[dict[str, Any]]:
+            if backend_name == "mcp-slack":
+                return [
+                    {"name": "slack_list_channels", "description": "d" * 50, "inputSchema": {}},
+                    {"name": "slack_dangerous", "description": "d" * 50, "inputSchema": {}},
+                ]
+            return [{"name": "jira_search", "description": "d" * 50, "inputSchema": {}}]
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            side_effect=fake_list,
+        ):
+            return await route_jsonrpc(profile, {"jsonrpc": "2.0", "id": 5, "method": "tools/list"})
+
+    async def test_stages_match_the_list_served(self) -> None:
+        from mcp_trentina_crunchtools.gateway.surface import surface_report, wire_bytes
+
+        resp = await self._list(_profile())
+        report = surface_report("testp")
+
+        assert report is not None
+        assert report["offered"]["tools"] == 3
+        assert report["allowed"]["tools"] == 2  # slack_dangerous is denied
+        assert report["served"]["tools"] == 2
+        assert report["served"]["bytes"] == wire_bytes(resp["result"]["tools"])
+        assert report["by_backend"]["mcp-slack"]["allowed"]["tools"] == 1
+
+    async def test_invalidation_drops_the_surface(self) -> None:
+        from mcp_trentina_crunchtools.gateway.router import invalidate_profile_cache
+        from mcp_trentina_crunchtools.gateway.surface import surface_report
+
+        await self._list(_profile())
+        invalidate_profile_cache("testp")
+
+        assert surface_report("testp") is None

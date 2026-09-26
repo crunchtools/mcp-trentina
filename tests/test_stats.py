@@ -161,6 +161,7 @@ class TestSurface:
 
         surface = result["surface"]
         assert list(surface["by_backend"]) == ["wiki"]
+        assert surface["by_backend"]["wiki"]["shaped"]["bytes"] == 1600
         assert surface["offered"]["bytes"] == 4000
         assert surface["served"]["bytes"] == 1500
         assert surface["saved"]["by_allowlist"]["bytes"] == 2000

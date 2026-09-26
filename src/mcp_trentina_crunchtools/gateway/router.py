@@ -607,17 +607,59 @@ async def _route_tools_call(
         )
         return _err(req_id, JSONRPC_INVALID_PARAMS, response_err)
 
-    assembled = await _assemble_call_result(
+    result = await _deliver(
         profile,
         backend,
         backend_name,
         tool_name,
         call_result,
+        t0,
         mode=mode,
         prompt=prompt,
         policy=policy,
         minify=minify,
     )
+    return _ok(req_id, result)
+
+
+async def _deliver(
+    profile: Profile,
+    backend: Backend,
+    backend_name: str,
+    tool_name: str,
+    call_result: Any,
+    t0: float,
+    *,
+    mode: Mode,
+    prompt: str | None,
+    policy: ModePolicy,
+    minify: bool | None,
+) -> dict[str, Any]:
+    """Assemble the result, then write the call's one audit row, sizes included."""
+    try:
+        assembled = await _assemble_call_result(
+            profile,
+            backend,
+            backend_name,
+            tool_name,
+            call_result,
+            mode=mode,
+            prompt=prompt,
+            policy=policy,
+            minify=minify,
+        )
+    except Exception as exc:
+        # The row is written after assembly, so a failure in it would
+        # otherwise leave the call unaudited.
+        _audit(
+            profile.name,
+            backend_name,
+            tool_name,
+            Outcome.GATEWAY_ERROR,
+            int((time.monotonic() - t0) * 1000),
+            f"assembly failed: {exc}",
+        )
+        raise
     # An internal tool minifies inside itself, so what arrived here is
     # already the delivered form: its arrived size stays NULL, not equal.
     arrived = (
@@ -638,7 +680,7 @@ async def _route_tools_call(
         bytes_arrived=arrived,
         bytes_delivered=await asyncio.to_thread(wire_bytes, assembled.result),
     )
-    return _ok(req_id, assembled.result)
+    return assembled.result
 
 
 async def _dispatch(

@@ -18,7 +18,8 @@ under that name.
   estimated tokens.** `surface` is the profile's tool list as its backends
   offer it, as the allowlist allows it, and as the gateway serves it, with
   the saving split by allowlist, shaping (compression, compaction) and short
-  names, per backend. `gateway_audit.delivery` is response bytes as they
+  names; `by_backend` gives each backend's offered, allowed and shaped
+  (pre-short-name) sizes. `gateway_audit.delivery` is response bytes as they
   arrived against as they were delivered (minify, duplicate
   `structuredContent`, redact), with the top tools. Agents see their own
   profile; the operator sees every profile.

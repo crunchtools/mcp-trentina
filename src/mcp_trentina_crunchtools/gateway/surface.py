@@ -50,9 +50,11 @@ class Stage:
 
     @classmethod
     def of(cls, tools: list[dict[str, Any]]) -> Stage:
+        """Count *tools* and size them as one compact JSON array."""
         return cls(len(tools), wire_bytes(tools))
 
     def as_dict(self) -> dict[str, int]:
+        """``tools``, ``bytes``, and ``est_tokens`` (bytes / BYTES_PER_TOKEN)."""
         return {
             "tools": self.tools,
             "bytes": self.bytes,
@@ -108,10 +110,12 @@ class Surface:
             if offered.bytes
             else 100,
             "by_backend": {
+                # "shaped", not "served": short names are assigned across the
+                # whole aggregate, so no backend has a served size of its own.
                 name: {
                     "offered": b.offered.as_dict(),
                     "allowed": b.allowed.as_dict(),
-                    "served": b.shaped.as_dict(),
+                    "shaped": b.shaped.as_dict(),
                 }
                 for name, b in sorted(
                     self.backends.items(), key=lambda kv: kv[1].offered.bytes, reverse=True
@@ -125,10 +129,12 @@ _surfaces: dict[str, Surface] = {}
 
 
 def record_surface(profile_name: str, surface: Surface) -> None:
+    """Keep *surface* as the profile's, replacing any earlier build's."""
     _surfaces[profile_name] = surface
 
 
 def forget_surface(profile_name: str) -> None:
+    """Drop the profile's surface with its aggregate; absent is fine."""
     _surfaces.pop(profile_name, None)
 
 
@@ -139,4 +145,5 @@ def surface_report(profile_name: str) -> dict[str, Any] | None:
 
 
 def surface_profiles() -> list[str]:
+    """Names of the profiles with a surface recorded, sorted."""
     return sorted(_surfaces)
