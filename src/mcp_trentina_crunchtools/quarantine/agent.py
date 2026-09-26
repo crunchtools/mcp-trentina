@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from ..config import get_config
+from ..config import DEFAULT_SEARCH_MODEL, get_config
 from ..errors import QuarantineAgentError
 from ..l1.pipeline import run_l1
 from .limiter import THROTTLE_STATUS, limited_generate, throttle_budget
@@ -56,6 +56,8 @@ _CANARY_PREFIX = "CANARY-"
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_TIMEOUT = 60.0
+#: L0 web search, either route.
+L0_SEARCH_TIMEOUT = 60.0
 #: Re-exported from the provider so both call sites carry the credential the
 #: same way. See the note there for why it is never a query parameter.
 GEMINI_API_KEY_HEADER = "x-goog-api-key"
@@ -794,13 +796,16 @@ def _citation_sources(message: dict[str, Any]) -> list[dict[str, str]]:
     for note in message.get("annotations") or []:
         if not isinstance(note, dict) or note.get("type") != "url_citation":
             continue
-        cite = note.get("url_citation") or {}
+        cite = note.get("url_citation")
+        if not isinstance(cite, dict):
+            continue
         uri = cite.get("url", "")
         if not isinstance(uri, str) or urlparse(uri).scheme not in ("http", "https"):
             continue
         if uri not in seen:
             seen.add(uri)
-            sources.append({"uri": uri, "title": cite.get("title", "")})
+            title = cite.get("title", "")
+            sources.append({"uri": uri, "title": title if isinstance(title, str) else ""})
     return sources
 
 
@@ -816,7 +821,7 @@ async def _search_openrouter(query: str, num_results: int, api_key: str) -> dict
     _enforce_openrouter_search_quarantine(body)
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(GEMINI_TIMEOUT)) as http_client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(L0_SEARCH_TIMEOUT)) as http_client:
             resp = await http_client.post(
                 f"{OPENROUTER_API_BASE}/chat/completions",
                 json=body,
@@ -838,12 +843,14 @@ async def _search_openrouter(query: str, num_results: int, api_key: str) -> dict
     text = message.get("content")
     if not isinstance(text, str) or not text.strip():
         raise QuarantineAgentError("Empty answer in OpenRouter search response")
-    if canary in text:
+    sources = _citation_sources(message)
+    # Everything returned came from the same untrusted message, citations too.
+    if any(canary in part for part in (text, *(v for s in sources for v in s.values()))):
         raise QuarantineAgentError("SECURITY: canary leaked in L0 search response")
     usage = resp_json.get("usage") or {}
     return {
         "text": text,
-        "sources": _citation_sources(message),
+        "sources": sources,
         "supports": [],
         "usage": {
             "input_tokens": usage.get("prompt_tokens", 0),
@@ -888,8 +895,11 @@ async def search_grounded(
     request_body = _build_search_request_body(query, system_prompt, num_results)
     _enforce_search_quarantine(request_body)
 
-    # The default is an OpenRouter id; Google's own API takes the bare name.
+    # The default is an OpenRouter id; Google's own API takes the bare name,
+    # and only a Gemini model. Anything else falls back to the known default.
     model = config.search_model.removeprefix("google/")
+    if "/" in model or not model.startswith("gemini"):
+        model = DEFAULT_SEARCH_MODEL.removeprefix("google/")
     url = f"{GEMINI_API_BASE}/{model}:generateContent"
 
     try:

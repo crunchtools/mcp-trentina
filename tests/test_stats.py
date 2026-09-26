@@ -132,6 +132,8 @@ class TestOperatorScope:
         }
         assert result["blocklist"]["total_blocked"] == 2
         assert "compression" in result
+        # 0.41.0: availability follows the provider chain, not Gemini's key.
+        assert {"provider", "llm_available", "has_api_key"} <= set(result["config"])
 
 
 class TestUnknownCaller:

@@ -128,6 +128,12 @@ def test_only_http_citations_are_kept() -> None:
     assert _citation_sources(message) == [{"uri": "http://ok.example/", "title": "t"}]
 
 
+def test_a_malformed_citation_is_skipped() -> None:
+    message = {"annotations": [{"type": "url_citation", "url_citation": "nope"}]}
+
+    assert _citation_sources(message) == []
+
+
 def test_citations_become_sources_once_each() -> None:
     message = _openrouter_reply()["choices"][0]["message"]
 
@@ -212,6 +218,33 @@ class TestRoute:
             pytest.raises(QuarantineAgentError, match="Empty answer"),
         ):
             await search_grounded("bootc")
+
+    async def test_a_canary_in_a_citation_is_refused(self) -> None:
+        reply = _openrouter_reply()
+        reply["choices"][0]["message"]["annotations"][0]["url_citation"]["title"] = "CANARY-x"
+        cls, _ = _http(reply)
+        with (
+            patch(f"{_AGENT}.get_config", return_value=_cfg(openrouter="k")),
+            patch(f"{_AGENT}.get_current_profile", return_value=None),
+            patch(f"{_AGENT}._generate_canary", return_value="CANARY-x"),
+            patch(f"{_AGENT}.httpx.AsyncClient", cls),
+            pytest.raises(QuarantineAgentError, match="canary"),
+        ):
+            await search_grounded("bootc")
+
+    async def test_the_gemini_route_only_sends_a_gemini_model(self) -> None:
+        cfg = _cfg(gemini="g")
+        cfg.search_model = "openai/gpt-6-luna"
+        cls, http = _http({"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+        with (
+            patch(f"{_AGENT}.get_config", return_value=cfg),
+            patch(f"{_AGENT}.get_current_profile", return_value=None),
+            patch(f"{_AGENT}.httpx.AsyncClient", cls),
+        ):
+            await search_grounded("bootc")
+
+        url = http.post.call_args.args[0]
+        assert "/gemini-2.5-flash:generateContent" in url
 
     async def test_no_choices_is_an_error(self) -> None:
         cls, _ = _http({"choices": []})
