@@ -47,7 +47,7 @@ The modes are named after the actions of OpenRouter's [prompt-injection guardrai
 
 OpenRouter's redact swaps out the spans its regexes matched. Trentina's L2 and L3 return verdicts, not spans, so there is nothing to swap out. Trentina's `redact` rewrites the whole payload through L3 instead (detect, extract, verify) and never returns the original bytes.
 
-Before 0.35.0, `flag` was `warn` and `redact` was `clean`. Both old names are still accepted everywhere a mode is read (`trentina_mode`, `defense.modes`, `defense.enforcement`, `alert_ingress.enforcement`, `TRENTINA_MODE`, `TRENTINA_MODES`, `TRENTINA_ENFORCEMENT_OVERRIDE`, and a `trentina_mode` parameter guard). They are normalized on the way in and logged once per process as `[DEPRECATED]`. Nothing emits them. They will be removed in 0.36.0.
+Before 0.35.0, `flag` was `warn` and `redact` was `clean`. The old names were accepted for one minor and removed in 0.36.0: a profile, call or environment variable using one is refused like any unknown mode. The one exception is the `TRENTINA_ENFORCEMENT_OVERRIDE` kill switch, which still honours `warn`, because the night it is needed is not the night to discover a rename.
 
 ### Choosing
 

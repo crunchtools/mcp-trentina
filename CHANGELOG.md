@@ -10,6 +10,15 @@ under that name.
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-09-25
+
+### Removed
+- **`warn` and `clean`**, the pre-0.35.0 spellings of `flag` and `redact`,
+  as announced when they were renamed (#200). A profile, `trentina_mode`
+  argument or `TRENTINA_MODE`/`TRENTINA_MODES` value still using one is
+  refused like any unknown mode. `TRENTINA_ENFORCEMENT_OVERRIDE=warn` is
+  still honoured: the kill switch keeps every old spelling on purpose.
+
 ### Added
 - **Boot warm-up** (#216). Once the event loop serves, a background task
   builds every profile's `tools/list` aggregate, so a cold perimeter store

@@ -139,3 +139,21 @@ decides: L3 runs on every tool response, and a user-facing call waits at most
 `qwen/qwen3.5-flash` has no host that passes `data_collection: deny` (404 on
 every call). Detection differences are one or two cases on a 48-case corpus;
 latency differences are an order of magnitude.
+
+### Newer Gemini Flash models (2026-09-25)
+
+Two runs of the corpus each (78 attacks, 18 benign), same routing.
+
+| Model | Detection | FP | p50 | p95 | $/1k calls |
+|-------|-----------|----|-----|-----|------------|
+| `google/gemini-2.5-flash-lite` | 74/78 | 3/18 | 1.0s | 1.9s | $0.09 |
+| `google/gemini-3.1-flash-lite` | 76/78 | 2/18 | 1.6s | 2.6s | $0.37 |
+| `google/gemini-2.5-flash` | 78/78 | 3/18 | 1.8s | 3.3s | $0.56 |
+| `google/gemini-3.5-flash-lite` | 76/78 | 0/18 | 1.7s | 12.2s | $0.48 |
+| `google/gemini-3.8-flash` | 68/68 (10 timed out) | 2/18 | 44.8s | 69.8s | $2.16 |
+
+2.5 Flash-Lite stays the default: nothing newer separates from it by more
+than the corpus can resolve, at a quarter of the cost. Gemini 3.5 and later
+return 404 through OpenRouter when the request carries `temperature` under
+`require_parameters`; the rows above were measured without it, so moving to
+one needs the driver to drop `temperature` for those models first.

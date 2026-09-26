@@ -10,7 +10,7 @@ decides only what is delivered:
 * ``redact`` — an L3 extraction, verified, instead of the original.
 
 The names are OpenRouter's guardrail actions (#200); until 0.35.0 flag was
-``warn`` and redact was ``clean``, and both are still accepted. redact is NOT
+``warn`` and redact was ``clean``, and 0.36.0 removed the old names. redact is NOT
 OpenRouter's span substitution: L2 and L3 give verdicts, not spans, so there
 is nothing to substitute. The whole payload is rewritten through L3 instead.
 
@@ -55,7 +55,7 @@ class Mode(str, Enum):
 
     @classmethod
     def _missing_(cls, value: object) -> Mode | None:
-        """``Mode("warn")`` is FLAG, with the deprecation logged; see ``canonical_mode``."""
+        """``Mode("BLOCK")`` is BLOCK; see ``canonical_mode``."""
         if isinstance(value, str) and (name := canonical_mode(value)) != value:
             return cls(name)
         return None

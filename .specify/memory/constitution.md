@@ -125,7 +125,7 @@ Follow [Semantic Versioning 2.0.0](https://semver.org/) strictly.
 | HTML Parsing | beautifulsoup4 | Latest |
 | HTML-to-Markdown | markdownify | Latest |
 | Database | SQLite | Built-in |
-| Q-Agent Backend | Gemini REST API (raw httpx) | gemini-2.0-flash-lite |
+| Q-Agent Backend | Pluggable provider drivers over raw httpx (Gemini, OpenAI-compatible incl. OpenRouter, Anthropic, Ollama) | gemini-2.5-flash-lite (spec 002) |
 | Container Base | Hummingbird | Latest |
 | Package Manager | uv | Latest |
 | Build System | hatchling | Latest |

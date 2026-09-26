@@ -18,7 +18,7 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from mcp_trentina_crunchtools.config import get_config
-from mcp_trentina_crunchtools.errors import ModeNotPermittedError
+from mcp_trentina_crunchtools.errors import ConfigError, ModeNotPermittedError
 from mcp_trentina_crunchtools.gateway.backend import BackendCall
 from mcp_trentina_crunchtools.gateway.ingress_defense import IngressDecision
 from mcp_trentina_crunchtools.gateway.modes_policy import (
@@ -642,68 +642,54 @@ class TestInternalModes:
         assert get_current_policy() is None
 
 
-class TestPre035Spellings:
-    """`warn`/`clean` became `flag`/`redact` in 0.35.0 (#200), OpenRouter's names.
+class TestPre035SpellingsAreGone:
+    """`warn`/`clean` became `flag`/`redact` in 0.35.0 (#200), were accepted
+    with a warning for one minor, and are removed in 0.36.0 as announced.
 
-    Accepted everywhere a mode is read, for one minor; emitted nowhere. Every
-    profile model is `extra="forbid"` and a profile that fails to load is
-    fatal, so without the alias an upgrade takes a deployed gateway down.
-    Delete this class with the aliases in 0.36.0.
+    A profile or call still carrying one now fails, which is loud and
+    recoverable — the alternative was migrating it forever.
     """
 
-    def test_the_enum_maps_them(self) -> None:
-        assert Mode("warn") is Mode.FLAG
-        assert Mode("clean") is Mode.REDACT
+    @pytest.mark.parametrize("old", ["warn", "clean"])
+    def test_the_enum_refuses_them(self, old: str) -> None:
+        with pytest.raises(ValueError, match="is not a valid Mode"):
+            Mode(old)
 
-    def test_the_deprecation_is_logged_once_per_name(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        from mcp_trentina_crunchtools import config as config_mod
+    @pytest.mark.parametrize("old", ["warn", "clean"])
+    def test_a_profile_carrying_one_fails_to_load(self, old: str) -> None:
+        with pytest.raises(ValidationError):
+            DefenseConfig.model_validate({"modes": ["block", old]})
 
-        config_mod._legacy_logged.clear()
-        with caplog.at_level("WARNING"):
-            for _ in range(3):
-                config_mod.canonical_mode("warn")
-        logged = [r.getMessage() for r in caplog.records if "[DEPRECATED]" in r.getMessage()]
-        assert logged == [
-            "[DEPRECATED] trentina mode 'warn' will be removed in v0.36.0. Use 'flag' instead."
-        ]
+    @pytest.mark.parametrize("old", ["warn", "clean"])
+    def test_a_default_carrying_one_fails_to_load(self, old: str) -> None:
+        with pytest.raises(ValidationError):
+            DefenseConfig.model_validate({"enforcement": old})
 
-    def test_a_profile_is_normalized_on_load(self) -> None:
-        d = DefenseConfig.model_validate(
-            {"enforcement": "warn", "modes": ["block", "warn", "clean"]}
-        )
-        assert d.enforcement == "flag"
-        assert d.modes == ["block", "flag", "redact"]
+    @pytest.mark.parametrize("value", ["warn", "warn*"])
+    def test_a_mode_guard_matching_no_mode_fails_to_load(self, value: str) -> None:
+        """`deny: [warn]` can never match a resolved mode; loading it would
+        leave a guard that silently denies nothing."""
+        with pytest.raises(ValidationError, match="matches no mode"):
+            _profile(
+                ["block", "flag", "redact"],
+                backend={
+                    "parameter_guards": {
+                        "jira_get_issue": {
+                            MODE_PARAM: ParameterConstraint(allow=["*"], deny=[value])
+                        }
+                    }
+                },
+            )
 
-    def test_clean_as_a_default_is_still_refused_with_the_reason(self) -> None:
-        with pytest.raises(ValidationError, match="cannot be a default"):
-            DefenseConfig.model_validate({"enforcement": "clean"})
-
-    def test_a_call_asking_for_an_old_name_resolves_to_the_new_one(self) -> None:
+    def test_a_call_asking_for_an_old_name_is_refused(self) -> None:
         policy = ModePolicy((Mode.BLOCK, Mode.REDACT), Mode.BLOCK)
-        assert policy.resolve("clean") is Mode.REDACT
+        with pytest.raises(ModeNotPermittedError):
+            policy.resolve("clean")
 
-    def test_a_mode_guard_keeps_its_meaning(self) -> None:
-        """`deny: [warn]` matched against the resolved `flag` would deny nothing."""
-        p = _profile(
-            ["block", "flag", "redact"],
-            backend={
-                "parameter_guards": {
-                    "jira_get_issue": {MODE_PARAM: ParameterConstraint(allow=["*"], deny=["warn"])}
-                }
-            },
-        )
-        policy = policy_for(p, p.backends["jira"], "jira_get_issue")
-        assert policy.allowed == (Mode.BLOCK, Mode.REDACT)
-
-    def test_the_standalone_env_accepts_them(self, mode_env: Callable[..., None]) -> None:
-        from mcp_trentina_crunchtools.modes import current_policy
-
-        mode_env("warn", "warn,clean")
-        policy = current_policy()
-        assert policy.default is Mode.FLAG
-        assert policy.allowed == (Mode.FLAG, Mode.REDACT)
+    def test_the_standalone_env_refuses_them(self, mode_env: Callable[..., None]) -> None:
+        mode_env("warn", "warn")
+        with pytest.raises(ConfigError, match="unknown trentina mode 'warn'"):
+            get_config()
 
     def test_nothing_emits_them(self) -> None:
         body = refusal_body(

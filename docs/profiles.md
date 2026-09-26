@@ -208,7 +208,7 @@ Each profile configures its defense **policy** — never the layers' existence. 
 
 An autonomous agent runs `enforcement: block`; a human-supervised agent runs `flag`. The mode decides what a flag costs and `l2_threshold` decides how readily L2 flags, so make an agent stricter through its mode. Below 0.5 the threshold flags content Prompt Guard labels BENIGN, and under `block` each of those is a refused call (#204). `TRENTINA_ENFORCEMENT_OVERRIDE=flag` is the global kill switch for the night a block threshold misfires.
 
-`warn` and `clean` are the pre-0.35.0 spellings of `flag` and `redact` ([why](quarantine-tools.md#the-names-are-openrouters)). **[DEPRECATED]** They still load, with a warning, and will be removed in 0.36.0. `annotate` and `extract`, the pre-0.25.0 spellings, were removed in 0.29.0.
+`warn` and `clean`, the pre-0.35.0 spellings of `flag` and `redact` ([why](quarantine-tools.md#the-names-are-openrouters)), were removed in 0.36.0; a profile carrying one fails to load. `annotate` and `extract`, the pre-0.25.0 spellings, were removed in 0.29.0.
 
 The `provider` field lets each profile use a different LLM for L3 Q-Agent operations and tool description compression. When omitted, the profile uses the global `TRENTINA_MODEL_PROVIDER` environment variable. All provider API keys must be present in the environment regardless of which profiles use them.
 

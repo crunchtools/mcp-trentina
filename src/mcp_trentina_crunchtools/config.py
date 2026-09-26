@@ -98,26 +98,15 @@ DEFAULT_PROVIDER_FALLBACK: list[str] = []
 #: the vocabulary most people arriving here already know.
 MODE_NAMES = ("block", "flag", "redact")
 
-#: The pre-0.35.0 spellings. Accepted, normalized, and logged once per
-#: process until 0.36.0 removes them; nothing ever emits them.
-LEGACY_MODE_NAMES = {"warn": "flag", "clean": "redact"}
-_legacy_logged: set[str] = set()
-
 
 def canonical_mode(name: str) -> str:
-    """``name`` lower-cased, with a pre-0.35.0 spelling mapped to its new one."""
-    lowered = name.strip().lower()
-    new = LEGACY_MODE_NAMES.get(lowered)
-    if new is None:
-        return lowered
-    if lowered not in _legacy_logged:
-        _legacy_logged.add(lowered)
-        logger.warning(
-            "[DEPRECATED] trentina mode %r will be removed in v0.36.0. Use %r instead.",
-            lowered,
-            new,
-        )
-    return new
+    """``name`` stripped and lower-cased.
+
+    ``warn``/``clean``, the pre-0.35.0 spellings of flag and redact, were
+    mapped here for one minor and dropped at 0.36.0 as announced; they are
+    now unknown modes like any other word.
+    """
+    return name.strip().lower()
 
 
 def _mode_policy_env() -> tuple[str, tuple[str, ...]]:
