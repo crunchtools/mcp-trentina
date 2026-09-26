@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from ..modes import Mode, ModePolicy
     from ..preprocess.policy import PreProcessPolicy
     from .profile import Backend, Profile
+    from .transform import TransformOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -557,13 +558,15 @@ async def _dispatch(
         )
 
 
-def _l3_context(backend: Backend, sidecar: dict[str, Any] | None) -> str | None:
+def _l3_context(backend: Backend, reduced: TransformOutcome) -> str | None:
     """The operator's word on what this backend returns (#204), then invariant 3.
 
     The transform sidecar travels to L3's briefing too. "This is the 3% that
-    survived reduction" is context a judge should have.
+    survived reduction" is context a judge should have, and so is "the
+    conversion removed elements hidden from a human reader" (#229).
     """
-    notes = [backend.l3_briefing]
+    notes = [backend.l3_briefing, reduced.briefing]
+    sidecar = reduced.sidecar
     if sidecar:
         notes.append(
             f"This artifact was transformed by trentina pre-processors "
@@ -636,7 +639,7 @@ async def _assemble_call_result(
     """
     content_blocks = call_result.content
     provenance = Provenance.EXTERNAL
-    reduce_sidecar: dict[str, Any] | None = None
+    reduced: TransformOutcome | None = None
 
     # Transform BEFORE the perimeter, never after. preprocess/base.py
     # invariant 2: the caller scans the transformed artifact and delivers that
@@ -662,7 +665,6 @@ async def _assemble_call_result(
             return _preprocess_refusal(reduced.failed, mode)
         content_blocks = reduced.content_blocks
         provenance = reduced.provenance
-        reduce_sidecar = reduced.sidecar
 
     result: dict[str, Any] = {
         "content": content_blocks,
@@ -682,7 +684,10 @@ async def _assemble_call_result(
             mode=mode,
             prompt=prompt,
             policy=policy,
-            l3_context=_l3_context(backend, reduce_sidecar),
+            l3_context=_l3_context(backend, reduced)
+            if reduced is not None
+            else backend.l3_briefing,
+            hidden=reduced.hidden if reduced is not None else None,
         )
         if decision.blocked:
             # The content never reaches the agent; the warning does. Audited

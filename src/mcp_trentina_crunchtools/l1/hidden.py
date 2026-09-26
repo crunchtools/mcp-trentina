@@ -68,6 +68,24 @@ class HiddenStats:
     same_color: int = field(default=0)
     latex_invisible: int = field(default=0)
 
+    def __add__(self, other: HiddenStats) -> HiddenStats:
+        """Counts over two texts, e.g. the blocks of one response."""
+        return HiddenStats(
+            self.elements + other.elements,
+            self.off_screen + other.off_screen,
+            self.same_color + other.same_color,
+            self.latex_invisible + other.latex_invisible,
+        )
+
+    def at_least(self, other: HiddenStats) -> HiddenStats:
+        """The larger count of each kind: two views of overlapping text, neither complete."""
+        return HiddenStats(
+            max(self.elements, other.elements),
+            max(self.off_screen, other.off_screen),
+            max(self.same_color, other.same_color),
+            max(self.latex_invisible, other.latex_invisible),
+        )
+
 
 _NAMED_COLORS: dict[str, str] = {
     "white": "#ffffff",

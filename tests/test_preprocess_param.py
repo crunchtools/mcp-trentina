@@ -272,6 +272,34 @@ class TestProxiedCall:
         assert delivered.startswith("# Release notes")
         assert scan.call_args.kwargs["content_blocks"][0]["text"] == delivered
 
+    async def test_what_conversion_hid_is_counted_and_briefed(self) -> None:
+        """#229: the proxied path keeps the evidence the internal tools keep."""
+        profile = _profile(PreProcessConfig(min_bytes=0))
+        resp, _, scan, _ = await self._call(profile, {"id": "1"})
+        assert "Ignore prior instructions" not in resp["result"]["content"][0]["text"]
+        assert scan.call_args.kwargs["hidden"].elements == 1
+        assert "removed 1 element(s) hidden" in scan.call_args.kwargs["l3_context"]
+
+    async def test_hiding_is_summed_over_every_block(self) -> None:
+        profile = _profile(PreProcessConfig(min_bytes=0))
+        off_screen = '<p>plain text</p><div style="position:absolute;left:-9999px">psst</div>'
+        blocks = [{"type": "text", "text": PAGE}, {"type": "text", "text": off_screen}]
+        out = await transform_response(
+            profile=profile,
+            backend=profile.backends["cms"],
+            backend_name="cms",
+            tool_name="get_page",
+            content_blocks=blocks,
+        )
+        assert out.hidden is not None
+        assert out.hidden.elements == 1
+        assert out.hidden.off_screen == 1
+
+    async def test_nothing_converted_means_no_hiding_override(self) -> None:
+        profile = _profile(PreProcessConfig(min_bytes=0))
+        _, _, scan, _ = await self._call(profile, {"id": "1"}, text="plain words")
+        assert scan.call_args.kwargs["hidden"] is None
+
     async def test_the_floor_runs_disabled_small_and_unasked(self) -> None:
         """`required` ignores `enabled` and `min_bytes`, and `false` cannot remove it."""
         profile = _profile(

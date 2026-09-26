@@ -33,13 +33,16 @@ per profile.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from ..channels import Channel
 from ..defense import Provenance
+from ..l1.hidden import HiddenStats, detect_hidden_markup
 from ..preprocess import PreProcessContext, PreProcessor, Strategy, run_preprocessors
+from ..preprocess.detect import hiding_briefing, hiding_removed
 from ..preprocess.policy import FAILED_DECLINES
 from .drivers import build_preprocessors
 from .errors import ProfileConfigError
@@ -63,6 +66,12 @@ class TransformOutcome:
     # Set when a REQUIRED processor could not run. The router delivers
     # nothing: a floor that fails open is not a floor.
     failed: str | None = None
+    # Hiding counted on the ORIGINAL of every text block, when any block's
+    # markup was converted (#229): conversion deletes the evidence L1 would
+    # count on what is delivered. None when nothing was converted.
+    hidden: HiddenStats | None = None
+    # What L3 is told when conversion deleted hidden elements.
+    briefing: str | None = None
 
 
 def resolve(profile: Profile, backend: Backend, tool_name: str) -> PreProcessConfig:
@@ -280,12 +289,25 @@ async def transform_response(
     )
     # An explicit true under strategy none still runs: the agent asked.
     strategy: Strategy = "chain" if cfg.strategy == "none" else cfg.strategy
+    return await _transform_blocks(
+        content_blocks, list(zip(targets, lengths, strict=True)), (floor, processors), strategy, ctx
+    )
+
+
+async def _transform_blocks(
+    content_blocks: list[Any] | None,
+    targets: list[tuple[tuple[int, str], int]],
+    stages: tuple[list[PreProcessor], list[PreProcessor]],
+    strategy: Strategy,
+    ctx: PreProcessContext,
+) -> TransformOutcome:
+    """Each text block through both stages, then the accounting and the hiding."""
     new_blocks = list(content_blocks or [])
     results: list[Any] = []
     metered = False
     sizes = [0, 0]
-    for (idx, text), length in zip(targets, lengths, strict=True):
-        block = await _transform_block(text, floor, processors, strategy, ctx)
+    for (idx, text), length in targets:
+        block = await _transform_block(text, *stages, strategy, ctx)
         if block.failed is not None:
             return TransformOutcome(content_blocks=None, failed=block.failed)
         results.extend(block.results)
@@ -294,7 +316,17 @@ async def transform_response(
         sizes[1] += len(block.content.encode("utf-8"))
         if block.content != text:
             new_blocks[idx] = {**new_blocks[idx], "text": block.content}
-    return _account(ctx.source, content_blocks, new_blocks, results, metered, *sizes)
+    outcome = _account(ctx.source, content_blocks, new_blocks, results, metered, *sizes)
+    removed = hiding_removed(results)
+    if removed is None:
+        return outcome
+    # Every block's original, converted or not: L1 will read the delivered
+    # text of all of them, and these counts stand in for that text's.
+    counts = await asyncio.gather(
+        *(asyncio.to_thread(detect_hidden_markup, text) for (_, text), _ in targets)
+    )
+    hidden = sum((c for _, c in counts), HiddenStats())
+    return replace(outcome, hidden=hidden, briefing=hiding_briefing(removed))
 
 
 def _account(
