@@ -30,6 +30,7 @@ where the payload hides past the cap and the head reads clean.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass, fields
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -41,6 +42,56 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from .defense import DefenseVerdict
+
+logger = logging.getLogger(__name__)
+
+#: What a malformed ``trentina_mode`` is told it may send instead.
+MODE_SHAPES = ["block", "flag", '{"redact": "<what you need>"}']
+
+
+def parse_mode_arg(value: Any, legacy_prompt: Any = None) -> tuple[str | None, str | None]:
+    """``trentina_mode`` as (mode name, extraction question), unchecked by policy.
+
+    Since 0.39.0 the question travels inside the mode, because it only means
+    something there: ``"block"``, ``"flag"``, or ``{"redact": "<question>"}``.
+    A bare ``"redact"`` keeps the tool's default question. ``trentina_prompt``
+    beside a string mode is the pre-0.39.0 spelling, read with a warning
+    until 0.41.0.
+
+    Args:
+        value: the call's ``trentina_mode``: None, a mode name, or
+            ``{"redact": "<question>"}``.
+        legacy_prompt: the call's ``trentina_prompt``. Used, with a warning,
+            only when ``value`` is not the dict form.
+
+    Returns:
+        ``(mode name or None, question or None)``. The name is not yet checked
+        against any policy: ``ModePolicy.resolve`` does that, after resolving
+        None to the default.
+
+    Raises:
+        ModeNotPermittedError: a dict that is not exactly one ``redact`` key
+            with a non-empty question, or a value of any other type.
+    """
+    if isinstance(value, dict):
+        items = list(value.items())
+        question = items[0][1] if len(items) == 1 else None
+        if (
+            canonical_mode(str(items[0][0] if items else "")) != "redact"
+            or not isinstance(question, str)
+            or not question.strip()
+        ):
+            raise ModeNotPermittedError(str(value), MODE_SHAPES)
+        return "redact", question
+    if value is not None and not isinstance(value, str):
+        raise ModeNotPermittedError(str(value), MODE_SHAPES)
+    if isinstance(legacy_prompt, str) and legacy_prompt.strip():
+        logger.warning(
+            "trentina_prompt is deprecated and removed in 0.41.0; "
+            'pass trentina_mode={"redact": "<question>"}'
+        )
+        return value, legacy_prompt
+    return value, None
 
 
 class Mode(str, Enum):

@@ -107,8 +107,9 @@ async def call_internal_tool(
 ) -> BackendCall:
     """Invoke an trentina tool in-process, returning a BackendCall like the http path.
 
-    ``modal_arguments`` are the gateway's RESOLVED ``trentina_mode`` and
-    ``trentina_prompt``. They are merged only into a tool that declares them:
+    ``modal_arguments`` are the gateway's RESOLVED ``trentina_mode`` (with the
+    question inside, for redact) and ``trentina_preprocess``. They are merged
+    only into a tool that declares them:
     the admin tools take neither, and passing an undeclared argument would
     fail the call.
 

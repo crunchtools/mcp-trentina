@@ -46,7 +46,7 @@ Everything entering through the gateway is judged at its ingress — the firewal
 
 **The mode is per call, the policy per profile.** `defense.modes` lists what the agent may choose through `trentina_mode`, which the gateway inserts into every tool; `defense.enforcement` is the default an omitted mode resolves to — `flag` (content delivered intact with a `_trentina_warning`) or `block` (flagged responses refused). See [Profiles](profiles.md#content-modes). `TRENTINA_ENFORCEMENT_OVERRIDE=flag` is the kill switch, and beats the call's own choice.
 
-`redact` cannot be the enforcement mode, because `enforcement` is the default an omitted `trentina_mode` resolves to, and a call that omits the mode carries no extraction prompt. It is available per call through `defense.modes` since 0.32.0: the call supplies `trentina_prompt`, which is what a proxied response lacked. `extract`, its pre-0.25.0 spelling, loads as `block`.
+`redact` cannot be the enforcement mode, because `enforcement` is the default an omitted `trentina_mode` resolves to, and a call that omits the mode carries no extraction prompt. It is available per call through `defense.modes` since 0.32.0: the call supplies the question, `trentina_mode: {"redact": "<question>"}` since 0.39.0 (a separate `trentina_prompt` before), which is what a proxied response lacked. `extract`, its pre-0.25.0 spelling, loads as `block`.
 
 The PUSH paths set it themselves, because no agent is waiting to be asked: `alert_ingress.enforcement` defaults to `flag`, so a Nagios page forwards with the caution attached. The Matrix path has no setting on purpose — refusing a streamed `/sync` response breaks the client's sync loop rather than dropping a message.
 

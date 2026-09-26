@@ -10,6 +10,20 @@ under that name.
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-09-26
+
+### Changed
+
+- **The extraction question travels inside the mode.** `trentina_mode` is
+  `"block"`, `"flag"`, or `{"redact": "<question>"}`. `trentina_prompt`, which
+  only ever meant something under `redact`, is read with a warning until
+  0.41.0. A refusal that offers redact spells the new form.
+- **No tool declares `trentina_mode`.** Every tool accepts it and the session
+  instructions explain it once, as `trentina_preprocess` since 0.38.0. The
+  declaration alone cost a 376-tool profile ~39 KB (~10k tokens) of every
+  tools/list. `declare_modes: true` on a profile declares it again, for a
+  client that drops arguments a tool does not declare.
+
 ## [0.38.0] - 2026-09-26
 
 Fewer tokens on every tool call. Measured on a 376-tool profile before this

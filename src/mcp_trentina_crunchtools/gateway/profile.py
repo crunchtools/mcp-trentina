@@ -89,7 +89,7 @@ def _normalize_enforcement(block: Any, *, key: str) -> Any:
     Since 0.32.0 `enforcement` is the DEFAULT an omitted `trentina_mode`
     resolves to, and a call that omitted the mode carried no prompt either —
     the agent called `jira_get_issue`, not "extract something from this". A
-    call that asks for redact does carry one (`trentina_prompt`), which is why
+    call that asks for redact does carry one (`{"redact": "<question>"}`), which is why
     redact is available per call through `modes` and not here.
 
     Pydantic would refuse it anyway, but it would say "input should be 'flag'
@@ -755,10 +755,9 @@ class DefenseConfig(BaseModel):
         default=None,
         description=(
             "The modes this profile's agent may choose per call, on every "
-            "tool of every backend. Unset means [enforcement] alone, and a "
-            "single mode inserts no parameter. With more than one, the "
-            "gateway adds trentina_mode (and trentina_prompt when redact is "
-            "allowed) to each tool's schema and refuses any other value. "
+            "tool of every backend. Unset means [enforcement] alone. With more "
+            "than one, every tool accepts trentina_mode (block, flag, or "
+            '{"redact": "<question>"}) and any other value is refused. '
             "`enforcement` is the default an omitted mode resolves to, and "
             "must be in this list."
         ),
@@ -1323,6 +1322,15 @@ class Profile(BaseModel):
             "Profile-level pre-processing of tool responses. Minifies by "
             "default since 0.38.0; agents get exact text per call with "
             "trentina_preprocess: false."
+        ),
+    )
+    declare_modes: bool = Field(
+        default=False,
+        description=(
+            "Declare trentina_mode in every tool's schema. Off since 0.39.0: "
+            "every tool accepts it and the session instructions explain it "
+            "once, and declaring it cost a 376-tool profile ~39 KB. Turn on "
+            "for a client that drops arguments a tool does not declare."
         ),
     )
     short_names: bool = Field(

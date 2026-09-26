@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from mcp_trentina_crunchtools.modes import Mode
 from mcp_trentina_crunchtools.server import mcp
 
 FAMILIES = ("fetch", "read", "dir", "content", "search")
@@ -27,7 +32,7 @@ class TestServerRegistration:
         for family in FAMILIES:
             props = tools[f"{family}_tool"].parameters["properties"]
             assert "trentina_mode" in props, family
-            assert "trentina_prompt" in props, family
+            assert "trentina_prompt" in props, family  # read until 0.41.0
             assert "trentina_mode" not in tools[f"{family}_tool"].parameters.get("required", [])
 
     async def test_expected_tools_registered(self) -> None:
@@ -45,3 +50,39 @@ class TestServerRegistration:
 
     def test_server_name(self) -> None:
         assert mcp.name == "mcp-trentina-crunchtools"
+
+
+FAMILY_CALLS = [
+    ("fetch_tool", "fetch_page", {"url": "https://example.com"}),
+    ("read_tool", "read_file", {"path": "/tmp/x"}),
+    ("dir_tool", "list_dir", {"path": "/tmp"}),
+    ("content_tool", "judge_content", {"content": "x"}),
+    ("search_tool", "web_search", {"query": "x"}),
+]
+
+
+async def test_the_dict_form_is_declared_and_strict() -> None:
+    """0.39.0: {"redact": "<question>"} is a model with no other keys."""
+    tools = {t.name: t for t in await mcp.list_tools()}
+    schema = tools["fetch_tool"].parameters
+    shapes = schema["properties"]["trentina_mode"]["anyOf"]
+    model = next(s for s in shapes if s.get("type") == "object")
+    assert model["required"] == ["redact"]
+    assert model["additionalProperties"] is False
+
+
+@pytest.mark.parametrize(("tool", "family", "args"), FAMILY_CALLS)
+async def test_every_family_extracts_what_the_dict_form_asks(
+    tool: str, family: str, args: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TRENTINA_MODES", "block,redact")
+    from mcp_trentina_crunchtools import config as config_mod
+
+    config_mod._config = None
+    fake = AsyncMock(return_value={"content": "ok"})
+    with patch(f"mcp_trentina_crunchtools.server.{family}", fake):
+        await mcp.call_tool(tool, {**args, "trentina_mode": {"redact": "What ships?"}})
+    config_mod._config = None
+    call = fake.call_args
+    assert Mode.REDACT in (*call.args, *call.kwargs.values())
+    assert "What ships?" in (*call.args, *call.kwargs.values())
