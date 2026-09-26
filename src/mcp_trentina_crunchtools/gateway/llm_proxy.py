@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from starlette.responses import Response, StreamingResponse
 
 from .auth import resolve_profile_by_token
+from .context import profile_context
 from .errors import ProfileConfigError
 from .proxy_utils import (
     PLAIN_TEXT,
@@ -398,13 +399,16 @@ def _schedule_completion_scan(
             from ..defense import Provenance, defend
 
             text = body.decode("utf-8", errors="replace")
-            verdict = await defend(
-                text,
-                source=f"llm:{profile.name}:{provider_name}",
-                source_type="llm_completion",
-                defense=profile.defense,
-                provenance=Provenance.MODEL_OUTPUT,
-            )
+            # Bound here, not at the handler: this runs after the stream ends,
+            # outside the request's context (RT #1505).
+            with profile_context(profile):
+                verdict = await defend(
+                    text,
+                    source=f"llm:{profile.name}:{provider_name}",
+                    source_type="llm_completion",
+                    defense=profile.defense,
+                    provenance=Provenance.MODEL_OUTPUT,
+                )
             if verdict.flagged:
                 logger.warning(
                     "llm_proxy: completion flagged profile=%s provider=%s "

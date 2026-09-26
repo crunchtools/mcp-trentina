@@ -44,6 +44,7 @@ from ..defense import defend, defend_selection
 from ..matrix.keybackup import KeyBackupProvider
 from ..preprocess import SelectionContext
 from ..warning import build_warning
+from .context import profile_context
 from .drivers import build_preprocessors
 from .proxy_utils import (
     PLAIN_TEXT,
@@ -184,7 +185,9 @@ def register_matrix_routes(
                 status_code=401,
                 media_type=PLAIN_TEXT,
             )
-        return await _proxy_matrix(request, upstream, profile)
+        # The sync scan runs on this profile's provider and key (RT #1505).
+        with profile_context(profile):
+            return await _proxy_matrix(request, upstream, profile)
 
     mcp_server.custom_route(
         "/matrix/{token}/{path:path}",
