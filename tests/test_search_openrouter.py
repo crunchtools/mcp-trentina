@@ -313,6 +313,29 @@ class TestRoute:
         ):
             await search_grounded("bootc")
 
+    async def test_deeply_nested_json_is_an_agent_error(self) -> None:
+        cls, _ = _http(body=b"[" * 200_000)
+        with (
+            patch(f"{_AGENT}.get_config", return_value=_cfg(openrouter="k")),
+            patch(f"{_AGENT}.get_current_profile", return_value=None),
+            patch(f"{_AGENT}.httpx.AsyncClient", cls),
+            pytest.raises(QuarantineAgentError, match="not JSON"),
+        ):
+            await search_grounded("bootc")
+
+    async def test_a_malformed_usage_block_is_ignored(self) -> None:
+        reply = _openrouter_reply()
+        reply["usage"] = "lots"
+        cls, _ = _http(reply)
+        with (
+            patch(f"{_AGENT}.get_config", return_value=_cfg(openrouter="k")),
+            patch(f"{_AGENT}.get_current_profile", return_value=None),
+            patch(f"{_AGENT}.httpx.AsyncClient", cls),
+        ):
+            result = await search_grounded("bootc")
+
+        assert result["usage"] == {"input_tokens": 0, "output_tokens": 0}
+
     async def test_valid_json_that_is_not_an_object_is_refused(self) -> None:
         cls, _ = _http(body=b"[]")
         with (

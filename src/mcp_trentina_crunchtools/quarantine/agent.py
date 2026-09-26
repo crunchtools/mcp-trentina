@@ -831,6 +831,53 @@ async def _read_bounded(resp: httpx.Response) -> bytes:
     return bytes(buf)
 
 
+def _json_object(raw: bytes) -> dict[str, Any]:
+    """*raw* as a JSON object, or QuarantineAgentError: never a parser exception."""
+    try:
+        value = json.loads(raw)
+    except (ValueError, RecursionError) as exc:
+        raise QuarantineAgentError("L0 search response is not JSON") from exc
+    if not isinstance(value, dict):
+        raise QuarantineAgentError("L0 search response is not a JSON object")
+    return value
+
+
+def _parse_openrouter_search(raw: bytes, canary: str) -> dict[str, Any]:
+    """An OpenRouter search body as L0's result, or QuarantineAgentError.
+
+    Every shape an upstream can get wrong is refused here, never raised as
+    an unrelated exception: not JSON, not an object, no choice, no message,
+    no answer, a leaked canary.
+    """
+    resp_json = _json_object(raw)
+    choices = resp_json.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise QuarantineAgentError("No choices in OpenRouter search response")
+    first = choices[0]
+    message = first.get("message") if isinstance(first, dict) else None
+    if not isinstance(message, dict):
+        raise QuarantineAgentError("No message in OpenRouter search response")
+    text = message.get("content")
+    if not isinstance(text, str) or not text.strip():
+        raise QuarantineAgentError("Empty answer in OpenRouter search response")
+    sources = _citation_sources(message)
+    # Everything returned came from the same untrusted message, citations too.
+    if canary in text or any(canary in value for src in sources for value in src.values()):
+        raise QuarantineAgentError("SECURITY: canary leaked in L0 search response")
+    usage = resp_json.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
+    return {
+        "text": text,
+        "sources": sources,
+        "supports": [],
+        "usage": {
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+        },
+    }
+
+
 async def _search_openrouter(query: str, num_results: int, api_key: str) -> dict[str, Any]:
     """L0 through OpenRouter's web plugin. Same contract as the Gemini path."""
     from .providers.openai import OPENROUTER_API_BASE
@@ -860,37 +907,7 @@ async def _search_openrouter(query: str, num_results: int, api_key: str) -> dict
         raise QuarantineAgentError("Request timed out") from exc
     except httpx.RequestError as exc:
         raise QuarantineAgentError(str(exc)) from exc
-    try:
-        resp_json = json.loads(raw)
-    except (ValueError, RecursionError) as exc:
-        raise QuarantineAgentError("L0 search response is not JSON") from exc
-    if not isinstance(resp_json, dict):
-        raise QuarantineAgentError("L0 search response is not a JSON object")
-
-    choices = resp_json.get("choices")
-    if not isinstance(choices, list) or not choices:
-        raise QuarantineAgentError("No choices in OpenRouter search response")
-    first = choices[0]
-    message = first.get("message") if isinstance(first, dict) else None
-    if not isinstance(message, dict):
-        raise QuarantineAgentError("No message in OpenRouter search response")
-    text = message.get("content")
-    if not isinstance(text, str) or not text.strip():
-        raise QuarantineAgentError("Empty answer in OpenRouter search response")
-    sources = _citation_sources(message)
-    # Everything returned came from the same untrusted message, citations too.
-    if canary in text or any(canary in value for src in sources for value in src.values()):
-        raise QuarantineAgentError("SECURITY: canary leaked in L0 search response")
-    usage = resp_json.get("usage") or {}
-    return {
-        "text": text,
-        "sources": sources,
-        "supports": [],
-        "usage": {
-            "input_tokens": usage.get("prompt_tokens", 0),
-            "output_tokens": usage.get("completion_tokens", 0),
-        },
-    }
+    return _parse_openrouter_search(raw, canary)
 
 
 async def search_grounded(
