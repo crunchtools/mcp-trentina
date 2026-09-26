@@ -10,6 +10,19 @@ under that name.
 
 ## [Unreleased]
 
+## [0.39.1] - 2026-09-26
+
+### Fixed
+
+- **Every gateway ingress now judges on the calling profile's own provider
+  and key** (RT #1505). Only internal tool calls bound the profile, so proxied
+  tool responses, Matrix syncs, alerts and `/llm/` completions ran L3 on the
+  global provider and key whatever the profile's `defense.provider` said, and
+  the verdict cache recorded a judge that never ran.
+- A profile with no `llm_keys` for its own provider now logs a warning at
+  load: with the profile bound, its L3 reports `l3_unavailable` on every
+  ingress, as its internal tools always did.
+
 ## [0.39.0] - 2026-09-26
 
 ### Changed

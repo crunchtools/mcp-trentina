@@ -44,6 +44,7 @@ from starlette.responses import Response
 
 from ..defense import defend, defend_json
 from ..l1.pipeline import risk_level_for_count
+from .context import profile_context
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -161,7 +162,9 @@ async def _handle_alert(
             media_type="text/plain",
         )
 
-    forward_body, risk_level, flagged, counts = await _defend_alert(body, profile)
+    # Judged on this profile's provider and key (RT #1505).
+    with profile_context(profile):
+        forward_body, risk_level, flagged, counts = await _defend_alert(body, profile)
 
     client_host = request.client.host if request.client is not None else "unknown"
     log_fn = logger.warning if flagged else logger.info

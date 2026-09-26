@@ -43,6 +43,7 @@ from .compress import (
     maybe_trigger_compression,
     set_on_compressed,
 )
+from .context import profile_context
 from .errors import BackendCallError, BackendNotInProfileError
 from .filter import filter_tools
 from .guards import check_parameter_guards, check_response_guards
@@ -299,7 +300,10 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
         return await _route_tools_list(profile, req_id)
 
     if method == "tools/call":
-        return await _route_tools_call(profile, req_id, params)
+        # Everything this call judges runs on the caller's own provider and
+        # key (RT #1505): unbound, L3 fell through to the global provider.
+        with profile_context(profile):
+            return await _route_tools_call(profile, req_id, params)
 
     return _err(req_id, JSONRPC_METHOD_NOT_FOUND, f"Method not found: {method}")
 
@@ -593,7 +597,6 @@ async def _dispatch(
     """Forward the call: in-process for internal://, streamable-http otherwise."""
     if not backend.is_internal:
         return await call_backend_tool(backend_name, backend, tool_name, forwarded)
-    from .context import profile_context
 
     # The internal tools judge their own ingress, so they get the RESOLVED
     # mode; the bound policy is what their refusals offer as alternatives.

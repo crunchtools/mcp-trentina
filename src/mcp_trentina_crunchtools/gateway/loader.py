@@ -342,6 +342,32 @@ def _resolve_alert_ingress_secrets(name: str, alert_ingress: AlertIngressConfig)
         alert_ingress.forward_secret = SecretStr(fwd_secret)
 
 
+def _check_judges(registry: dict[str, Profile]) -> None:
+    """Warn about a profile with no key for the provider its L3 runs on.
+
+    Each gateway ingress binds the calling profile (RT #1505), and
+    ``resolve_profile_llm`` refuses to bill any key but the profile's own, so
+    such a profile's L3 reports ``l3_unavailable`` and block refuses what it
+    judges. Its internal tools always behaved that way; before RT #1505 its
+    proxied responses ran unbound on the global key and hid it. A warning,
+    not a load error: a config that never set ``llm_keys`` should learn why
+    before it stops loading.
+    """
+    from .service import judge_of
+
+    for name, profile in registry.items():
+        provider, _model = judge_of(profile)
+        if provider != "ollama" and provider not in profile.llm_keys:
+            logger.warning(
+                "profile %r judges with provider %r but has no llm_keys.%s: its L3 "
+                "will report l3_unavailable; add the key, or set defense.provider "
+                "to one it holds",
+                name,
+                provider,
+                provider,
+            )
+
+
 def _check_operator(registry: dict[str, Profile]) -> None:
     """At most one operator, and it must be able to pay for its own work.
 
@@ -412,6 +438,7 @@ def load_profiles(path: Path | str) -> GatewayConfig:
         name: _build_profile(name, body) for name, body in profiles_section.items()
     }
     _check_operator(registry)
+    _check_judges(registry)
 
     logger.info(
         "gateway: loaded %d profile(s): %s",
