@@ -107,11 +107,16 @@ def _check_drivers(name: str, profile: Profile) -> None:
     outage. This makes them fail at startup, which is where
     ``gateway/drivers.py`` claims they fail.
 
-    Both channels are checked, because both name processors and both can name
+    Every channel is checked, because each names processors and each can name
     the wrong one.
     """
     build_preprocessors(profile.preprocess, channel=Channel.TOOL, profile_name=name)
     for backend_name, backend in profile.backends.items():
+        build_preprocessors(
+            backend.preprocess_tool_descriptions,
+            channel=Channel.TOOL_DESCRIPTION,
+            profile_name=f"{name}:{backend_name}",
+        )
         for tool_name, override in backend.preprocess_tools.items():
             if override.processors is None and override.required is None:
                 continue

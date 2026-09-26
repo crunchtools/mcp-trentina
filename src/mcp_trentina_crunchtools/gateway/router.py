@@ -36,8 +36,14 @@ from ..defense import Provenance
 from ..errors import ModeNotPermittedError, PreProcessNotPermittedError
 from ..outcomes import Outcome, classify_exception, refusal_of
 from ..preprocess.policy import PREPROCESS_PARAM
+from ..quarantine.limiter import Priority, l3_priority
 from .backend import call_backend_tool, list_backend_tools, on_backend_cache_evict
-from .compress import compress_tools, maybe_trigger_compression
+from .compress import (
+    compress_tools,
+    get_profiles,
+    maybe_trigger_compression,
+    set_on_compressed,
+)
 from .errors import BackendCallError, BackendNotInProfileError
 from .filter import filter_tools
 from .guards import check_parameter_guards, check_response_guards
@@ -82,6 +88,8 @@ _profile_tools_cache: dict[str, list[dict[str, Any]]] = {}
 _profile_backend_urls: dict[str, set[str]] = {}
 
 _profile_inflight: dict[str, asyncio.Task[list[dict[str, Any]]]] = {}
+# Held so the rebuild after a compression pass is not garbage-collected.
+_rebuild_task: asyncio.Future[None] | None = None
 
 # Bumped per profile by every invalidation of it. An in-flight aggregation
 # built from the pre-reload Profile: its waiters still get it, but it must not
@@ -105,6 +113,36 @@ def _on_backend_evicted(url: str) -> None:
 
 
 on_backend_cache_evict(_on_backend_evicted)
+
+
+def _rebuild_after_compression() -> None:
+    """Serve newly compressed text once it is judged, without making anyone wait.
+
+    Each profile is rebuilt in the background, after any build already in
+    flight, and the new aggregate replaces the cached one when it is done.
+    Clients keep the cached list meanwhile: nothing is invalidated.
+    """
+    global _rebuild_task
+    profiles = get_profiles()
+    if profiles:
+        _rebuild_task = asyncio.ensure_future(_rebuild_in_background(list(profiles.values())))
+
+
+async def _rebuild_in_background(profiles: list[Profile]) -> None:
+    token = l3_priority.set(Priority.BACKGROUND)
+    try:
+        for profile in profiles:
+            # After the build in flight, which may predate the new text. A
+            # failed build keeps the cached list, and the build logged why.
+            inflight = _profile_inflight.get(profile.name)
+            if inflight is not None:
+                await asyncio.gather(inflight, return_exceptions=True)
+            await asyncio.gather(ensure_profile_build(profile), return_exceptions=True)
+    finally:
+        l3_priority.reset(token)
+
+
+set_on_compressed(_rebuild_after_compression)
 
 
 def invalidate_profile_cache_for_backend(url: str) -> None:
@@ -344,7 +382,7 @@ async def _build_profile_tools(
         raw_tools = [strip_params(t) for t in raw_tools]
         filtered = filter_tools(raw_tools, backend)
         pre_compress = filtered
-        if backend.compress_descriptions:
+        if backend.compresses_descriptions:
             filtered = compress_tools(filtered)
         # The perimeter, on the post-compression text — compressed
         # descriptions are LLM output and it is the OUTPUT that reaches the

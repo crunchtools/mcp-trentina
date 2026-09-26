@@ -164,7 +164,7 @@ class TestRules:
 
     def test_tool_without_schema_passes_through(self) -> None:
         tool = {"name": "t", "description": "d"}
-        assert compact_tool(tool) is tool
+        assert compact_tool(tool) == tool
 
     def test_depth_cap_serves_deep_subtree_as_is(self) -> None:
         leaf = _schema({"x": {"type": "string", "default": None}})
@@ -260,3 +260,25 @@ class TestRouter:
         served, _ = await self._list(compact=False)
         assert served["properties"] == GW_SCHEMA["properties"]
         assert "$schema" in served
+
+
+def test_fields_no_agent_reads_are_dropped() -> None:
+    """0.38.0: outputSchema and the titles that repeat the name cost ~40 KB on josui."""
+    tool = {
+        "name": "list_issues",
+        "title": "List Issues",
+        "description": "List issues.",
+        "inputSchema": {"type": "object", "properties": {}},
+        "outputSchema": {"type": "object", "properties": {"items": {"type": "array"}}},
+        "annotations": {"title": "List Issues", "readOnlyHint": True},
+    }
+    out = compact_tool(tool)
+    assert "outputSchema" not in out
+    assert "title" not in out
+    assert out["annotations"] == {"readOnlyHint": True}
+    assert tool["annotations"]["title"] == "List Issues", "never mutates its input"
+
+
+def test_annotations_holding_only_a_title_go_entirely() -> None:
+    out = compact_tool({"name": "x", "annotations": {"title": "X"}})
+    assert "annotations" not in out

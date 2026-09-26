@@ -403,3 +403,176 @@ class TestRetryLogic:
             result = await _call_compress_model([("h1", "desc")])
         assert result == []
         assert mock_prov.generate.call_count == 1
+
+
+class TestParameterDescriptions:
+    """0.38.0: parameter descriptions are trimmed, then compressed when long."""
+
+    def setup_method(self) -> None:
+        _cache.clear()
+
+    @pytest.mark.parametrize(
+        ("text", "required", "default", "expected"),
+        [
+            ("Optional. The page size.", False, 10, "The page size."),
+            ("The page size (optional)", False, ..., "The page size"),
+            ("Optional. The page size.", True, ..., "Optional. The page size."),
+            ("Max results. Defaults to 10.", False, 10, "Max results."),
+            ("Max results (default: 10)", False, 10, "Max results."),
+            ("Max results. Defaults to 10.", False, 20, "Max results. Defaults to 10."),
+            ("Include archived. Default is false.", False, False, "Include archived."),
+            ("Optional", False, ..., "Optional"),
+        ],
+    )
+    def test_trim_drops_only_what_the_schema_says(
+        self, text: str, required: bool, default: Any, expected: str
+    ) -> None:
+        assert compress_mod._trim(text, required=required, default=default) == expected
+
+    def test_cached_parameter_descriptions_are_served(self) -> None:
+        schema = {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "default": 10, "description": "Max. Defaults to 10."},
+                "q": {"type": "string", "description": "Query."},
+            },
+            "$defs": {"F": {"properties": {"x": {"description": "Long x."}}}},
+        }
+        _cache[compress_mod._param_key("Max. Defaults to 10.", 10)] = "Max."
+        _cache[compress_mod._param_key("Long x.", ...)] = "X."
+        out = compress_tools([_tool("t", "", schema)])[0]["inputSchema"]
+        assert out["properties"]["limit"]["description"] == "Max."
+        assert out["properties"]["q"]["description"] == "Query."
+        assert out["$defs"]["F"]["properties"]["x"]["description"] == "X."
+        assert schema["properties"]["limit"]["description"] == "Max. Defaults to 10."
+
+    def test_the_default_is_part_of_the_key(self) -> None:
+        """Same words, different default: the trim read different schemas."""
+        assert compress_mod._param_key("Max. Defaults to 10.", 10) != compress_mod._param_key(
+            "Max. Defaults to 10.", 20
+        )
+
+    @pytest.mark.asyncio
+    async def test_short_ones_are_trimmed_and_long_ones_go_to_the_model(self) -> None:
+        long_desc = "The maximum number of results to return in a single page of output. " * 2
+        schema = {
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer", "description": "Optional. Page number."},
+                "limit": {"type": "integer", "description": long_desc},
+            },
+        }
+        long_key = compress_mod._param_key(long_desc, ...)
+        model = AsyncMock(return_value=[(long_key, "Page size.")])
+        with (
+            patch.object(compress_mod, "_call_compress_model", model),
+            patch.object(compress_mod, "save_compression"),
+            patch.object(compress_mod, "DELAY_BETWEEN_BATCHES", 0),
+        ):
+            stored = await compress_mod._precompress_params("b", [_tool("list", "", schema)])
+        assert stored == 2
+        assert _cache[compress_mod._param_key("Optional. Page number.", ...)] == "Page number."
+        assert _cache[long_key] == "Page size."
+        assert model.call_args.kwargs["kind"] == "parameter"
+        assert model.call_args.kwargs["context"][long_key] == {"tool": "list", "parameter": "limit"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("reply", [[], "longer"])
+    async def test_a_model_that_fails_or_grows_it_leaves_the_trim(self, reply: Any) -> None:
+        long_desc = "Optional. " + "The maximum number of results in one page of output. " * 2
+        schema = {"type": "object", "properties": {"limit": {"description": long_desc}}}
+        key = compress_mod._param_key(long_desc, ...)
+        answer = [(key, long_desc + " and more")] if reply == "longer" else reply
+        with (
+            patch.object(compress_mod, "_call_compress_model", AsyncMock(return_value=answer)),
+            patch.object(compress_mod, "save_compression"),
+            patch.object(compress_mod, "DELAY_BETWEEN_BATCHES", 0),
+        ):
+            await compress_mod._precompress_params("b", [_tool("list", "", schema)])
+        assert _cache[key] == long_desc.removeprefix("Optional. ").strip()
+
+    @pytest.mark.asyncio
+    async def test_a_run_that_banked_anything_rebuilds_the_lists(self) -> None:
+        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+
+        profile = Profile(
+            name="p",
+            auth=AuthConfig(bearer_token_env="T"),
+            backends={"b": Backend(url="http://x:8000/mcp", compress_descriptions=True)},
+        )
+        rebuilt = MagicMock()
+        saved = compress_mod._on_compressed
+        compress_mod.set_on_compressed(rebuilt)
+        try:
+            with (
+                patch.object(compress_mod, "_precompress_backend", AsyncMock(return_value=3)),
+                patch.object(compress_mod, "DELAY_BETWEEN_BACKENDS", 0),
+            ):
+                await compress_mod.precompress_all({"p": profile})
+                rebuilt.assert_called_once()
+                rebuilt.reset_mock()
+                with patch.object(compress_mod, "_precompress_backend", AsyncMock(return_value=0)):
+                    await compress_mod.precompress_all({"p": profile})
+                rebuilt.assert_not_called()
+        finally:
+            compress_mod.set_on_compressed(saved)
+
+
+class TestPreprocessToolDescriptions:
+    """#176: compression is the summarize pre-processor on its own channel."""
+
+    def test_the_old_key_is_read_as_summarize(self) -> None:
+        from mcp_trentina_crunchtools.gateway.profile import Backend
+
+        backend = Backend(url="http://x:8000/mcp", compress_descriptions=True)
+        assert backend.preprocess_tool_descriptions.processors == ["summarize"]
+        assert backend.compresses_descriptions
+        assert not Backend(
+            url="http://x:8000/mcp", compress_descriptions=False
+        ).compresses_descriptions
+
+    def test_both_keys_do_not_load(self) -> None:
+        from pydantic import ValidationError
+
+        from mcp_trentina_crunchtools.gateway.profile import Backend
+
+        with pytest.raises(ValidationError, match="not both"):
+            Backend(
+                url="http://x:8000/mcp",
+                compress_descriptions=True,
+                preprocess_tool_descriptions={"processors": ["summarize"]},
+            )
+
+    def test_only_summarize_runs_on_the_description_channel(self) -> None:
+        from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
+        from mcp_trentina_crunchtools.gateway.loader import _check_drivers
+        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+
+        profile = Profile(
+            name="p",
+            auth=AuthConfig(bearer_token_env="T"),
+            backends={
+                "b": Backend(
+                    url="http://x:8000/mcp", preprocess_tool_descriptions={"processors": ["petit"]}
+                )
+            },
+        )
+        with pytest.raises(ProfileConfigError, match="tool_description"):
+            _check_drivers("p", profile)
+
+    @pytest.mark.asyncio
+    async def test_summarize_descriptions_parses_well_formed_entries(self) -> None:
+        from mcp_trentina_crunchtools.preprocess.summarize import summarize_descriptions
+
+        reply = ProviderResult(
+            text=json.dumps({"compressed": [{"id": "a", "text": "A."}, {"id": "b"}, "junk"]})
+        )
+        with patch(
+            "mcp_trentina_crunchtools.preprocess.summarize.limited_generate",
+            AsyncMock(return_value=reply),
+        ) as generate:
+            out = await summarize_descriptions(
+                MagicMock(), [{"id": "a", "text": "Long A."}], "parameter"
+            )
+        assert out == [("a", "A.")]
+        assert "PARAMETER" in generate.call_args.kwargs["system_prompt"]

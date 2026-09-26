@@ -690,7 +690,10 @@ async def scan_tool_list(
     """Judge every tool definition; annotate the flagged ones in place.
 
     ``tools_before_compression`` decides provenance per tool: a description
-    the compressor rewrote is LLM output and earns unconditional L3. The
+    or parameter description the compressor rewrote is LLM output and earns
+    unconditional L3. A parameter that was only trimmed of boilerplate counts
+    too; telling the two apart would cost a second cache lookup per tool to
+    save L3 on text L3 was going to read anyway. The
     lists are positionally parallel (compress_tools preserves order and
     length).
 
@@ -708,7 +711,10 @@ async def scan_tool_list(
         if not surface.strip():
             return None
 
-        compressed = tool.get("description", "") != before.get("description", "")
+        # A model may have rewritten the description or any parameter's.
+        compressed = tool.get("description", "") != before.get("description", "") or (
+            tool.get("inputSchema") != before.get("inputSchema")
+        )
         provenance = Provenance.MODEL_OUTPUT if compressed else Provenance.EXTERNAL
 
         key = _cache_key(profile, f"tool:{provenance.value}", surface, judge)

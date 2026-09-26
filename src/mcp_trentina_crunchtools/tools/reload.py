@@ -160,7 +160,7 @@ def _profile_delta(before: Profile, after: Profile) -> dict[str, Any]:
 
 
 def _compression_surface(profiles: dict[str, Profile]) -> set[tuple[str, bool]]:
-    """The (url, compress_descriptions) pairs description compression walks.
+    """The (url, compresses_descriptions) pairs description compression walks.
 
     Re-arming compression is worth a fan-out only when this set moved.
     ``precompress_all`` deduplicates by URL and ``_find_uncached`` skips every
@@ -168,7 +168,7 @@ def _compression_surface(profiles: dict[str, Profile]) -> set[tuple[str, bool]]:
     per compressing backend and buy nothing.
     """
     return {
-        (backend.url, backend.compress_descriptions)
+        (backend.url, backend.compresses_descriptions)
         for profile in profiles.values()
         for backend in profile.backends.values()
         if not backend.is_internal
@@ -283,7 +283,7 @@ AGENT_SCOPE_NOTE = (
 def _profile_compression_surface(profile: Profile) -> set[tuple[str, bool]]:
     """One profile's slice of the compression surface."""
     return {
-        (backend.url, backend.compress_descriptions)
+        (backend.url, backend.compresses_descriptions)
         for backend in profile.backends.values()
         if not backend.is_internal
     }
