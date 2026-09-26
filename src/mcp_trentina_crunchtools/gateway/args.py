@@ -29,7 +29,11 @@ def drop_empty_optional(
         return arguments, []
     required = schema.get("required")
     keep = set(required) if isinstance(required, list) else set()
-    dropped = [k for k, v in arguments.items() if k not in keep and (v is None or v == "")]
-    if not dropped:
-        return arguments, []
-    return {k: v for k, v in arguments.items() if k not in dropped}, dropped
+    cleaned: dict[str, Any] = {}
+    dropped: list[str] = []
+    for key, value in arguments.items():
+        if key not in keep and (value is None or value == ""):
+            dropped.append(key)
+        else:
+            cleaned[key] = value
+    return (cleaned, dropped) if dropped else (arguments, [])

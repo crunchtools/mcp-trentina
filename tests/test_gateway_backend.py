@@ -439,3 +439,25 @@ class TestRejectedCallsAreNotOutages:
         from mcp_trentina_crunchtools.outcomes import Outcome, classify_exception
 
         assert classify_exception(BackendRejectedCallError("x")) is Outcome.TOOL_ERROR
+
+
+@pytest.mark.parametrize("code", [-32600, -32601, -32602])
+def test_every_rejection_code_is_found(code: int) -> None:
+    from mcp.shared.exceptions import MCPError
+
+    from mcp_trentina_crunchtools.gateway.backend import _rejection
+
+    assert _rejection(ExceptionGroup("tg", [MCPError(code, "x")])) is not None
+
+
+def test_a_rejection_is_found_in_a_nested_group_and_through_a_cause() -> None:
+    from mcp.shared.exceptions import MCPError
+
+    from mcp_trentina_crunchtools.gateway.backend import _rejection
+
+    wrapped = RuntimeError("wrapper")
+    wrapped.__cause__ = MCPError(-32602, "x")
+    nested = ExceptionGroup("outer", [ValueError("other"), ExceptionGroup("inner", [wrapped])])
+
+    assert _rejection(nested) == "invalid arguments"
+    assert _rejection(ExceptionGroup("tg", [MCPError(-32603, "x")])) is None
