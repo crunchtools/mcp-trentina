@@ -661,7 +661,7 @@ class TestBearerPathWithNoStaticToken:
 
 class TestEnforcementModeNames:
     """`annotate`/`extract` became `warn`/`clean` in 0.25.0, and those became
-    `flag`/`redact` in 0.35.0 (see TestPre035Spellings in test_mode_param.py).
+    `flag`/`redact` in 0.35.0 (see TestPre035SpellingsAreGone in test_mode_param.py).
 
     The old names described the MECHANISM — a note gets attached, an
     extraction is run. The new ones describe what the reading agent is being

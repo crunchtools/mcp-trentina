@@ -1,6 +1,6 @@
 # mcp-trentina-crunchtools Constitution
 
-> **Version:** 1.2.0
+> **Version:** 1.2.1
 > **Ratified:** 2026-09-22
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.17.0
@@ -125,7 +125,7 @@ Follow [Semantic Versioning 2.0.0](https://semver.org/) strictly.
 | HTML Parsing | beautifulsoup4 | Latest |
 | HTML-to-Markdown | markdownify | Latest |
 | Database | SQLite | Built-in |
-| Q-Agent Backend | Gemini REST API (raw httpx) | gemini-2.0-flash-lite |
+| Q-Agent Backend | Pluggable provider drivers over raw httpx (Gemini, OpenAI-compatible incl. OpenRouter, Anthropic, Ollama) | gemini-2.5-flash-lite (spec 002) |
 | Container Base | Hummingbird | Latest |
 | Package Manager | uv | Latest |
 | Build System | hatchling | Latest |
@@ -307,3 +307,4 @@ Container CI workflows MUST use two separate jobs:
 | 1.1.0 | 2026-09-20 | Add Section III "Python version coverage": full matrix from floor to newest, single-version jobs pinned to newest (production's version) |
 | 1.1.1 | 2026-09-22 | Inherit crunchtools/constitution v1.16.0 (XVII: no real-world names, PII or private deployment topology); examples, tests and docs moved to its fictional roster (RT #1504) |
 | 1.2.0 | 2026-09-24 | Inherit v1.17.0 (Gatehouse pre-commit hook + triage). Section 2 rewritten for the three-layer defense it has had since 0.10 — it still described a 7-stage stripping L1 and an L2 extraction agent (Gatehouse critical on #182, unanswered). Allowlist, quality gates and the L1 stage recipe corrected to match the code |
+| 1.2.1 | 2026-09-25 | Q-Agent backend row brought up to date: pluggable provider drivers (Gemini, OpenAI-compatible incl. OpenRouter, Anthropic, Ollama), default gemini-2.5-flash-lite since spec 002 |

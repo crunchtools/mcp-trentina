@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+from fnmatch import fnmatchcase
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -25,7 +26,7 @@ from pydantic import (
     model_validator,
 )
 
-from ..config import LEGACY_MODE_NAMES, SUPPORTED_PROVIDERS, canonical_mode
+from ..config import MODE_NAMES, SUPPORTED_PROVIDERS, canonical_mode
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +70,8 @@ def _canonical_mode(value: Any) -> Any:
 #: The three things a flagged payload can become, named for what the reading
 #: agent is told rather than for the mechanism that tells it. `flag` forwards
 #: the original bytes with the caution attached, `block` refuses. Spelled
-#: `annotate`/`block` before 0.25.0 and `warn`/`block` before 0.35.0, which
-#: is still accepted (#200). `redact` is deliberately absent — see
+#: `annotate`/`block` before 0.25.0 and `warn`/`block` before 0.35.0 (#200),
+#: both since dropped (0.29.0, 0.36.0). `redact` is deliberately absent — see
 #: `_normalize_enforcement`.
 EnforcementMode = Annotated[Literal["flag", "block"], BeforeValidator(_canonical_mode)]
 
@@ -482,25 +483,26 @@ class Backend(BaseModel):
 
     @field_validator("parameter_guards")
     @classmethod
-    def mode_guards_in_current_spelling(
+    def mode_guards_name_real_modes(
         cls, v: dict[str, dict[str, ParameterConstraint]]
     ) -> dict[str, dict[str, ParameterConstraint]]:
-        """A `trentina_mode` guard written with `warn` or `clean` keeps its meaning.
+        """Every `trentina_mode` guard value must match at least one real mode.
 
-        The guard is matched against the RESOLVED mode, which is only ever
-        spelled flag or redact since 0.35.0 (#200). Left alone, `deny:
-        [warn]` would silently stop denying anything. Exact legacy names
-        only; a glob is the operator's to rewrite.
+        The guard is matched against the RESOLVED mode. A value that matches
+        none can never fire, so `deny: [warn]` — `flag`'s name before 0.35.0 —
+        or `deny: [warn*]` would load and silently deny nothing. That is a
+        policy quietly weakened, so it is a load error instead.
         """
-        for params in v.values():
-            guard = params.get("trentina_mode")
-            if guard is not None:
-                guard.allow = [
-                    _canonical_mode(p) if p in LEGACY_MODE_NAMES else p for p in guard.allow
-                ]
-                guard.deny = [
-                    _canonical_mode(p) if p in LEGACY_MODE_NAMES else p for p in guard.deny
-                ]
+        for tool, params in v.items():
+            guard = params.get("trentina_mode")  # modes_policy.MODE_PARAM
+            if guard is None:
+                continue
+            for value in (*guard.allow, *guard.deny):
+                if not any(fnmatchcase(mode, value) for mode in MODE_NAMES):
+                    raise ValueError(
+                        f"parameter_guards.{tool}.trentina_mode: {value!r} matches no mode; "
+                        f"use {', '.join(MODE_NAMES)} or a glob over them"
+                    )
         return v
 
     @field_validator("url")

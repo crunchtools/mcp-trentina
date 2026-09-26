@@ -101,7 +101,7 @@ parameter_guards:
       allow: ["block"]
 ```
 
-The guard is checked against the RESOLVED mode — an omitted `trentina_mode` becomes the profile default first — so leaving the argument out cannot skip it, which is what a guard does with any other absent argument. The tool's schema offers only what survives the guard.
+The guard is checked against the RESOLVED mode — an omitted `trentina_mode` becomes the profile default first — so leaving the argument out cannot skip it, which is what a guard does with any other absent argument. The tool's schema offers only what survives the guard. Every value, glob or not, must match at least one of `block`, `flag` or `redact`, or the profile fails to load: a value that matches no mode (`warn`, the pre-0.35.0 name for `flag`, or `warn*`) could never fire, and a guard that silently denies nothing is worse than a load error.
 
 ## Pipeline Position
 

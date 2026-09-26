@@ -142,9 +142,8 @@ No text written by L3 reaches an agent: finding types are a closed enum
 NOTE: `defense.enforcement` is the DEFAULT mode and accepts only `flag` and
 `block` — a call that omits the mode carries no extraction prompt.
 
-[DEPRECATED] `warn`/`clean`, the pre-0.35.0 names (#200), are normalized to
-`flag`/`redact` by `config.canonical_mode` wherever a mode is read, and removed
-in 0.36.0. The names are OpenRouter's guardrail actions; our `redact` is an L3
+`warn`/`clean`, the pre-0.35.0 names (#200), were removed in 0.36.0; a
+profile or call still using one is refused like any unknown mode. The names are OpenRouter's guardrail actions; our `redact` is an L3
 rewrite, not their span substitution. Precedence: block > redact > flag.
 
 ### Stats
