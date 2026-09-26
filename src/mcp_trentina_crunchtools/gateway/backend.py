@@ -21,10 +21,12 @@ from typing import TYPE_CHECKING, Any
 import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.shared.exceptions import MCPError
+from mcp_types import INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND
 
 from ..database import delete_all_tool_lists, delete_tool_list, save_tool_list
 from .circuit import breaker
-from .errors import BackendCallError
+from .errors import BackendCallError, BackendRejectedCallError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -107,6 +109,49 @@ class BackendCall:
 
 
 _tool_list_cache: dict[str, list[dict[str, Any]]] = {}
+
+# JSON-RPC errors that mean "your request was wrong", said by a backend that
+# is up. Each is named in the refusal by our own words, never the backend's:
+# its message text has not crossed the perimeter.
+_REJECTIONS = {
+    INVALID_PARAMS: "invalid arguments",
+    METHOD_NOT_FOUND: "method not found",
+    INVALID_REQUEST: "invalid request",
+}
+_MAX_REJECTION_WALK = 32
+
+
+def _rejection(exc: BaseException) -> str | None:
+    """What the backend rejected, if *exc* is a backend refusing the request.
+
+    The SDK raises the backend's JSON-RPC error inside its task group, so it
+    arrives wrapped in an ExceptionGroup; walk the group's leaves and each
+    ``__cause__``, bounded.
+    """
+    stack: list[BaseException] = [exc]
+    seen = 0
+    while stack and seen < _MAX_REJECTION_WALK:
+        err = stack.pop()
+        seen += 1
+        if isinstance(err, MCPError):
+            reason = _REJECTIONS.get(err.code)
+            if reason is not None:
+                return reason
+        if isinstance(err, BaseExceptionGroup):
+            stack.extend(err.exceptions)
+        if err.__cause__ is not None:
+            stack.append(err.__cause__)
+    return None
+
+
+def cached_tool_schema(url: str, tool_name: str) -> dict[str, Any] | None:
+    """The inputSchema a backend listed for *tool_name*, if its list is cached."""
+    for tool in _tool_list_cache.get(url, ()):
+        if tool.get("name") == tool_name:
+            schema = tool.get("inputSchema")
+            return schema if isinstance(schema, dict) else None
+    return None
+
 
 _inflight: dict[str, asyncio.Task[list[dict[str, Any]]]] = {}
 
@@ -281,6 +326,21 @@ async def call_backend_tool(
             timeout=backend.timeout_seconds,
         )
     except Exception as exc:
+        rejected = _rejection(exc)
+        if rejected is not None:
+            # The backend answered: it is reachable, whatever it thought of
+            # the request. Counting this opened the breaker on a healthy
+            # backend after three bad calls from one client (RT #1505).
+            breaker.record_success(backend.url)
+            logger.warning(
+                "gateway: call_tool rejected backend=%s tool=%s reason=%s",
+                backend_name,
+                tool_name,
+                rejected,
+            )
+            raise BackendRejectedCallError(
+                f"backend {backend_name!r} rejected the call to {tool_name!r}: {rejected}"
+            ) from exc
         breaker.record_failure(backend.url)
         logger.warning(
             "gateway: call_tool failed backend=%s tool=%s err=%s",

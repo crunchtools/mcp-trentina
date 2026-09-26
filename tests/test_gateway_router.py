@@ -1219,3 +1219,48 @@ class TestSurfaceRecording:
         invalidate_profile_cache("testp")
 
         assert surface_report("testp") is None
+
+
+class TestArgumentHygiene:
+    async def test_empty_optionals_never_reach_the_backend(self) -> None:
+        from mcp_trentina_crunchtools.gateway.backend import _tool_list_cache
+
+        seen: dict[str, Any] = {}
+
+        async def fake_call(_bn: str, _b: Backend, _tn: str, args: dict[str, Any]) -> BackendCall:
+            seen.update(args)
+            return BackendCall(
+                content=[{"type": "text", "text": "ok"}], is_error=False, structured_content=None
+            )
+
+        url = _profile().backends["mcp-slack"].url
+        _tool_list_cache[url] = [
+            {
+                "name": "slack_list_channels",
+                "inputSchema": {
+                    "properties": {"cursor": {}, "limit": {}, "team": {}},
+                    "required": ["team"],
+                },
+            }
+        ]
+        try:
+            with patch(
+                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                side_effect=fake_call,
+            ):
+                await route_jsonrpc(
+                    _profile(),
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 95,
+                        "method": "tools/call",
+                        "params": {
+                            "name": f"mcp-slack{NAMESPACE_SEP}slack_list_channels",
+                            "arguments": {"cursor": "", "limit": 0, "team": ""},
+                        },
+                    },
+                )
+        finally:
+            _tool_list_cache.pop(url, None)
+
+        assert seen == {"limit": 0, "team": ""}
