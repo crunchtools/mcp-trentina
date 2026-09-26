@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 from ..errors import PreProcessNotPermittedError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
 PREPROCESS_PARAM = "trentina_preprocess"
 
@@ -78,7 +78,7 @@ class PreProcessPolicy:
         required: Iterable[str] = (),
         *,
         defaults: Iterable[str] = (),
-        permits: Any = None,
+        permits: Callable[[str], bool] | None = None,
     ) -> PreProcessPolicy:
         """Build a selectable policy. ``permits(name) -> bool`` is a parameter guard."""
         floor = tuple(dict.fromkeys(required))

@@ -45,7 +45,7 @@ from mcp_trentina_crunchtools.gateway.profile import (
 from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
 from mcp_trentina_crunchtools.gateway.transform import resolve, transform_response
 from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.outcomes import Outcome
+from mcp_trentina_crunchtools.outcomes import Outcome, classify_exception
 from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
 from mcp_trentina_crunchtools.preprocess.policy import PREPROCESS_PARAM, PreProcessPolicy
 from mcp_trentina_crunchtools.tools.fetch import fetch_page, flag_fetch
@@ -139,6 +139,17 @@ class TestPolicy:
         assert policy.resolve(None, ["html"]) == ("html",)
         with pytest.raises(PreProcessNotPermittedError):
             policy.resolve(["html"])
+
+
+@pytest.mark.parametrize(
+    ("exc", "outcome"),
+    [
+        (PreProcessNotPermittedError(["html"]), Outcome.DENIED_GUARD),
+        (PreProcessFailedError("html", "too_large"), Outcome.BLOCKED_DEFENSE),
+    ],
+)
+def test_refusals_audit_as_policy_outcomes(exc: Exception, outcome: Outcome) -> None:
+    assert classify_exception(exc) is outcome
 
 
 class TestConfig:
@@ -522,6 +533,26 @@ class TestInternalTools:
             with pytest.raises(PreProcessFailedError, match="worker_error"):
                 await flag_fetch("https://example.com")
         assert fakes.classify.await_count == 0
+
+    async def test_a_chain_feeds_each_processor_the_last_ones_output(self, env: Path) -> None:
+        """html then petit: petit sees Markdown, and both are accounted for."""
+        seen: list[str] = []
+
+        async def petit(_self: Any, payload: str, _ctx: Any) -> PreProcessResult:
+            seen.append(payload)
+            return PreProcessResult("petit", Cost.FREE, "grouped", True, len(payload), 7)
+
+        policy = PreProcessPolicy.of(["html", "petit"])
+        with (
+            profile_context(_profile(), None, policy),
+            layers(env) as fakes,
+            patch("mcp_trentina_crunchtools.preprocess.petit.PetitProcessor.run", petit),
+        ):
+            fakes.fetch_url.return_value = (PAGE, "text/html")
+            result = await fetch_page("https://e.com", Mode.FLAG, preprocess=["petit", "html"])
+        assert seen[0].startswith("# Release notes")
+        assert result["content"] == "grouped"
+        assert [p["name"] for p in result["preprocess"]] == ["html", "petit"]
 
     async def test_read_delivers_the_bytes_on_disk_unless_asked(self, env: Path) -> None:
         page = env / "notes.html"
