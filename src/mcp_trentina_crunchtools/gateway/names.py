@@ -196,7 +196,7 @@ def resolve_name(profile: Profile, name: str) -> Pair | None:
             _legacy_warned.add((profile.name, name))
             logger.warning(
                 "gateway: profile=%s called %r by its <backend>__<tool> name, which "
-                "is removed in 0.40.0; tools/list serves short names",
+                "is removed in 0.41.0; tools/list serves short names",
                 profile.name,
                 name,
             )

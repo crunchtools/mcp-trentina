@@ -489,8 +489,8 @@ class Backend(BaseModel):
             "Pre-processors for this backend's tool and parameter descriptions "
             "(#176). {processors: [summarize]} compresses them with the "
             "operator's model in the background, cached; until a description "
-            "is compressed it is served as the backend wrote it. Replaces "
-            "compress_descriptions: true, which is still read until 0.40.0."
+            "is compressed it is served as the backend wrote it. Replaced "
+            "compress_descriptions: true (gone since 0.40.0)."
         ),
     )
     compact_schemas: bool = Field(
@@ -592,29 +592,6 @@ class Backend(BaseModel):
     def compresses_descriptions(self) -> bool:
         """Whether a model rewrites this backend's descriptions (#176)."""
         return "summarize" in self.preprocess_tool_descriptions.processors
-
-    @model_validator(mode="before")
-    @classmethod
-    def compress_descriptions_is_a_preprocessor_now(cls, raw: Any) -> Any:
-        """``compress_descriptions: true`` is now ``preprocess_tool_descriptions``.
-
-        That is ``{processors: [summarize]}``. Read until 0.40.0 with a
-        WARNING, because it is live config and a profile that fails to load
-        takes the gateway down with it.
-        """
-        if not isinstance(raw, dict) or "compress_descriptions" not in raw:
-            return raw
-        backend = dict(raw)
-        legacy = backend.pop("compress_descriptions")
-        if "preprocess_tool_descriptions" in backend:
-            raise ValueError("set preprocess_tool_descriptions or compress_descriptions, not both")
-        logger.warning(
-            "compress_descriptions is deprecated and removed in 0.40.0; use "
-            "preprocess_tool_descriptions: {processors: [summarize]}"
-        )
-        if legacy:
-            backend["preprocess_tool_descriptions"] = {"processors": ["summarize"]}
-        return backend
 
     @field_validator("tools_allow", "tools_deny")
     @classmethod
@@ -1339,7 +1316,7 @@ class Profile(BaseModel):
             "Serve each tool under the simplest name that says what it does, "
             "tagged with its backend only where two backends' names collide "
             "(gateway/names.py). Off: <backend>__<tool>, as before 0.38.0. "
-            "Either way the <backend>__<tool> form still routes until 0.40.0."
+            "Either way the <backend>__<tool> form still routes until 0.41.0."
         ),
     )
     alert_ingress: AlertIngressConfig | None = Field(

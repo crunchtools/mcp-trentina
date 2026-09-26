@@ -11,7 +11,7 @@ or as `<backend>__<tool>` when the profile turns `short_names` off.
 
 For `tools/call`, resolves the name back into (backend, tool), verifies the
 backend is in the profile, re-checks the allowlist (defense in depth), and
-forwards. `<backend>__<tool>` resolves either way until 0.40.0.
+forwards. `<backend>__<tool>` resolves either way until 0.41.0.
 """
 
 from __future__ import annotations

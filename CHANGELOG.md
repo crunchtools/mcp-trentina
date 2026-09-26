@@ -26,6 +26,18 @@ under that name.
   migration). Internal tools minify inside the tool, so their arrived size
   is NULL and they are left out of the saving.
 
+### Removed
+
+- `compress_descriptions` on a backend. Use `preprocess_tool_descriptions:
+  {processors: [summarize]}`; the old key is now a load error.
+- `trentina_preprocess` as a list (the 0.37.0 form). Pass `true` or `false`.
+
+### Deprecated
+
+- The `<backend>__<tool>` fallback on a short-names profile now routes until
+  0.41.0, not 0.40.0. Clients holding a pre-0.38.0 tool list still call by
+  it, so removing it now would break live callers.
+
 ### Fixed
 
 - **A blocked tool response was audited twice**, as `ok` before the

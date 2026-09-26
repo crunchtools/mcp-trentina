@@ -62,9 +62,8 @@ backends:
     # nothing set: descriptions are served as the backend wrote them
 ```
 
-`compress_descriptions: true` is the pre-0.38.0 spelling. It is still read,
-with a warning, until 0.40.0; setting both keys is a load error. Only
-`summarize` is valid on this channel.
+`compress_descriptions: true`, the pre-0.38.0 spelling, was removed in
+0.40.0 and is now a load error. Only `summarize` is valid on this channel.
 
 ## Real-World Results
 
