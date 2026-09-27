@@ -60,6 +60,12 @@ thread or reply; a withheld reaction is dropped. Under `flag` it is delivered
 with `_trentina_warning` in its content. **Outbound**, only the agent's own
 events are carried; a refused one is not sent, and the agent gets a notice.
 
+Each carried event ends with one log line giving its outcome, its total time
+and its stages: `wait` (behind the previous inbound event), `judge` (L1 ∥ L2 →
+L3), and `deliver`, `send` or `notice`. It is INFO, and WARNING once an event
+takes 5 seconds, so a slow turn shows where its time went at the production
+log level.
+
 Local rooms exist before anyone speaks in them. The bridge announces every
 room it is in when it starts, and each room it joins later; the gateway judges
 the room's name and topic, creates the local room, invites the agent, and
@@ -72,7 +78,7 @@ A direct message is a true DM: its local room is created by the other
 person's stand-in and holds exactly two members, the stand-in and the agent.
 Agents tell a DM from a group by member count, and a group is where they
 answer only when mentioned. A DM made by 0.45.0, with the appservice bot in
-it, is handed over on the bridge's next start.
+it, is handed over when the next event arrives in it.
 
 Remote senders appear as stand-ins, `@<user_prefix><escaped id>:<server_name>`,
 where the escape is the spec's mapping (`@Scott_M:matrix.org` →

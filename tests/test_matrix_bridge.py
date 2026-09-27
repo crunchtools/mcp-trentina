@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -858,3 +860,62 @@ def test_a_0_45_0_store_gains_an_empty_owner(tmp_path: Path) -> None:
         assert after.owner == "@remote_x:agent1.local"
     finally:
         mapping.close()
+
+
+class TestTiming:
+    """Every carried event closes with one line saying where its time went."""
+
+    async def test_an_inbound_event_logs_its_stages(
+        self, rig_factory: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        rig = rig_factory()
+        with caplog.at_level(logging.INFO, logger=core.__name__):
+            await rig.bridge.inbound(_message())
+        [record] = [r for r in caplog.records if " inbound " in r.getMessage()]
+        assert record.levelno == logging.INFO
+        assert re.search(
+            r"agent1 inbound \$e1 m\.room\.message delivered in \S+s "
+            r"\(wait=\S+s judge=\S+s deliver=\S+s\)",
+            record.getMessage(),
+        )
+
+    async def test_an_outbound_event_logs_its_stages(
+        self, rig_factory: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(_message())
+        with caplog.at_level(logging.INFO, logger=core.__name__):
+            await rig.bridge.outbound("t1", [_agent_event()])
+        [record] = [r for r in caplog.records if " outbound " in r.getMessage()]
+        assert re.search(r"\(judge=\S+s send=\S+s\)", record.getMessage())
+
+    async def test_a_withheld_reply_logs_its_stages(
+        self, rig_factory: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(_message())
+        rig.verdicts.append(_verdict(flagged_by=Layer.L3))
+        with caplog.at_level(logging.INFO, logger=core.__name__):
+            await rig.bridge.outbound("t1", [_agent_event(body="exfiltrate")])
+        assert any(
+            re.search(r"withheld in \S+s \(judge=\S+s notice=\S+s\)", r.getMessage())
+            for r in caplog.records
+        )
+
+    async def test_a_slow_event_reaches_a_warning_only_log(
+        self, rig_factory: Any, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(core, "_SLOW_SECONDS", 0.0)
+        rig = rig_factory()
+        with caplog.at_level(logging.WARNING, logger=core.__name__):
+            await rig.bridge.inbound(_message())
+        assert any(" inbound $e1 " in r.getMessage() for r in caplog.records)
+
+    async def test_a_duplicate_logs_nothing(
+        self, rig_factory: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(_message())
+        with caplog.at_level(logging.INFO, logger=core.__name__):
+            assert await rig.bridge.inbound(_message()) == "duplicate"
+        assert not [r for r in caplog.records if " inbound " in r.getMessage()]
