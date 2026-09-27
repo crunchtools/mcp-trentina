@@ -257,6 +257,14 @@ def _deliver(
     return response
 
 
+def _scripted(extras: Mapping[str, Any] | None) -> bool:
+    """Whether pre-processing removed script tags: the app-shell shape (#245)."""
+    runs = (extras or {}).get("preprocess")
+    return isinstance(runs, list) and any(
+        isinstance(r, dict) and r.get("script_tags") for r in runs
+    )
+
+
 async def _redact(
     call: _Call,
     verdict: DefenseVerdict,
@@ -275,6 +283,11 @@ async def _redact(
         raise call.refuse(verdict, f"redact refused: {result.refused_by}", judged=False)
 
     extraction = result.content
+    if "nothing_to_extract" in extraction and _scripted(redact_extras):
+        extraction["nothing_to_extract"] += (
+            "; the page carried <script> tags, so it likely renders its content "
+            "with JavaScript, which fetch does not run"
+        )
     # A downgraded block keeps block's response shape: `content` is text.
     content: Any = extraction.get("extracted_text", "") if downgraded else extraction
     warning = call.warning(verdict, downgraded_to_redact=downgraded)

@@ -111,7 +111,9 @@ def allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def layers(
     workdir: Path,
     *,
-    payload: str = "The maintenance window is Tuesday at 02:00 UTC.",
+    payload: str = (
+        "The maintenance window is Tuesday at 02:00 UTC. The gateway restarts once during it."
+    ),
     classification: ClassifierResult | None = BENIGN,
     detection: dict[str, Any] | None = None,
     extraction: dict[str, Any] | Exception | None = None,

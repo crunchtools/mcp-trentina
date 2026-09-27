@@ -18,6 +18,7 @@ import pytest
 from mcp_trentina_crunchtools import config as config_mod
 from mcp_trentina_crunchtools.errors import BlockedSourceError, QuarantineAgentError
 from mcp_trentina_crunchtools.modes import Mode
+from mcp_trentina_crunchtools.quarantine.agent import confidence_of, grounding
 from mcp_trentina_crunchtools.tools import block_dir, flag_dir, redact_dir
 
 from .mode_harness import (
@@ -41,7 +42,11 @@ class TestRedactTurns:
         assert result["_trentina_warning"]["flagged_by"] == "L3"
 
     async def test_turn_two_reads_normalized_text_and_is_briefed(self, env: Path) -> None:
-        with layers(env, payload="x\u200by is here", detection=FLAGGED) as fakes:
+        with layers(
+            env,
+            payload="x\u200by is here. The maintenance window is Tuesday at 02:00 UTC, as usual.",
+            detection=FLAGGED,
+        ) as fakes:
             await call("content", Mode.REDACT, fakes)
         text, prompt = fakes.extract.call_args.args
         assert "\u200b" not in text
@@ -81,6 +86,74 @@ class TestRedactTurns:
             with pytest.raises(BlockedSourceError):
                 await call("content", Mode.REDACT, fakes)
             assert fakes.verify.await_count == 0
+
+
+class TestGrounding:
+    """#245: 23 bytes of app shell came back as 90 invented words, "high"."""
+
+    async def test_near_empty_content_is_not_sent_to_turn_two(self, env: Path) -> None:
+        with layers(env, payload="Red Hat Hardened Images") as fakes:
+            result = await call("content", Mode.REDACT, fakes)
+        assert fakes.extract.await_count == 0
+        assert result["content"]["extracted_text"] == ""
+        assert result["content"]["confidence"] == "none"
+        assert "23 characters" in result["content"]["nothing_to_extract"]
+
+    @pytest.mark.parametrize(("chars", "extracts"), [(63, False), (64, True)])
+    async def test_the_floor_is_64_characters(self, env: Path, chars: int, extracts: bool) -> None:
+        payload = ("maintenance " * 8)[:chars]
+        with layers(env, payload=f"  {payload}  ") as fakes:
+            await call("content", Mode.REDACT, fakes)
+        assert (fakes.extract.await_count == 1) is extracts
+
+    async def test_an_app_shell_says_it_needs_javascript(self, env: Path) -> None:
+        shell = (
+            "<html><head><title>CVE feed</title><script src='a.js'></script></head>"
+            "<body><div id='root'></div></body></html>"
+        )
+        with layers(env) as fakes:
+            fakes.fetch_url.return_value = (shell, "text/html")
+            result = await call("fetch", Mode.REDACT, fakes)
+        assert fakes.extract.await_count == 0
+        assert "JavaScript" in result["content"]["nothing_to_extract"]
+
+    async def test_an_invented_extraction_is_refused(self, env: Path) -> None:
+        invented = {
+            "content": {
+                "extracted_text": "Hardened images meet PCI DSS, HIPAA and NIST compliance "
+                "standards across cloud and on-premises platforms.",
+                "confidence": "high",
+            },
+            "usage": {},
+        }
+        with (
+            layers(env, extraction=invented) as fakes,
+            pytest.raises(BlockedSourceError, match="redact refused: ungrounded"),
+        ):
+            await call("content", Mode.REDACT, fakes)
+        assert fakes.verify.await_count == 0
+
+    async def test_confidence_is_ours_not_turn_twos(self, env: Path) -> None:
+        paraphrase = {
+            "content": {
+                "extracted_text": "Maintenance is Tuesday; the gateway restarts once, briefly.",
+                "confidence": "high",
+            },
+            "usage": {},
+        }
+        with layers(env, extraction=paraphrase) as fakes:
+            result = await call("content", Mode.REDACT, fakes)
+        assert result["content"]["confidence"] == "medium"
+
+    @pytest.mark.parametrize(
+        ("share", "label"), [(None, "low"), (0.2, "low"), (0.6, "medium"), (0.9, "high")]
+    )
+    def test_bands(self, share: float | None, label: str) -> None:
+        assert confidence_of(share) == label
+
+    def test_short_words_and_case_do_not_count(self) -> None:
+        assert grounding("The WINDOW is a go", "window") == 1.0
+        assert grounding("a of it", "anything") is None
 
 
 class TestAllowlist:
