@@ -16,6 +16,7 @@ import logging
 import re
 import secrets
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -92,6 +93,12 @@ def _check_canary(parsed: dict[str, Any], canary: str) -> bool:
 _RETRYABLE_STATUS_CODES = frozenset({429, 503})
 
 
+MALFORMED_RESPONSE = "Invalid JSON in provider response"
+"""A reply that did not parse. Asked again once, of the same provider: it is
+usually one bad sample, and under Matrix withholding an unjudged /sync costs
+the agent that sync's events for good (#227)."""
+
+
 def _is_retryable(exc: QuarantineAgentError) -> bool:
     """Return True if the error is transient and worth trying the next provider."""
     if exc.status_code is not None:
@@ -165,15 +172,23 @@ async def _call_with_fallback(
 
     last_exc: QuarantineAgentError | None = None
     for i, (name, key) in enumerate(chain):
+        call = partial(
+            _call_throttle_aware,
+            content=content,
+            system_prompt=system_prompt,
+            response_schema=response_schema,
+            user_prompt=user_prompt,
+            provider_name=name,
+            api_key=key,
+        )
         try:
-            return await _call_throttle_aware(
-                content=content,
-                system_prompt=system_prompt,
-                response_schema=response_schema,
-                user_prompt=user_prompt,
-                provider_name=name,
-                api_key=key,
-            )
+            try:
+                return await call()
+            except QuarantineAgentError as exc:
+                if MALFORMED_RESPONSE not in str(exc):
+                    raise
+                logger.warning("provider %s returned malformed JSON; asking once more", name)
+                return await call()
         except QuarantineAgentError as exc:
             if not _is_retryable(exc):
                 raise
@@ -360,7 +375,7 @@ async def _call_gemini(
     try:
         parsed: dict[str, Any] = json.loads(provider_result.text)
     except json.JSONDecodeError as exc:
-        raise QuarantineAgentError("Invalid JSON in provider response") from exc
+        raise QuarantineAgentError(MALFORMED_RESPONSE) from exc
 
     if _check_canary(parsed, canary):
         raise QuarantineAgentError(
