@@ -4,6 +4,7 @@
     mcp-trentina-bridge import-mautrix --crypto-db /import/crypto.db
     mcp-trentina-bridge logout-device        # BRIDGE_OLD_ACCESS_TOKEN
     mcp-trentina-bridge sign-device          # BRIDGE_RECOVERY_KEY
+    mcp-trentina-bridge reset-identity       # recovery key lost
 
 ``logout-device`` exists for cutover: once the bridge holds an account, the
 agent's old device is pruned, which is what leaves the agent with no upstream
@@ -13,7 +14,9 @@ service) serves neither ``/delete_devices`` nor ``DELETE /devices``.
 
 ``sign-device`` cross-signs the bridge's own device with the account's
 self-signing key from secret storage, so a device the bridge logged in fresh
-does not show as unverified.
+does not show as unverified. ``reset-identity`` is for an account whose
+recovery key is lost: new cross-signing keys, approved by the account owner
+in a browser, and a new recovery key printed once.
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ from ..gateway.loader import read_secret_env
 from ..matrix.recovery_key import RecoveryKeyError
 from .api import build_app
 from .client import Bridge
-from .crosssign import CrossSignError, sign_own_device
+from .crosssign import CrossSignError, reset_identity, sign_own_device
 from .import_mautrix import import_mautrix
 from .settings import BridgeSettings
 
@@ -109,6 +112,37 @@ async def _sign_device(settings: BridgeSettings) -> None:
     logger.warning("bridge[%s]: device %s %s", settings.profile, result.device_id, verb)
 
 
+async def _reset_identity(settings: BridgeSettings) -> None:
+    """New cross-signing identity; the recovery key goes to stdout only."""
+
+    def ask(url: str) -> None:
+        sys.stderr.write(
+            f"\nApprove the reset as {settings.user_id}, within 10 minutes:\n  {url}\n\n"
+        )
+        sys.stderr.flush()
+
+    def keep(recovery_key: str) -> None:
+        sys.stdout.write(f"Recovery key (keep it; shown once): {recovery_key}\n")
+        sys.stdout.flush()
+
+    async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
+        try:
+            result = await reset_identity(
+                client, settings.homeserver, _session(settings), ask, keep
+            )
+        except CrossSignError as exc:
+            raise SystemExit(
+                f"reset-identity: {exc}. If a recovery key was printed above, "
+                "finish with sign-device and that key."
+            ) from exc
+    logger.warning(
+        "bridge[%s]: new identity %s; device %s signed",
+        settings.profile,
+        result.master_key,
+        result.device_id,
+    )
+
+
 def _session(settings: BridgeSettings) -> dict[str, str]:
     """The session the bridge saved on its first start."""
     path = settings.store_dir / "session.json"
@@ -130,6 +164,7 @@ def main(argv: list[str] | None = None) -> None:
     imp.add_argument("--crypto-db", type=Path, required=True)
     sub.add_parser("logout-device", help="log out the old device (BRIDGE_OLD_ACCESS_TOKEN)")
     sub.add_parser("sign-device", help="cross-sign the bridge's device (BRIDGE_RECOVERY_KEY)")
+    sub.add_parser("reset-identity", help="new cross-signing identity (recovery key lost)")
     args = parser.parse_args(argv)
 
     if args.command == "import-mautrix":
@@ -146,6 +181,9 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.command == "sign-device":
         asyncio.run(_sign_device(settings))
+        return
+    if args.command == "reset-identity":
+        asyncio.run(_reset_identity(settings))
         return
     asyncio.run(_run(settings))
 

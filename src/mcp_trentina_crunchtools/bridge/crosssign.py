@@ -15,9 +15,11 @@ Run once, by an operator, with the recovery key supplied for that run only.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote
@@ -27,9 +29,11 @@ from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
 from unpaddedbase64 import decode_base64, encode_base64
 
-from ..matrix.recovery_key import decode_recovery_key
+from ..matrix.recovery_key import decode_recovery_key, encode_recovery_key
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import httpx
 
 SSSS_ALGORITHM = "m.secret_storage.v1.aes-hmac-sha2"
@@ -79,11 +83,20 @@ def canonical_json(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 
 
+def _signing_key(seed: bytes) -> Any:
+    # pycryptodome takes the 32-byte seed as bytes; its typing says str or int.
+    return ECC.construct(curve="Ed25519", seed=cast("Any", seed))
+
+
+def public_key(seed: bytes) -> str:
+    """The unpadded-base64 Ed25519 public key for a seed."""
+    return encode_base64(_signing_key(seed).public_key().export_key(format="raw"))
+
+
 def sign(value: dict[str, Any], seed: bytes) -> tuple[str, str]:
     """``(key id, signature)`` over ``value`` minus signatures and unsigned."""
-    # pycryptodome takes the 32-byte seed as bytes; its typing says str or int.
-    key = ECC.construct(curve="Ed25519", seed=cast("Any", seed))
-    public = encode_base64(key.public_key().export_key(format="raw"))
+    key = _signing_key(seed)
+    public = public_key(seed)
     body = {k: v for k, v in value.items() if k not in ("signatures", "unsigned")}
     signature = encode_base64(eddsa.new(key, "rfc8032").sign(canonical_json(body)))
     return f"ed25519:{public}", signature
@@ -168,3 +181,169 @@ async def sign_own_device(
     if upload.status_code != 200 or failures:
         raise CrossSignError(f"signature upload: {upload.status_code} {failures}")
     return Signed(device_id, signer, already=False)
+
+
+# How long to keep retrying the upload while the account owner approves the
+# reset in the browser, and how often.
+_APPROVAL_WINDOW = 600.0
+_APPROVAL_POLL = 10.0
+_CROSS_SIGNING = ("master", "self_signing", "user_signing")
+# Clear bit 63 of the IV, as clients do, so the CTR counter cannot overflow
+# into the upper half; and the random bytes behind a new storage key's ID.
+_COUNTER_HEADROOM = 0x7F
+_KEY_ID_BYTES = 24
+
+
+def _encrypt_secret(key: bytes, name: str, secret: str) -> dict[str, str]:
+    """One SSSS secret, as ``decrypt_secret`` reads it."""
+    aes_key, mac_key = _hkdf(key, name.encode())
+    iv = bytearray(os.urandom(16))
+    iv[8] &= _COUNTER_HEADROOM
+    ciphertext = AES.new(aes_key, AES.MODE_CTR, nonce=b"", initial_value=bytes(iv)).encrypt(
+        secret.encode()
+    )
+    mac = hmac.new(mac_key, ciphertext, hashlib.sha256).digest()
+    return {
+        "iv": encode_base64(bytes(iv)),
+        "ciphertext": encode_base64(ciphertext),
+        "mac": encode_base64(mac),
+    }
+
+
+def _key_object(user_id: str, usage: str, seed: bytes) -> dict[str, Any]:
+    public = public_key(seed)
+    return {"user_id": user_id, "usage": [usage], "keys": {f"ed25519:{public}": public}}
+
+
+@dataclass(frozen=True)
+class Reset:
+    """What ``reset_identity`` did. ``recovery_key`` is shown once."""
+
+    device_id: str
+    master_key: str
+    recovery_key: str
+
+
+async def reset_identity(
+    client: httpx.AsyncClient,
+    homeserver: str,
+    session: dict[str, str],
+    on_approval: Callable[[str], None],
+    on_recovery_key: Callable[[str], None],
+) -> Reset:
+    """Give the account a new cross-signing identity, and sign the bridge.
+
+    For an account whose recovery key is lost, so its self-signing key can no
+    longer be read. Everyone who verified the account will see its identity
+    change once and must verify it again; ``sign_own_device`` is the path
+    that avoids that, whenever the recovery key exists.
+
+    New master, self-signing and user-signing keys are generated, stored in
+    new secret storage under a new recovery key for the operator to keep,
+    then uploaded. matrix.org gates the upload on the account owner
+    approving it in a browser; ``on_approval`` is handed that URL, and the
+    upload is retried until approved or ``_APPROVAL_WINDOW`` runs out.
+
+    Args:
+        client: the HTTP client for the upstream homeserver; not closed here.
+        homeserver: its base URL.
+        session: the bridge's saved session: ``user_id``, ``device_id`` and
+            ``access_token``. That device is the one signed.
+        on_approval: called with the approval URL when the homeserver asks
+            the account owner to approve the reset.
+        on_recovery_key: called with the new recovery key once the new keys
+            are in secret storage and before the identity is uploaded, so the
+            key is never lost to a later error. A failed signing step can be
+            finished with ``sign-device`` and that key.
+
+    Returns:
+        ``Reset``: the device signed, the new master key ID, and the
+        recovery key (also already handed to ``on_recovery_key``).
+
+    Raises:
+        CrossSignError: storing the secrets failed (nothing was published),
+            the upload was refused or never approved (the stored keys match no
+            published identity and are replaced by a rerun), or signing
+            failed (finish with ``sign-device``).
+    """
+    user_id, device_id = session["user_id"], session["device_id"]
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    base = f"{homeserver}/_matrix/client/v3"
+    seeds = {usage: os.urandom(32) for usage in _CROSS_SIGNING}
+    keys = {usage: _key_object(user_id, usage, seed) for usage, seed in seeds.items()}
+    master_id = next(iter(keys["master"]["keys"]))
+    for usage in ("self_signing", "user_signing"):
+        signer, signature = sign(keys[usage], seeds["master"])
+        keys[usage]["signatures"] = {user_id: {signer: signature}}
+
+    body: dict[str, Any] = {
+        "master_key": keys["master"],
+        "self_signing_key": keys["self_signing"],
+        "user_signing_key": keys["user_signing"],
+    }
+    # Stored before anything is published, so the printed key and the
+    # account's secret storage always agree: if the upload then fails or is
+    # never approved, the stored keys match no published identity,
+    # sign-device refuses them, and a rerun replaces them.
+    storage_key = os.urandom(32)
+    recovery_key = encode_recovery_key(storage_key)
+    key_id = encode_base64(os.urandom(_KEY_ID_BYTES))
+    check = _encrypt_secret(storage_key, "", "\0" * 32)
+
+    async def put(kind: str, content: dict[str, Any]) -> None:
+        resp = await client.put(
+            f"{base}/user/{quote(user_id, safe='')}/account_data/{quote(kind, safe='')}",
+            headers=auth,
+            json=content,
+        )
+        if resp.status_code != 200:
+            raise CrossSignError(f"storing {kind}: {resp.status_code}")
+
+    await put(
+        f"m.secret_storage.key.{key_id}",
+        {"algorithm": SSSS_ALGORITHM, "iv": check["iv"], "mac": check["mac"]},
+    )
+    for usage, seed in seeds.items():
+        name = f"m.cross_signing.{usage}"
+        await put(
+            name, {"encrypted": {key_id: _encrypt_secret(storage_key, name, encode_base64(seed))}}
+        )
+    await put("m.secret_storage.default_key", {"key": key_id})
+    on_recovery_key(recovery_key)
+
+    await _upload_with_approval(
+        client, f"{base}/keys/device_signing/upload", auth, body, on_approval
+    )
+    await sign_own_device(client, homeserver, session, recovery_key)
+    return Reset(device_id, master_id, recovery_key)
+
+
+async def _upload_with_approval(
+    client: httpx.AsyncClient,
+    url: str,
+    auth: dict[str, str],
+    body: dict[str, Any],
+    on_approval: Callable[[str], None],
+) -> None:
+    """POST ``body``, answering a user-interactive-auth challenge by waiting
+    for browser approval (matrix.org's ``org.matrix.cross_signing_reset``)."""
+    resp = await client.post(url, headers=auth, json=body)
+    if resp.status_code == 200:
+        return
+    challenge = resp.json()
+    if resp.status_code != 401 or "session" not in challenge:
+        raise CrossSignError(f"key upload refused: {resp.status_code} {challenge.get('errcode')}")
+    stage = next((s for f in challenge.get("flows", []) for s in f.get("stages", [])), "")
+    approve_url = (challenge.get("params", {}).get(stage) or {}).get("url", "")
+    if not approve_url:
+        raise CrossSignError(f"the homeserver wants {stage or 'an auth stage'} this cannot answer")
+    on_approval(approve_url)
+    retry = {**body, "auth": {"type": stage, "session": challenge["session"]}}
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _APPROVAL_WINDOW
+    while loop.time() < deadline:
+        await asyncio.sleep(_APPROVAL_POLL)
+        resp = await client.post(url, headers=auth, json=retry)
+        if resp.status_code == 200:
+            return
+    raise CrossSignError("the reset was not approved in time; nothing was changed")

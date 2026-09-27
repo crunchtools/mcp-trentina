@@ -18,6 +18,10 @@ under that name.
   with the account's self-signing key, read from secret storage with
   `BRIDGE_RECOVERY_KEY`. A device the bridge logged in fresh no longer shows
   as unverified, and no identity is reset.
+- `mcp-trentina-bridge reset-identity`: for an account whose recovery key
+  is lost. New cross-signing keys, uploaded once the account owner approves
+  the reset in a browser. The keys go into new secret storage first, then the bridge's
+  device signed and the new recovery key printed once.
 - `mcp-trentina-bridge logout-device`: prunes the agent's old device by
   logging it out with its own token (`BRIDGE_OLD_ACCESS_TOKEN`).
 

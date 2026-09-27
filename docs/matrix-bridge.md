@@ -167,6 +167,21 @@ only. It reads the self-signing key from secret storage, checks it against
 the published key, and signs the bridge's device. No identity is reset, so
 nobody has to re-verify the account.
 
+A recovery key opens only the secret storage it was made with. If storage was
+set up again since, the old key is refused, and if nobody holds the current
+one the self-signing key cannot be read at all. Then:
+
+```
+python -m mcp_trentina_crunchtools.bridge.main reset-identity
+```
+
+It generates new cross-signing keys, and matrix.org asks the account owner to
+approve the reset: the command prints a link, to be opened while logged in as
+the account, and waits up to ten minutes. It then stores the keys in new secret
+storage, signs the bridge's device, and prints the new recovery key once. Keep
+it. Everyone who had verified the account sees its identity change and
+verifies it again.
+
 ## Conduit
 
 One per profile, on the agent's internal network only:

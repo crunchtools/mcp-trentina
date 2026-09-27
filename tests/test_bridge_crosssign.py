@@ -22,11 +22,13 @@ from Crypto.Cipher import AES
 from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
 
+from mcp_trentina_crunchtools.bridge import crosssign
 from mcp_trentina_crunchtools.bridge import main as main_mod
 from mcp_trentina_crunchtools.bridge.crosssign import (
     CrossSignError,
     _hkdf,
     canonical_json,
+    reset_identity,
     sign_own_device,
 )
 from mcp_trentina_crunchtools.bridge.settings import BridgeSettings
@@ -226,3 +228,112 @@ class TestLogoutDevice:
         with pytest.raises(SystemExit, match="own device"):
             await main_mod._logout_device(_settings(tmp_path))
         assert calls == []
+
+
+class ResettableAccount:
+    """A homeserver that wants the reset approved in a browser first."""
+
+    def __init__(self, approvals_needed: int = 1) -> None:
+        self.data: dict[str, Any] = {}
+        self.uploaded: dict[str, Any] = {}
+        self.signatures: list[dict[str, Any]] = []
+        self.pending = approvals_needed
+        self.device = {
+            "user_id": USER,
+            "device_id": DEVICE,
+            "algorithms": ["m.olm.v1.curve25519-aes-sha2"],
+            "keys": {f"ed25519:{DEVICE}": "devkey"},
+            "signatures": {USER: {f"ed25519:{DEVICE}": "selfsig"}},
+        }
+
+    def _upload(self, request: httpx.Request) -> httpx.Response:
+        """Challenge while approvals are pending, then accept."""
+        body = json.loads(request.content)
+        self.pending -= 1
+        if self.pending >= 0:
+            return httpx.Response(
+                401,
+                json={
+                    "session": "uia1",
+                    "flows": [{"stages": ["org.matrix.cross_signing_reset"]}],
+                    "params": {"org.matrix.cross_signing_reset": {"url": "https://account/reset"}},
+                },
+            )
+        assert body["auth"] == {"type": "org.matrix.cross_signing_reset", "session": "uia1"}
+        self.uploaded = body
+        return httpx.Response(200, json={})
+
+    def _account_data(self, request: httpx.Request) -> httpx.Response:
+        kind = request.url.path.rsplit("/", 1)[1]
+        if request.method == "PUT":
+            self.data[kind] = json.loads(request.content)
+            return httpx.Response(200, json={})
+        found = self.data.get(kind)
+        return httpx.Response(200, json=found) if found is not None else httpx.Response(404)
+
+    def _query(self, _request: httpx.Request) -> httpx.Response:
+        ssk = self.uploaded["self_signing_key"]
+        return httpx.Response(
+            200,
+            json={"device_keys": {USER: {DEVICE: self.device}}, "self_signing_keys": {USER: ssk}},
+        )
+
+    def _signatures(self, request: httpx.Request) -> httpx.Response:
+        self.signatures.append(json.loads(request.content))
+        return httpx.Response(200, json={"failures": {}})
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        routes = (
+            ("/keys/device_signing/upload", self._upload),
+            ("/account_data/", self._account_data),
+            ("/keys/query", self._query),
+            ("/keys/signatures/upload", self._signatures),
+        )
+        handler = next((h for marker, h in routes if marker in request.url.path), None)
+        return handler(request) if handler else httpx.Response(404)
+
+
+class TestResetIdentity:
+    async def test_reset_waits_for_approval_then_signs_and_stores(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(crosssign, "_APPROVAL_POLL", 0.0)
+        account = ResettableAccount()
+        asked: list[str] = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+            kept: list[str] = []
+            reset = await reset_identity(client, "https://hs", SESSION, asked.append, kept.append)
+            assert kept == [reset.recovery_key], "the key is surfaced before anything can fail"
+            assert asked == ["https://account/reset"]
+            # The key handed back opens the new storage and the device is signed.
+            account.device["signatures"][USER].update(
+                account.signatures[0][USER][DEVICE]["signatures"][USER]
+            )
+            again = await sign_own_device(client, "https://hs", SESSION, reset.recovery_key)
+        assert again.already
+        master = account.uploaded["master_key"]
+        assert reset.master_key in master["keys"]
+        for usage in ("self_signing_key", "user_signing_key"):
+            signatures = account.uploaded[usage]["signatures"][USER]
+            assert reset.master_key in signatures, f"{usage} is signed by the master key"
+        for secret in (
+            "m.cross_signing.master",
+            "m.cross_signing.self_signing",
+            "m.cross_signing.user_signing",
+        ):
+            assert secret in account.data
+
+    async def test_nothing_is_published_when_the_reset_is_never_approved(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(crosssign, "_APPROVAL_POLL", 0.0)
+        monkeypatch.setattr(crosssign, "_APPROVAL_WINDOW", 0.0)
+        account = ResettableAccount(approvals_needed=99)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+            with pytest.raises(CrossSignError, match="not approved"):
+                await reset_identity(client, "https://hs", SESSION, print, print)
+        assert account.uploaded == {}, "no identity was published"
+        assert account.signatures == []
+        assert "m.secret_storage.default_key" in account.data, (
+            "the stored keys match no published identity; a rerun replaces them"
+        )
