@@ -86,7 +86,17 @@ class TestModel:
         cfg = MatrixBridgeConfig.model_validate(body)
         assert not cfg.local.homeserver.endswith("/")
 
-    @pytest.mark.parametrize("user_id", ["agent1:matrix.org", "@Agent1:matrix.org", "@k"])
+    @pytest.mark.parametrize(
+        "user_id",
+        [
+            "agent1:matrix.org",
+            "@Agent1:matrix.org",
+            "@k",
+            "@a:matrix.org:99999",
+            "@a:[::::]",
+            "@:matrix.org",
+        ],
+    )
     def test_public_user_id_is_a_matrix_id(self, user_id: str) -> None:
         with pytest.raises(ValidationError, match="Matrix user ID"):
             MatrixBridgeConfig.model_validate(_bridge(public_user_id=user_id))

@@ -11,6 +11,7 @@ profile YAML are a hard error at load time.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 from fnmatch import fnmatchcase
@@ -981,14 +982,39 @@ class MatrixIngressConfig(BaseModel):
 
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
-_MATRIX_USER_ID_RE = re.compile(r"^@[a-z0-9._=/+-]+:[A-Za-z0-9.-]+(:[0-9]{1,5})?$")
-# The Matrix server-name grammar: a DNS name, an IPv4 address or a bracketed
-# IPv6 literal, then an optional port. DNS labels may not be empty or start or
-# end with '-'.
-_SERVER_NAME_RE = re.compile(
-    r"^(?:(?=[a-z0-9.-]{1,253}(?::|$))[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
-    r"(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*|\[[0-9a-f:.]{2,45}\])(:[0-9]{1,5})?$"
+_MATRIX_LOCALPART_RE = re.compile(r"^[a-z0-9._=/+-]+$")
+_DNS_NAME_RE = re.compile(
+    r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"
 )
+
+
+# RFC 1035's limit on a DNS name, and the largest TCP port.
+_MAX_DNS_NAME = 253
+_MAX_PORT = 65535
+
+
+def _valid_server_name(value: str) -> bool:
+    """The Matrix server-name grammar: a DNS name, an IPv4 address or a
+    bracketed IPv6 literal, then an optional port in 1-65535."""
+    if value.startswith("["):
+        literal, sep, rest = value[1:].partition("]")
+        try:
+            ipaddress.IPv6Address(literal)
+        except ValueError:
+            return False
+        host_ok = bool(sep)
+    else:
+        literal, colon, port_part = value.partition(":")
+        rest = colon + port_part
+        host_ok = len(literal) <= _MAX_DNS_NAME and bool(_DNS_NAME_RE.match(literal))
+    if not host_ok:
+        return False
+    if not rest:
+        return True
+    port = rest[1:]
+    return rest[0] == ":" and port.isdigit() and 1 <= int(port) <= _MAX_PORT
+
+
 _LOCALPART_RE = re.compile(r"^[a-z0-9._=/-]{1,64}$")
 
 
@@ -1045,7 +1071,7 @@ class MatrixBridgeLocalConfig(BaseModel):
     @field_validator("server_name")
     @classmethod
     def _server_name(cls, value: str) -> str:
-        if not _SERVER_NAME_RE.match(value):
+        if not _valid_server_name(value):
             raise ValueError(f"{value!r} is not a Matrix server_name")
         return value
 
@@ -1116,7 +1142,13 @@ class MatrixBridgeConfig(BaseModel):
     @field_validator("public_user_id")
     @classmethod
     def _user_id(cls, value: str) -> str:
-        if not _MATRIX_USER_ID_RE.match(value):
+        localpart, sep, server = value[1:].partition(":")
+        if not (
+            value.startswith("@")
+            and sep
+            and _MATRIX_LOCALPART_RE.match(localpart)
+            and _valid_server_name(server)
+        ):
             raise ValueError(f"{value!r} is not a Matrix user ID")
         return value
 
