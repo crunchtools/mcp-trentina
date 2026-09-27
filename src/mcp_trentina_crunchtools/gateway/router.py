@@ -574,7 +574,15 @@ async def _route_tools_call(
     )
     if refused is not None:
         outcome, message = refused
-        _audit(profile.name, backend_name, tool_name, outcome, 0, message)
+        _audit(
+            profile.name,
+            backend_name,
+            tool_name,
+            outcome,
+            0,
+            message,
+            normalized=normalized.dropped or None,
+        )
         return _err(req_id, JSONRPC_INVALID_PARAMS, message)
 
     t0 = time.monotonic()

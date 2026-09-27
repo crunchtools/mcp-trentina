@@ -104,6 +104,30 @@ def test_an_optional_that_fails_its_schema_is_dropped(key: str, value: Any, reas
     assert result.dropped == {key: reason}
 
 
+@pytest.mark.parametrize(
+    ("prop", "bad", "good", "reason"),
+    [
+        ({"const": "v1"}, "v2", "v1", "is not the allowed value"),
+        ({"type": "string", "format": "date"}, "soon", "2026-09-24", "is not a date"),
+        ({"type": "number", "exclusiveMinimum": 0}, 0, 0.5, "not above exclusiveMinimum 0"),
+        ({"type": "number", "exclusiveMaximum": 1}, 1, 0.5, "not below exclusiveMaximum 1"),
+    ],
+)
+def test_the_remaining_keywords(prop: dict[str, Any], bad: Any, good: Any, reason: str) -> None:
+    schema = {"properties": {"x": prop}}
+
+    assert normalize_arguments({"x": bad}, schema).dropped == {"x": f"dropped: {reason}"}
+    assert normalize_arguments({"x": good}, schema).dropped == {}
+
+
+def test_a_huge_integer_is_judged_not_crashed() -> None:
+    schema = {"properties": {"n": {"type": "integer", "maximum": 100}}}
+
+    assert normalize_arguments({"n": 10**400}, schema).dropped == {
+        "n": "dropped: above maximum 100"
+    }
+
+
 def test_a_single_branch_reports_its_own_reason() -> None:
     schema = {"properties": {"id": {"anyOf": [{"type": "integer", "minimum": 1}]}}}
 

@@ -161,11 +161,13 @@ def _composed_violation(value: Any, prop: dict[str, Any], walk: _Walk, depth: in
     for key in ("anyOf", "oneOf"):
         branches = prop.get(key)
         if isinstance(branches, list) and branches:
-            reasons = [
-                _violation(value, b, walk, depth + 1) if isinstance(b, dict) else None
-                for b in branches
-            ]
-            if all(r is not None for r in reasons):
+            reasons: list[str | None] = []
+            for b in branches:
+                reason = _violation(value, b, walk, depth + 1) if isinstance(b, dict) else None
+                if reason is None:
+                    break
+                reasons.append(reason)
+            else:
                 return _branch_reason(value, branches, reasons)
     branches = prop.get("allOf")
     for b in branches if isinstance(branches, list) else ():
@@ -251,7 +253,9 @@ def _parses(parse: Any, value: str) -> bool:
 
 
 def _number_violation(value: float, prop: dict[str, Any]) -> str | None:
-    if not math.isfinite(value):
+    # Floats only: an int is always finite, and ``math.isfinite`` on a huge
+    # one raises OverflowError converting it.
+    if isinstance(value, float) and not math.isfinite(value):
         return None
     checks = (
         ("minimum", operator.lt, "below"),
