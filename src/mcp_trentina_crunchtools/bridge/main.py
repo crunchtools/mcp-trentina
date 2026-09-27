@@ -31,6 +31,7 @@ from pathlib import Path
 
 import httpx
 import uvicorn
+from nio.store import SqliteStore
 
 from ..gateway.loader import read_secret_env
 from ..matrix.recovery_key import RecoveryKeyError
@@ -106,8 +107,9 @@ async def _sign_device(settings: BridgeSettings) -> None:
         raise SystemExit("sign-device needs BRIDGE_RECOVERY_KEY")
     async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
         try:
+            session = _session(settings)
             result = await sign_own_device(
-                client, settings.homeserver, _session(settings), recovery_key
+                client, settings.homeserver, session, _device_keys(settings, session), recovery_key
             )
         except (CrossSignError, RecoveryKeyError, httpx.HTTPError) as exc:
             raise SystemExit(f"sign-device: {exc}") from exc
@@ -130,8 +132,9 @@ async def _reset_identity(settings: BridgeSettings) -> None:
 
     async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
         try:
+            session = _session(settings)
             result = await reset_identity(
-                client, settings.homeserver, _session(settings), ask, keep
+                client, settings.homeserver, session, _device_keys(settings, session), ask, keep
             )
         except (CrossSignError, httpx.HTTPError) as exc:
             raise SystemExit(
@@ -156,6 +159,17 @@ def _session(settings: BridgeSettings) -> dict[str, str]:
     except json.JSONDecodeError as exc:
         raise SystemExit(f"{path} is not valid JSON ({exc}): restore it or log in again") from exc
     return saved
+
+
+def _device_keys(settings: BridgeSettings, session: dict[str, str]) -> dict[str, str]:
+    """The device's identity keys from the bridge's own crypto store: what
+    its homeserver's copy must match before anything signs it."""
+    user_id, device_id = session["user_id"], session["device_id"]
+    store = SqliteStore(user_id, device_id, str(settings.store_dir), settings.pickle_key)
+    account = store.load_account()
+    if account is None:
+        raise SystemExit(f"no crypto account for {device_id} in {settings.store_dir}")
+    return {f"{algorithm}:{device_id}": key for algorithm, key in account.identity_keys.items()}
 
 
 def main(argv: list[str] | None = None) -> None:

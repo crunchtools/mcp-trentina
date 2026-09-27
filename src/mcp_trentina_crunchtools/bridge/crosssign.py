@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 SSSS_ALGORITHM = "m.secret_storage.v1.aes-hmac-sha2"
+_SEED_BYTES = 32
 SELF_SIGNING = "m.cross_signing.self_signing"
 
 
@@ -187,6 +188,7 @@ async def sign_own_device(
     client: httpx.AsyncClient,
     homeserver: str,
     session: dict[str, str],
+    device_keys: dict[str, str],
     recovery_key: str,
 ) -> Signed:
     """Sign the session's device with the account's self-signing key.
@@ -196,6 +198,11 @@ async def sign_own_device(
         homeserver: its base URL.
         session: the bridge's saved session: ``user_id``, ``device_id`` and
             ``access_token``. The device signed is that one, never another.
+        device_keys: the device's identity keys as the bridge holds them
+            (``ed25519:<device>``, ``curve25519:<device>``), from its own
+            crypto store. The homeserver's copy is signed only if it is
+            exactly these: signing whatever it returned would let it have
+            keys of its choosing cross-signed as this device.
         recovery_key: the account's secret-storage recovery key, as a client
             displays it. It decrypts the self-signing key and is used for
             nothing else.
@@ -209,7 +216,8 @@ async def sign_own_device(
         RecoveryKeyError: the recovery key is malformed.
         CrossSignError: it does not open this account's secret storage, the
             storage uses an unsupported algorithm, the stored key is not the
-            published one, or the upload failed. Nothing is uploaded unless
+            published one, the homeserver's device keys are not
+            ``device_keys``, or the upload failed. Nothing is uploaded unless
             every check passed.
         httpx.HTTPError: the homeserver could not be reached; propagated.
     """
@@ -240,6 +248,12 @@ async def sign_own_device(
         raise CrossSignError(f"the account has no {exc} where its keys should be") from exc
     except ValueError as exc:
         raise CrossSignError(f"the account's secret storage is malformed: {exc}") from exc
+    if device.get("user_id") != user_id or device.get("device_id") != device_id:
+        raise CrossSignError("the homeserver returned another device's keys")
+    if device.get("keys") != device_keys:
+        raise CrossSignError("the homeserver's keys for this device are not the bridge's own")
+    if len(seed) != _SEED_BYTES:
+        raise CrossSignError("the stored self-signing key is not an Ed25519 seed")
     signer, signature = sign(device, seed)
     if signer not in published:
         raise CrossSignError("the stored self-signing key is not the published one")
@@ -302,6 +316,7 @@ async def reset_identity(
     client: httpx.AsyncClient,
     homeserver: str,
     session: dict[str, str],
+    device_keys: dict[str, str],
     on_approval: Callable[[str], None],
     on_recovery_key: Callable[[str], None],
 ) -> Reset:
@@ -323,6 +338,8 @@ async def reset_identity(
         homeserver: its base URL.
         session: the bridge's saved session: ``user_id``, ``device_id`` and
             ``access_token``. That device is the one signed.
+        device_keys: its identity keys as the bridge holds them; see
+            ``sign_own_device``.
         on_approval: called with the approval URL when the homeserver asks
             the account owner to approve the reset.
         on_recovery_key: called with the new recovery key once the new keys
@@ -345,7 +362,7 @@ async def reset_identity(
     user_id, device_id = session["user_id"], session["device_id"]
     auth = {"Authorization": f"Bearer {session['access_token']}"}
     base = f"{homeserver}/_matrix/client/v3"
-    seeds = {usage: os.urandom(32) for usage in _CROSS_SIGNING}
+    seeds = {usage: os.urandom(_SEED_BYTES) for usage in _CROSS_SIGNING}
     keys = {usage: _key_object(user_id, usage, seed) for usage, seed in seeds.items()}
     master_id = next(iter(keys["master"]["keys"]))
     for usage in ("self_signing", "user_signing"):
@@ -394,7 +411,7 @@ async def reset_identity(
     await _upload_with_approval(
         client, f"{base}/keys/device_signing/upload", auth, body, on_approval
     )
-    await sign_own_device(client, homeserver, session, recovery_key)
+    await sign_own_device(client, homeserver, session, device_keys, recovery_key)
     return Reset(device_id, master_id, recovery_key)
 
 

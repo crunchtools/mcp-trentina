@@ -164,8 +164,9 @@ python -m mcp_trentina_crunchtools.bridge.main sign-device
 
 With `BRIDGE_RECOVERY_KEY` set to the account's recovery key, for this run
 only. It reads the self-signing key from secret storage, checks it against
-the published key, and signs the bridge's device. No identity is reset, so
-nobody has to re-verify the account.
+the published key, and signs the bridge's device, but only if the
+homeserver's copy of the device's keys is exactly what the bridge's own crypto
+store holds. No identity is reset, so nobody has to re-verify the account.
 
 A recovery key opens only the secret storage it was made with. If storage was
 set up again since, the old key is refused, and if nobody holds the current

@@ -21,6 +21,8 @@ import pytest
 from Crypto.Cipher import AES
 from Crypto.PublicKey import ECC
 from Crypto.Signature import eddsa
+from nio.crypto.sessions import OlmAccount
+from nio.store import SqliteStore
 
 from mcp_trentina_crunchtools.bridge import crosssign
 from mcp_trentina_crunchtools.bridge import main as main_mod
@@ -42,6 +44,8 @@ from mcp_trentina_crunchtools.matrix.recovery_key import (
 USER = "@agent2-bot:matrix.org"
 DEVICE = "NEWDEV"
 KEY_ID = "ssss1"
+DEVICE_KEYS = {f"ed25519:{DEVICE}": "devkey", f"curve25519:{DEVICE}": "curvekey"}
+SESSION = {"user_id": USER, "device_id": DEVICE, "access_token": "tok"}
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
@@ -102,7 +106,7 @@ class Account:
             "user_id": USER,
             "device_id": DEVICE,
             "algorithms": ["m.olm.v1.curve25519-aes-sha2"],
-            "keys": {f"ed25519:{DEVICE}": "devkey"},
+            "keys": dict(DEVICE_KEYS),
             "signatures": {USER: {f"ed25519:{DEVICE}": "selfsig"}},
             "unsigned": {"device_display_name": "bridge"},
         }
@@ -138,13 +142,12 @@ class Account:
         return httpx.Response(404)
 
 
-SESSION = {"user_id": USER, "device_id": DEVICE, "access_token": "tok"}
-
-
 async def test_the_device_is_signed_with_the_stored_key() -> None:
     account = Account()
     async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
-        result = await sign_own_device(client, "https://hs", SESSION, recovery_key(account.key))
+        result = await sign_own_device(
+            client, "https://hs", SESSION, DEVICE_KEYS, recovery_key(account.key)
+        )
     assert not result.already
     [upload] = account.uploads
     signed = upload[USER][DEVICE]
@@ -159,11 +162,13 @@ async def test_the_device_is_signed_with_the_stored_key() -> None:
 async def test_a_signed_device_is_left_alone() -> None:
     account = Account()
     async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
-        await sign_own_device(client, "https://hs", SESSION, recovery_key(account.key))
+        await sign_own_device(client, "https://hs", SESSION, DEVICE_KEYS, recovery_key(account.key))
         account.device["signatures"][USER].update(
             account.uploads[0][USER][DEVICE]["signatures"][USER]
         )
-        again = await sign_own_device(client, "https://hs", SESSION, recovery_key(account.key))
+        again = await sign_own_device(
+            client, "https://hs", SESSION, DEVICE_KEYS, recovery_key(account.key)
+        )
     assert again.already
     assert len(account.uploads) == 1
 
@@ -172,7 +177,9 @@ async def test_the_wrong_recovery_key_uploads_nothing() -> None:
     account = Account()
     async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
         with pytest.raises(CrossSignError, match="does not open"):
-            await sign_own_device(client, "https://hs", SESSION, recovery_key(os.urandom(32)))
+            await sign_own_device(
+                client, "https://hs", SESSION, DEVICE_KEYS, recovery_key(os.urandom(32))
+            )
     assert account.uploads == []
 
 
@@ -181,7 +188,9 @@ async def test_a_stored_key_that_is_not_the_published_one_uploads_nothing() -> N
     account.ssk_public = b64(os.urandom(32))
     async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
         with pytest.raises(CrossSignError, match="not the published one"):
-            await sign_own_device(client, "https://hs", SESSION, recovery_key(account.key))
+            await sign_own_device(
+                client, "https://hs", SESSION, DEVICE_KEYS, recovery_key(account.key)
+            )
     assert account.uploads == []
 
 
@@ -191,7 +200,9 @@ async def test_a_tampered_secret_is_refused_before_anything_is_signed() -> None:
     secret["ciphertext"] = b64(os.urandom(32))
     async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
         with pytest.raises(CrossSignError, match="MAC mismatch"):
-            await sign_own_device(client, "https://hs", SESSION, recovery_key(account.key))
+            await sign_own_device(
+                client, "https://hs", SESSION, DEVICE_KEYS, recovery_key(account.key)
+            )
     assert account.uploads == []
 
 
@@ -217,7 +228,9 @@ async def test_a_failed_homeserver_call_is_reported_not_taken_for_success(
     account.failing[marker] = answer
     async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
         with pytest.raises(CrossSignError, match=match):
-            await sign_own_device(client, "https://hs", SESSION, recovery_key(account.key))
+            await sign_own_device(
+                client, "https://hs", SESSION, DEVICE_KEYS, recovery_key(account.key)
+            )
     assert account.uploads == []
 
 
@@ -240,6 +253,47 @@ class TestEncodeRecoveryKey:
     def test_a_key_of_the_wrong_length_is_refused(self) -> None:
         with pytest.raises(RecoveryKeyError, match="expected 32"):
             encode_recovery_key(b"short")
+
+
+async def test_device_keys_the_bridge_does_not_hold_are_never_signed() -> None:
+    """The homeserver's copy is signed only if it is the bridge's own."""
+    account = Account()
+    account.device["keys"][f"ed25519:{DEVICE}"] = "attacker"
+    async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+        with pytest.raises(CrossSignError, match="not the bridge's own"):
+            await sign_own_device(
+                client, "https://hs", SESSION, DEVICE_KEYS, recovery_key(account.key)
+            )
+    assert account.uploads == []
+
+
+async def test_a_stored_seed_of_the_wrong_length_is_refused() -> None:
+    account = Account()
+    account.data["m.cross_signing.self_signing"]["encrypted"][KEY_ID] = encrypt(
+        account.key, "m.cross_signing.self_signing", b64(b"short").encode()
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+        with pytest.raises(CrossSignError, match="not an Ed25519 seed"):
+            await sign_own_device(
+                client, "https://hs", SESSION, DEVICE_KEYS, recovery_key(account.key)
+            )
+    assert account.uploads == []
+
+
+def test_the_device_keys_come_from_the_bridges_own_store(tmp_path: Path) -> None:
+    olm = OlmAccount()
+    SqliteStore(USER, DEVICE, str(tmp_path), "pk").save_account(olm)
+    settings = _settings(tmp_path)
+    keys = main_mod._device_keys(settings, SESSION)
+    assert keys == {
+        f"ed25519:{DEVICE}": olm.identity_keys["ed25519"],
+        f"curve25519:{DEVICE}": olm.identity_keys["curve25519"],
+    }
+
+
+def test_no_store_is_an_exit(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="no crypto account"):
+        main_mod._device_keys(_settings(tmp_path), SESSION)
 
 
 def _settings(tmp_path: Path) -> BridgeSettings:
@@ -338,7 +392,7 @@ class ResettableAccount:
             "user_id": USER,
             "device_id": DEVICE,
             "algorithms": ["m.olm.v1.curve25519-aes-sha2"],
-            "keys": {f"ed25519:{DEVICE}": "devkey"},
+            "keys": dict(DEVICE_KEYS),
             "signatures": {USER: {f"ed25519:{DEVICE}": "selfsig"}},
         }
 
@@ -407,14 +461,18 @@ class TestResetIdentity:
         asked: list[str] = []
         async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
             kept: list[str] = []
-            reset = await reset_identity(client, "https://hs", SESSION, asked.append, kept.append)
+            reset = await reset_identity(
+                client, "https://hs", SESSION, DEVICE_KEYS, asked.append, kept.append
+            )
             assert kept == [reset.recovery_key], "the key is surfaced before anything can fail"
             assert asked == ["https://account/reset"]
             # The key handed back opens the new storage and the device is signed.
             account.device["signatures"][USER].update(
                 account.signatures[0][USER][DEVICE]["signatures"][USER]
             )
-            again = await sign_own_device(client, "https://hs", SESSION, reset.recovery_key)
+            again = await sign_own_device(
+                client, "https://hs", SESSION, DEVICE_KEYS, reset.recovery_key
+            )
         assert again.already
         master = account.uploaded["master_key"]
         assert reset.master_key in master["keys"]
@@ -436,7 +494,7 @@ class TestResetIdentity:
         account = ResettableAccount(approvals_needed=99)
         async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
             with pytest.raises(CrossSignError, match="not approved"):
-                await reset_identity(client, "https://hs", SESSION, print, print)
+                await reset_identity(client, "https://hs", SESSION, DEVICE_KEYS, print, print)
         assert account.uploaded == {}, "no identity was published"
         assert account.signatures == []
         assert "m.secret_storage.default_key" in account.data, (
@@ -451,7 +509,7 @@ class TestResetIdentity:
         old = {"iv": "i", "ciphertext": "c", "mac": "m"}
         account.data["m.cross_signing.master"] = {"encrypted": {"old": old}}
         async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
-            await reset_identity(client, "https://hs", SESSION, print, print)
+            await reset_identity(client, "https://hs", SESSION, DEVICE_KEYS, print, print)
         copies = account.data["m.cross_signing.master"]["encrypted"]
         assert copies["old"] == old
         assert len(copies) == 2
@@ -462,7 +520,7 @@ class TestResetIdentity:
         account.refused_reads = {"m.cross_signing.master"}
         async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
             with pytest.raises(CrossSignError, match=r"reading m\.cross_signing\.master: 500"):
-                await reset_identity(client, "https://hs", SESSION, print, print)
+                await reset_identity(client, "https://hs", SESSION, DEVICE_KEYS, print, print)
         assert account.data["m.cross_signing.master"] == {"encrypted": {"old": {}}}
 
     async def test_a_failed_store_hands_out_no_key_and_publishes_nothing(self) -> None:
@@ -473,7 +531,7 @@ class TestResetIdentity:
             with pytest.raises(
                 CrossSignError, match=r"storing m\.cross_signing\.self_signing: 500"
             ):
-                await reset_identity(client, "https://hs", SESSION, print, kept.append)
+                await reset_identity(client, "https://hs", SESSION, DEVICE_KEYS, print, kept.append)
         assert kept == []
         assert account.uploaded == {}
         assert "m.secret_storage.default_key" not in account.data
@@ -486,7 +544,7 @@ class TestResetIdentity:
         account = ResettableAccount(approvals_needed=10**9)
         async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
             with pytest.raises(CrossSignError, match=r"last answer: 401\)"):
-                await reset_identity(client, "https://hs", SESSION, print, print)
+                await reset_identity(client, "https://hs", SESSION, DEVICE_KEYS, print, print)
         assert account.uploaded == {}
 
     @pytest.mark.parametrize(
@@ -510,7 +568,9 @@ class TestResetIdentity:
         asked: list[str] = []
         async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
             with pytest.raises(CrossSignError, match=match):
-                await reset_identity(client, "https://hs", SESSION, asked.append, print)
+                await reset_identity(
+                    client, "https://hs", SESSION, DEVICE_KEYS, asked.append, print
+                )
         assert asked == []
         assert account.uploaded == {}
         assert account.signatures == []
@@ -519,7 +579,9 @@ class TestResetIdentity:
         account = ResettableAccount(approvals_needed=0)
         asked: list[str] = []
         async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
-            reset = await reset_identity(client, "https://hs", SESSION, asked.append, print)
+            reset = await reset_identity(
+                client, "https://hs", SESSION, DEVICE_KEYS, asked.append, print
+            )
         assert asked == []
         assert reset.master_key in account.uploaded["master_key"]["keys"]
         assert "auth" not in account.uploaded
@@ -538,6 +600,10 @@ def _route_clients(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
 
 class TestCommands:
     """The sign-device and reset-identity wrappers around the functions above."""
+
+    @pytest.fixture(autouse=True)
+    def _held_keys(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(main_mod, "_device_keys", lambda _settings, _session: DEVICE_KEYS)
 
     async def test_sign_device_needs_the_recovery_key(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
