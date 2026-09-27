@@ -105,7 +105,19 @@ class Transaction(BaseModel):
 
 
 def build_bridges(profiles: dict[str, Profile], data_dir: Path) -> dict[str, ProfileBridge]:
-    """A ProfileBridge for every profile whose bridge is enabled."""
+    """Build the gateway half of every enabled bridge.
+
+    Args:
+        profiles: the loaded profiles; only those whose ``matrix_bridge`` is
+            enabled (and so has resolved tokens) get a bridge.
+        data_dir: where each profile's mapping store goes, as
+            ``bridge-<profile>.db``. Created if absent.
+
+    Returns:
+        ``{profile name: ProfileBridge}``, empty when no bridge is enabled.
+        Each owns HTTP clients and a SQLite store; ``close_bridges`` closes
+        the ones registered at startup.
+    """
     out: dict[str, ProfileBridge] = {}
     for name, profile in profiles.items():
         cfg = profile.matrix_bridge
@@ -140,6 +152,16 @@ def _matches(presented: str, expected: SecretStr | None) -> bool:
 
 def _refused(status: int, errcode: str, error: str) -> JSONResponse:
     return JSONResponse({"errcode": errcode, "error": error}, status_code=status)
+
+
+# The bridges registered at startup, so the gateway's lifespan can close them.
+_registered: list[ProfileBridge] = []
+
+
+async def close_bridges() -> None:
+    """Close every registered bridge's clients and store. Called on shutdown."""
+    while _registered:
+        await _registered.pop().aclose()
 
 
 class BridgeRoutes:
@@ -230,10 +252,21 @@ class BridgeRoutes:
 def register_bridge_routes(
     mcp_server: Any, profiles: dict[str, Profile], data_dir: Path
 ) -> BridgeRoutes | None:
-    """Wire the bridge endpoints for every enabled bridge. Bound at startup."""
+    """Wire the bridge endpoints for every enabled bridge. Bound at startup.
+
+    Args:
+        mcp_server: the FastMCP server; routes go on via ``custom_route``.
+        profiles: the loaded profiles (see ``build_bridges``).
+        data_dir: where the mapping stores live.
+
+    Returns:
+        The bound handlers, or None when no profile has an enabled bridge,
+        in which case no route is registered at all.
+    """
     bridges = build_bridges(profiles, data_dir)
     if not bridges:
         return None
+    _registered.extend(bridges.values())
     handlers = BridgeRoutes(bridges)
     route = mcp_server.custom_route
     route("/bridge/{profile}/event", methods=["POST"])(handlers.event)

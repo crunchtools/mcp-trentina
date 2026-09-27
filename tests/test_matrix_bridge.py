@@ -20,7 +20,12 @@ from pydantic import SecretStr
 
 from mcp_trentina_crunchtools.defense import DefenseVerdict, Layer
 from mcp_trentina_crunchtools.gateway.matrix_bridge import core
-from mcp_trentina_crunchtools.gateway.matrix_bridge.appservice import AppService, ConduitError
+from mcp_trentina_crunchtools.gateway.matrix_bridge import routes as routes_mod
+from mcp_trentina_crunchtools.gateway.matrix_bridge.appservice import (
+    AppService,
+    ConduitError,
+    _Recent,
+)
 from mcp_trentina_crunchtools.gateway.matrix_bridge.core import (
     BridgeUnavailableError,
     ProfileBridge,
@@ -31,6 +36,10 @@ from mcp_trentina_crunchtools.gateway.matrix_bridge.rewrite import (
     escape_localpart,
     rewrite_content,
     user_ids_in,
+)
+from mcp_trentina_crunchtools.gateway.matrix_bridge.routes import (
+    close_bridges,
+    register_bridge_routes,
 )
 from mcp_trentina_crunchtools.gateway.profile import Profile
 from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, PipelineStats
@@ -598,3 +607,34 @@ class TestLookupCache:
         for n in range(5):
             await rig.bridge.inbound(_message(f"$more{n}"))
         assert reads == [], "room, sender and membership come from memory after the first"
+
+
+class TestBoundedCache:
+    def test_the_least_recently_used_entry_goes_first(self) -> None:
+        cache: _Recent[str, int] = _Recent(limit=2)
+        cache["a"], cache["b"] = 1, 2
+        assert cache.get("a") == 1  # a is now the most recent
+        cache["c"] = 3
+        assert list(cache) == ["a", "c"]
+
+
+class TestShutdown:
+    async def test_registered_bridges_are_closed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        closed: list[str] = []
+
+        class Server:
+            def custom_route(self, _path: str, methods: list[str]) -> Any:
+                return lambda handler: handler
+
+        register_bridge_routes(Server(), {"agent1": _profile()}, tmp_path)
+        [bridge] = routes_mod._registered
+
+        async def record() -> None:
+            closed.append("agent1")
+
+        monkeypatch.setattr(bridge, "aclose", record)
+        await close_bridges()
+        assert closed == ["agent1"]
+        assert routes_mod._registered == []

@@ -15,7 +15,8 @@ crypto (matrix-js-sdk does exactly that).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from collections import OrderedDict
+from typing import TYPE_CHECKING, Any, TypeVar
 from urllib.parse import quote
 
 import httpx
@@ -29,6 +30,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+
+# Rooms, names and memberships kept in memory per cache.
+_CACHE_ENTRIES = 4096
+_K = TypeVar("_K")
+_V = TypeVar("_V")
+
+
+class _Recent(OrderedDict[_K, _V]):
+    """A dict that forgets its least recently used entries past ``limit``."""
+
+    def __init__(self, limit: int = _CACHE_ENTRIES) -> None:
+        super().__init__()
+        self._limit = limit
+
+    def get(self, key: _K, default: Any = None) -> Any:
+        """The value, now the most recently used; ``default`` if absent."""
+        try:
+            self.move_to_end(key)
+        except KeyError:
+            return default
+        return self[key]
+
+    def __setitem__(self, key: _K, value: _V) -> None:
+        super().__setitem__(key, value)
+        self.move_to_end(key)
+        while len(self) > self._limit:
+            self.popitem(last=False)
 
 
 class ConduitError(RuntimeError):
@@ -72,11 +100,12 @@ class AppService:
         self.bot_id = f"@{sender_localpart}:{server_name}"
         self._sender_localpart = sender_localpart
         self._bot_registered = False
-        # The mapping's rooms, names and memberships, read once each. Bounded
-        # by the conversations the account is in, so held for the process.
-        self._rooms: dict[str, Room] = {}
-        self._names: dict[str, str] = {}
-        self._members: set[tuple[str, str]] = set()
+        # The mapping's rooms, names and memberships, most recently used
+        # first. A miss falls back to SQLite, so the bound costs a query, not
+        # correctness.
+        self._rooms: _Recent[str, Room] = _Recent()
+        self._names: _Recent[str, str] = _Recent()
+        self._members: _Recent[tuple[str, str], bool] = _Recent()
         self.agent_id = f"@{agent_localpart}:{server_name}"
 
     async def aclose(self) -> None:
@@ -223,10 +252,10 @@ class AppService:
 
     async def ensure_member(self, local_room: str, local_user: str) -> None:
         """Put a stand-in in a room: the bot invites, the stand-in joins."""
-        if (local_room, local_user) in self._members:
+        if self._members.get((local_room, local_user)):
             return
         if await self._mapping.is_member(local_room, local_user):
-            self._members.add((local_room, local_user))
+            self._members[(local_room, local_user)] = True
             return
         await self._call(
             "POST",
@@ -239,7 +268,7 @@ class AppService:
         )
         await self._call("POST", "rooms", local_room, "join", as_user=local_user)
         await self._mapping.put_member(local_room, local_user)
-        self._members.add((local_room, local_user))
+        self._members[(local_room, local_user)] = True
 
     async def send(
         self, local_room: str, sender: str, event_type: str, content: dict[str, Any], txn_id: str

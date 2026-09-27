@@ -50,14 +50,17 @@ async def _run(settings: BridgeSettings) -> None:
             asyncio.create_task(bridge.run(), name="sync"),
             asyncio.create_task(server.serve(), name="api"),
         ]
-        # Either one ending ends the bridge: a sync loop with no API cannot
-        # send, and an API with no sync loop sends into rooms it never reads.
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
-        for task in done:
-            task.result()
+        try:
+            # Either one ending ends the bridge: a sync loop with no API cannot
+            # send, and an API with no sync loop sends into rooms it never reads.
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
+        finally:
+            # Also on cancellation of _run itself: no task outlives the clients.
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
     finally:
         await bridge.aclose()
 

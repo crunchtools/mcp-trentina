@@ -119,3 +119,7 @@ async def trentina_lifespan() -> AsyncIterator[dict[str, Any]]:
             with contextlib.suppress(asyncio.CancelledError):
                 await _task
             _task = None
+        # The Matrix bridges' clients and mapping stores (a no-op without one).
+        from .matrix_bridge.routes import close_bridges
+
+        await close_bridges()

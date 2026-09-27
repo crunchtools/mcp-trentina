@@ -1073,3 +1073,26 @@ class TestLoginFailureCloses:
         with pytest.raises(RuntimeError, match="no way in"):
             await main_mod._run(Failing.settings)
         assert closed == [True]
+
+
+class TestConnectionErrors:
+    async def test_a_connection_failure_is_retried(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def no_sleep(_s: float) -> None:
+            return None
+
+        monkeypatch.setattr(client_mod.asyncio, "sleep", no_sleep)
+        attempts: list[int] = []
+        token_file = tmp_path / "sync_token"
+
+        def gateway(request: httpx.Request) -> httpx.Response:
+            attempts.append(1)
+            assert not token_file.exists()
+            if len(attempts) == 1:
+                raise httpx.ConnectError("refused", request=request)
+            return httpx.Response(200)
+
+        await _bridge(tmp_path, FakeNio(), gateway).process(_sync(_text_event()), first=False)
+        assert len(attempts) == 2
+        assert token_file.read_text() == "s2"
