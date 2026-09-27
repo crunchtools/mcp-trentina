@@ -267,12 +267,18 @@ class ProfileBridge:
         verdict = await self._judge(scanned, room=remote_room, direction="inbound")
         if self._refusal(verdict) is not None:
             scanned = {"room_name": "", "room_topic": ""}
-        await self.appservice.ensure_room(
+        local_room = await self.appservice.ensure_room(
             remote_room,
             name=scanned["room_name"],
             topic=scanned["room_topic"],
             is_direct=bool(room.get("is_direct")),
         )
+        # Held until the agent is in, so the room's first messages (which the
+        # bridge forwards next) are not written before it can read them.
+        if not await self.appservice.wait_for_agent(local_room):
+            logger.warning(
+                "matrix_bridge: %s has not joined a new room; carrying on", self.profile.name
+            )
         return "mapped"
 
     async def _inbound_redaction(self, event: dict[str, Any], remote_room: str) -> str:

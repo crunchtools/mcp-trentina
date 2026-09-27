@@ -14,6 +14,7 @@ crypto (matrix-js-sdk does exactly that).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -223,6 +224,23 @@ class AppService:
             ok_errcodes=frozenset({"M_USER_IN_USE"}),
         )
         self._bot_registered = True
+
+    async def wait_for_agent(self, local_room: str, timeout: float = 30.0) -> bool:
+        """Wait until the agent has joined ``local_room``; False on timeout.
+
+        A message written before the agent joins may never reach it, so a
+        freshly created room is not handed messages until the agent is in.
+        """
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            joined = await self._call(
+                "GET", "rooms", local_room, "joined_members", as_user=self.bot_id
+            )
+            if self.agent_id in (joined.get("joined") or {}):
+                return True
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(1.0)
 
     async def _sync_metadata(self, room: Room, *, name: str, topic: str) -> None:
         if name != room.name:

@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
 from pydantic import BaseModel, ValidationError
 from starlette.applications import Starlette
+from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from mcp_trentina_crunchtools.httpbody import TooLargeError, read_capped, where_invalid
-
-if TYPE_CHECKING:
-    from starlette.requests import Request
 
 LIMIT = 64
 
@@ -48,3 +44,17 @@ def test_where_invalid_names_the_field_not_the_value() -> None:
     where = where_invalid(caught.value)
     assert where == ["event_id"]
     assert secret not in repr(where)
+
+
+async def test_the_cap_counts_across_chunks() -> None:
+    """Refused as the running total passes the cap, before later chunks."""
+    sent: list[int] = []
+
+    async def receive() -> dict[str, object]:
+        sent.append(1)
+        return {"type": "http.request", "body": b"x" * 40, "more_body": len(sent) < 5}
+
+    request = Request({"type": "http", "method": "POST", "headers": []}, receive)
+    with pytest.raises(TooLargeError):
+        await read_capped(request, LIMIT)
+    assert len(sent) == 2, "stopped at the chunk that crossed the cap"

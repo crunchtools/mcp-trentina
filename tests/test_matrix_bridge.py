@@ -19,6 +19,7 @@ import pytest
 from pydantic import SecretStr
 
 from mcp_trentina_crunchtools.defense import DefenseVerdict, Layer
+from mcp_trentina_crunchtools.gateway.matrix_bridge import appservice as appservice_mod
 from mcp_trentina_crunchtools.gateway.matrix_bridge import core
 from mcp_trentina_crunchtools.gateway.matrix_bridge import routes as routes_mod
 from mcp_trentina_crunchtools.gateway.matrix_bridge.appservice import (
@@ -77,6 +78,8 @@ class FakeConduit:
     sent: list[dict[str, Any]] = field(default_factory=list)
     created: list[dict[str, Any]] = field(default_factory=list)
     calls: list[tuple[str, str, str | None]] = field(default_factory=list)
+    agent: str | None = "@agent1:agent1.local"
+    user_in_use: bool = False
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         assert request.headers["authorization"] == "Bearer as-secret"
@@ -88,6 +91,10 @@ class FakeConduit:
             self.rooms += 1
             self.created.append(body)
             return httpx.Response(200, json={"room_id": f"!local{self.rooms}:agent1.local"})
+        if path.endswith("/joined_members"):
+            return httpx.Response(200, json={"joined": {self.agent: {}} if self.agent else {}})
+        if path == "/register" and self.user_in_use:
+            return httpx.Response(400, json={"errcode": "M_USER_IN_USE"})
         if "/send/" in path:
             _, room, _, event_type, txn = path.split("/", 4)
             self.sent.append(
@@ -656,3 +663,37 @@ class TestMetadataUpdates:
         room = await rig.bridge.mapping.room_by_remote(ROOM)
         assert room is not None
         assert (room.name, room.topic) == ("Ops 2", "new topic")
+
+
+class TestNewRoomWaitsForTheAgent:
+    async def test_an_announced_room_is_acked_once_the_agent_is_in(self, rig_factory: Any) -> None:
+        rig = rig_factory()
+        assert await rig.bridge.inbound(TestRoomAnnouncement()._announce()) == "mapped"
+        assert any(p.endswith("/joined_members") for _, p, _ in rig.conduit.calls)
+
+    async def test_an_agent_that_never_joins_does_not_wedge_the_bridge(
+        self, rig_factory: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rig = rig_factory()
+        rig.conduit.agent = None
+
+        async def no_sleep(_s: float) -> None:
+            return None
+
+        monkeypatch.setattr(appservice_mod.asyncio, "sleep", no_sleep)
+        real = rig.bridge.appservice.wait_for_agent
+
+        async def short(room: str, _timeout: float = 30.0) -> bool:
+            return await real(room, timeout=0.0)
+
+        monkeypatch.setattr(rig.bridge.appservice, "wait_for_agent", short)
+        assert await rig.bridge.inbound(TestRoomAnnouncement()._announce()) == "mapped"
+
+
+class TestRestartRegistration:
+    async def test_an_existing_bot_does_not_stop_room_creation(self, rig_factory: Any) -> None:
+        """After a restart the bot and stand-ins already exist: M_USER_IN_USE."""
+        rig = rig_factory()
+        rig.conduit.user_in_use = True
+        assert await rig.bridge.inbound(_message()) == "delivered"
+        assert len(rig.conduit.created) == 1
