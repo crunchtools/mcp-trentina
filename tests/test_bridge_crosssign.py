@@ -194,6 +194,17 @@ async def test_a_stored_key_that_is_not_the_published_one_uploads_nothing() -> N
     assert account.uploads == []
 
 
+async def test_a_bogus_existing_signature_is_replaced() -> None:
+    account = Account()
+    account.device["signatures"][USER][f"ed25519:{account.ssk_public}"] = "bogus"
+    async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+        result = await sign_own_device(
+            client, "https://hs", SESSION, DEVICE_KEYS, recovery_key(account.key)
+        )
+    assert not result.already
+    assert len(account.uploads) == 1
+
+
 async def test_a_tampered_secret_is_refused_before_anything_is_signed() -> None:
     account = Account()
     secret = account.data["m.cross_signing.self_signing"]["encrypted"][KEY_ID]
@@ -364,6 +375,16 @@ class TestLogoutDevice:
         self._patch(monkeypatch, calls)
         monkeypatch.setenv("BRIDGE_OLD_ACCESS_TOKEN", "tok")
         with pytest.raises(SystemExit, match="own device"):
+            await main_mod._logout_device(_settings(tmp_path))
+        assert calls == []
+
+    async def test_no_old_token_is_an_exit_before_any_request(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[httpx.Request] = []
+        self._patch(monkeypatch, calls)
+        monkeypatch.delenv("BRIDGE_OLD_ACCESS_TOKEN", raising=False)
+        with pytest.raises(SystemExit, match="needs BRIDGE_OLD_ACCESS_TOKEN"):
             await main_mod._logout_device(_settings(tmp_path))
         assert calls == []
 

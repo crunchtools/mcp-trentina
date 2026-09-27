@@ -259,7 +259,9 @@ async def sign_own_device(
     signer, signature = sign(device, seed)
     if signer not in published:
         raise CrossSignError("the stored self-signing key is not the published one")
-    if signer in device.get("signatures", {}).get(user_id, {}):
+    # Ed25519 signatures are deterministic: the same key over the same keys
+    # makes the same signature, so an equal one is a valid one.
+    if device.get("signatures", {}).get(user_id, {}).get(signer) == signature:
         return Signed(device_id, signer, already=True)
 
     signed = {k: v for k, v in device.items() if k != "unsigned"}
