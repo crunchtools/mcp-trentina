@@ -21,7 +21,7 @@ under that name.
   outside an `enum`, a wrong type) is dropped like the empty ones 0.40.1
   already dropped. One equal to its `default` is forwarded: `default` is
   only an annotation. A required argument that
-  provably fails is refused at the gateway with `-32602`, so the backend
+  provably fails, or is absent, is refused at the gateway with `-32602`, so the backend
   and its breaker never see it. The validator judges only keywords it
   understands and never `pattern`; anything else is forwarded unchanged.
   Dropping an optional is the call the agent would have made by omitting

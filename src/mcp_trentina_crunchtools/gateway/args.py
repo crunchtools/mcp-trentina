@@ -13,6 +13,7 @@ that matches:
 1. optional and ``""`` or ``null``  -> dropped
 2. optional and provably invalid    -> dropped
 3. required and provably invalid    -> reported; the router refuses
+4. required and absent              -> reported; the router refuses
 
 Dropping an optional cannot widen a call. The result is the call the agent
 would have made by omitting it, and omitting an optional is always permitted.
@@ -76,13 +77,13 @@ class _Walk:
 
 
 def normalize_arguments(arguments: dict[str, Any], schema: dict[str, Any] | None) -> Normalized:
-    """Apply the module's three rules to *arguments*, a tools/call's, under *schema*.
+    """Apply the module's four rules to *arguments*, a tools/call's, under *schema*.
 
     *schema* is the tool's ``inputSchema`` as the backend listed it. The result
     carries ``arguments``, what to forward; ``dropped``, each removed optional
     and the rule that removed it; and ``invalid_required``, each required
-    argument that fails its schema, for the router to refuse. A required
-    argument is always left in ``arguments``.
+    argument that fails its schema or is absent, for the router to refuse. A
+    required argument is always left in ``arguments``.
 
     With no schema nothing changes: an unknown parameter may be required, and
     forwarding it unchanged is the old behaviour. The caller's dict is never
@@ -120,6 +121,8 @@ def normalize_arguments(arguments: dict[str, Any], schema: dict[str, Any] | None
             result.arguments[key] = value
         else:
             result.dropped[key] = f"dropped: {drop}"
+    for key in sorted(required - arguments.keys()):
+        result.invalid_required[key] = "is missing"
     if not result.dropped:
         result.arguments = arguments
     return result

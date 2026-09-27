@@ -216,6 +216,23 @@ def test_a_required_argument_that_fails_is_reported_not_dropped() -> None:
     assert result.invalid_required == {"id": "below minimum 1"}
 
 
+def test_a_missing_required_argument_is_reported() -> None:
+    result = normalize_arguments({"query": "q"}, SCHEMA)
+
+    assert result.invalid_required == {"id": "is missing"}
+
+
+@pytest.mark.parametrize(
+    "prop",
+    [{"anyOf": [{"type": "integer"}, {"type": "null"}]}, {"type": ["integer", "null"]}],
+)
+def test_a_required_null_the_schema_allows_is_forwarded(prop: dict[str, Any]) -> None:
+    result = normalize_arguments({"n": None}, {"properties": {"n": prop}, "required": ["n"]})
+
+    assert result.arguments == {"n": None}
+    assert result.invalid_required == {}
+
+
 def test_a_required_empty_string_the_schema_allows_is_forwarded() -> None:
     """The backend, not the gateway, says whether an allowed value is missing."""
     result = normalize_arguments({"query": "", "id": 1}, SCHEMA)

@@ -99,7 +99,7 @@ call is forwarded, the gateway checks each argument against the tool's cached
 |---|---|---|
 | optional | `""` or `null` | dropped |
 | optional | provably fails the schema | dropped |
-| required | provably fails the schema | refused with `-32602`; the backend is not called |
+| required | provably fails the schema, or is absent | refused with `-32602`; the backend is not called |
 
 "Provably" means the gateway checks only `type`, `enum`, `const`, length,
 range, item count and the `date`/`date-time` formats, through `anyOf`,
