@@ -10,6 +10,32 @@ under that name.
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-09-26
+
+### Added
+
+- **Schema-driven argument normalization (#241).** Before a proxied call is
+  forwarded, each argument is checked against the tool's cached
+  `inputSchema`. An optional argument that provably fails its schema
+  (`0` against `minimum: 1`, `""` against `format: date-time`, a value
+  outside an `enum`, a wrong type) is dropped like the empty ones 0.40.1
+  already dropped. One equal to its `default` is forwarded: `default` is
+  only an annotation. A required argument that
+  provably fails, or is absent, is refused at the gateway with `-32602`, so the backend
+  and its breaker never see it. The validator judges only keywords it
+  understands and never `pattern`; anything else is forwarded unchanged.
+  Dropping an optional is the call the agent would have made by omitting
+  it, so it cannot widen what a call reaches. Parameter guards still judge
+  the forwarded arguments. OpenAI-family models fill every optional
+  parameter with a placeholder (RT #1505).
+- Dropped arguments are reported to the agent as
+  `_trentina_warning.normalized` (`{"feed_id": "dropped: below minimum 1"}`)
+  and recorded in the new `gateway_calls.normalized` column.
+
+### Deprecated
+
+- `<backend>__<tool>` names and `trentina_prompt` now run until 0.43.0.
+
 ## [0.41.0] - 2026-09-26
 
 ### Changed

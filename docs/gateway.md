@@ -87,6 +87,38 @@ bytes the agent would pay for and not read (0.38.0):
   `detect` by default, unless the call passes `trentina_preprocess: false`.
   See [Minifying and exact text](profiles.md#minifying-and-exact-text).
 
+### Argument Normalization
+
+Some models send every optional parameter instead of omitting it, filled with
+a placeholder: `feed_id: 0`, `file_type: ""`. The backend rejects them, and a
+client may count each rejection against the whole server. Before a proxied
+call is forwarded, the gateway checks each argument against the tool's cached
+`inputSchema` and applies the first rule that matches:
+
+| Argument | Value | Result |
+|---|---|---|
+| optional | `""` or `null` | dropped |
+| optional | provably fails the schema | dropped |
+| required | provably fails the schema, or is absent | refused with `-32602`; the backend is not called |
+
+"Provably" means the gateway checks only `type`, `enum`, `const`, length,
+range, item count and the `date`/`date-time` formats, through `anyOf`,
+`oneOf`, `allOf` and local `$ref`. Anything else counts as valid, so nothing
+is dropped on a guess. `pattern` is never evaluated, since a backend's regex
+run on the gateway is a ReDoS. With no cached schema, nothing changes.
+
+Dropping an optional cannot widen a call. The result is the call the agent
+would have made by omitting the argument, which is always permitted.
+A value equal to the schema's `default` is forwarded: it is valid, and
+`default` is only an annotation, so a backend may not apply it on omission.
+Parameter guards judge the arguments as forwarded. Each drop is reported to
+the agent in `_trentina_warning.normalized` and recorded in the audit row.
+Internal tools are exempt, since they already read an empty value as unset.
+
+The normalization is only as good as the backend's schema. An ID declared
+`int | None` with no `minimum` cannot show that `0` is invalid. The crunchtools
+mcp-server profile requires `ge=1` on IDs for this reason.
+
 ### Tool Names
 
 Since 0.38.0 each tool is served under the simplest name that says what it

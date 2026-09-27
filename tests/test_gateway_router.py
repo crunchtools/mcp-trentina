@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -1158,7 +1159,7 @@ class TestOneAuditRowPerCall:
                     "params": {"name": f"web{NAMESPACE_SEP}fetch_tool", "arguments": {}},
                 },
             )
-            row = db_mod.get_db().execute("SELECT * FROM gateway_calls").fetchone()
+            row = db_mod.get_db().execute("SELECT * FROM gateway_calls ORDER BY id DESC").fetchone()
         db_mod._db = None
 
         assert row["bytes_arrived"] is None
@@ -1221,46 +1222,212 @@ class TestSurfaceRecording:
         assert surface_report("testp") is None
 
 
+_LUNA_SCHEMAS: dict[str, dict[str, Any]] = {
+    # mcp-feed-reader under constitution mcp-server 1.5.0: IDs declare ge=1.
+    "list_entries_tool": {
+        "properties": {
+            "feed_id": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
+            "published_after": {"type": "string", "format": "date-time"},
+            "limit": {"type": "integer", "default": 50},
+            "unread_only": {"type": "boolean", "default": False},
+        },
+    },
+    "search_drive_files": {
+        "properties": {"query": {"type": "string"}, "file_type": {"type": "string"}},
+        "required": ["query"],
+    },
+    "save_output": {
+        "properties": {
+            "content": {"type": "string"},
+            "run_id": {"type": "string"},
+            "priority": {"type": "integer", "minimum": 1},
+        },
+        "required": ["content", "priority"],
+    },
+    "send_message": {
+        "properties": {"to": {"type": "string"}, "cc": {"type": "string"}},
+        "required": ["to"],
+    },
+}
+
+
 class TestArgumentHygiene:
-    async def test_empty_optionals_never_reach_the_backend(self) -> None:
+    """Schema-driven normalization (#241), replaying Kagetora's Luna calls (RT #1505)."""
+
+    @staticmethod
+    async def _call(
+        tmp_path: Any,
+        tool: str,
+        arguments: dict[str, Any],
+        backend: Backend | None = None,
+        warning: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, Any]:
+        """(response, arguments the backend saw or None, the audit row)."""
+        import mcp_trentina_crunchtools.database as db_mod
         from mcp_trentina_crunchtools.gateway.backend import _tool_list_cache
 
-        seen: dict[str, Any] = {}
+        db_mod._db = None
+        backend = backend or Backend(url="http://luna:8000/mcp", tools_allow=["*"])
+        profile = Profile(
+            short_names=False,
+            name="kagetora",
+            auth=AuthConfig(bearer_token_env="TEST"),
+            backends={"luna": backend},
+        )
+        profile.auth.bearer_token = SecretStr("x")
+        seen: list[dict[str, Any]] = []
 
         async def fake_call(_bn: str, _b: Backend, _tn: str, args: dict[str, Any]) -> BackendCall:
-            seen.update(args)
+            seen.append(args)
             return BackendCall(
                 content=[{"type": "text", "text": "ok"}], is_error=False, structured_content=None
             )
 
-        url = _profile().backends["mcp-slack"].url
-        _tool_list_cache[url] = [
-            {
-                "name": "slack_list_channels",
-                "inputSchema": {
-                    "properties": {"cursor": {}, "limit": {}, "team": {}},
-                    "required": ["team"],
-                },
-            }
+        async def fake_scan(**_kwargs: Any) -> Any:
+            return SimpleNamespace(blocked=False, extraction=None, warning=warning)
+
+        _tool_list_cache[backend.url] = [
+            {"name": name, "inputSchema": schema} for name, schema in _LUNA_SCHEMAS.items()
         ]
         try:
-            with patch(
-                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
-                side_effect=fake_call,
+            with (
+                patch(
+                    "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                    side_effect=fake_call,
+                ),
+                patch(
+                    "mcp_trentina_crunchtools.gateway.router.scan_tool_response",
+                    side_effect=fake_scan,
+                ),
+                patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
             ):
-                await route_jsonrpc(
-                    _profile(),
+                mock_cfg.return_value.db_path = str(tmp_path / "hygiene.db")
+                mock_cfg.return_value.ensure_db_dir = lambda: None
+                resp = await route_jsonrpc(
+                    profile,
                     {
                         "jsonrpc": "2.0",
                         "id": 95,
                         "method": "tools/call",
-                        "params": {
-                            "name": f"mcp-slack{NAMESPACE_SEP}slack_list_channels",
-                            "arguments": {"cursor": "", "limit": 0, "team": ""},
-                        },
+                        "params": {"name": f"luna{NAMESPACE_SEP}{tool}", "arguments": arguments},
                     },
                 )
+                row = (
+                    db_mod.get_db()
+                    .execute("SELECT * FROM gateway_calls ORDER BY id DESC")
+                    .fetchone()
+                )
         finally:
-            _tool_list_cache.pop(url, None)
+            _tool_list_cache.pop(backend.url, None)
+            db_mod._db = None
+        return resp, (seen[0] if seen else None), row
 
-        assert seen == {"limit": 0, "team": ""}
+    async def test_list_entries_placeholders_are_dropped(self, tmp_path: Any) -> None:
+        resp, seen, row = await self._call(
+            tmp_path,
+            "list_entries_tool",
+            {"feed_id": 0, "published_after": "", "limit": 50, "unread_only": True},
+        )
+
+        assert seen == {"limit": 50, "unread_only": True}
+        dropped = {
+            "feed_id": "dropped: below minimum 1",
+            "published_after": "dropped: empty",
+        }
+        assert resp["result"]["_trentina_warning"] == {"normalized": dropped}
+        assert row["outcome"] == "ok"
+        assert json.loads(row["normalized"]) == dropped
+
+    async def test_search_drive_files_empty_type_is_dropped(self, tmp_path: Any) -> None:
+        resp, seen, row = await self._call(
+            tmp_path, "search_drive_files", {"query": "okrs", "file_type": ""}
+        )
+
+        assert seen == {"query": "okrs"}
+        assert "result" in resp
+        assert json.loads(row["normalized"]) == {"file_type": "dropped: empty"}
+
+    async def test_save_output_empty_run_id_is_dropped(self, tmp_path: Any) -> None:
+        _resp, seen, row = await self._call(
+            tmp_path, "save_output", {"content": "x", "run_id": "", "priority": 1}
+        )
+
+        assert seen == {"content": "x", "priority": 1}
+        assert row["outcome"] == "ok"
+
+    async def test_normalized_joins_a_defense_warning(self, tmp_path: Any) -> None:
+        resp, _seen, _row = await self._call(
+            tmp_path,
+            "search_drive_files",
+            {"query": "q", "file_type": ""},
+            warning={"risk_level": "low", "l3_truncated": True},
+        )
+
+        assert resp["result"]["_trentina_warning"] == {
+            "risk_level": "low",
+            "l3_truncated": True,
+            "normalized": {"file_type": "dropped: empty"},
+        }
+
+    async def test_a_clean_call_carries_no_warning(self, tmp_path: Any) -> None:
+        resp, seen, row = await self._call(tmp_path, "search_drive_files", {"query": "q"})
+
+        assert seen == {"query": "q"}
+        assert "_trentina_warning" not in resp["result"]
+        assert row["normalized"] is None
+
+    async def test_an_invalid_required_argument_never_reaches_the_backend(
+        self, tmp_path: Any
+    ) -> None:
+        url = "http://luna:8000/mcp"
+        breaker.reset(url)
+        resp, seen, row = await self._call(tmp_path, "save_output", {"content": "x", "priority": 0})
+
+        assert seen is None
+        assert resp["error"]["code"] == -32602
+        assert "priority below minimum 1" in resp["error"]["message"]
+        assert row["outcome"] == "tool_error"
+        assert breaker._get(url).consecutive_failures == 0
+
+    async def test_a_refused_call_still_records_its_drops(self, tmp_path: Any) -> None:
+        resp, seen, row = await self._call(
+            tmp_path, "save_output", {"content": "x", "run_id": "", "priority": 0}
+        )
+
+        assert seen is None
+        assert resp["error"]["code"] == -32602
+        assert json.loads(row["normalized"]) == {"run_id": "dropped: empty"}
+
+    async def test_a_guard_refusal_outranks_a_schema_refusal(self, tmp_path: Any) -> None:
+        guarded = Backend(
+            url="http://luna:8000/mcp",
+            tools_allow=["*"],
+            parameter_guards={"save_output": {"priority": ParameterConstraint(deny=["0"])}},
+        )
+
+        resp, seen, row = await self._call(
+            tmp_path, "save_output", {"content": "x", "priority": 0}, guarded
+        )
+
+        assert seen is None
+        assert resp["error"]["code"] == -32602
+        assert row["outcome"] == "denied_guard"
+
+    async def test_guards_judge_the_forwarded_arguments(self, tmp_path: Any) -> None:
+        guarded = Backend(
+            url="http://luna:8000/mcp",
+            tools_allow=["*"],
+            parameter_guards={"send_message": {"cc": ParameterConstraint(allow=["*@ok.com"])}},
+        )
+
+        resp, seen, _row = await self._call(
+            tmp_path, "send_message", {"to": "a@ok.com", "cc": ""}, guarded
+        )
+        assert seen == {"to": "a@ok.com"}
+        assert "result" in resp
+
+        resp, seen, row = await self._call(
+            tmp_path, "send_message", {"to": "a@ok.com", "cc": "b@evil.com"}, guarded
+        )
+        assert seen is None
+        assert row["outcome"] == "denied_guard"

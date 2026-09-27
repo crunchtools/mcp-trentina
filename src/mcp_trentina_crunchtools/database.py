@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     error_message TEXT,
     outcome TEXT,
     bytes_arrived INTEGER,
-    bytes_delivered INTEGER
+    bytes_delivered INTEGER,
+    normalized TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_gateway_calls_timestamp ON gateway_calls(timestamp);
@@ -129,6 +130,9 @@ def _migrate(db: sqlite3.Connection) -> None:
     for column in ("bytes_arrived", "bytes_delivered"):
         if column not in columns:
             db.execute(f"ALTER TABLE gateway_calls ADD COLUMN {column} INTEGER")
+    # Arguments the gateway dropped before forwarding, as JSON (#241).
+    if "normalized" not in columns:
+        db.execute("ALTER TABLE gateway_calls ADD COLUMN normalized TEXT")
     db.commit()
 
     detection_columns = {row["name"] for row in db.execute("PRAGMA table_info(detections)")}
@@ -284,6 +288,7 @@ def record_gateway_call(
     error_message: str | None = None,
     bytes_arrived: int | None = None,
     bytes_delivered: int | None = None,
+    normalized: dict[str, str] | None = None,
 ) -> None:
     """Record a gateway tools/call invocation.
 
@@ -297,7 +302,8 @@ def record_gateway_call(
     db.execute(
         "INSERT INTO gateway_calls "
         "(timestamp, profile, backend, tool, success, duration_ms, error_message, "
-        "outcome, bytes_arrived, bytes_delivered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "outcome, bytes_arrived, bytes_delivered, normalized) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             time.time(),
             profile,
@@ -309,6 +315,7 @@ def record_gateway_call(
             outcome,
             bytes_arrived,
             bytes_delivered,
+            json.dumps(normalized) if normalized else None,
         ),
     )
     db.commit()

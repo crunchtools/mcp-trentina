@@ -20,6 +20,8 @@ Each gateway call writes one row to the `gateway_calls` table:
 | `duration_ms` | integer | `234` |
 | `error_message` | text | `null` (or error message) |
 | `outcome` | text | `ok`, `blocked_defense`, … (see below) |
+| `bytes_arrived` / `bytes_delivered` | integer | response size before and after minifying |
+| `normalized` | text (JSON) | `{"feed_id": "dropped: below minimum 1"}`: arguments dropped before forwarding ([normalization](gateway.md#argument-normalization)) |
 
 ### Outcomes
 
