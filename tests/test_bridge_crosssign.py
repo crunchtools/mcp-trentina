@@ -314,6 +314,13 @@ def test_the_device_keys_come_from_the_bridges_own_store(tmp_path: Path) -> None
     }
 
 
+def test_a_corrupt_session_file_is_an_exit_naming_it(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    (tmp_path / "session.json").write_text("{not json")
+    with pytest.raises(SystemExit, match=r"session\.json is not valid JSON"):
+        main_mod._session(settings)
+
+
 def test_no_store_is_an_exit(tmp_path: Path) -> None:
     with pytest.raises(SystemExit, match="no crypto account"):
         main_mod._device_keys(_settings(tmp_path), SESSION)
