@@ -24,7 +24,7 @@ import httpx
 
 from ..client import MAX_RESPONSE_SIZE
 from ..config import DEFAULT_SEARCH_MODEL, get_config
-from ..errors import QuarantineAgentError
+from ..errors import MalformedResponseError, QuarantineAgentError
 from ..l1.pipeline import run_l1
 from .limiter import THROTTLE_STATUS, limited_generate, throttle_budget
 from .prompts import (
@@ -91,12 +91,6 @@ def _check_canary(parsed: dict[str, Any], canary: str) -> bool:
 
 
 _RETRYABLE_STATUS_CODES = frozenset({429, 503})
-
-
-MALFORMED_RESPONSE = "Invalid JSON in provider response"
-"""A reply that did not parse. Asked again once, of the same provider: it is
-usually one bad sample, and under Matrix withholding an unjudged /sync costs
-the agent that sync's events for good (#227)."""
 
 
 def _is_retryable(exc: QuarantineAgentError) -> bool:
@@ -184,9 +178,9 @@ async def _call_with_fallback(
         try:
             try:
                 return await call()
-            except QuarantineAgentError as exc:
-                if MALFORMED_RESPONSE not in str(exc):
-                    raise
+            except MalformedResponseError:
+                # Usually one bad sample, and under Matrix withholding an
+                # unjudged /sync costs the agent that sync's events (#227).
                 logger.warning("provider %s returned malformed JSON; asking once more", name)
                 return await call()
         except QuarantineAgentError as exc:
@@ -375,7 +369,7 @@ async def _call_gemini(
     try:
         parsed: dict[str, Any] = json.loads(provider_result.text)
     except json.JSONDecodeError as exc:
-        raise QuarantineAgentError(MALFORMED_RESPONSE) from exc
+        raise MalformedResponseError from exc
 
     if _check_canary(parsed, canary):
         raise QuarantineAgentError(
