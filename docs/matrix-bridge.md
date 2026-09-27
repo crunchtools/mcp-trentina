@@ -149,7 +149,7 @@ python -m mcp_trentina_crunchtools.bridge.main logout-device
 ```
 
 With `BRIDGE_OLD_ACCESS_TOKEN` set to the agent's old token, for this run
-only. matrix.org serves neither `/delete_devices` nor `DELETE /devices`;
+only. A homeserver behind MAS serves neither `/delete_devices` nor `DELETE /devices`;
 logging a device out with its own token removes it. Afterwards the agent holds
 no upstream credential, which is what makes the perimeter mandatory.
 
@@ -175,11 +175,14 @@ one the self-signing key cannot be read at all. Then:
 python -m mcp_trentina_crunchtools.bridge.main reset-identity
 ```
 
-It generates new cross-signing keys, and matrix.org asks the account owner to
-approve the reset: the command prints a link, to be opened while logged in as
-the account, and waits up to ten minutes. It then stores the keys in new secret
-storage, signs the bridge's device, and prints the new recovery key once. Keep
-it. Everyone who had verified the account sees its identity change and
+It generates new cross-signing keys, stores them in new secret storage, and
+prints the new recovery key once, before anything is published. Keep it. Then
+it uploads the identity; a homeserver behind MAS first asks the account owner
+to approve the reset, so the command prints a link, to be opened while logged
+in as the account, and waits up to ten minutes. Last, it signs the bridge's
+device. If that step fails, `sign-device` with the printed key finishes it; if
+the reset is never approved, nothing was published and a rerun replaces the
+stored keys. Everyone who had verified the account sees its identity change and
 verifies it again.
 
 ## Conduit

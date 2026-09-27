@@ -8,7 +8,9 @@ gets written, as whom, into which room, and what never gets written at all.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -760,6 +762,19 @@ class TestDirectMessages:
         assert notice["as"] == STAND_IN
         assert "not sent" in notice["content"]["body"]
 
+    async def test_the_owner_is_remembered_across_a_restart(
+        self, rig_factory: Any, dm: Any
+    ) -> None:
+        await rig_factory().bridge.inbound(dm())
+        restarted = rig_factory()  # a new process on the same store
+        restarted.verdicts.append(_verdict(flagged_by=Layer.L3))
+        await restarted.bridge.outbound(
+            "t1", [_agent_event("$o1") | {"room_id": "!local1:agent1.local"}]
+        )
+        [notice] = restarted.conduit.sent
+        assert notice["as"] == STAND_IN
+        assert restarted.upstream.sent == []
+
     async def test_a_bot_made_dm_is_handed_over(self, rig_factory: Any, dm: Any) -> None:
         """Rooms made before 0.45.1 had the bot in them: it promotes the
         peer's stand-in and leaves."""
@@ -779,3 +794,26 @@ class TestDirectMessages:
         rig = rig_factory()
         await rig.bridge.inbound(dm())
         assert rig.judged[0]["peer"] == "Scott"
+
+
+def test_a_0_45_0_store_gains_an_empty_owner(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    db = sqlite3.connect(path)
+    db.execute(
+        "CREATE TABLE rooms (remote_id TEXT PRIMARY KEY, local_id TEXT NOT NULL UNIQUE,"
+        " name TEXT NOT NULL DEFAULT '', topic TEXT NOT NULL DEFAULT '')"
+    )
+    db.execute("INSERT INTO rooms VALUES ('!r:hs', '!l:agent1.local', 'ops', 't')")
+    db.commit()
+    db.close()
+    mapping = BridgeMapping(path)
+    try:
+        room = asyncio.run(mapping.room_by_local("!l:agent1.local"))
+        assert room is not None
+        assert (room.name, room.owner) == ("ops", "")
+        asyncio.run(mapping.set_owner("!r:hs", "@remote_x:agent1.local"))
+        after = asyncio.run(mapping.room_by_remote("!r:hs"))
+        assert after is not None
+        assert after.owner == "@remote_x:agent1.local"
+    finally:
+        mapping.close()

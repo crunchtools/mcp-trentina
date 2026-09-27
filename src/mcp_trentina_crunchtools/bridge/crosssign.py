@@ -83,6 +83,8 @@ def check_key(key: bytes, description: dict[str, Any]) -> None:
 
 
 def canonical_json(value: Any) -> bytes:
+    """Matrix canonical JSON: sorted keys, no whitespace, UTF-8. What a
+    signature covers, so any other encoding verifies nowhere."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 
 
@@ -103,6 +105,25 @@ def sign(value: dict[str, Any], seed: bytes) -> tuple[str, str]:
     body = {k: v for k, v in value.items() if k not in ("signatures", "unsigned")}
     signature = encode_base64(eddsa.new(key, "rfc8032").sign(canonical_json(body)))
     return f"ed25519:{public}", signature
+
+
+def _json(resp: httpx.Response) -> dict[str, Any]:
+    """A response's JSON object, or ``{}`` for any other body: an error from
+    a proxy is often an HTML page, and that must not escape as a
+    ``JSONDecodeError`` in place of the homeserver's answer."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def _require(resp: httpx.Response, what: str) -> dict[str, Any]:
+    """The JSON object of a 200, else ``CrossSignError`` naming the call."""
+    body = _json(resp)
+    if resp.status_code != 200:
+        raise CrossSignError(f"{what}: {resp.status_code} {body.get('errcode', '')}".rstrip())
+    return body
 
 
 @dataclass(frozen=True)
@@ -152,23 +173,22 @@ async def sign_own_device(
             f"{base}/user/{quote(user_id, safe='')}/account_data/{quote(kind, safe='')}",
             headers=auth,
         )
-        if resp.status_code != 200:
-            raise CrossSignError(f"account data {kind}: {resp.status_code}")
-        content: dict[str, Any] = resp.json()
-        return content
+        return _require(resp, f"account data {kind}")
 
     key = decode_recovery_key(recovery_key)
-    key_id = (await account_data("m.secret_storage.default_key"))["key"]
-    check_key(key, await account_data(f"m.secret_storage.key.{key_id}"))
-    encrypted = (await account_data(SELF_SIGNING))["encrypted"][key_id]
-    seed = decode_base64(decrypt_secret(key, SELF_SIGNING, encrypted))
-
     query = await client.post(
         f"{base}/keys/query", headers=auth, json={"device_keys": {user_id: [device_id]}}
     )
-    keys = query.json()
-    published = keys["self_signing_keys"][user_id]["keys"]
-    device = keys["device_keys"][user_id][device_id]
+    try:
+        key_id = (await account_data("m.secret_storage.default_key"))["key"]
+        check_key(key, await account_data(f"m.secret_storage.key.{key_id}"))
+        encrypted = (await account_data(SELF_SIGNING))["encrypted"][key_id]
+        keys = _require(query, "keys query")
+        published = keys["self_signing_keys"][user_id]["keys"]
+        device = keys["device_keys"][user_id][device_id]
+    except (KeyError, TypeError) as exc:
+        raise CrossSignError(f"the account has no {exc} where its keys should be") from exc
+    seed = decode_base64(decrypt_secret(key, SELF_SIGNING, encrypted))
     signer, signature = sign(device, seed)
     if signer not in published:
         raise CrossSignError("the stored self-signing key is not the published one")
@@ -180,9 +200,9 @@ async def sign_own_device(
     upload = await client.post(
         f"{base}/keys/signatures/upload", headers=auth, json={user_id: {device_id: signed}}
     )
-    failures = upload.json().get("failures") or {}
-    if upload.status_code != 200 or failures:
-        raise CrossSignError(f"signature upload: {upload.status_code} {failures}")
+    failures = _require(upload, "signature upload").get("failures")
+    if failures:
+        raise CrossSignError(f"signature upload: {failures}")
     return Signed(device_id, signer, already=False)
 
 
@@ -243,7 +263,7 @@ async def reset_identity(
 
     New master, self-signing and user-signing keys are generated, stored in
     new secret storage under a new recovery key for the operator to keep,
-    then uploaded. matrix.org gates the upload on the account owner
+    then uploaded. A homeserver behind MAS gates the upload on the account owner
     approving it in a browser; ``on_approval`` is handed that URL, and the
     upload is retried until approved or ``_APPROVAL_WINDOW`` runs out.
 
@@ -299,8 +319,7 @@ async def reset_identity(
             headers=auth,
             json=content,
         )
-        if resp.status_code != 200:
-            raise CrossSignError(f"storing {kind}: {resp.status_code}")
+        _require(resp, f"storing {kind}")
 
     await put(
         f"m.secret_storage.key.{key_id}",
@@ -329,11 +348,11 @@ async def _upload_with_approval(
     on_approval: Callable[[str], None],
 ) -> None:
     """POST ``body``, answering a user-interactive-auth challenge by waiting
-    for browser approval (matrix.org's ``org.matrix.cross_signing_reset``)."""
+    for browser approval (MAS's ``org.matrix.cross_signing_reset``)."""
     resp = await client.post(url, headers=auth, json=body)
     if resp.status_code == 200:
         return
-    challenge = resp.json()
+    challenge = _json(resp)
     if resp.status_code != 401 or "session" not in challenge:
         raise CrossSignError(f"key upload refused: {resp.status_code} {challenge.get('errcode')}")
     stage = next((s for f in challenge.get("flows", []) for s in f.get("stages", [])), "")
@@ -350,7 +369,7 @@ async def _upload_with_approval(
         resp = await client.post(url, headers=auth, json=retry)
         if resp.status_code == 200:
             return
-        answer = f"{resp.status_code} {resp.json().get('errcode', '')}".strip()
+        answer = f"{resp.status_code} {_json(resp).get('errcode', '')}".rstrip()
         if answer != last:
             logger.warning("cross-signing reset not accepted yet: %s", answer)
             last = answer

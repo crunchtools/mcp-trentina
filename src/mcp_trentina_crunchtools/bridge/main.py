@@ -9,8 +9,8 @@
 ``logout-device`` exists for cutover: once the bridge holds an account, the
 agent's old device is pruned, which is what leaves the agent with no upstream
 credential and makes the perimeter mandatory rather than optional. It logs the
-old device out with that device's own token: matrix.org (behind its OAuth
-service) serves neither ``/delete_devices`` nor ``DELETE /devices``.
+old device out with that device's own token: a homeserver behind MAS
+serves neither ``/delete_devices`` nor ``DELETE /devices``.
 
 ``sign-device`` cross-signs the bridge's own device with the account's
 self-signing key from secret storage, so a device the bridge logged in fresh
@@ -148,7 +148,10 @@ def _session(settings: BridgeSettings) -> dict[str, str]:
     path = settings.store_dir / "session.json"
     if not path.exists():
         raise SystemExit(f"{path} does not exist: run the bridge once first")
-    saved: dict[str, str] = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        saved: dict[str, str] = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{path} is not valid JSON ({exc}): restore it or log in again") from exc
     return saved
 
 

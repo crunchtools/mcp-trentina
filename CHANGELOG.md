@@ -42,8 +42,8 @@ under that name.
 
 ### Removed
 
-- `mcp-trentina-bridge delete-devices`: matrix.org (behind its OAuth
-  service) serves neither `/delete_devices` nor `DELETE /devices`.
+- `mcp-trentina-bridge delete-devices`: a homeserver behind MAS serves
+  neither `/delete_devices` nor `DELETE /devices`.
 
 ## [0.45.0] - 2026-09-27
 

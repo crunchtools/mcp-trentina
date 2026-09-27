@@ -102,9 +102,14 @@ class Account:
             "unsigned": {"device_display_name": "bridge"},
         }
         self.uploads: list[dict[str, Any]] = []
+        # A path marker whose request fails with this answer instead.
+        self.failing: dict[str, httpx.Response] = {}
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        failure = next((r for marker, r in self.failing.items() if marker in path), None)
+        if failure is not None:
+            return failure
         if "/account_data/" in path:
             kind = path.rsplit("/", 1)[1]
             return (
@@ -175,6 +180,42 @@ async def test_a_stored_key_that_is_not_the_published_one_uploads_nothing() -> N
     assert account.uploads == []
 
 
+async def test_a_tampered_secret_is_refused_before_anything_is_signed() -> None:
+    account = Account()
+    secret = account.data["m.cross_signing.self_signing"]["encrypted"][KEY_ID]
+    secret["ciphertext"] = b64(os.urandom(32))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+        with pytest.raises(CrossSignError, match="MAC mismatch"):
+            await sign_own_device(client, "https://hs", SESSION, recovery_key(account.key))
+    assert account.uploads == []
+
+
+@pytest.mark.parametrize(
+    ("marker", "answer", "match"),
+    [
+        ("/account_data/", httpx.Response(500, json={"errcode": "M_UNKNOWN"}), "account data"),
+        ("/keys/query", httpx.Response(401, json={"errcode": "M_UNKNOWN_TOKEN"}), "keys query"),
+        ("/keys/query", httpx.Response(502, text="<html>bad gateway</html>"), "keys query: 502"),
+        ("/keys/query", httpx.Response(200, json={"device_keys": {}}), "no"),
+        (
+            "/keys/signatures/upload",
+            httpx.Response(200, json={"failures": {USER: {DEVICE: {"errcode": "M_INVALID"}}}}),
+            "signature upload",
+        ),
+        ("/keys/signatures/upload", httpx.Response(502, text="<html/>"), "signature upload: 502"),
+    ],
+)
+async def test_a_failed_homeserver_call_is_reported_not_taken_for_success(
+    marker: str, answer: httpx.Response, match: str
+) -> None:
+    account = Account()
+    account.failing[marker] = answer
+    async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+        with pytest.raises(CrossSignError, match=match):
+            await sign_own_device(client, "https://hs", SESSION, recovery_key(account.key))
+    assert account.uploads == []
+
+
 def _settings(tmp_path: Path) -> BridgeSettings:
     (tmp_path / "session.json").write_text(json.dumps(SESSION))
     return BridgeSettings(
@@ -233,8 +274,9 @@ class TestLogoutDevice:
 class ResettableAccount:
     """A homeserver that wants the reset approved in a browser first."""
 
-    def __init__(self, approvals_needed: int = 1) -> None:
+    def __init__(self, approvals_needed: int = 1, challenge: httpx.Response | None = None) -> None:
         self.data: dict[str, Any] = {}
+        self.challenge = challenge
         self.uploaded: dict[str, Any] = {}
         self.signatures: list[dict[str, Any]] = []
         self.pending = approvals_needed
@@ -249,6 +291,8 @@ class ResettableAccount:
     def _upload(self, request: httpx.Request) -> httpx.Response:
         """Challenge while approvals are pending, then accept."""
         body = json.loads(request.content)
+        if self.challenge is not None:
+            return self.challenge
         self.pending -= 1
         if self.pending >= 0:
             return httpx.Response(
@@ -337,3 +381,29 @@ class TestResetIdentity:
         assert "m.secret_storage.default_key" in account.data, (
             "the stored keys match no published identity; a rerun replaces them"
         )
+
+    @pytest.mark.parametrize(
+        ("challenge", "match"),
+        [
+            (httpx.Response(403, json={"errcode": "M_FORBIDDEN"}), "refused: 403 M_FORBIDDEN"),
+            (httpx.Response(401, json={"flows": []}), "refused: 401"),
+            (httpx.Response(502, text="<html>bad gateway</html>"), "refused: 502"),
+            (
+                httpx.Response(
+                    401, json={"session": "s", "flows": [{"stages": ["m.login.password"]}]}
+                ),
+                "cannot answer",
+            ),
+        ],
+    )
+    async def test_a_challenge_it_cannot_answer_publishes_nothing(
+        self, challenge: httpx.Response, match: str
+    ) -> None:
+        account = ResettableAccount(challenge=challenge)
+        asked: list[str] = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+            with pytest.raises(CrossSignError, match=match):
+                await reset_identity(client, "https://hs", SESSION, asked.append, print)
+        assert asked == []
+        assert account.uploaded == {}
+        assert account.signatures == []

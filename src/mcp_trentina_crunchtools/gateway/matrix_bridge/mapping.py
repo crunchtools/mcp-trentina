@@ -147,6 +147,7 @@ class BridgeMapping:
         return None if row is None else Room(*row)
 
     async def room_by_local(self, local_id: str) -> Room | None:
+        """The mapped room whose local ID this is, or ``None``."""
         row = await self._row(
             "SELECT remote_id, local_id, name, topic, owner FROM rooms WHERE local_id = ?",
             local_id,
@@ -154,6 +155,7 @@ class BridgeMapping:
         return None if row is None else Room(*row)
 
     async def set_owner(self, remote_id: str, owner: str) -> None:
+        """Record the stand-in that now owns a room, after a handover."""
         await self._write("UPDATE rooms SET owner = ? WHERE remote_id = ?", owner, remote_id)
 
     async def put_room(
