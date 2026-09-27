@@ -86,11 +86,14 @@ async def _logout_device(settings: BridgeSettings) -> None:
     if old == _session(settings)["access_token"]:
         raise SystemExit("refusing to log out the bridge's own device")
     async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
-        resp = await client.post(
-            f"{settings.homeserver}/_matrix/client/v3/logout",
-            headers={"Authorization": f"Bearer {old}"},
-            json={},
-        )
+        try:
+            resp = await client.post(
+                f"{settings.homeserver}/_matrix/client/v3/logout",
+                headers={"Authorization": f"Bearer {old}"},
+                json={},
+            )
+        except httpx.HTTPError as exc:
+            raise SystemExit(f"logout-device: {exc}") from exc
     if resp.status_code != 200:
         raise SystemExit(f"logout failed: {resp.status_code} {resp.text[:200]}")
     logger.warning("bridge[%s]: old device logged out", settings.profile)
@@ -106,7 +109,7 @@ async def _sign_device(settings: BridgeSettings) -> None:
             result = await sign_own_device(
                 client, settings.homeserver, _session(settings), recovery_key
             )
-        except (CrossSignError, RecoveryKeyError) as exc:
+        except (CrossSignError, RecoveryKeyError, httpx.HTTPError) as exc:
             raise SystemExit(f"sign-device: {exc}") from exc
     verb = "was already signed" if result.already else "signed"
     logger.warning("bridge[%s]: device %s %s", settings.profile, result.device_id, verb)
@@ -130,7 +133,7 @@ async def _reset_identity(settings: BridgeSettings) -> None:
             result = await reset_identity(
                 client, settings.homeserver, _session(settings), ask, keep
             )
-        except CrossSignError as exc:
+        except (CrossSignError, httpx.HTTPError) as exc:
             raise SystemExit(
                 f"reset-identity: {exc}. If a recovery key was printed above, "
                 "finish with sign-device and that key."

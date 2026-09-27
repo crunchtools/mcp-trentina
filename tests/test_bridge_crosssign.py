@@ -292,6 +292,7 @@ class ResettableAccount:
         self.data: dict[str, Any] = {}
         self.challenge = challenge
         self.refused_writes: set[str] = set()
+        self.refused_signatures = False
         self.uploaded: dict[str, Any] = {}
         self.signatures: list[dict[str, Any]] = []
         self.pending = approvals_needed
@@ -341,7 +342,10 @@ class ResettableAccount:
         )
 
     def _signatures(self, request: httpx.Request) -> httpx.Response:
-        self.signatures.append(json.loads(request.content))
+        uploaded = json.loads(request.content)
+        if self.refused_signatures:
+            return httpx.Response(403, json={"errcode": "M_FORBIDDEN"})
+        self.signatures.append(uploaded)
         return httpx.Response(200, json={"failures": {}})
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
@@ -507,3 +511,25 @@ class TestCommands:
         )
         with pytest.raises(SystemExit, match="finish with sign-device"):
             await main_mod._reset_identity(_settings(tmp_path))
+
+    async def test_a_signing_failure_after_publishing_keeps_the_key_shown(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        account = ResettableAccount(approvals_needed=0)
+        account.refused_signatures = True
+        _route_clients(monkeypatch, account)
+        with pytest.raises(SystemExit, match="finish with sign-device"):
+            await main_mod._reset_identity(_settings(tmp_path))
+        assert account.uploaded, "the identity was published"
+        assert capsys.readouterr().out.count("Recovery key") == 1
+
+    async def test_an_unreachable_homeserver_is_an_exit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def down(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("refused", request=request)
+
+        _route_clients(monkeypatch, down)
+        monkeypatch.setenv("BRIDGE_RECOVERY_KEY", recovery_key(os.urandom(32)))
+        with pytest.raises(SystemExit, match="sign-device: refused"):
+            await main_mod._sign_device(_settings(tmp_path))

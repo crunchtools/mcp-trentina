@@ -125,15 +125,19 @@ def _signing_key(seed: bytes) -> Any:
     return ECC.construct(curve="Ed25519", seed=cast("Any", seed))
 
 
+def _public(key: Any) -> str:
+    return encode_base64(key.public_key().export_key(format="raw"))
+
+
 def public_key(seed: bytes) -> str:
     """The unpadded-base64 Ed25519 public key for a seed."""
-    return encode_base64(_signing_key(seed).public_key().export_key(format="raw"))
+    return _public(_signing_key(seed))
 
 
 def sign(value: dict[str, Any], seed: bytes) -> tuple[str, str]:
     """``(key id, signature)`` over ``value`` minus signatures and unsigned."""
     key = _signing_key(seed)
-    public = public_key(seed)
+    public = _public(key)
     body = {k: v for k, v in value.items() if k not in ("signatures", "unsigned")}
     signature = encode_base64(eddsa.new(key, "rfc8032").sign(canonical_json(body)))
     return f"ed25519:{public}", signature

@@ -85,7 +85,11 @@ def decode_recovery_key(text: str) -> bytes:
 
 def encode_recovery_key(key: bytes) -> str:
     """The display form of a 32-byte key: prefix, key and parity byte in
-    base58, in space-separated groups of four, as clients show it."""
+    base58, in space-separated groups of four, as clients show it.
+
+    Raises:
+        RecoveryKeyError: ``key`` is not exactly 32 bytes.
+    """
     if len(key) != KEY_BYTES:
         raise RecoveryKeyError(f"expected {KEY_BYTES} key bytes, got {len(key)}")
     raw = bytes(PREFIX) + key
