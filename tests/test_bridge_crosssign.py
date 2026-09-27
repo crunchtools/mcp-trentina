@@ -428,6 +428,17 @@ class TestResetIdentity:
         assert account.uploaded == {}
         assert "m.secret_storage.default_key" not in account.data
 
+    async def test_a_reset_refused_until_the_deadline_names_the_last_answer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(crosssign, "_APPROVAL_POLL", 0.0)
+        monkeypatch.setattr(crosssign, "_APPROVAL_WINDOW", 0.05)
+        account = ResettableAccount(approvals_needed=10**9)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+            with pytest.raises(CrossSignError, match=r"last answer: 401\)"):
+                await reset_identity(client, "https://hs", SESSION, print, print)
+        assert account.uploaded == {}
+
     @pytest.mark.parametrize(
         ("challenge", "match"),
         [
