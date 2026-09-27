@@ -53,7 +53,7 @@ def _warn_legacy_prompt() -> None:
     global _legacy_prompt_warned
     _legacy_prompt_warned = True
     logger.warning(
-        "trentina_prompt is deprecated and removed in 0.42.0; "
+        "trentina_prompt is deprecated and removed in 0.43.0; "
         'pass trentina_mode={"redact": "<question>"}'
     )
 
@@ -69,7 +69,7 @@ def parse_mode_arg(value: Any, legacy_prompt: Any = None) -> tuple[str | None, s
     something there: ``"block"``, ``"flag"``, or ``{"redact": "<question>"}``.
     A bare ``"redact"`` keeps the tool's default question. ``trentina_prompt``
     beside a string mode is the pre-0.39.0 spelling, read with a warning
-    until 0.42.0.
+    until 0.43.0.
 
     Args:
         value: the call's ``trentina_mode``: None, a mode name, or

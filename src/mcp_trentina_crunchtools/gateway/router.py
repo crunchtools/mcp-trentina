@@ -11,7 +11,7 @@ or as `<backend>__<tool>` when the profile turns `short_names` off.
 
 For `tools/call`, resolves the name back into (backend, tool), verifies the
 backend is in the profile, re-checks the allowlist (defense in depth), and
-forwards. `<backend>__<tool>` resolves either way until 0.42.0.
+forwards. `<backend>__<tool>` resolves either way until 0.43.0.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from ..errors import ModeNotPermittedError, PreProcessNotPermittedError
 from ..outcomes import Outcome, classify_exception, refusal_of
 from ..preprocess.policy import PREPROCESS_PARAM
 from ..quarantine.limiter import Priority, l3_priority
-from .args import drop_empty_optional
+from .args import Normalized, normalize_arguments
 from .backend import (
     cached_tool_schema,
     call_backend_tool,
@@ -200,6 +200,7 @@ def _audit(
     *,
     bytes_arrived: int | None = None,
     bytes_delivered: int | None = None,
+    normalized: dict[str, str] | None = None,
 ) -> None:
     with contextlib.suppress(Exception):
         record_gateway_call(
@@ -211,6 +212,7 @@ def _audit(
             error_message,
             bytes_arrived=bytes_arrived,
             bytes_delivered=bytes_delivered,
+            normalized=normalized,
         )
 
 
@@ -561,14 +563,19 @@ async def _route_tools_call(
         return _err(req_id, JSONRPC_INVALID_PARAMS, str(exc))
 
     # Before the guards, so they judge exactly what is forwarded.
-    forwarded = _clean_arguments(profile, backend, backend_name, tool_name, forwarded)
+    normalized = _normalize_arguments(profile, backend, backend_name, tool_name, forwarded)
+    forwarded = normalized.arguments
 
-    guard_err = check_parameter_guards(
-        tool_name, {**forwarded, MODE_PARAM: mode.value, PROMPT_PARAM: prompt}, backend
+    refused = _refuse_arguments(
+        backend,
+        tool_name,
+        {**forwarded, MODE_PARAM: mode.value, PROMPT_PARAM: prompt},
+        normalized.invalid_required,
     )
-    if guard_err:
-        _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, guard_err)
-        return _err(req_id, JSONRPC_INVALID_PARAMS, guard_err)
+    if refused is not None:
+        outcome, message = refused
+        _audit(profile.name, backend_name, tool_name, outcome, 0, message)
+        return _err(req_id, JSONRPC_INVALID_PARAMS, message)
 
     t0 = time.monotonic()
     try:
@@ -627,33 +634,54 @@ async def _route_tools_call(
         prompt=prompt,
         policy=policy,
         minify=minify,
+        normalized=normalized.dropped,
     )
     return _ok(req_id, result)
 
 
-def _clean_arguments(
+def _refuse_arguments(
+    backend: Backend, tool_name: str, judged: dict[str, Any], invalid_required: dict[str, str]
+) -> tuple[Outcome, str] | None:
+    """The parameter guards' refusal, else the schema's, else None.
+
+    Guards first, so a probe a guard refuses still audits as one. A required
+    argument that fails its schema would be refused by the backend too;
+    answering here spares the round trip, and the breaker never sees a call
+    the backend never received.
+    """
+    guard_err = check_parameter_guards(tool_name, judged, backend)
+    if guard_err:
+        return Outcome.DENIED_GUARD, guard_err
+    if invalid_required:
+        return Outcome.TOOL_ERROR, "Invalid required arguments: " + "; ".join(
+            f"{name} {reason}" for name, reason in invalid_required.items()
+        )
+    return None
+
+
+def _normalize_arguments(
     profile: Profile,
     backend: Backend,
     backend_name: str,
     tool_name: str,
     forwarded: dict[str, Any],
-) -> dict[str, Any]:
-    """Drop empty optional arguments before a remote call (``args.py``).
+) -> Normalized:
+    """Normalize arguments against the backend's schema before a remote call (``args.py``).
 
     Internal tools are ours and already read an empty value as unset.
     """
     if backend.is_internal:
-        return forwarded
-    cleaned, dropped = drop_empty_optional(forwarded, cached_tool_schema(backend.url, tool_name))
-    if dropped:
+        return Normalized(forwarded)
+    normalized = normalize_arguments(forwarded, cached_tool_schema(backend.url, tool_name))
+    if normalized.dropped:
         logger.info(
-            "gateway: profile=%s %s/%s dropped empty optional args %s",
+            "gateway: profile=%s %s/%s normalized args %s",
             profile.name,
             backend_name,
             tool_name,
-            dropped,
+            normalized.dropped,
         )
-    return cleaned
+    return normalized
 
 
 async def _deliver(
@@ -668,8 +696,13 @@ async def _deliver(
     prompt: str | None,
     policy: ModePolicy,
     minify: bool | None,
+    normalized: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Assemble the result, then write the call's one audit row, sizes included."""
+    """Assemble the result, then write the call's one audit row, sizes included.
+
+    Dropped arguments go back to the agent in ``_trentina_warning`` beside any
+    defense verdict, so a model can learn from them, and into the audit row.
+    """
     try:
         assembled = await _assemble_call_result(
             profile,
@@ -694,6 +727,12 @@ async def _deliver(
             f"assembly failed: {exc}",
         )
         raise
+    if normalized:
+        warning = assembled.result.get("_trentina_warning")
+        assembled.result["_trentina_warning"] = {
+            **(warning if isinstance(warning, dict) else {}),
+            "normalized": normalized,
+        }
     # An internal tool minifies inside itself, so what arrived here is
     # already the delivered form: its arrived size stays NULL, not equal.
     arrived = (
@@ -713,6 +752,7 @@ async def _deliver(
         assembled.error,
         bytes_arrived=arrived,
         bytes_delivered=await asyncio.to_thread(wire_bytes, assembled.result),
+        normalized=normalized or None,
     )
     return assembled.result
 

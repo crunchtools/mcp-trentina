@@ -127,7 +127,7 @@ Every call runs L1 ∥ L2 on the arrived bytes, then L3 briefed with both. The
   security-researcher grant; leave it out of agent policies.
 - `redact` — L3 detect, extract, verify; any objection refuses. Spelled
   `{"redact": "<question>"}` since 0.39.0: the question travels inside the
-  mode (`modes.parse_mode_arg`); `trentina_prompt` is read until 0.42.0. No
+  mode (`modes.parse_mode_arg`); `trentina_prompt` is read until 0.43.0. No
   tool declares `trentina_mode` unless the profile sets `declare_modes`.
 
 "Arrived" means arrived at the perimeter, AFTER pre-processing. Output is
@@ -332,6 +332,10 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
     leaves repeated footers to petit, which is what `chain` is for. Rewrites
     the thread, where petit's `EmailHash` only fingerprints its skeleton.
 - `gateway/` — Per-consumer MCP gateway proxy with tool allowlists, parameter guards, and defense pipeline
+  - `args.py` — schema-driven argument normalization (#241): drops an
+    optional that is empty, equals its default, or provably fails its schema;
+    reports a failing required one for the router to refuse. Never evaluates
+    `pattern` (a backend's regex is a ReDoS here).
   - `ratelimit.py` — the token bucket and the ASGI guard on `/register`,
     `/authorize` and `/consent`. NOT on `/token`: that is reached with a code
     or refresh token this gateway issued, so it is not unauthenticated, and

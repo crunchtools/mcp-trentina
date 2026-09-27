@@ -157,6 +157,8 @@ class TestEveryLayersVerdict:
         database._migrate(conn)
         columns = {r["name"] for r in conn.execute("PRAGMA table_info(detections)")}
         assert {"flagged_by", "l2_label", "l2_score", "l3_verdict", "l3_risk"} <= columns
+        audit = {r["name"] for r in conn.execute("PRAGMA table_info(gateway_calls)")}
+        assert {"outcome", "bytes_arrived", "bytes_delivered", "normalized"} <= audit
 
     def test_the_insert_names_the_verdict_columns_in_tuple_order(self) -> None:
         """Values are bound positionally from _VERDICT_COLUMNS; the INSERT must agree."""
