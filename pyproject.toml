@@ -1,6 +1,6 @@
 [project]
 name = "mcp-trentina-crunchtools"
-version = "0.44.0"
+version = "0.45.0"
 description = "Secure MCP gateway and quarantine for AI agent traffic — three-layer defense against prompt injection"
 requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
@@ -68,11 +68,11 @@ dependencies = [
 matrix = [
     "vodozemac>=0.10,<0.11",
 ]
-# The Matrix bridge (#162, spec 015): the public-side client that holds the
-# login, device and crypto store. Its e2e extra is built on vodozemac, the same
-# library as `matrix` above, so the two resolve to one copy. Not in the image
-# yet: nothing runs a bridge until phase 1, and an unused crypto stack in the
-# gateway image is attack surface with no purpose.
+# The Matrix bridge (#162, spec 015): the upstream client that holds the
+# login, device and crypto store, run from the same image as its own container
+# (`python -m mcp_trentina_crunchtools.bridge.main run`). Its e2e extra is
+# built on vodozemac, the same library as `matrix` above, so the two resolve
+# to one copy.
 bridge = [
     "matrix-nio[e2e]>=0.26,<0.27",
 ]
@@ -85,6 +85,7 @@ dev = [
 
 [project.scripts]
 mcp-trentina-crunchtools = "mcp_trentina_crunchtools:main"
+mcp-trentina-bridge = "mcp_trentina_crunchtools.bridge.main:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -182,4 +183,9 @@ pythonpath = ["src"]
 # preprocess/petit.py imports it.
 [[tool.mypy.overrides]]
 module = ["petit", "petit.*"]
+ignore_missing_imports = true
+
+# matrix-nio ships no py.typed marker.
+[[tool.mypy.overrides]]
+module = ["nio", "nio.*"]
 ignore_missing_imports = true

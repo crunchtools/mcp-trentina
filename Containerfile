@@ -79,9 +79,10 @@ COPY src/ ./src/
 # released that morning — the artifact that actually runs was the least pinned
 # thing we owned, and it was resolved separately from the set CI tested.
 #
-# The `matrix` extra must appear in BOTH places below or the dependency is
-# half-installed: `--extra matrix` puts vodozemac in the exported, hash-pinned
-# requirements, and `.[matrix]` on the final --no-deps install is what records
+# The `matrix` and `bridge` extras must appear in BOTH places below or the
+# dependency is half-installed: `--extra matrix --extra bridge` puts vodozemac
+# and matrix-nio in the exported, hash-pinned requirements, and
+# `.[matrix,bridge]` on the final --no-deps install is what records
 # it against the project. Exporting without installing gives you a verified
 # wheel nobody imports; installing without exporting gives you an unpinned one.
 #
@@ -94,10 +95,10 @@ COPY src/ ./src/
 # #96), so it is now an ordinary locked, hash-verified dependency like every
 # other one and needs no special case here.
 RUN pip install --no-cache-dir uv \
- && uv export --frozen --no-dev --extra matrix --no-emit-project \
+ && uv export --frozen --no-dev --extra matrix --extra bridge --no-emit-project \
       --format requirements-txt -o /tmp/requirements.txt \
  && pip install --no-cache-dir --prefix=/usr -r /tmp/requirements.txt \
- && pip install --no-cache-dir --prefix=/usr --no-deps '.[matrix]'
+ && pip install --no-cache-dir --prefix=/usr --no-deps '.[matrix,bridge]'
 
 # onnxruntime >= 1.29 reads /etc/machine-id during module init. When that file
 # is absent it falls back to popen("blkid")/popen("hostname"), and popen returns

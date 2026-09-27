@@ -69,6 +69,16 @@ uv run mcp-trentina-crunchtools
 - `TRENTINA_L3_THROTTLE_BUDGET` — seconds a user-facing L3 call waits out 429s
   on one provider before falling back (default 20; the boot warm-up uses 300).
 
+### Bridge process (`python -m mcp_trentina_crunchtools.bridge.main`)
+
+Its own environment, never profiles.yaml; full table in `docs/matrix-bridge.md`.
+Required: `BRIDGE_PROFILE`, `BRIDGE_USER_ID`, `BRIDGE_GATEWAY_URL`,
+`BRIDGE_INGRESS_TOKEN`, `BRIDGE_TOKEN`, `BRIDGE_PICKLE_KEY`. Optional:
+`BRIDGE_HOMESERVER`, `BRIDGE_STORE_DIR` (`/data`), `BRIDGE_LISTEN_HOST`
+(`127.0.0.1`), `BRIDGE_LISTEN_PORT` (8471), `BRIDGE_DEVICE_NAME`,
+`BRIDGE_LOG_LEVEL`, and one way in: `BRIDGE_DEVICE_ID` + `BRIDGE_ACCESS_TOKEN`
+(adopt) or `BRIDGE_PASSWORD` (new device). Secrets take `_FILE`.
+
 ## onnxruntime telemetry
 
 `ORT_DISABLE_TELEMETRY=1` is set in the Containerfile and defaulted in
@@ -338,6 +348,12 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
   - `email.py` — mail. Collapses quoted reply chains and strips signatures;
     leaves repeated footers to petit, which is what `chain` is for. Rewrites
     the thread, where petit's `EmailHash` only fingerprints its skeleton.
+- `bridge/` — the Matrix bridge PROCESS (#162, spec 015): upstream login,
+  crypto store, sync. Untrusted; runs as its own container and can reach only
+  matrix.org and the gateway. Sends every type encrypted itself, because nio
+  sends `m.reaction` in the clear.
+- `gateway/matrix_bridge/` — the gateway's half: judges every bridged event in
+  both directions and is the only writer into the agent's Conduit (appservice).
 - `gateway/` — Per-consumer MCP gateway proxy with tool allowlists, parameter guards, and defense pipeline
   - `args.py` — schema-driven argument normalization (#241): drops an
     optional that is empty or provably fails its schema (never one equal to

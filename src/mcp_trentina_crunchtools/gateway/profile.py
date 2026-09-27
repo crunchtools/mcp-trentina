@@ -981,7 +981,7 @@ class MatrixIngressConfig(BaseModel):
     )
 
 
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_LOCAL_HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 _MATRIX_LOCALPART_RE = re.compile(r"^[a-z0-9._=/+-]+$")
 _DNS_NAME_RE = re.compile(
     r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"
@@ -1019,17 +1019,21 @@ def _valid_server_name(value: str) -> bool:
 _LOCALPART_RE = re.compile(r"^[a-z0-9._=/-]{1,64}$")
 
 
-def _loopback_url(value: str) -> str:
-    """Refuse any URL whose host is not this machine.
+def private_url(value: str) -> str:
+    """Refuse any URL whose host could be on the public internet.
 
-    Both ends the gateway talks to on the bridge path are per-profile and
-    localhost-only by design (spec 015). A public host here would put the
-    plaintext side of an E2EE room on the network, so it is a load error
-    rather than a deployment note.
+    Both ends the gateway talks to on the bridge path live on private
+    container networks by design (spec 015): the bridge on the gateway's
+    egress network, each Conduit on its agent's internal network. Accepted
+    hosts are loopback, a private address, or a single-label container name,
+    which the container runtime's DNS resolves and a public resolver cannot.
+    A dotted name or a public address here would put the plaintext side of an
+    E2EE room somewhere a network could see it, so it is a load error rather
+    than a deployment note.
     """
     parsed = urlparse(value)
-    if parsed.scheme not in ("http", "https") or parsed.hostname not in _LOOPBACK_HOSTS:
-        raise ValueError(f"{value!r} must be an http(s) URL on a loopback host")
+    if parsed.scheme not in ("http", "https") or not _is_private_host(parsed.hostname or ""):
+        raise ValueError(f"{value!r} must be an http(s) URL on a private host")
     try:
         port = parsed.port
     except ValueError as exc:
@@ -1037,6 +1041,31 @@ def _loopback_url(value: str) -> str:
     if port == 0:
         raise ValueError(f"{value!r} has an invalid port")
     return value.rstrip("/")
+
+
+# Where a container network can put a peer. Named rather than taken from
+# ``is_private``, which also admits link-local (169.254.169.254 is a cloud
+# metadata endpoint), the unspecified address and documentation ranges.
+_PRIVATE_NETWORKS = tuple(
+    ipaddress.ip_network(net)
+    for net in (
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "127.0.0.0/8",
+        "fc00::/7",
+        "::1/128",
+    )
+)
+
+
+def _is_private_host(host: str) -> bool:
+    """Loopback, an RFC 1918 or ULA address, or a bare container name."""
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return bool(_LOCAL_HOST_RE.match(host))
+    return any(address in network for network in _PRIVATE_NETWORKS)
 
 
 class MatrixBridgeLocalConfig(BaseModel):
@@ -1051,10 +1080,19 @@ class MatrixBridgeLocalConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    homeserver: str = Field(..., description="The profile's Conduit, on loopback")
+    homeserver: str = Field(..., description="The profile's Conduit, on a private network")
     server_name: str = Field(..., description="That Conduit's server_name")
     as_token_env: str = Field(..., description="Env var naming the appservice as_token")
     hs_token_env: str = Field(..., description="Env var naming the appservice hs_token")
+    agent_localpart: str = Field(
+        ...,
+        description=(
+            "The agent's own user on this Conduit. Its events are the only ones "
+            "carried outbound, and the remote identity is rewritten to it inbound."
+        ),
+    )
+    as_token: SecretStr | None = Field(default=None, exclude=True)
+    hs_token: SecretStr | None = Field(default=None, exclude=True)
     sender_localpart: str = Field(
         default="trentina",
         description="The appservice's own user, which creates and manages the local rooms",
@@ -1067,7 +1105,7 @@ class MatrixBridgeLocalConfig(BaseModel):
     @field_validator("homeserver")
     @classmethod
     def _homeserver(cls, value: str) -> str:
-        return _loopback_url(value)
+        return private_url(value)
 
     @field_validator("server_name")
     @classmethod
@@ -1076,7 +1114,7 @@ class MatrixBridgeLocalConfig(BaseModel):
             raise ValueError(f"{value!r} is not a Matrix server_name")
         return value
 
-    @field_validator("sender_localpart", "user_prefix")
+    @field_validator("sender_localpart", "user_prefix", "agent_localpart")
     @classmethod
     def _localpart(cls, value: str) -> str:
         if not _LOCALPART_RE.match(value):
@@ -1102,9 +1140,8 @@ class MatrixBridgeConfig(BaseModel):
     them. Keeping the public credential out of this file is what makes that a
     property rather than a convention.
 
-    Phase 0: the shape is settled and validated, and nothing runs it.
-    ``enabled: true`` is refused at load until the inbound path ships, so a
-    profile cannot look bridged while its messages still arrive as ciphertext.
+    The four tokens are resolved from the environment only when ``enabled``:
+    an inert block does not demand secrets nothing reads.
     """
 
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -1117,9 +1154,11 @@ class MatrixBridgeConfig(BaseModel):
             "the gateway needs it to recognize its own echoes."
         ),
     )
-    bridge_url: str = Field(..., description="Where the gateway reaches the bridge, on loopback")
+    bridge_url: str = Field(..., description="Where the gateway reaches the bridge, privately")
     bridge_token_env: str = Field(..., description="Env var naming the gateway->bridge token")
     ingress_token_env: str = Field(..., description="Env var naming the bridge->gateway token")
+    bridge_token: SecretStr | None = Field(default=None, exclude=True)
+    ingress_token: SecretStr | None = Field(default=None, exclude=True)
     enforcement: EnforcementMode = Field(
         default="block",
         description=(
@@ -1138,7 +1177,7 @@ class MatrixBridgeConfig(BaseModel):
     @field_validator("bridge_url")
     @classmethod
     def _bridge_url(cls, value: str) -> str:
-        return _loopback_url(value)
+        return private_url(value)
 
     @field_validator("public_user_id")
     @classmethod

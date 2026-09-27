@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.44.0"
+__version__ = "0.45.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -134,6 +134,16 @@ def main() -> None:
                 )
 
 
+def _register_push_ingresses(mcp_server: FastMCP, profiles: dict[str, Any], data_dir: Path) -> None:
+    """The paths content is pushed in on rather than fetched: alerts and the
+    Matrix bridge. Both bind at startup."""
+    from .gateway.alert_ingress import register_alert_routes
+    from .gateway.matrix_bridge import register_bridge_routes
+
+    register_alert_routes(mcp_server, profiles)
+    register_bridge_routes(mcp_server, profiles, data_dir)
+
+
 def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: str) -> None:
     """Run trentina with gateway routes wired in via FastMCP's custom_route API.
 
@@ -153,6 +163,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     ``log_level`` is forwarded to ``mcp.run()`` so uvicorn's access/error
     loggers pick up the resolved ``TRENTINA_LOG_LEVEL``.
     """
+    from .config import get_config
     from .gateway import load_profiles, register_internal_server, register_with_fastmcp
     from .gateway.circuit import breaker
     from .gateway.compress import load_compression_cache, set_profiles
@@ -215,9 +226,8 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
             upstream=matrix_upstream,
         )
 
-    from .gateway.alert_ingress import register_alert_routes
-
-    register_alert_routes(mcp_server, gateway_config.profiles)
+    # Bridge mapping stores live beside the blocklist, like perimeter.db.
+    _register_push_ingresses(mcp_server, gateway_config.profiles, Path(get_config().db_path).parent)
 
     from .gateway.backend import load_tool_list_cache
     from .gateway.ingress_defense import load_verdict_cache

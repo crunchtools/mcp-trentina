@@ -1,10 +1,9 @@
-"""The matrix_bridge block (#162, spec 015 phase 0).
+"""The matrix_bridge block (#162, spec 015).
 
-Phase 0 ships the shape and refuses to run it. What these tests pin down is
-the part of the design that must hold before any bridge code exists: the
-gateway's half of the config carries nothing for the public homeserver, both
-endpoints it does carry are loopback-only, and a profile cannot claim to be
-bridged while nothing bridges it.
+What these tests pin down is the part of the design that holds regardless of
+the code behind it: the gateway's half of the config carries nothing for the
+public homeserver, both endpoints it does carry are on private networks, and
+an enabled bridge cannot load without every token it needs.
 """
 
 from __future__ import annotations
@@ -39,6 +38,7 @@ def _bridge(**overrides: Any) -> dict[str, Any]:
             "server_name": "agent1.local",
             "as_token_env": "AGENT1_AS_TOKEN",
             "hs_token_env": "AGENT1_HS_TOKEN",
+            "agent_localpart": "agent1",
         },
     }
     body.update(overrides)
@@ -64,23 +64,37 @@ class TestModel:
         "url",
         [
             "http://matrix.org:8471",
-            "http://10.0.0.5:8471",
+            "http://8.8.8.8:8471",
+            "http://169.254.169.254",
+            "http://0.0.0.0:8471",
+            "http://[fe80::1]:8471",
+            "http://192.0.2.1",
+            "http://bridge.example.com:8471",
             "unix:///run/bridge.sock",
             "ftp://127.0.0.1",
         ],
     )
-    def test_bridge_url_must_be_loopback(self, url: str) -> None:
-        with pytest.raises(ValidationError, match="loopback"):
+    def test_bridge_url_must_be_private(self, url: str) -> None:
+        with pytest.raises(ValidationError, match="private host"):
             MatrixBridgeConfig.model_validate(_bridge(bridge_url=url))
 
-    def test_local_homeserver_must_be_loopback(self) -> None:
+    def test_local_homeserver_must_be_private(self) -> None:
         body = _bridge()
         body["local"]["homeserver"] = "https://conduit.example.com"
-        with pytest.raises(ValidationError, match="loopback"):
+        with pytest.raises(ValidationError, match="private host"):
             MatrixBridgeConfig.model_validate(body)
 
-    @pytest.mark.parametrize("host", ["http://localhost:6167/", "http://[::1]:6167"])
-    def test_loopback_spellings_are_accepted(self, host: str) -> None:
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "http://localhost:6167/",
+            "http://[::1]:6167",
+            "http://10.0.10.3:6167",
+            "http://conduit-agent1:6167",
+            "http://192.168.1.4",
+        ],
+    )
+    def test_private_spellings_are_accepted(self, host: str) -> None:
         body = _bridge()
         body["local"]["homeserver"] = host
         cfg = MatrixBridgeConfig.model_validate(body)
@@ -135,7 +149,7 @@ class TestLocal:
             "agent1.local:8448",
             "[::1]",
             "[::1]:6167",
-            "10.89.10.3",
+            "10.0.10.3",
             "agent1.local:1",
             "agent1.local:65535",
         ],
@@ -235,6 +249,7 @@ _BRIDGE_YAML = (
     "        server_name: agent1.local\n"
     "        as_token_env: AGENT1_AS_TOKEN\n"
     "        hs_token_env: AGENT1_HS_TOKEN\n"
+    "        agent_localpart: agent1\n"
 )
 
 
@@ -251,9 +266,30 @@ class TestLoader:
         assert bridge is not None
         assert bridge.enabled is False
 
-    def test_enabled_is_refused_until_the_bridge_ships(self, tmp_path: Path) -> None:
-        with pytest.raises(ProfileConfigError, match="not supported yet"):
-            load_profiles(_write(tmp_path, "      enabled: true\n" + _BRIDGE_YAML))
+    def test_an_enabled_bridge_needs_every_token(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = _write(tmp_path, "      enabled: true\n" + _BRIDGE_YAML)
+        tokens = {
+            "AGENT1_BRIDGE_TOKEN": "tok-bridge-7f3a",
+            "AGENT1_BRIDGE_INGRESS": "tok-ingress-7f3a",
+            "AGENT1_AS_TOKEN": "tok-as-7f3a",
+            "AGENT1_HS_TOKEN": "tok-hs-7f3a",
+        }
+        for missing in tokens:
+            for name, value in tokens.items():
+                monkeypatch.setenv(name, value)
+            monkeypatch.delenv(missing)
+            with pytest.raises(ProfileConfigError, match=missing):
+                load_profiles(path)
+
+        for name, value in tokens.items():
+            monkeypatch.setenv(name, value)
+        bridge = load_profiles(path).profiles["agent1"].matrix_bridge
+        assert bridge is not None
+        assert bridge.local.as_token is not None
+        assert bridge.local.as_token.get_secret_value() == "tok-as-7f3a"
+        assert "7f3a" not in bridge.model_dump_json(), "a resolved token must never serialize"
 
     def test_the_channel_lock_fires_at_load(self, tmp_path: Path) -> None:
         body = _BRIDGE_YAML + "      preprocess:\n        processors: [detect]\n"
