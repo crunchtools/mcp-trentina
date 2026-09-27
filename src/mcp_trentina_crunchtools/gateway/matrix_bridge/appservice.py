@@ -34,6 +34,8 @@ _TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
 
 # Rooms, names and memberships kept in memory per cache.
 _CACHE_ENTRIES = 4096
+# The power level that administers a room: what the creator of a room has.
+_ADMIN = 100
 _K = TypeVar("_K")
 _V = TypeVar("_V")
 
@@ -252,6 +254,12 @@ class AppService:
         return room
 
     async def _create_room(self, remote_room: str, *, name: str, topic: str, owner: str) -> Room:
+        """Create and record the local room, the agent invited.
+
+        With an ``owner`` (a DM) that stand-in creates it as a trusted private
+        chat with no name or topic, and is recorded as its member; without
+        one the appservice bot creates a named private room.
+        """
         if owner:
             creator = owner
             body: dict[str, Any] = {
@@ -282,23 +290,37 @@ class AppService:
 
     async def _hand_over(self, room: Room, owner: str) -> Room:
         """Turn a bot-made DM into a true one: the other person's stand-in
-        takes the bot's power, and the bot leaves (rooms 0.45.0 made)."""
+        takes the bot's power, and the bot leaves (rooms 0.45.0 made).
+
+        Every step can be repeated, and the owner is recorded last, so a
+        handover cut short by a restart is finished by the next one even when
+        the bot had already left: the stand-in reads the power levels, a
+        promotion already made is not made again, and leaving twice is fine.
+        """
         await self.ensure_member(room, owner)
         levels = await self._call(
-            "GET", "rooms", room.local_id, "state", "m.room.power_levels", "", as_user=self.bot_id
+            "GET", "rooms", room.local_id, "state", "m.room.power_levels", "", as_user=owner
         )
-        levels.setdefault("users", {})[owner] = 100
+        if levels.get("users", {}).get(owner) != _ADMIN:
+            levels.setdefault("users", {})[owner] = _ADMIN
+            await self._call(
+                "PUT",
+                "rooms",
+                room.local_id,
+                "state",
+                "m.room.power_levels",
+                "",
+                as_user=self.bot_id,
+                body=levels,
+            )
         await self._call(
-            "PUT",
+            "POST",
             "rooms",
             room.local_id,
-            "state",
-            "m.room.power_levels",
-            "",
+            "leave",
             as_user=self.bot_id,
-            body=levels,
+            ok_errcodes=frozenset({"M_FORBIDDEN"}),  # already left
         )
-        await self._call("POST", "rooms", room.local_id, "leave", as_user=self.bot_id)
         await self._mapping.set_owner(room.remote_id, owner)
         logger.warning("matrix_bridge: %s's DM is now two-member", self.agent_id)
         return Room(room.remote_id, room.local_id, room.name, room.topic, owner)

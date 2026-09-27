@@ -281,7 +281,18 @@ class TestLogoutDevice:
         calls: list[httpx.Request] = []
         self._patch(monkeypatch, calls, httpx.Response(401, json={"errcode": "M_UNKNOWN_TOKEN"}))
         monkeypatch.setenv("BRIDGE_OLD_ACCESS_TOKEN", "old-token")
-        with pytest.raises(SystemExit, match=r"logout failed: 401 .*M_UNKNOWN_TOKEN"):
+        with pytest.raises(SystemExit, match=r"logout-device: 401 .*M_UNKNOWN_TOKEN"):
+            await main_mod._logout_device(_settings(tmp_path))
+
+    async def test_an_unreachable_homeserver_fails_the_logout_cleanly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def down(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("refused", request=request)
+
+        _route_clients(monkeypatch, down)
+        monkeypatch.setenv("BRIDGE_OLD_ACCESS_TOKEN", "old-token")
+        with pytest.raises(SystemExit, match="logout-device: refused"):
             await main_mod._logout_device(_settings(tmp_path))
 
 

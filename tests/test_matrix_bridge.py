@@ -82,6 +82,8 @@ class FakeConduit:
     calls: list[tuple[str, str, str | None]] = field(default_factory=list)
     agent: str | None = "@agent1:agent1.local"
     user_in_use: bool = False
+    power_levels: dict[str, Any] = field(default_factory=dict)
+    bot_left: bool = False
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         assert request.headers["authorization"] == "Bearer as-secret"
@@ -95,6 +97,8 @@ class FakeConduit:
             return httpx.Response(200, json={"room_id": f"!local{self.rooms}:agent1.local"})
         if path.endswith("/joined_members"):
             return httpx.Response(200, json={"joined": {self.agent: {}} if self.agent else {}})
+        if path.endswith("/leave") and self.bot_left:
+            return httpx.Response(403, json={"errcode": "M_FORBIDDEN"})
         if path == "/register" and self.user_in_use:
             return httpx.Response(400, json={"errcode": "M_USER_IN_USE"})
         if "/send/" in path:
@@ -103,7 +107,8 @@ class FakeConduit:
                 {"room": room, "type": event_type, "txn": txn, "as": as_user, "content": body}
             )
             return httpx.Response(200, json={"event_id": f"$local{len(self.sent)}"})
-        return httpx.Response(200, json={})
+        state = self.power_levels if path.endswith("/state/m.room.power_levels/") else {}
+        return httpx.Response(200, json=state)
 
 
 @dataclass
@@ -795,6 +800,23 @@ class TestDirectMessages:
         calls = [(m, p, u) for m, p, u in rig.conduit.calls]
         assert ("PUT", "/rooms/!local1:agent1.local/state/m.room.power_levels/", BOT) in calls
         assert ("POST", "/rooms/!local1:agent1.local/leave", BOT) in calls
+        room = await rig.bridge.mapping.room_by_remote("!dm:matrix.org")
+        assert room is not None
+        assert room.owner == STAND_IN
+
+    async def test_a_handover_cut_short_is_finished_after_the_bot_left(
+        self, rig_factory: Any, dm: Any
+    ) -> None:
+        rig = rig_factory()
+        group_first = dm()
+        group_first["room"] = {"name": "", "topic": "", "is_direct": False}
+        await rig.bridge.inbound(group_first)
+        rig.conduit.power_levels = {"users": {BOT: 100, STAND_IN: 100}}
+        rig.conduit.bot_left = True
+        await rig.bridge.inbound(dm("$d2"))
+        assert not any(m == "PUT" and "power_levels" in p for m, p, _ in rig.conduit.calls), (
+            "a promotion already made is not made again"
+        )
         room = await rig.bridge.mapping.room_by_remote("!dm:matrix.org")
         assert room is not None
         assert room.owner == STAND_IN

@@ -199,6 +199,7 @@ async def sign_own_device(
             storage uses an unsupported algorithm, the stored key is not the
             published one, or the upload failed. Nothing is uploaded unless
             every check passed.
+        httpx.HTTPError: the homeserver could not be reached; propagated.
     """
     user_id, device_id = session["user_id"], session["device_id"]
     auth = {"Authorization": f"Bearer {session['access_token']}"}
@@ -326,6 +327,8 @@ async def reset_identity(
             the upload was refused or never approved (the stored keys match no
             published identity and are replaced by a rerun), or signing
             failed (finish with ``sign-device``).
+        httpx.HTTPError: the homeserver could not be reached, at any step;
+            propagated, and the step it stopped at is as for CrossSignError.
     """
     user_id, device_id = session["user_id"], session["device_id"]
     auth = {"Authorization": f"Bearer {session['access_token']}"}

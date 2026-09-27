@@ -95,7 +95,7 @@ async def _logout_device(settings: BridgeSettings) -> None:
         except httpx.HTTPError as exc:
             raise SystemExit(f"logout-device: {exc}") from exc
     if resp.status_code != 200:
-        raise SystemExit(f"logout failed: {resp.status_code} {resp.text[:200]}")
+        raise SystemExit(f"logout-device: {resp.status_code} {resp.text[:200]}")
     logger.warning("bridge[%s]: old device logged out", settings.profile)
 
 
