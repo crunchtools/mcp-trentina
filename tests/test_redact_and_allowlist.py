@@ -146,10 +146,36 @@ class TestGrounding:
         assert result["content"]["confidence"] == "medium"
 
     @pytest.mark.parametrize(
-        ("share", "label"), [(None, "low"), (0.2, "low"), (0.6, "medium"), (0.9, "high")]
+        ("share", "label"),
+        [
+            (None, "low"),
+            (0.2, "low"),
+            (0.59, "low"),
+            (0.6, "medium"),
+            (0.84, "medium"),
+            (0.85, "high"),
+            (0.9, "high"),
+        ],
     )
     def test_bands(self, share: float | None, label: str) -> None:
         assert confidence_of(share) == label
+
+    @pytest.mark.parametrize(("grounded", "refused"), [(3, False), (2, True)])
+    async def test_the_refusal_boundary_is_30_percent(
+        self, env: Path, grounded: int, refused: bool
+    ) -> None:
+        """Ten distinct words, `grounded` of them in the source."""
+        source = ["maintenance", "window", "tuesday"][:grounded]
+        invented = ["alpha", "bravo", "charlie", "delta", "echoes", "foxtrot", "golfer"]
+        words = source + invented[: 10 - len(source)]
+        extraction = {"content": {"extracted_text": " ".join(words)}, "usage": {}}
+        with layers(env, extraction=extraction) as fakes:
+            if refused:
+                with pytest.raises(BlockedSourceError, match="ungrounded"):
+                    await call("content", Mode.REDACT, fakes)
+            else:
+                result = await call("content", Mode.REDACT, fakes)
+                assert result["content"]["confidence"] == "low"
 
     def test_short_words_and_case_do_not_count(self) -> None:
         assert grounding("The WINDOW is a go", "window") == 1.0

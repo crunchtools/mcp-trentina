@@ -271,7 +271,9 @@ class _Reducer:
             if lister.take(found):
                 continue
             if found is not None and lister.opens(found):
-                kept.append(self.walk(item, depth + 1))
+                # Verbatim, not walked: the marker below reconstructs the
+                # group from exactly this record.
+                kept.append(item)
                 lister.open(found, kept)
                 continue
 

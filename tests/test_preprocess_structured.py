@@ -203,6 +203,12 @@ class TestIdentifierListing:
         assert "10002 PROJ-2, 10003 PROJ-3" in marker
         assert "10000" not in marker
 
+    async def test_the_representative_is_not_reduced(self) -> None:
+        nested = [{"n": "same"} for _ in range(10)]
+        records = [{"key": f"PROJ-{i}", "items": nested} for i in range(10)]
+        result = await _run(json.dumps(records))
+        assert json.loads(result.content)[0] == records[0]
+
     async def test_an_integer_and_its_string_do_not_merge(self) -> None:
         records = [{"id": 100 + i, "summary": "x y"} for i in range(5)]
         records += [{"id": str(100 + i), "summary": "x y"} for i in range(5)]

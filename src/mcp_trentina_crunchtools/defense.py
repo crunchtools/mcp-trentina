@@ -407,8 +407,10 @@ async def defend(
     if scan and stop_on_partial and l2_truncated:
         # The one partial read left under stop_on_partial: L1's normalized
         # copy decoded past the cap. Refused at admission all the same; what
-        # L2 found in the original still stands.
+        # L2 found in the original still stands. The count reported is the
+        # copy's, the one that was over.
         refuse_at_admission, l2_truncated = True, False
+        tokens, _ = await admission(pipeline.l2_input)
     if refuse_at_admission:
         logger.warning(
             "admission: refused %s, %d tokens against a %d-token cap", source, tokens, cap
