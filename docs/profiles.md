@@ -396,9 +396,11 @@ preserve the inode (`cp new profiles.yaml`, not `mv`), which is one careless
 
 Some sections cannot reload, because their routes bind at startup: the
 `llm_providers` and `matrix` sections, and adding an `alert_ingress` or
-`matrix_ingress` where no such route was registered at boot. The reload result
-names any of these it finds in `not_applied` rather than reporting success over
-an edit that went nowhere.
+`matrix_ingress` where no such route was registered at boot, and any edit to a
+`matrix_bridge` block. The reload result names any of these it finds in
+`not_applied` rather than reporting success over an edit that went nowhere. An
+agent-scope reload never moves its own `matrix_bridge` at all; it is reported
+under `operator_only`.
 
 ## Related
 

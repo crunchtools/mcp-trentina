@@ -15,6 +15,7 @@ import logging
 import re
 from fnmatch import fnmatchcase
 from typing import Annotated, Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import (
     BaseModel,
@@ -979,6 +980,151 @@ class MatrixIngressConfig(BaseModel):
     )
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_MATRIX_USER_ID_RE = re.compile(r"^@[a-z0-9._=/+-]+:[A-Za-z0-9.-]+(:[0-9]{1,5})?$")
+# Dot-separated DNS labels, none empty and none starting or ending with '-'.
+_SERVER_NAME_RE = re.compile(
+    r"^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"
+)
+_LOCALPART_RE = re.compile(r"^[a-z0-9._=/-]{1,64}$")
+
+
+def _loopback_url(value: str) -> str:
+    """Refuse any URL whose host is not this machine.
+
+    Both ends the gateway talks to on the bridge path are per-profile and
+    localhost-only by design (spec 015). A public host here would put the
+    plaintext side of an E2EE room on the network, so it is a load error
+    rather than a deployment note.
+    """
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or parsed.hostname not in _LOOPBACK_HOSTS:
+        raise ValueError(f"{value!r} must be an http(s) URL on a loopback host")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{value!r} has an invalid port") from exc
+    if port == 0:
+        raise ValueError(f"{value!r} has an invalid port")
+    return value.rstrip("/")
+
+
+class MatrixBridgeLocalConfig(BaseModel):
+    """The agent-facing side: one Conduit per profile, written to only by us.
+
+    Trentina is registered with that homeserver as an application service, so
+    ``as_token`` is the one credential that can write into the agent's rooms,
+    and the gateway alone holds it. A stand-in user per remote sender lives in
+    the appservice's namespace (``user_prefix``), which is what lets the agent
+    see who said what without anyone on the remote side having an account here.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    homeserver: str = Field(..., description="The profile's Conduit, on loopback")
+    server_name: str = Field(..., description="That Conduit's server_name")
+    as_token_env: str = Field(..., description="Env var naming the appservice as_token")
+    hs_token_env: str = Field(..., description="Env var naming the appservice hs_token")
+    sender_localpart: str = Field(
+        default="trentina",
+        description="The appservice's own user, which creates and manages the local rooms",
+    )
+    user_prefix: str = Field(
+        default="remote_",
+        description="Namespace for the stand-in users that carry remote senders",
+    )
+
+    @field_validator("homeserver")
+    @classmethod
+    def _homeserver(cls, value: str) -> str:
+        return _loopback_url(value)
+
+    @field_validator("server_name")
+    @classmethod
+    def _server_name(cls, value: str) -> str:
+        if not _SERVER_NAME_RE.match(value):
+            raise ValueError(f"{value!r} is not a Matrix server_name")
+        return value
+
+    @field_validator("sender_localpart", "user_prefix")
+    @classmethod
+    def _localpart(cls, value: str) -> str:
+        if not _LOCALPART_RE.match(value):
+            raise ValueError(f"{value!r} is not a valid Matrix localpart")
+        return value
+
+    @field_validator("as_token_env", "hs_token_env")
+    @classmethod
+    def _env_name(cls, value: str) -> str:
+        if not ENV_NAME_RE.match(value):
+            raise ValueError(f"{value!r} is not an env var name")
+        return value
+
+
+class MatrixBridgeConfig(BaseModel):
+    """Matrix E2EE termination by bridge (#162, spec 015).
+
+    Deliberately holds NOTHING for the public homeserver. The matrix.org login,
+    the device and the crypto store belong to the bridge process, which has no
+    credential here and therefore no way to write to the agent. The gateway
+    holds the other half: the appservice token for the local homeserver. A
+    compromised bridge can hand the gateway bytes to judge; it cannot deliver
+    them. Keeping the public credential out of this file is what makes that a
+    property rather than a convention.
+
+    Phase 0: the shape is settled and validated, and nothing runs it.
+    ``enabled: true`` is refused at load until the inbound path ships, so a
+    profile cannot look bridged while its messages still arrive as ciphertext.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    enabled: bool = Field(default=False, description="Run this profile's bridge")
+    public_user_id: str = Field(
+        ...,
+        description=(
+            "The Matrix identity the bridge speaks as upstream. Not a secret: "
+            "the gateway needs it to recognize its own echoes."
+        ),
+    )
+    bridge_url: str = Field(..., description="Where the gateway reaches the bridge, on loopback")
+    bridge_token_env: str = Field(..., description="Env var naming the gateway->bridge token")
+    ingress_token_env: str = Field(..., description="Env var naming the bridge->gateway token")
+    enforcement: EnforcementMode = Field(
+        default="block",
+        description=(
+            "What a flagged inbound message becomes. Unlike the /sync proxy, "
+            "the bridge delivers one event at a time, so withholding one drops "
+            "a message rather than the client's sync loop: block posts a "
+            "withheld notice in its place, flag delivers it annotated."
+        ),
+    )
+    local: MatrixBridgeLocalConfig
+    preprocess: ProcessorChainConfig = Field(
+        default_factory=ProcessorChainConfig,
+        description="Pre-processing of each message's plaintext. Empty delivers it unchanged.",
+    )
+
+    @field_validator("bridge_url")
+    @classmethod
+    def _bridge_url(cls, value: str) -> str:
+        return _loopback_url(value)
+
+    @field_validator("public_user_id")
+    @classmethod
+    def _user_id(cls, value: str) -> str:
+        if not _MATRIX_USER_ID_RE.match(value):
+            raise ValueError(f"{value!r} is not a Matrix user ID")
+        return value
+
+    @field_validator("bridge_token_env", "ingress_token_env")
+    @classmethod
+    def _env_name(cls, value: str) -> str:
+        if not ENV_NAME_RE.match(value):
+            raise ValueError(f"{value!r} is not an env var name")
+        return value
+
+
 class OAuthConfig(BaseModel):
     """Per-profile Google-backed OAuth access, opt-in on top of static bearer.
 
@@ -1337,6 +1483,10 @@ class Profile(BaseModel):
     matrix_ingress: MatrixIngressConfig | None = Field(
         default=None,
         description="Matrix reverse-proxy access for this profile (optional)",
+    )
+    matrix_bridge: MatrixBridgeConfig | None = Field(
+        default=None,
+        description="Matrix E2EE termination by bridge (optional, #162)",
     )
     oauth: OAuthConfig | None = Field(
         default=None,

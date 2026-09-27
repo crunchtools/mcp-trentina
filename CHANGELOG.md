@@ -10,6 +10,30 @@ under that name.
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-09-27
+
+### Added
+
+- **`matrix_bridge` profile block, phase 0 of Matrix E2EE termination
+  (#162, spec 015).** The config shape for a per-profile bridge: the
+  loopback endpoint the gateway reaches the bridge on, the two tokens between
+  them, the profile's local Conduit as an application service, and
+  `enforcement` for a flagged inbound message (default `block`). It holds
+  nothing for the public homeserver: the matrix.org login lives only in the
+  bridge process, so the bridge cannot write to the agent. Both URLs must be
+  loopback. `enabled: true` is refused at load until the inbound path ships.
+  Nothing runs it; no deployment's behaviour changes.
+- `Channel.MATRIX_BRIDGE` (TEXT). No processor is locked to it yet, so an
+  empty chain is the only valid `matrix_bridge.preprocess`.
+- `bridge` optional extra: `matrix-nio[e2e]` 0.26, which is built on the
+  vodozemac the `matrix` extra already pins. Locked, not yet in the image.
+
+### Changed
+
+- An agent-scope `reload_profiles` holds the whole `matrix_bridge` block and
+  reports it under `operator_only`; an operator reload that moves one reports
+  that a restart applies it.
+
 ## [0.43.1] - 2026-09-27
 
 ### Fixed
