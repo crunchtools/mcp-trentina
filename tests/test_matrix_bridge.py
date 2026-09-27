@@ -911,6 +911,22 @@ class TestTiming:
             await rig.bridge.inbound(_message())
         assert any(" inbound $e1 " in r.getMessage() for r in caplog.records)
 
+    async def test_wait_is_the_time_spent_behind_the_previous_event(
+        self, rig_factory: Any, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        clock = [100.0]
+        monkeypatch.setattr(core.time, "monotonic", lambda: clock[0])
+        rig = rig_factory()
+        with caplog.at_level(logging.INFO, logger=core.__name__):
+            async with rig.bridge._inbound_lock:
+                queued = asyncio.create_task(rig.bridge.inbound(_message()))
+                await asyncio.sleep(0)
+                clock[0] += 7.0
+            assert await queued == "delivered"
+        [record] = [r for r in caplog.records if " inbound " in r.getMessage()]
+        assert record.levelno == logging.WARNING
+        assert "in 7.00s (wait=7.00s judge=0.00s deliver=0.00s)" in record.getMessage()
+
     async def test_a_duplicate_logs_nothing(
         self, rig_factory: Any, caplog: pytest.LogCaptureFixture
     ) -> None:
