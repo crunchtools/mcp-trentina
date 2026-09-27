@@ -71,11 +71,15 @@ _SHAPES: list[tuple[str, Any]] = [
 
 @pytest.mark.asyncio
 class TestFullScanEqualsJsonScan:
-    @pytest.mark.parametrize("payload", [p for _, p in _SHAPES], ids=[n for n, _ in _SHAPES])
+    @pytest.mark.parametrize(
+        "payload", [p for _, p in _SHAPES], ids=[n for n, _ in _SHAPES]
+    )
     async def test_same_leaves_stats_and_risk(self, payload: Any) -> None:
         via_json = await defend_json(payload, source="s", source_type="tool_response")
         view = read_everything(payload, extractor="none", why="")
-        via_view = await defend_selection(view, source="s", source_type="tool_response")
+        via_view = await defend_selection(
+            view, source="s", source_type="tool_response"
+        )
 
         assert via_json.verdict.pipeline.content == via_view.pipeline.content, (
             "the two walks disagree about which leaves exist, or their order"
@@ -86,7 +90,9 @@ class TestFullScanEqualsJsonScan:
         )
         assert via_json.verdict.risk_level == via_view.risk_level
 
-    @pytest.mark.parametrize("case", CORPUS, ids=lambda c: c.id)
+    @pytest.mark.parametrize(
+        "case", CORPUS, ids=lambda c: c.id
+    )
     async def test_adversarial_corpus_agrees(self, case: Any) -> None:
         """The payloads that matter, planted as a value, a key, and in an array.
 
@@ -99,9 +105,13 @@ class TestFullScanEqualsJsonScan:
             {case.payload: "value"},
             {"items": [{"text": case.payload}, {"text": "harmless"}]},
         ):
-            via_json = await defend_json(payload, source="s", source_type="tool_response")
+            via_json = await defend_json(
+                payload, source="s", source_type="tool_response"
+            )
             view = read_everything(payload, extractor="none", why="")
-            via_view = await defend_selection(view, source="s", source_type="tool_response")
+            via_view = await defend_selection(
+                view, source="s", source_type="tool_response"
+            )
 
             assert via_json.verdict.pipeline.content == via_view.pipeline.content
             assert via_json.verdict.pipeline.l2_input == via_view.pipeline.l2_input

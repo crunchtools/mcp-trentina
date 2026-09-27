@@ -34,21 +34,22 @@ logger = logging.getLogger("mcp_trentina_crunchtools.bridge")
 
 
 async def _run(settings: BridgeSettings) -> None:
+    """Run the sync loop and the API until either one ends; always close."""
     bridge = Bridge(settings)
-    await bridge.login()
-    server = uvicorn.Server(
-        uvicorn.Config(
-            build_app(bridge),
-            host=settings.listen_host,
-            port=settings.listen_port,
-            log_level="warning",
-        )
-    )
-    tasks = [
-        asyncio.create_task(bridge.run(), name="sync"),
-        asyncio.create_task(server.serve(), name="api"),
-    ]
     try:
+        await bridge.login()
+        server = uvicorn.Server(
+            uvicorn.Config(
+                build_app(bridge),
+                host=settings.listen_host,
+                port=settings.listen_port,
+                log_level="warning",
+            )
+        )
+        tasks = [
+            asyncio.create_task(bridge.run(), name="sync"),
+            asyncio.create_task(server.serve(), name="api"),
+        ]
         # Either one ending ends the bridge: a sync loop with no API cannot
         # send, and an API with no sync loop sends into rooms it never reads.
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)

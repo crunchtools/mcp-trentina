@@ -71,7 +71,9 @@ class TestObfuscationDetection:
         assert "dynamic_import" in categories
 
     def test_detects_chr_building(self) -> None:
-        indicators = _scan_for_obfuscation("x = chr(72) + chr(101) + chr(108) + chr(108)")
+        indicators = _scan_for_obfuscation(
+            "x = chr(72) + chr(101) + chr(108) + chr(108)"
+        )
         categories = {i.category for i in indicators}
         assert "char_building" in categories
 
@@ -161,7 +163,9 @@ class TestDetectModuleShadows:
         assert result.shadows_found[0].shadows_module == "os"
 
     def test_detects_obfuscated_shadow(self, tmp_path: Path) -> None:
-        (tmp_path / "struct.py").write_text("from _struct import *\nexec(bytes.fromhex('6f73'))\n")
+        (tmp_path / "struct.py").write_text(
+            "from _struct import *\nexec(bytes.fromhex('6f73'))\n"
+        )
         result = detect_module_shadows(str(tmp_path))
         assert result.risk_level == "critical"
         assert result.shadows_found[0].is_obfuscated

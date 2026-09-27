@@ -117,8 +117,7 @@ class TestLoadLlmProviders:
         assert load_llm_providers(section) == {}
 
     def test_missing_api_key_env_fails_closed(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
+        self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.delenv("MISSING_KEY_FOR_TEST", raising=False)
         section: dict[str, Any] = {
@@ -133,8 +132,7 @@ class TestLoadLlmProviders:
             load_llm_providers(section)
 
     def test_valid_provider_loaded(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
+        self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("TEST_LLM_KEY", "sk-test")
         section: dict[str, Any] = {
@@ -315,7 +313,9 @@ class TestProxyLlm:
         assert fake.captured_headers.get("x-goog-api-key") == "agent1-key"
         assert not any(k.lower() == "authorization" for k in fake.captured_headers)
 
-    def test_success_selects_correct_profile_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_success_selects_correct_profile_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         providers, profiles = self._fixtures()
         fake = _FakeClient()
         monkeypatch.setattr(llm_proxy, "_get_llm_client", lambda: fake)

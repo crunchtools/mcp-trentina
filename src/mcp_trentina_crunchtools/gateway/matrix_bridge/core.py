@@ -42,6 +42,8 @@ logger = logging.getLogger(__name__)
 # the room metadata the bridge sends with each event, not replayed.
 _CARRIED = frozenset({"m.room.message", "m.reaction", "m.sticker"})
 _REDACTION = "m.room.redaction"
+# The bridge process announcing a room it is in (bridge/client.py).
+_ROOM_ANNOUNCE = "org.crunchtools.trentina.room"
 
 _BRIDGE_TIMEOUT = httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0)
 
@@ -166,6 +168,10 @@ class ProfileBridge:
             outcome = await self._inbound_redaction(event, remote_room)
             await self.mapping.mark(key)
             return outcome
+        if event_type == _ROOM_ANNOUNCE:
+            outcome = await self._inbound_room(event, remote_room)
+            await self.mapping.mark(key)
+            return outcome
         if event_type not in _CARRIED:
             await self.mapping.mark(key)
             return "skipped"
@@ -246,6 +252,28 @@ class ProfileBridge:
         if "m.relates_to" in content:
             notice["m.relates_to"] = content["m.relates_to"]
         return rewrite_content(notice, await self._inbound_ids(notice))
+
+    async def _inbound_room(self, event: dict[str, Any], remote_room: str) -> str:
+        """Create the local room for a room the bridge is in, agent invited.
+
+        The name and topic are the only text, and they are judged like any
+        other before they are written; refused, the room is created unnamed.
+        """
+        room = event.get("room") or {}
+        scanned = {
+            "room_name": str(room.get("name") or ""),
+            "room_topic": str(room.get("topic") or ""),
+        }
+        verdict = await self._judge(scanned, room=remote_room, direction="inbound")
+        if self._refusal(verdict) is not None:
+            scanned = {"room_name": "", "room_topic": ""}
+        await self.appservice.ensure_room(
+            remote_room,
+            name=scanned["room_name"],
+            topic=scanned["room_topic"],
+            is_direct=bool(room.get("is_direct")),
+        )
+        return "mapped"
 
     async def _inbound_redaction(self, event: dict[str, Any], remote_room: str) -> str:
         """Mirror a redaction. Only removes: its reason text is not carried.

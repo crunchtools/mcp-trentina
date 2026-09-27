@@ -55,23 +55,25 @@ class Vectors:
         self.room_id = room_id
         self.private = secrets.token_bytes(32)
         self.recovery_key = make_recovery_key(self.private)
-        self._pk = v.PkDecryption.from_key(v.Curve25519SecretKey.from_bytes(self.private))
+        self._pk = v.PkDecryption.from_key(
+            v.Curve25519SecretKey.from_bytes(self.private)
+        )
         self.backup_public_key = self._pk.public_key.to_base64()
 
         self._group = v.GroupSession()
         self.session_id = self._group.session_id
         exported = v.InboundGroupSession(self._group.session_key).export_at(0)
 
-        session_data = json.dumps(
-            {
-                "algorithm": "m.megolm.v1.aes-sha2",
-                "sender_key": "s" * CURVE25519_B64_LEN,
-                "session_key": exported.to_base64(),
-                "sender_claimed_keys": {},
-                "forwarding_curve25519_key_chain": [],
-            }
+        session_data = json.dumps({
+            "algorithm": "m.megolm.v1.aes-sha2",
+            "sender_key": "s" * CURVE25519_B64_LEN,
+            "session_key": exported.to_base64(),
+            "sender_claimed_keys": {},
+            "forwarding_curve25519_key_chain": [],
+        })
+        enc = v.PkEncryption.from_key(self._pk.public_key).encrypt(
+            session_data.encode()
         )
-        enc = v.PkEncryption.from_key(self._pk.public_key).encrypt(session_data.encode())
         # By name, not by to_base64()'s tuple: its order is not the
         # constructor's, and mixing them up fails with a key-size error that
         # points nowhere near the mistake.
@@ -91,25 +93,19 @@ class Vectors:
         }
 
     def keys_response(self) -> dict[str, Any]:
-        return {
-            "sessions": {
-                self.session_id: {
-                    "first_message_index": 0,
-                    "forwarded_count": 0,
-                    "is_verified": True,
-                    "session_data": self.session_data,
-                }
-            }
-        }
+        return {"sessions": {self.session_id: {
+            "first_message_index": 0,
+            "forwarded_count": 0,
+            "is_verified": True,
+            "session_data": self.session_data,
+        }}}
 
     def encrypted_event(self, body: str, *, event_id: str = "$ev:hs") -> dict[str, Any]:
-        plaintext = json.dumps(
-            {
-                "type": "m.room.message",
-                "room_id": self.room_id,
-                "content": {"msgtype": "m.text", "body": body},
-            }
-        )
+        plaintext = json.dumps({
+            "type": "m.room.message",
+            "room_id": self.room_id,
+            "content": {"msgtype": "m.text", "body": body},
+        })
         ciphertext = self._group.encrypt(plaintext.encode()).to_base64()
         return {
             "type": "m.room.encrypted",
@@ -129,14 +125,7 @@ class Vectors:
         }
 
     def sync_response(self, *events: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "next_batch": "s1_2_3",
-            "rooms": {
-                "join": {
-                    self.room_id: {
-                        "timeline": {"events": list(events), "limited": False},
-                        "state": {"events": []},
-                    }
-                }
-            },
-        }
+        return {"next_batch": "s1_2_3", "rooms": {"join": {self.room_id: {
+            "timeline": {"events": list(events), "limited": False},
+            "state": {"events": []},
+        }}}}

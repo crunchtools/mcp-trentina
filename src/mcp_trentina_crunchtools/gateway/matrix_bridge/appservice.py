@@ -20,10 +20,11 @@ from urllib.parse import quote
 
 import httpx
 
+from .mapping import Room
 from .rewrite import escape_localpart
 
 if TYPE_CHECKING:
-    from .mapping import BridgeMapping, Room
+    from .mapping import BridgeMapping
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,11 @@ class AppService:
         self.bot_id = f"@{sender_localpart}:{server_name}"
         self._sender_localpart = sender_localpart
         self._bot_registered = False
+        # The mapping's rooms, names and memberships, read once each. Bounded
+        # by the conversations the account is in, so held for the process.
+        self._rooms: dict[str, Room] = {}
+        self._names: dict[str, str] = {}
+        self._members: set[tuple[str, str]] = set()
         self.agent_id = f"@{agent_localpart}:{server_name}"
 
     async def aclose(self) -> None:
@@ -120,7 +126,9 @@ class AppService:
     async def ensure_user(self, remote_user: str, displayname: str) -> str:
         """The stand-in for ``remote_user``, registered and named."""
         local = self.stand_in_id(remote_user)
-        known = await self._mapping.displayname(remote_user)
+        known = self._names.get(remote_user)
+        if known is None:
+            known = await self._mapping.displayname(remote_user)
         if known is None:
             await self._call(
                 "POST",
@@ -141,12 +149,13 @@ class AppService:
                 body={"displayname": displayname},
             )
             await self._mapping.put_user(remote_user, local, displayname)
+        self._names[remote_user] = displayname
         return local
 
     async def ensure_room(self, remote_room: str, *, name: str, topic: str, is_direct: bool) -> str:
         """The local room mirroring ``remote_room``, created on first use and
         renamed when the remote name or topic moved."""
-        room = await self._mapping.room_by_remote(remote_room)
+        room = self._rooms.get(remote_room) or await self._mapping.room_by_remote(remote_room)
         if room is None:
             await self._ensure_bot()
             created = await self._call(
@@ -163,9 +172,11 @@ class AppService:
             )
             local_id = str(created["room_id"])
             await self._mapping.put_room(remote_room, local_id, name, topic)
+            self._rooms[remote_room] = Room(remote_room, local_id, name, topic)
             logger.info("matrix_bridge: mapped a new room for %s", self.agent_id)
             return local_id
         await self._sync_metadata(room, name=name, topic=topic)
+        self._rooms[remote_room] = Room(remote_room, room.local_id, name, topic)
         return room.local_id
 
     async def _ensure_bot(self) -> None:
@@ -212,7 +223,10 @@ class AppService:
 
     async def ensure_member(self, local_room: str, local_user: str) -> None:
         """Put a stand-in in a room: the bot invites, the stand-in joins."""
+        if (local_room, local_user) in self._members:
+            return
         if await self._mapping.is_member(local_room, local_user):
+            self._members.add((local_room, local_user))
             return
         await self._call(
             "POST",
@@ -225,6 +239,7 @@ class AppService:
         )
         await self._call("POST", "rooms", local_room, "join", as_user=local_user)
         await self._mapping.put_member(local_room, local_user)
+        self._members.add((local_room, local_user))
 
     async def send(
         self, local_room: str, sender: str, event_type: str, content: dict[str, Any], txn_id: str

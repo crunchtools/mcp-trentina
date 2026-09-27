@@ -33,6 +33,7 @@ import httpx
 from nio import (
     AsyncClient,
     AsyncClientConfig,
+    JoinResponse,
     LoginResponse,
     MegolmEvent,
     RoomSendResponse,
@@ -53,6 +54,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 REDACTION = "m.room.redaction"
+# Not a Matrix event: the bridge's own notice that it is in a room.
+ROOM_ANNOUNCE = "org.crunchtools.trentina.room"
 FORWARDED = frozenset({"m.room.message", "m.reaction", "m.sticker", REDACTION})
 UNDECRYPTABLE_AFTER = 600.0
 # Parked events held at once; past it an event is reported undecryptable at
@@ -108,6 +111,7 @@ class Bridge:
         # interleave across awaits. Every such operation holds this lock.
         self._crypto_lock = asyncio.Lock()
         self._pending_dirty = False
+        self._announced: set[str] = set()
         self._pending: dict[str, tuple[str, dict[str, Any], float]] = self._load_pending()
         self.ready = asyncio.Event()
 
@@ -229,6 +233,7 @@ class Bridge:
         """
         await self.maintain_keys()
         await self._join_invites(resp)
+        await self._announce_rooms()
         # The first sync is history. Forwarding it would replay every room
         # into the agent's new homeserver, so it only establishes position.
         if not first:
@@ -256,10 +261,42 @@ class Bridge:
             await c.keys_claim(c.get_users_for_key_claiming())
         await c.send_to_device_messages()
 
+    async def _announce_rooms(self) -> None:
+        """Tell the gateway about every joined room it has not heard of yet.
+
+        So the agent's local room exists, and the agent is in it, before the
+        first message arrives. Created on the first message instead, the room
+        would invite the agent at the moment the message was written, and the
+        agent would join too late to read it. Once per room per process; the
+        gateway dedupes a repeat.
+        """
+        for room_id in sorted(set(self.client.rooms) - self._announced):
+            await self.forward(
+                {
+                    **self._payload(room_id, {"sender": self.client.user_id}),
+                    "event_id": f"room:{room_id}",
+                    "type": ROOM_ANNOUNCE,
+                    "content": {},
+                }
+            )
+            self._announced.add(room_id)
+
     async def _join_invites(self, resp: Any) -> None:
-        for room_id in resp.rooms.invite:
+        """Accept every open invite: this batch's, and any that failed before.
+
+        nio keeps pending invites in ``invited_rooms`` until they are joined,
+        so a join that fails is simply tried again on the next sync rather
+        than lost behind an advanced sync position.
+        """
+        invites = set(resp.rooms.invite) | set(getattr(self.client, "invited_rooms", {}))
+        for room_id in sorted(invites):
             result = await self.client.join(room_id)
-            logger.warning("bridge[%s]: joined %s: %s", self.settings.profile, room_id, result)
+            if isinstance(result, JoinResponse):
+                logger.warning("bridge[%s]: joined an invited room", self.settings.profile)
+            else:
+                logger.warning(
+                    "bridge[%s]: join failed, retried next sync: %s", self.settings.profile, result
+                )
 
     async def _forward_batch(self, resp: Any) -> None:
         for room_id, info in resp.rooms.join.items():
@@ -390,7 +427,8 @@ class Bridge:
                 continue
             parsed.room_id = room_id
             try:
-                decrypted = self.client.decrypt_event(parsed)
+                async with self._crypto_lock:
+                    decrypted = self.client.decrypt_event(parsed)
             except EncryptionError:
                 if now - first_seen < UNDECRYPTABLE_AFTER:
                     continue

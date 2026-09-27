@@ -41,6 +41,15 @@ def _http_url(name: str, value: str) -> str:
     return value.rstrip("/")
 
 
+_MAX_PORT = 65535
+
+
+def _port(value: str) -> int:
+    if not value.isdigit() or not 0 < int(value) <= _MAX_PORT:
+        raise SettingsError(f"BRIDGE_LISTEN_PORT must be a port number, got {value!r}")
+    return int(value)
+
+
 def _required(name: str) -> str:
     value = _secret(name)
     if not value:
@@ -82,7 +91,7 @@ class BridgeSettings:
             ingress_token=_required("BRIDGE_INGRESS_TOKEN"),
             bridge_token=_required("BRIDGE_TOKEN"),
             listen_host=os.environ.get("BRIDGE_LISTEN_HOST", "127.0.0.1"),
-            listen_port=int(os.environ.get("BRIDGE_LISTEN_PORT", str(DEFAULT_PORT))),
+            listen_port=_port(os.environ.get("BRIDGE_LISTEN_PORT", str(DEFAULT_PORT))),
             device_name=os.environ.get("BRIDGE_DEVICE_NAME", "Trentina bridge"),
             device_id=os.environ.get("BRIDGE_DEVICE_ID", ""),
             access_token=_secret("BRIDGE_ACCESS_TOKEN"),

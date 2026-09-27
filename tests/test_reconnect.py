@@ -48,7 +48,9 @@ def _unset_profiles() -> None:
 # attribute names cannot notice an SDK field rename, which is how camelCase
 # reads survived the move to snake_case with the suite still green.
 def _tools_result(names: list[str]) -> ListToolsResult:
-    return ListToolsResult(tools=[Tool(name=n, description="", input_schema={}) for n in names])
+    return ListToolsResult(
+        tools=[Tool(name=n, description="", input_schema={}) for n in names]
+    )
 
 
 def _profile(name: str, backends: dict[str, Backend]) -> Profile:
@@ -85,7 +87,9 @@ def test_safe_endpoint_strips_path_and_query(url: str, expected: str) -> None:
 class TestReconnectBackend:
     async def test_reset_closes_open_circuit_and_rewarms_cache(self) -> None:
         """An open circuit is forced closed and the tool cache is re-warmed."""
-        set_profiles({"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})})
+        set_profiles(
+            {"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})}
+        )
         for _ in range(3):
             breaker.record_failure(POSTIZ_URL)
         assert breaker.get_state(POSTIZ_URL) is State.OPEN
@@ -93,7 +97,9 @@ class TestReconnectBackend:
         async def ok(_url: str, _headers: Any) -> ListToolsResult:
             return _tools_result(["integrationList", "listPostsTool"])
 
-        with patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok):
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok
+        ):
             result = await reconnect_backend("postiz")
 
         assert result["reconnected"] is True
@@ -106,7 +112,9 @@ class TestReconnectBackend:
 
     async def test_unknown_backend_reports_available(self) -> None:
         """A name in no profile returns reconnected False with the known names."""
-        set_profiles({"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})})
+        set_profiles(
+            {"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})}
+        )
         result = await reconnect_backend("nope")
 
         assert result["reconnected"] is False
@@ -115,12 +123,16 @@ class TestReconnectBackend:
 
     async def test_failing_backend_reports_failure(self) -> None:
         """A backend that still can't be reached reports reconnected False."""
-        set_profiles({"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})})
+        set_profiles(
+            {"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})}
+        )
 
         async def boom(_url: str, _headers: Any) -> Any:
             raise ConnectionRefusedError("still down")
 
-        with patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=boom):
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=boom
+        ):
             result = await reconnect_backend("postiz")
 
         assert result["reconnected"] is False
@@ -129,7 +141,9 @@ class TestReconnectBackend:
 
     async def test_internal_backend_is_noop(self) -> None:
         """An internal:// backend needs no transport reconnect."""
-        set_profiles({"agent2": _profile("agent2", {"web": Backend(url="internal://web")})})
+        set_profiles(
+            {"agent2": _profile("agent2", {"web": Backend(url="internal://web")})}
+        )
         result = await reconnect_backend("web")
 
         assert result["reconnected"] is True
@@ -148,7 +162,9 @@ class TestReconnectBackend:
         async def ok(_url: str, _headers: Any) -> ListToolsResult:
             return _tools_result(["integrationList"])
 
-        with patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok):
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok
+        ):
             result = await reconnect_backend("postiz")
 
         assert result["reconnected"] is True
@@ -159,14 +175,18 @@ class TestReconnectBackend:
 
     async def test_reconnect_invalidates_stale_profile_cache(self) -> None:
         """A profile aggregate that omitted the backend is dropped on reconnect."""
-        set_profiles({"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})})
+        set_profiles(
+            {"agent2": _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})}
+        )
         _profile_tools_cache["agent2"] = [{"name": "other__tool"}]
         _profile_backend_urls["agent2"] = {POSTIZ_URL}
 
         async def ok(_url: str, _headers: Any) -> ListToolsResult:
             return _tools_result(["integrationList"])
 
-        with patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok):
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok
+        ):
             await reconnect_backend("postiz")
 
         assert "agent2" not in _profile_tools_cache
@@ -187,9 +207,13 @@ class TestAgentScope:
     @staticmethod
     def _live(profiles: dict[str, Profile], tmp_path: Any) -> None:
         set_profiles(profiles)
-        register_active_config(tmp_path / "profiles.yaml", GatewayConfig(profiles=profiles), {})
+        register_active_config(
+            tmp_path / "profiles.yaml", GatewayConfig(profiles=profiles), {}
+        )
 
-    async def test_a_backend_in_another_profile_is_refused(self, tmp_path: Any) -> None:
+    async def test_a_backend_in_another_profile_is_refused(
+        self, tmp_path: Any
+    ) -> None:
         """Reconnecting what you cannot call is not yours to do."""
         agent2 = _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})
         agent3 = _profile("agent3", {"wiki": Backend(url="http://wiki:1/mcp")})
@@ -202,7 +226,9 @@ class TestAgentScope:
         assert "not in this profile" in result["error"]
         assert breaker.get_state(POSTIZ_URL) is State.CLOSED
 
-    async def test_a_miss_lists_only_the_callers_own_backends(self, tmp_path: Any) -> None:
+    async def test_a_miss_lists_only_the_callers_own_backends(
+        self, tmp_path: Any
+    ) -> None:
         """The directory of every profile's backends used to come back here."""
         agent2 = _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})
         agent3 = _profile("agent3", {"wiki": Backend(url="http://wiki:1/mcp")})
@@ -214,7 +240,9 @@ class TestAgentScope:
         assert result["available"] == ["wiki"]
         assert "postiz" not in str(result)
 
-    async def test_the_tool_count_is_what_the_caller_would_see(self, tmp_path: Any) -> None:
+    async def test_the_tool_count_is_what_the_caller_would_see(
+        self, tmp_path: Any
+    ) -> None:
         """A shared backend's raw surface is somebody else's view of it."""
         agent3 = _profile(
             "agent3",
@@ -225,16 +253,17 @@ class TestAgentScope:
         async def ok(_url: str, _headers: Any) -> ListToolsResult:
             return _tools_result(["integrationList", "deletePostTool"])
 
-        with (
-            profile_context(agent3),
-            patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok),
+        with profile_context(agent3), patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok
         ):
             result = await reconnect_backend("postiz")
 
         assert result["targets"][0]["tool_count"] == 1
         assert "profiles" not in result["targets"][0]
 
-    async def test_no_bound_caller_on_a_live_gateway_is_refused(self, tmp_path: Any) -> None:
+    async def test_no_bound_caller_on_a_live_gateway_is_refused(
+        self, tmp_path: Any
+    ) -> None:
         agent2 = _profile("agent2", {"postiz": Backend(url=POSTIZ_URL)})
         self._live({"agent2": agent2}, tmp_path)
 

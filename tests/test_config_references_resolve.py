@@ -35,7 +35,9 @@ def _exception_paths() -> list[tuple[int, str]]:
     raw = (REPO / "gourmand-exceptions.toml").read_bytes()
     data = tomllib.loads(raw.decode("utf-8"))
     return [
-        (i, entry["path"]) for i, entry in enumerate(data.get("exceptions", [])) if "path" in entry
+        (i, entry["path"])
+        for i, entry in enumerate(data.get("exceptions", []))
+        if "path" in entry
     ]
 
 
@@ -72,7 +74,9 @@ class TestGourmandExceptionPathsExist:
         """A parse that silently found nothing would pass the test below."""
         assert len(_exception_paths()) > 10
 
-    @pytest.mark.parametrize(("index", "rel"), _exception_paths(), ids=str)
+    @pytest.mark.parametrize(
+        ("index", "rel"), _exception_paths(), ids=str
+    )
     def test_the_file_still_exists(self, index: int, rel: str) -> None:
         """A lint suppression that names no file suppresses nothing.
 
@@ -104,7 +108,9 @@ class TestPatchTargetsResolve:
         _patch_targets(),
         ids=lambda v: str(v) if not isinstance(v, Path) else v.name,
     )
-    def test_the_dotted_path_resolves(self, path: Path, lineno: int, target: str) -> None:
+    def test_the_dotted_path_resolves(
+        self, path: Path, lineno: int, target: str
+    ) -> None:
         """Walk the dotted path the way mock will, and fail here instead."""
         parts = target.split(".")
         module = None
@@ -118,7 +124,9 @@ class TestPatchTargetsResolve:
         else:  # pragma: no cover - the loop always breaks or exhausts
             remainder = []
 
-        assert module is not None, f"{path.name}:{lineno}: no importable module in {target!r}"
+        assert module is not None, (
+            f"{path.name}:{lineno}: no importable module in {target!r}"
+        )
         obj = module
         for attr in remainder:
             assert hasattr(obj, attr), (

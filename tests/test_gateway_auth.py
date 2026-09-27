@@ -237,7 +237,9 @@ class TestResolveProfileByToken:
     def test_unresolved_token_profiles_skipped(self) -> None:
         """A profile whose token was never resolved must never match."""
         registry: dict[str, Profile] = {
-            "unresolved": Profile(name="unresolved", auth=AuthConfig(bearer_token_env="TEST")),
+            "unresolved": Profile(
+                name="unresolved", auth=AuthConfig(bearer_token_env="TEST")
+            ),
         }
         assert resolve_profile_by_token("Bearer anything", registry) is None
 

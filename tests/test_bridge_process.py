@@ -22,6 +22,8 @@ import pytest
 from nio import (
     DeleteDevicesAuthResponse,
     DeleteDevicesResponse,
+    JoinError,
+    JoinResponse,
     LoginResponse,
     MegolmEvent,
     RoomSendResponse,
@@ -125,7 +127,10 @@ def _bridge(tmp_path: Path, nio: FakeNio, handler: Any = None) -> Bridge:
         password="",
     )
     fake_client: Any = nio
-    return Bridge(settings, client=fake_client, gateway=gateway)
+    bridge = Bridge(settings, client=fake_client, gateway=gateway)
+    # Rooms count as announced unless a test is about announcing them.
+    bridge._announced.update(nio.rooms)
+    return bridge
 
 
 class TestNothingUpstreamInPlaintext:
@@ -323,6 +328,8 @@ class TestUndecryptable:
 class TestImportMautrix:
     """An adopted device keeps its identity and the keys it held."""
 
+    CIPHERTEXT: ClassVar[dict[str, str]] = {}
+
     def _mautrix_db(self, path: Path) -> tuple[OlmAccount, str]:
         passphrase = f"{USER}:DEV"
         account = OlmAccount()
@@ -333,6 +340,8 @@ class TestImportMautrix:
             account.identity_keys["curve25519"],
             ROOM,
         )
+        outbound.mark_as_shared()
+        self.CIPHERTEXT["hello"] = outbound.encrypt("hello")
         peer = OlmAccount()
         peer.generate_one_time_keys(1)
         otk = next(iter(peer.one_time_keys["curve25519"].values()))
@@ -389,6 +398,9 @@ class TestImportMautrix:
         assert loaded.shared, "an adopted identity must not be re-uploaded"
         sessions = store.load_inbound_group_sessions()
         assert sessions.get(ROOM, account.identity_keys["curve25519"], session_id) is not None
+        imported = sessions.get(ROOM, account.identity_keys["curve25519"], session_id)
+        plaintext, _index = imported.decrypt(self.CIPHERTEXT["hello"])
+        assert plaintext == "hello", "the imported session decrypts what the original encrypted"
         olm_sessions = store.load_sessions()
         assert len(list(olm_sessions.values())) == 1, "the Olm session reached the store"
 
@@ -642,7 +654,7 @@ class TestSettings:
 
     def test_a_bad_port_is_fatal(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._env(monkeypatch, BRIDGE_LISTEN_PORT="http")
-        with pytest.raises(ValueError, match="http"):
+        with pytest.raises(SettingsError, match="http"):
             BridgeSettings.from_env()
 
 
@@ -994,3 +1006,70 @@ class TestLifecycle:
         await run
         assert cancelled.is_set()
         assert stub.closed
+
+
+class TestRoomAnnouncements:
+    async def test_every_joined_room_is_announced_once(self, tmp_path: Path) -> None:
+        seen: list[dict[str, Any]] = []
+
+        def gateway(request: httpx.Request) -> httpx.Response:
+            seen.append(json.loads(request.content))
+            return httpx.Response(200)
+
+        bridge = _bridge(tmp_path, FakeNio(), gateway)
+        bridge._announced.clear()
+        await bridge.process(_sync(), first=True)
+        await bridge.process(_sync(next_batch="s3"), first=False)
+        assert [(e["type"], e["room_id"]) for e in seen] == [
+            ("org.crunchtools.trentina.room", ROOM)
+        ]
+        assert seen[0]["room"]["name"] == "Ops"
+
+
+class TestJoinRetry:
+    async def test_a_failed_join_is_tried_again_next_sync(self, tmp_path: Path) -> None:
+        attempts: list[str] = []
+
+        @dataclass
+        class JoiningNio(FakeNio):
+            invited_rooms: dict[str, Any] = field(default_factory=dict)
+
+            async def join(self, room_id: str) -> Any:
+                attempts.append(room_id)
+                if len(attempts) == 1:
+                    return JoinError("M_LIMIT_EXCEEDED")
+                self.invited_rooms.pop(room_id, None)
+                return JoinResponse(room_id)
+
+        nio = JoiningNio()
+        nio.invited_rooms["!new:matrix.org"] = object()
+        bridge = _bridge(tmp_path, nio)
+        await bridge.process(_sync(), first=False)
+        await bridge.process(_sync(next_batch="s3"), first=False)
+        assert attempts == ["!new:matrix.org", "!new:matrix.org"]
+
+
+class TestSettingsPort:
+    def test_a_bad_port_is_a_settings_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        TestSettings()._env(monkeypatch, BRIDGE_LISTEN_PORT="99999")
+        with pytest.raises(SettingsError, match="BRIDGE_LISTEN_PORT"):
+            BridgeSettings.from_env()
+
+
+class TestLoginFailureCloses:
+    async def test_clients_close_when_login_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        closed: list[bool] = []
+
+        class Failing:
+            settings = SimpleNamespace(listen_host="127.0.0.1", listen_port=0)
+
+            async def login(self) -> None:
+                raise RuntimeError("no way in")
+
+            async def aclose(self) -> None:
+                closed.append(True)
+
+        monkeypatch.setattr(main_mod, "Bridge", lambda _settings: Failing())
+        with pytest.raises(RuntimeError, match="no way in"):
+            await main_mod._run(Failing.settings)
+        assert closed == [True]
