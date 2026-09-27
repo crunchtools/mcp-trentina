@@ -2,35 +2,49 @@
 
     mcp-trentina-bridge run
     mcp-trentina-bridge import-mautrix --crypto-db /import/crypto.db
-    mcp-trentina-bridge delete-devices DEVICE [DEVICE ...]
+    mcp-trentina-bridge logout-device        # BRIDGE_OLD_ACCESS_TOKEN
+    mcp-trentina-bridge sign-device          # BRIDGE_RECOVERY_KEY
+    mcp-trentina-bridge reset-identity       # recovery key lost
 
-``delete-devices`` exists for cutover: once the bridge holds an account, the
-agent's old devices are pruned, which is what leaves the agent with no
-upstream credential and makes the perimeter mandatory rather than optional.
-It needs BRIDGE_PASSWORD, because the homeserver gates device deletion on
-user-interactive auth.
+``logout-device`` exists for cutover: once the bridge holds an account, the
+agent's old device is pruned, which is what leaves the agent with no upstream
+credential and makes the perimeter mandatory rather than optional. It logs the
+old device out with that device's own token: a homeserver behind MAS
+serves neither ``/delete_devices`` nor ``DELETE /devices``.
+
+``sign-device`` cross-signs the bridge's own device with the account's
+self-signing key from secret storage, so a device the bridge logged in fresh
+does not show as unverified. ``reset-identity`` is for an account whose
+recovery key is lost: new cross-signing keys, approved by the account owner
+in a browser, and a new recovery key printed once.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
+import httpx
 import uvicorn
-from nio import DeleteDevicesResponse
+from nio.store import SqliteStore
 
 from ..gateway.loader import read_secret_env
+from ..matrix.recovery_key import RecoveryKeyError
 from .api import build_app
 from .client import Bridge
+from .crosssign import CrossSignError, reset_identity, sign_own_device
 from .import_mautrix import import_mautrix
 from .settings import BridgeSettings
 
 logger = logging.getLogger("mcp_trentina_crunchtools.bridge")
+
+# Seconds for each request of a one-shot command against the homeserver.
+_ONE_SHOT_TIMEOUT = 30.0
 
 
 async def _run(settings: BridgeSettings) -> None:
@@ -65,40 +79,94 @@ async def _run(settings: BridgeSettings) -> None:
         await bridge.aclose()
 
 
-async def _delete_devices(settings: BridgeSettings, devices: list[str]) -> None:
-    if not settings.password:
-        raise SystemExit("delete-devices needs BRIDGE_PASSWORD")
-    bridge = Bridge(settings)
+async def _logout_device(settings: BridgeSettings) -> None:
+    """Log out the agent's old device with its own access token."""
+    old = read_secret_env("BRIDGE_OLD_ACCESS_TOKEN")
+    if not old:
+        raise SystemExit("logout-device needs BRIDGE_OLD_ACCESS_TOKEN")
+    if old == _session(settings)["access_token"]:
+        raise SystemExit("refusing to log out the bridge's own device")
+    async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
+        try:
+            resp = await client.post(
+                f"{settings.homeserver}/_matrix/client/v3/logout",
+                headers={"Authorization": f"Bearer {old}"},
+                json={},
+            )
+        except httpx.HTTPError as exc:
+            raise SystemExit(f"logout-device: {exc}") from exc
+    if resp.status_code != 200:
+        raise SystemExit(f"logout-device: {resp.status_code} {resp.text[:200]}")
+    logger.warning("bridge[%s]: old device logged out", settings.profile)
+
+
+async def _sign_device(settings: BridgeSettings) -> None:
+    """Cross-sign the bridge's device from the account's secret storage."""
+    recovery_key = read_secret_env("BRIDGE_RECOVERY_KEY")
+    if not recovery_key:
+        raise SystemExit("sign-device needs BRIDGE_RECOVERY_KEY")
+    async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
+        try:
+            session = _session(settings)
+            result = await sign_own_device(
+                client, settings.homeserver, session, _device_keys(settings, session), recovery_key
+            )
+        except (CrossSignError, RecoveryKeyError, httpx.HTTPError) as exc:
+            raise SystemExit(f"sign-device: {exc}") from exc
+    verb = "was already signed" if result.already else "signed"
+    logger.warning("bridge[%s]: device %s %s", settings.profile, result.device_id, verb)
+
+
+async def _reset_identity(settings: BridgeSettings) -> None:
+    """New cross-signing identity; the recovery key goes to stdout only."""
+
+    def ask(url: str) -> None:
+        sys.stderr.write(
+            f"\nApprove the reset as {settings.user_id}, within 10 minutes:\n  {url}\n\n"
+        )
+        sys.stderr.flush()
+
+    def keep(recovery_key: str) -> None:
+        sys.stdout.write(f"Recovery key (keep it; shown once): {recovery_key}\n")
+        sys.stdout.flush()
+
+    async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
+        try:
+            session = _session(settings)
+            result = await reset_identity(
+                client, settings.homeserver, session, _device_keys(settings, session), ask, keep
+            )
+        except (CrossSignError, httpx.HTTPError) as exc:
+            raise SystemExit(f"reset-identity: {exc}") from exc
+    logger.warning(
+        "bridge[%s]: new identity %s; device %s signed",
+        settings.profile,
+        result.master_key,
+        result.device_id,
+    )
+
+
+def _session(settings: BridgeSettings) -> dict[str, str]:
+    """The session the bridge saved on its first start."""
+    path = settings.store_dir / "session.json"
+    if not path.exists():
+        raise SystemExit(f"{path} does not exist: run the bridge once first")
     try:
-        await delete_devices(bridge, devices)
-    finally:
-        await bridge.aclose()
+        saved: dict[str, str] = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{path} is not valid JSON ({exc}): restore it or log in again") from exc
+    return saved
 
 
-async def delete_devices(bridge: Bridge, devices: list[str]) -> Any:
-    """Delete other devices of the bridge's account, through password UIA.
-
-    The first call asks the homeserver which auth it wants and returns a UIA
-    session; the second answers it with the password.
-    """
-    settings = bridge.settings
-    await bridge.login()
-    if bridge.client.device_id in devices:
-        raise SystemExit("refusing to delete the bridge's own device")
-    first = await bridge.client.delete_devices(devices)
-    auth: dict[str, Any] = {
-        "type": "m.login.password",
-        "identifier": {"type": "m.id.user", "user": settings.user_id},
-        "password": settings.password,
-    }
-    session = getattr(first, "session", None)
-    if session:
-        auth["session"] = session
-    result = await bridge.client.delete_devices(devices, auth)
-    if not isinstance(result, DeleteDevicesResponse):
-        raise SystemExit(f"delete failed: {result}")
-    logger.warning("bridge[%s]: deleted %s", settings.profile, devices)
-    return result
+def _device_keys(settings: BridgeSettings, session: dict[str, str]) -> dict[str, str]:
+    """The device's identity keys from the bridge's own crypto store: what
+    its homeserver's copy must match before anything signs it."""
+    user_id, device_id = session["user_id"], session["device_id"]
+    store = SqliteStore(user_id, device_id, str(settings.store_dir), settings.pickle_key)
+    account = store.load_account()
+    if account is None:
+        raise SystemExit(f"no crypto account for {device_id} in {settings.store_dir}")
+    return {f"{algorithm}:{device_id}": key for algorithm, key in account.identity_keys.items()}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -111,8 +179,9 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("run", help="run the bridge")
     imp = sub.add_parser("import-mautrix", help="adopt a mautrix device into the store")
     imp.add_argument("--crypto-db", type=Path, required=True)
-    rm = sub.add_parser("delete-devices", help="delete the account's other devices")
-    rm.add_argument("devices", nargs="+")
+    sub.add_parser("logout-device", help="log out the old device (BRIDGE_OLD_ACCESS_TOKEN)")
+    sub.add_parser("sign-device", help="cross-sign the bridge's device (BRIDGE_RECOVERY_KEY)")
+    sub.add_parser("reset-identity", help="new cross-signing identity (recovery key lost)")
     args = parser.parse_args(argv)
 
     if args.command == "import-mautrix":
@@ -124,8 +193,14 @@ def main(argv: list[str] | None = None) -> None:
         sys.stdout.write(f"{result}\n")
         return
     settings = BridgeSettings.from_env()
-    if args.command == "delete-devices":
-        asyncio.run(_delete_devices(settings, args.devices))
+    if args.command == "logout-device":
+        asyncio.run(_logout_device(settings))
+        return
+    if args.command == "sign-device":
+        asyncio.run(_sign_device(settings))
+        return
+    if args.command == "reset-identity":
+        asyncio.run(_reset_identity(settings))
         return
     asyncio.run(_run(settings))
 

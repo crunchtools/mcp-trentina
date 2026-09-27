@@ -68,6 +68,12 @@ first messages are not written before the agent can read them. An agent that
 has not joined by then does not stall the bridge: the room is used anyway,
 and the delay is logged.
 
+A direct message is a true DM: its local room is created by the other
+person's stand-in and holds exactly two members, the stand-in and the agent.
+Agents tell a DM from a group by member count, and a group is where they
+answer only when mentioned. A DM made by 0.45.0, with the appservice bot in
+it, is handed over on the bridge's next start.
+
 Remote senders appear as stand-ins, `@<user_prefix><escaped id>:<server_name>`,
 where the escape is the spec's mapping (`@Scott_M:matrix.org` →
 `@remote__scott___m=3amatrix.org:agent1.local`). The agent's own remote ID is
@@ -105,7 +111,9 @@ python -m mcp_trentina_crunchtools.bridge.main run
 | `BRIDGE_STORE_DIR` | crypto store, session, sync position (default `/data`) |
 | `BRIDGE_LISTEN_HOST` / `BRIDGE_LISTEN_PORT` | API bind (default `127.0.0.1:8471`; set `0.0.0.0` in a container) |
 | `BRIDGE_DEVICE_ID` + `BRIDGE_ACCESS_TOKEN` | adopt an existing device |
-| `BRIDGE_PASSWORD` | log in a new device (first boot), and `delete-devices` |
+| `BRIDGE_PASSWORD` | log in a new device (first boot only) |
+| `BRIDGE_OLD_ACCESS_TOKEN` | `logout-device` only: the token of the device to prune |
+| `BRIDGE_RECOVERY_KEY` | `sign-device` only: the account's secret-storage recovery key |
 | `BRIDGE_DEVICE_NAME` | name for a new device (default `Trentina bridge`) |
 | `BRIDGE_LOG_LEVEL` | default `WARNING` |
 
@@ -134,14 +142,51 @@ python -m mcp_trentina_crunchtools.bridge.main import-mautrix --crypto-db /impor
 Then start the bridge with `BRIDGE_DEVICE_ID` and `BRIDGE_ACCESS_TOKEN` set to
 the agent's.
 
-### Pruning old devices
+### Pruning the old device
 
 ```
-python -m mcp_trentina_crunchtools.bridge.main delete-devices OLDDEVICE
+python -m mcp_trentina_crunchtools.bridge.main logout-device
 ```
 
-Needs `BRIDGE_PASSWORD` (user-interactive auth). Afterwards the agent holds no
-upstream credential, which is what makes the perimeter mandatory.
+With `BRIDGE_OLD_ACCESS_TOKEN` set to the agent's old token, for this run
+only. A homeserver behind MAS serves neither `/delete_devices` nor `DELETE /devices`;
+logging a device out with its own token removes it. Afterwards the agent holds
+no upstream credential, which is what makes the perimeter mandatory.
+
+### Verifying a new device
+
+A device the bridge logged in fresh is unsigned, and clients show it as
+unverified. An adopted device is usually signed already.
+
+```
+python -m mcp_trentina_crunchtools.bridge.main sign-device
+```
+
+With `BRIDGE_RECOVERY_KEY` set to the account's recovery key, for this run
+only. It reads the self-signing key from secret storage, checks it against
+the published key, and signs the bridge's device, but only if the
+homeserver's copy of the device's keys is exactly what the bridge's own crypto
+store holds. No identity is reset, so nobody has to re-verify the account.
+
+A recovery key opens only the secret storage it was made with. If storage was
+set up again since, the old key is refused, and if nobody holds the current
+one the self-signing key cannot be read at all. Then:
+
+```
+python -m mcp_trentina_crunchtools.bridge.main reset-identity
+```
+
+It generates new cross-signing keys, stores them in new secret storage, and
+prints the new recovery key once, before anything is published. Keep it. Then
+it uploads the identity; a homeserver behind MAS first asks the account owner
+to approve the reset, so the command prints a link, to be opened while logged
+in as the account, and waits up to ten minutes. Once it is published, the new
+storage becomes the account's default and the bridge's device is signed. If
+signing fails, `sign-device` with the printed key finishes it; if the reset is
+never approved, nothing was published and the account's default storage is
+unchanged; the new key and its copies stay unused beside it, and a rerun
+starts again. Everyone who had verified the account sees its identity change and
+verifies it again.
 
 ## Conduit
 

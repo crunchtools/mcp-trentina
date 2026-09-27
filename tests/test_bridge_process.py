@@ -20,8 +20,6 @@ from typing import Any, ClassVar
 import httpx
 import pytest
 from nio import (
-    DeleteDevicesAuthResponse,
-    DeleteDevicesResponse,
     JoinError,
     JoinResponse,
     LoginResponse,
@@ -45,7 +43,6 @@ from mcp_trentina_crunchtools.bridge import main as main_mod
 from mcp_trentina_crunchtools.bridge.api import build_app
 from mcp_trentina_crunchtools.bridge.client import Bridge, SendError
 from mcp_trentina_crunchtools.bridge.import_mautrix import SessionImportError, import_mautrix
-from mcp_trentina_crunchtools.bridge.main import delete_devices
 from mcp_trentina_crunchtools.bridge.settings import BridgeSettings, SettingsError
 
 USER = "@agent1-bot:matrix.org"
@@ -420,7 +417,6 @@ class FakeLoginNio(FakeNio):
         super().__init__()
         self.login_ok = login_ok
         self.restored: list[tuple[str, str, str]] = []
-        self.deletes: list[tuple[list[str], dict[str, Any] | None]] = []
 
     def restore_login(self, user_id: str, device_id: str, access_token: str) -> None:
         self.restored.append((user_id, device_id, access_token))
@@ -431,12 +427,6 @@ class FakeLoginNio(FakeNio):
             return "M_FORBIDDEN"
         self.device_id, self.access_token = "NEWDEV", "newtok"
         return LoginResponse(USER, "NEWDEV", "newtok")
-
-    async def delete_devices(self, devices: list[str], auth: dict[str, Any] | None = None) -> Any:
-        self.deletes.append((devices, auth))
-        if auth is None:
-            return DeleteDevicesAuthResponse("uia-session", {}, {})
-        return DeleteDevicesResponse()
 
 
 def _settings_with(tmp_path: Path, **changes: Any) -> BridgeSettings:
@@ -496,29 +486,6 @@ class TestLogin:
     async def test_no_way_in_is_fatal(self, tmp_path: Path) -> None:
         with pytest.raises(RuntimeError, match="no way in"):
             await _login_bridge(tmp_path, FakeLoginNio()).login()
-
-
-class TestDeleteDevices:
-    async def test_the_uia_session_is_answered_with_the_password(self, tmp_path: Path) -> None:
-
-        nio = FakeLoginNio()
-        bridge = _login_bridge(tmp_path, nio, password="pw")
-        await delete_devices(bridge, ["OLD"])
-        (first, no_auth), (second, auth) = nio.deletes
-        assert (first, no_auth) == (["OLD"], None)
-        assert second == ["OLD"]
-        assert auth is not None
-        assert auth["session"] == "uia-session"
-        assert auth["password"] == "pw"
-        assert auth["identifier"] == {"type": "m.id.user", "user": USER}
-
-    async def test_the_bridges_own_device_is_never_deleted(self, tmp_path: Path) -> None:
-
-        nio = FakeLoginNio()
-        bridge = _login_bridge(tmp_path, nio, password="pw")
-        with pytest.raises(SystemExit, match="own device"):
-            await delete_devices(bridge, ["NEWDEV", "OLD"])
-        assert nio.deletes == []
 
 
 class TestApi:
@@ -666,8 +633,11 @@ class SyncingNio(FakeNio):
     answers: list[Any] = field(default_factory=list)
     since: list[str | None] = field(default_factory=list)
 
+    full_state: list[bool] = field(default_factory=list)
+
     async def sync(self, **kwargs: Any) -> Any:
         self.since.append(kwargs.get("since"))
+        self.full_state.append(bool(kwargs.get("full_state")))
         if not self.answers:
             raise asyncio.CancelledError
         return self.answers.pop(0)
@@ -696,6 +666,9 @@ class TestRun:
         with pytest.raises(asyncio.CancelledError):
             await _bridge(tmp_path, nio).run()
         assert nio.since == ["s1", "s1", "s1", "s2", "s3"]
+        assert nio.full_state == [True, True, True, False, False], (
+            "a resumed start asks for full state until its first good sync"
+        )
         assert sleeps == [1.0, 2.0]
         assert (tmp_path / "sync_token").read_text() == "s3"
 
@@ -1129,3 +1102,20 @@ class TestGatewayUrl:
         TestSettings()._env(monkeypatch, BRIDGE_GATEWAY_URL=url)
         with pytest.raises(SettingsError, match="BRIDGE_GATEWAY_URL"):
             BridgeSettings.from_env()
+
+
+class TestRoomInfo:
+    def test_a_two_member_room_names_its_peer(self, tmp_path: Path) -> None:
+        nio = FakeNio()
+        room = nio.rooms[ROOM]
+        room.member_count = 2
+        room.users = {USER: None, "@scott:matrix.org": None}
+        info = _bridge(tmp_path, nio)._room_info(room)
+        assert info["is_direct"] is True
+        assert info["peer"] == "@scott:matrix.org"
+        assert info["peer_displayname"] == "Scott"
+
+    def test_a_group_names_no_peer(self, tmp_path: Path) -> None:
+        nio = FakeNio()
+        info = _bridge(tmp_path, nio)._room_info(nio.rooms[ROOM])
+        assert (info["is_direct"], info["peer"]) == (False, "")

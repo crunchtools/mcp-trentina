@@ -1369,7 +1369,7 @@ wheels = [
 
 [[package]]
 name = "mcp-trentina-crunchtools"
-version = "0.45.0"
+version = "0.46.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -1390,6 +1390,7 @@ dependencies = [
 [package.optional-dependencies]
 bridge = [
     { name = "matrix-nio", extra = ["e2e"] },
+    { name = "unpaddedbase64" },
 ]
 dev = [
     { name = "mypy" },
@@ -1420,6 +1421,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
     { name = "transformers", specifier = ">=4.40" },
+    { name = "unpaddedbase64", marker = "extra == 'bridge'", specifier = ">=2.1" },
     { name = "vodozemac", marker = "extra == 'matrix'", specifier = ">=0.10,<0.11" },
 ]
 provides-extras = ["matrix", "bridge", "dev"]

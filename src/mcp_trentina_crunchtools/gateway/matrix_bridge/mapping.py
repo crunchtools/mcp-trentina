@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS rooms (
     remote_id TEXT PRIMARY KEY,
     local_id  TEXT NOT NULL UNIQUE,
     name      TEXT NOT NULL DEFAULT '',
-    topic     TEXT NOT NULL DEFAULT ''
+    topic     TEXT NOT NULL DEFAULT '',
+    owner     TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS users (
     remote_id   TEXT PRIMARY KEY,
@@ -71,12 +72,18 @@ _PRUNE_EVERY = 500
 
 @dataclass(frozen=True)
 class Room:
-    """A mapped room and the metadata last mirrored into it."""
+    """A mapped room and the metadata last mirrored into it.
+
+    ``owner`` is the local user that administers the room: empty for a room
+    the appservice bot created, or the stand-in of the other person in a DM,
+    which is a true two-member room with no bot in it.
+    """
 
     remote_id: str
     local_id: str
     name: str
     topic: str
+    owner: str = ""
 
 
 class BridgeMapping:
@@ -96,6 +103,10 @@ class BridgeMapping:
         self._db = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(_SCHEMA)
+        # 0.45.0 stores had no owner column.
+        columns = {row[1] for row in self._db.execute("PRAGMA table_info(rooms)")}
+        if "owner" not in columns:
+            self._db.execute("ALTER TABLE rooms ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
         self._lock = threading.Lock()
         self._writes = 0
         self._prune_now(time.time())
@@ -130,21 +141,36 @@ class BridgeMapping:
 
     async def room_by_remote(self, remote_id: str) -> Room | None:
         row = await self._row(
-            "SELECT remote_id, local_id, name, topic FROM rooms WHERE remote_id = ?", remote_id
+            "SELECT remote_id, local_id, name, topic, owner FROM rooms WHERE remote_id = ?",
+            remote_id,
         )
         return None if row is None else Room(*row)
 
-    async def remote_room(self, local_id: str) -> str | None:
-        return await self._one("SELECT remote_id FROM rooms WHERE local_id = ?", local_id)
+    async def room_by_local(self, local_id: str) -> Room | None:
+        """The mapped room whose local ID this is, or ``None``."""
+        row = await self._row(
+            "SELECT remote_id, local_id, name, topic, owner FROM rooms WHERE local_id = ?",
+            local_id,
+        )
+        return None if row is None else Room(*row)
 
-    async def put_room(self, remote_id: str, local_id: str, name: str, topic: str) -> None:
+    async def set_owner(self, remote_id: str, owner: str) -> None:
+        """Record the stand-in that now owns a room, after a handover."""
+        await self._write("UPDATE rooms SET owner = ? WHERE remote_id = ?", owner, remote_id)
+
+    async def put_room(
+        self, remote_id: str, local_id: str, name: str, topic: str, owner: str = ""
+    ) -> None:
+        """Record a room, or update its name and topic. The owner is set on
+        creation and moved only by ``set_owner``."""
         await self._write(
-            "INSERT INTO rooms (remote_id, local_id, name, topic) VALUES (?, ?, ?, ?) "
+            "INSERT INTO rooms (remote_id, local_id, name, topic, owner) VALUES (?, ?, ?, ?, ?) "
             "ON CONFLICT(remote_id) DO UPDATE SET name = excluded.name, topic = excluded.topic",
             remote_id,
             local_id,
             name,
             topic,
+            owner,
         )
 
     # users

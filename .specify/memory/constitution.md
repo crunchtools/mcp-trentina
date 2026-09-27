@@ -1,6 +1,6 @@
 # mcp-trentina-crunchtools Constitution
 
-> **Version:** 1.4.0
+> **Version:** 1.4.1
 > **Ratified:** 2026-09-22
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.17.0
@@ -44,8 +44,11 @@ Every change MUST preserve all five security layers.
   OAuth, bridge mappings), the caches, and the Matrix bridge's crypto store
   and session, all written by deterministic code under the process's own
   configured data directory only: the blocklist's directory for the gateway,
-  `BRIDGE_STORE_DIR` for the bridge (each its container's `/data`). The one binary read is `import-mautrix`: an operator-run command that
-  opens a crypto store read-only, never reachable from a tool or an agent.
+  `BRIDGE_STORE_DIR` for the bridge (each its container's `/data`); the
+  bridge's operator commands read that same store. The one read of a store
+  the process does NOT own is `import-mautrix`: an operator-run command that
+  opens another client's crypto store read-only, never reachable from a tool
+  or an agent.
 
 **Layer 5 — Supply Chain Security:**
 - Weekly automated CVE scanning via GitHub Actions
@@ -330,3 +333,4 @@ Container CI workflows MUST use two separate jobs:
 | 1.2.1 | 2026-09-25 | Q-Agent backend row brought up to date: pluggable provider drivers (Gemini, OpenAI-compatible incl. OpenRouter, Anthropic, Ollama), default gemini-2.5-flash-lite since spec 002 |
 | 1.3.0 | 2026-09-27 | Layer 3: the 100K-character truncation before the Q-Agent becomes one token admission cap (#225). Two caps in two units held their invariant only in a docstring, broke on dense JSON, and let L3 read a slice of what L2 read |
 | 1.4.0 | 2026-09-27 | Layer 4's file rule scoped to the file tools, which is what it always governed: process-owned state under the data directory (SQLite stores, caches, the bridge's crypto store) was already written and is now named. Add Section 5, the Matrix bridge credential split (#162) |
+| 1.4.1 | 2026-09-27 | Layer 4: the bridge's operator commands read the bridge's own store; `import-mautrix` is named as the one read of a store the process does not own, which is what "the one binary read" meant |

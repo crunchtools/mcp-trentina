@@ -77,7 +77,9 @@ Required: `BRIDGE_PROFILE`, `BRIDGE_USER_ID`, `BRIDGE_GATEWAY_URL`,
 `BRIDGE_HOMESERVER`, `BRIDGE_STORE_DIR` (`/data`), `BRIDGE_LISTEN_HOST`
 (`127.0.0.1`), `BRIDGE_LISTEN_PORT` (8471), `BRIDGE_DEVICE_NAME`,
 `BRIDGE_LOG_LEVEL`, and one way in: `BRIDGE_DEVICE_ID` + `BRIDGE_ACCESS_TOKEN`
-(adopt) or `BRIDGE_PASSWORD` (new device). Secrets take `_FILE`.
+(adopt) or `BRIDGE_PASSWORD` (new device). One-shot commands:
+`BRIDGE_OLD_ACCESS_TOKEN` (`logout-device`), `BRIDGE_RECOVERY_KEY`
+(`sign-device`). Secrets take `_FILE`.
 
 ## onnxruntime telemetry
 

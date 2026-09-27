@@ -67,8 +67,7 @@ def decode_recovery_key(text: str) -> bytes:
         )
     if tuple(raw[: len(PREFIX)]) != PREFIX:
         raise RecoveryKeyError(
-            "wrong version prefix — this is not an m.megolm_backup.v1 "
-            "recovery key"
+            "wrong version prefix — this is not an m.megolm_backup.v1 recovery key"
         )
 
     parity = 0
@@ -82,3 +81,24 @@ def decode_recovery_key(text: str) -> bytes:
         )
 
     return raw[len(PREFIX) : len(PREFIX) + KEY_BYTES]
+
+
+def encode_recovery_key(key: bytes) -> str:
+    """The display form of a 32-byte key: prefix, key and parity byte in
+    base58, in space-separated groups of four, as clients show it.
+
+    Raises:
+        RecoveryKeyError: ``key`` is not exactly 32 bytes.
+    """
+    if len(key) != KEY_BYTES:
+        raise RecoveryKeyError(f"expected {KEY_BYTES} key bytes, got {len(key)}")
+    raw = bytes(PREFIX) + key
+    parity = 0
+    for byte in raw:
+        parity ^= byte
+    number = int.from_bytes(raw + bytes([parity]), "big")
+    digits = ""
+    while number:
+        number, rem = divmod(number, _BASE)
+        digits = _ALPHABET[rem] + digits
+    return " ".join(digits[i : i + 4] for i in range(0, len(digits), 4))
