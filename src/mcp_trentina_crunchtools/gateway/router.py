@@ -11,7 +11,8 @@ or as `<backend>__<tool>` when the profile turns `short_names` off.
 
 For `tools/call`, resolves the name back into (backend, tool), verifies the
 backend is in the profile, re-checks the allowlist (defense in depth), and
-forwards. `<backend>__<tool>` resolves either way until 0.43.0.
+forwards. Only a name tools/list serves resolves: since 0.43.0 the
+`<backend>__<tool>` form routes only when `short_names` is off.
 """
 
 from __future__ import annotations
@@ -535,8 +536,8 @@ async def _route_tools_call(
     arguments = params.get("arguments") or {}
 
     resolved = resolve_name(profile, served_name)
-    if resolved is None and NAMESPACE_SEP in served_name:
-        # A legacy-shaped name for a backend this profile does not hold.
+    if resolved is None and not profile.short_names and NAMESPACE_SEP in served_name:
+        # A long-form name, as this profile serves them, for a backend it does not hold.
         raise BackendNotInProfileError(
             f"backend {served_name.partition(NAMESPACE_SEP)[0]!r} not in profile {profile.name!r}"
         )

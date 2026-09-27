@@ -28,7 +28,6 @@ newcomer takes the tag. Everything behind the edge — allowlists, guards,
 
 from __future__ import annotations
 
-import logging
 import re
 from collections import Counter, defaultdict
 from typing import TYPE_CHECKING, Any
@@ -40,7 +39,6 @@ if TYPE_CHECKING:
 
     from .profile import Backend, Profile
 
-logger = logging.getLogger(__name__)
 
 #: How ``<backend>__<tool>`` is spelled, the form served before 0.38.0.
 NAMESPACE_SEP = "__"
@@ -52,7 +50,6 @@ _INVALID = re.compile(r"[^A-Za-z0-9-]+")
 # Names issued per profile, read through from the database: a name is never
 # reassigned, so this never goes stale, only incomplete.
 _issued: dict[str, dict[str, Pair]] = {}
-_legacy_warned: set[tuple[str, str]] = set()
 
 
 def _clean(name: str) -> str:
@@ -149,7 +146,6 @@ def assign(
 def forget_issued_names() -> None:
     """Drop the in-memory copy (for testing); the database keeps every name."""
     _issued.clear()
-    _legacy_warned.clear()
 
 
 def _issued_names(profile_name: str) -> dict[str, Pair]:
@@ -187,22 +183,14 @@ def serve_short_names(profile: Profile, tools: list[dict[str, Any]]) -> list[dic
 def resolve_name(profile: Profile, name: str) -> Pair | None:
     """The (backend, tool) a served name stands for, or None.
 
-    ``<backend>__<tool>`` still resolves: it is what every client knew before
-    0.38.0, and what a client with a cached list still sends.
+    Only the names tools/list serves: short names, or ``<backend>__<tool>``
+    when the profile turns ``short_names`` off. The long form stopped
+    resolving under short names in 0.43.0; it was a pre-0.38.0 client's.
     """
-    backend, sep, tool = name.partition(NAMESPACE_SEP)
-    if sep and backend in profile.backends:
-        if profile.short_names and (profile.name, name) not in _legacy_warned:
-            _legacy_warned.add((profile.name, name))
-            logger.warning(
-                "gateway: profile=%s called %r by its <backend>__<tool> name, which "
-                "is removed in 0.43.0; tools/list serves short names",
-                profile.name,
-                name,
-            )
-        return backend, tool
     if not profile.short_names:
-        return None
+        backend, sep, tool = name.partition(NAMESPACE_SEP)
+        return (backend, tool) if sep and backend in profile.backends else None
+
     names = _issued_names(profile.name)
     pair = names.get(name)
     if pair is None:

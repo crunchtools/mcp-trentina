@@ -187,7 +187,7 @@ class Config:
         if "QUARANTINE_MAX_CONTENT" in os.environ:
             from .errors import ConfigError
 
-            # Removed in 0.43.0 (#225) and refused rather than ignored: a
+            # Gone as of 0.43.0 (#225), and refused rather than ignored: a
             # character cap beside a token cap was two units governing one
             # question, and an operator who still sets it believes it applies.
             raise ConfigError(

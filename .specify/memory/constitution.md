@@ -1,6 +1,6 @@
 # mcp-trentina-crunchtools Constitution
 
-> **Version:** 1.2.1
+> **Version:** 1.3.0
 > **Ratified:** 2026-09-22
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.17.0
@@ -31,7 +31,7 @@ Every change MUST preserve all five security layers.
 - TLS to Gemini REST API (mandatory)
 - Timeouts on all outbound HTTP calls (web fetch and Gemini)
 - Response size limits on web fetches (5 MB)
-- Content truncation before Q-Agent (configurable, default 100K chars)
+- One admission cap before any inference, in L2's tokens: the smaller of L2's CPU budget and the Q-Agent's context window. Admitted content is read whole by every layer; block and redact refuse what is over the cap, and no layer is handed a truncated slice of content it was asked to judge (flag alone scans an over-cap payload's head, and says so)
 
 **Layer 4 — Dangerous Operation Prevention:**
 - **EXCEPTION:** This server is a security gateway, not an API wrapper. It fetches and processes untrusted web content by design. Layer 4 compliance is achieved by ensuring the server itself never executes arbitrary code, never shells out, and limits filesystem access to read-only on text files.
@@ -308,3 +308,4 @@ Container CI workflows MUST use two separate jobs:
 | 1.1.1 | 2026-09-22 | Inherit crunchtools/constitution v1.16.0 (XVII: no real-world names, PII or private deployment topology); examples, tests and docs moved to its fictional roster (RT #1504) |
 | 1.2.0 | 2026-09-24 | Inherit v1.17.0 (Gatehouse pre-commit hook + triage). Section 2 rewritten for the three-layer defense it has had since 0.10 — it still described a 7-stage stripping L1 and an L2 extraction agent (Gatehouse critical on #182, unanswered). Allowlist, quality gates and the L1 stage recipe corrected to match the code |
 | 1.2.1 | 2026-09-25 | Q-Agent backend row brought up to date: pluggable provider drivers (Gemini, OpenAI-compatible incl. OpenRouter, Anthropic, Ollama), default gemini-2.5-flash-lite since spec 002 |
+| 1.3.0 | 2026-09-27 | Layer 3: the 100K-character truncation before the Q-Agent becomes one token admission cap (#225). Two caps in two units held their invariant only in a docstring, broke on dense JSON, and let L3 read a slice of what L2 read |

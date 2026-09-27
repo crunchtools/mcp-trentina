@@ -100,8 +100,6 @@ async def get_trentina_stats() -> dict[str, Any]:
             "admission_tokens": config.admission_tokens,
             "provider": config.provider,
             "llm_available": config.has_llm,
-            # Gemini's key only; kept for dashboards, removed in 0.43.0.
-            "has_api_key": config.has_api_key,
             "classifier_threshold": config.classifier_threshold,
             "classifier_model_path": config.classifier_model_path,
         },

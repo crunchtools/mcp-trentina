@@ -131,7 +131,8 @@ Every call runs L1 ∥ L2 on the arrived bytes, then L3 briefed with both. The
   security-researcher grant; leave it out of agent policies.
 - `redact` — L3 detect, extract, verify; any objection refuses. Spelled
   `{"redact": "<question>"}` since 0.39.0: the question travels inside the
-  mode (`modes.parse_mode_arg`); `trentina_prompt` is read until 0.43.0. No
+  mode (`modes.parse_mode_arg`); a call still sending `trentina_prompt` is
+  refused (0.43.0). No
   tool declares `trentina_mode` unless the profile sets `declare_modes`.
 
 "Arrived" means arrived at the perimeter, AFTER pre-processing. Output is
@@ -183,7 +184,7 @@ rewrite, not their span substitution. Precedence: block > redact > flag.
 
 ### Stats
 - quarantine_stats — operator `config` carries `provider` and `llm_available`
-  (0.41.0); `has_api_key` there is Gemini's key only, deprecated for dashboards.
+  (0.41.0); its `has_api_key` was removed in 0.43.0.
   `admission_tokens` replaced `max_content` there and in the D-Bus status
   (0.43.0, #225): the one cap, in L2's tokens.
 - quarantine_stats — role-scoped like the gateway admin tools below: an agent

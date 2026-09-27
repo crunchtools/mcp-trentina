@@ -46,31 +46,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_legacy_prompt_warned = False
-
-
-def _warn_legacy_prompt() -> None:
-    """Once per process: a client on the old spelling sends it on every call."""
-    global _legacy_prompt_warned
-    _legacy_prompt_warned = True
-    logger.warning(
-        "trentina_prompt is deprecated and removed in 0.43.0; "
-        'pass trentina_mode={"redact": "<question>"}'
-    )
-
-
 #: What a malformed ``trentina_mode`` is told it may send instead.
 MODE_SHAPES = ["block", "flag", '{"redact": "<what you need>"}']
 
 
-def parse_mode_arg(value: Any, legacy_prompt: Any = None) -> tuple[str | None, str | None]:
+def parse_mode_arg(value: Any) -> tuple[str | None, str | None]:
     """``trentina_mode`` as (mode name, extraction question), unchecked by policy.
 
     Since 0.39.0 the question travels inside the mode, because it only means
     something there: ``"block"``, ``"flag"``, or ``{"redact": "<question>"}``.
-    A bare ``"redact"`` keeps the tool's default question. ``trentina_prompt``
-    beside a string mode is the pre-0.39.0 spelling, read with a warning
-    until 0.43.0.
+    A bare ``"redact"`` keeps the tool's default question. The pre-0.39.0
+    ``trentina_prompt`` beside it no longer exists (0.43.0).
 
     The dict may also arrive as its JSON text (#244). No tool declares
     ``trentina_mode`` unless the profile sets ``declare_modes``, and a client
@@ -81,8 +67,6 @@ def parse_mode_arg(value: Any, legacy_prompt: Any = None) -> tuple[str | None, s
     Args:
         value: the call's ``trentina_mode``: None, a mode name, or
             ``{"redact": "<question>"}``.
-        legacy_prompt: the call's ``trentina_prompt``. Used, with a warning,
-            only when ``value`` is not the dict form.
 
     Returns:
         ``(mode name or None, question or None)``. The name is not yet checked
@@ -110,10 +94,6 @@ def parse_mode_arg(value: Any, legacy_prompt: Any = None) -> tuple[str | None, s
         return "redact", question
     if value is not None and not isinstance(value, str):
         raise ModeNotPermittedError(str(value), MODE_SHAPES)
-    if isinstance(legacy_prompt, str) and legacy_prompt.strip():
-        if not _legacy_prompt_warned:
-            _warn_legacy_prompt()
-        return value, legacy_prompt
     return value, None
 
 

@@ -82,6 +82,7 @@ def _profile(
     backend: dict[str, Any] | None = None,
 ) -> Profile:
     p = Profile(
+        short_names=False,  # calls below use <backend>__<tool>
         name="agent",
         auth=AuthConfig(bearer_token_env="TEST"),
         defense=DefenseConfig(enforcement=enforcement, modes=modes),
@@ -141,21 +142,19 @@ class TestModeArg:
     """0.39.0: the extraction question travels inside the mode."""
 
     @pytest.mark.parametrize(
-        ("value", "legacy", "expected"),
+        ("value", "expected"),
         [
-            (None, None, (None, None)),
-            ("flag", None, ("flag", None)),
-            ({"redact": "What ships?"}, None, ("redact", "What ships?")),
-            ({"REDACT": "What ships?"}, None, ("redact", "What ships?")),
-            ({"redact": "What ships?"}, "ignored", ("redact", "What ships?")),
-            ("redact", "What ships?", ("redact", "What ships?")),
-            ("redact", "  ", ("redact", None)),
-            ('{"redact": "What ships?"}', None, ("redact", "What ships?")),
-            (' {"redact": "What ships?"}', "ignored", ("redact", "What ships?")),
+            (None, (None, None)),
+            ("flag", ("flag", None)),
+            ("redact", ("redact", None)),
+            ({"redact": "What ships?"}, ("redact", "What ships?")),
+            ({"REDACT": "What ships?"}, ("redact", "What ships?")),
+            ('{"redact": "What ships?"}', ("redact", "What ships?")),
+            (' {"redact": "What ships?"}', ("redact", "What ships?")),
         ],
     )
-    def test_shapes(self, value: Any, legacy: Any, expected: tuple[Any, Any]) -> None:
-        assert parse_mode_arg(value, legacy) == expected
+    def test_shapes(self, value: Any, expected: tuple[Any, Any]) -> None:
+        assert parse_mode_arg(value) == expected
 
     @pytest.mark.parametrize(
         "bad",
@@ -177,16 +176,6 @@ class TestModeArg:
     def test_anything_else_is_refused(self, bad: Any) -> None:
         with pytest.raises(ModeNotPermittedError, match=MODE_PARAM):
             parse_mode_arg(bad)
-
-    def test_the_old_prompt_warns_once(
-        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from mcp_trentina_crunchtools import modes
-
-        monkeypatch.setattr(modes, "_legacy_prompt_warned", False)
-        parse_mode_arg("redact", "What ships?")
-        parse_mode_arg("redact", "What ships?")
-        assert caplog.text.count("trentina_prompt is deprecated") == 1
 
 
 class TestSchema:
@@ -366,11 +355,22 @@ class TestRouter:
     async def test_backend_never_sees_the_inserted_arguments(self) -> None:
         _, forwarded, scan = await self._call(
             _profile(["block", "redact"]),
-            {"issue_key": "X-1", MODE_PARAM: "redact", PROMPT_PARAM: "the summary"},
+            {"issue_key": "X-1", MODE_PARAM: {"redact": "the summary"}},
         )
         assert forwarded == {"issue_key": "X-1"}
         assert scan.call_args.kwargs["mode"] is Mode.REDACT
         assert scan.call_args.kwargs["prompt"] == "the summary"
+
+    async def test_the_removed_prompt_argument_is_refused(self) -> None:
+        """0.43.0: answering the default question instead would be worse."""
+        resp, forwarded, scan = await self._call(
+            _profile(["block", "redact"]),
+            {"issue_key": "X-1", MODE_PARAM: "redact", PROMPT_PARAM: "the summary"},
+        )
+        assert resp["error"]["code"] == -32602
+        assert "no longer exists" in resp["error"]["message"]
+        assert forwarded == {}
+        scan.assert_not_called()
 
     async def test_omitted_mode_runs_as_the_default(self) -> None:
         _, _, scan = await self._call(_profile(["block", "redact"]), {"issue_key": "X-1"})
@@ -650,7 +650,7 @@ class TestServerTools:
     ) -> None:
 
         mode_env(modes="block,redact")
-        fake = await self._run(tool, trentina_mode="redact", trentina_prompt="the date")
+        fake = await self._run(tool, trentina_mode={"redact": "the date"})
         assert Mode.REDACT in fake.call_args.args
         assert "the date" in fake.call_args.args
 
@@ -677,6 +677,7 @@ class TestInternalModes:
 
     def _profile(self) -> Profile:
         p = Profile(
+            short_names=False,  # calls below use <backend>__<tool>
             name="researcher",
             auth=AuthConfig(bearer_token_env="TEST"),
             defense=DefenseConfig(enforcement="block", modes=["block", "flag", "redact"]),
@@ -720,8 +721,7 @@ class TestInternalModes:
                             "name": f"web{NAMESPACE_SEP}{tool}",
                             "arguments": {
                                 **target,
-                                MODE_PARAM: mode,
-                                PROMPT_PARAM: "the date",
+                                MODE_PARAM: {"redact": "the date"} if mode == "redact" else mode,
                             },
                         },
                     },

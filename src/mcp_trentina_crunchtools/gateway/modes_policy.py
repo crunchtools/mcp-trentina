@@ -11,7 +11,8 @@ where the agent can make it, and nowhere else:
   376-tool profile ~39 KB a session.
 * **initialize** — `instructions` explains the modes ONCE per profile (#198),
   including the extraction form `{"redact": "<question>"}` (0.39.0), which
-  replaced a separate `trentina_prompt`.
+  replaced a separate `trentina_prompt`; 0.43.0 refuses a call that still
+  sends one.
 * **tools/call** — `resolve_call` pops the arguments, resolves an omitted mode
   to the default, and only then checks the policy. Checking first would let an
   omitted mode skip the check, the way a parameter guard skips an argument
@@ -33,6 +34,7 @@ from __future__ import annotations
 import copy
 from typing import TYPE_CHECKING, Any
 
+from ..errors import PromptParamGoneError
 from ..modes import Mode, ModePolicy, parse_mode_arg
 from ..preprocess.policy import (
     INTERNAL_CHAIN,
@@ -48,6 +50,8 @@ if TYPE_CHECKING:
     from .profile import Backend, Profile
 
 MODE_PARAM = "trentina_mode"
+# The redact question, as parameter guards address it. No longer an argument
+# (0.43.0): a call carrying one is refused.
 PROMPT_PARAM = "trentina_prompt"
 INSERTED_PARAMS = (MODE_PARAM, PROMPT_PARAM, PREPROCESS_PARAM)
 
@@ -205,10 +209,13 @@ def resolve_call(
     """Resolve the call's mode and return the arguments without ours.
 
     Raises:
-        ModeNotPermittedError: the resolved mode is outside the policy.
+        ModeNotPermittedError: the resolved mode is outside the policy, or the
+            call sent the removed ``trentina_prompt``.
     """
+    if PROMPT_PARAM in arguments:
+        raise PromptParamGoneError
     forwarded = {k: v for k, v in arguments.items() if k not in INSERTED_PARAMS}
-    requested, prompt = parse_mode_arg(arguments.get(MODE_PARAM), arguments.get(PROMPT_PARAM))
+    requested, prompt = parse_mode_arg(arguments.get(MODE_PARAM))
     policy = policy_for(profile, backend, tool_name)
     mode = policy.resolve(requested)
     return policy, mode, prompt, forwarded

@@ -91,6 +91,22 @@ class ModeNotPermittedError(TrentinaError):
         self.mode = mode
 
 
+class PromptParamGoneError(ModeNotPermittedError):
+    """A call still sent ``trentina_prompt``, which 0.43.0 no longer reads.
+
+    Refused rather than ignored: ignoring it would answer the tool's default
+    question instead of the one the caller asked.
+    """
+
+    def __init__(self) -> None:
+        TrentinaError.__init__(
+            self,
+            "Parameter 'trentina_prompt' no longer exists (0.43.0); "
+            'pass trentina_mode={"redact": "<question>"}',
+        )
+        self.mode = "redact"
+
+
 class PreProcessNotPermittedError(TrentinaError):
     """The call named a pre-processor the caller's policy does not offer (#183)."""
 

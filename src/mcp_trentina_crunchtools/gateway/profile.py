@@ -1327,7 +1327,7 @@ class Profile(BaseModel):
             "Serve each tool under the simplest name that says what it does, "
             "tagged with its backend only where two backends' names collide "
             "(gateway/names.py). Off: <backend>__<tool>, as before 0.38.0. "
-            "Either way the <backend>__<tool> form still routes until 0.43.0."
+            "Only the form served routes (0.43.0)."
         ),
     )
     alert_ingress: AlertIngressConfig | None = Field(

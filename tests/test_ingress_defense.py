@@ -69,6 +69,7 @@ HOSTILE = (
 
 def _profile(name: str = "testp") -> Profile:
     p = Profile(
+        short_names=False,  # calls below use <backend>__<tool>
         name=name,
         auth=AuthConfig(bearer_token_env="TEST"),
         backends={"jira": Backend(url="http://jira:1/mcp", tools_allow=["*"])},
@@ -407,6 +408,7 @@ class TestRouterIntegration:
         from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
 
         profile = Profile(
+            short_names=False,  # calls below use <backend>__<tool>
             name="mixed",
             auth=AuthConfig(bearer_token_env="TEST"),
             backends={"web": Backend(url="internal://web", tools_allow=["*"])},

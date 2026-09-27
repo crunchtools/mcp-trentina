@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 def client() -> TestClient:
     """Build a TestClient over a one-profile registry for endpoint-level tests."""
     profile = Profile(
+        short_names=False,  # calls below use <backend>__<tool>
         name="alice",
         auth=AuthConfig(bearer_token_env="A"),
         backends={"mcp-slack": Backend(url="http://mcp-slack:8000/mcp")},
@@ -201,6 +202,7 @@ class TestHealthEndpoint:
 def client_with_profile(name: str) -> TestClient:
     """Build a TestClient whose single profile has the given name."""
     profile = Profile(
+        short_names=False,  # calls below use <backend>__<tool>
         name=name,
         auth=AuthConfig(bearer_token_env="A"),
         backends={"mcp-slack": Backend(url="http://mcp-slack:8000/mcp")},
@@ -250,6 +252,7 @@ OAUTH_SCOPES = (
 def oauth_client() -> TestClient:
     """TestClient over a profile that accepts static bearer OR Google OAuth."""
     profile = Profile(
+        short_names=False,  # calls below use <backend>__<tool>
         name="gemini-app",
         auth=AuthConfig(bearer_token_env="A"),
         oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
@@ -386,6 +389,7 @@ class TestOAuthResourcePin:
     @staticmethod
     def _oauth_profile(name: str) -> Profile:
         return Profile(
+            short_names=False,  # calls below use <backend>__<tool>
             name=name,
             auth=AuthConfig(bearer_token_env="A"),
             oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
@@ -438,6 +442,7 @@ class TestProvisionedConfidentialClient:
     @staticmethod
     def _profile(**oauth_kwargs: Any) -> Profile:
         return Profile(
+            short_names=False,  # calls below use <backend>__<tool>
             name="gemini-app",
             auth=AuthConfig(bearer_token_env="A"),
             oauth=OAuthConfig(
@@ -668,6 +673,7 @@ def delegated_client() -> TestClient:
     from mcp_trentina_crunchtools.gateway.app import DelegatedAuth
 
     profile = Profile(
+        short_names=False,  # calls below use <backend>__<tool>
         name="gemini-app",
         auth=AuthConfig(bearer_token_env="A"),
         oauth=OAuthConfig(
@@ -809,6 +815,7 @@ class TestConfidentialDynamicRegistration:
             "TRENTINA_OAUTH_BASE_URL": OAUTH_BASE_URL,
         }
         profile = Profile(
+            short_names=False,  # calls below use <backend>__<tool>
             name="gemini-app",
             auth=AuthConfig(bearer_token_env="A"),
             oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
@@ -929,6 +936,7 @@ class TestMultiProfileResourceIndicator:
     @staticmethod
     def _profile(name: str, emails: list[str] | None = None) -> Profile:
         return Profile(
+            short_names=False,  # calls below use <backend>__<tool>
             name=name,
             auth=AuthConfig(bearer_token_env="A"),
             oauth=OAuthConfig(enabled=True, allowed_emails=emails or ["alice@example.com"]),
@@ -1057,6 +1065,7 @@ class TestRegisteredRedirectUriIsRestricted:
             "TRENTINA_OAUTH_BASE_URL": OAUTH_BASE_URL,
         }
         profile = Profile(
+            short_names=False,  # calls below use <backend>__<tool>
             name="claude-web",
             oauth=OAuthConfig(
                 enabled=True,

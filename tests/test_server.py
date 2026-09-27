@@ -32,7 +32,7 @@ class TestServerRegistration:
         for family in FAMILIES:
             props = tools[f"{family}_tool"].parameters["properties"]
             assert "trentina_mode" in props, family
-            assert "trentina_prompt" in props, family  # read until 0.41.0
+            assert "trentina_prompt" not in props, family  # removed in 0.43.0
             assert "trentina_mode" not in tools[f"{family}_tool"].parameters.get("required", [])
 
     async def test_expected_tools_registered(self) -> None:

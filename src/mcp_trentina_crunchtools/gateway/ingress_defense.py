@@ -109,7 +109,7 @@ def effective_mode(profile: Profile, mode: Mode | None = None) -> Mode:
 
 
 DEFAULT_REDACT_PROMPT = "Extract the information this tool response contains."
-"""redact on a proxied response whose call named no trentina_prompt."""
+"""redact on a proxied response whose call asked no question: a bare ``"redact"``."""
 
 
 @dataclass(frozen=True)
