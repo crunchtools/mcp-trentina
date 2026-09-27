@@ -146,6 +146,10 @@ class Gaps:
     oversize: bool = False
     """Over the admission cap (#225): refused before L2 or L3 ran."""
 
+    def names(self) -> list[str]:
+        """The gaps that are true, by field name."""
+        return [name for name, present in asdict(self).items() if present]
+
     def any(self) -> bool:
         return (
             self.l2_unavailable

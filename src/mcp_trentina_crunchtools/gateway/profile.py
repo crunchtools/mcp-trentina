@@ -958,6 +958,17 @@ class MatrixIngressConfig(BaseModel):
     # spec 013 and re-affirmed in 0.25.0 when the alert path became
     # configurable. If this ever needs a mode, the mode is per-EVENT and
     # drops the event from the timeline, not per-response.
+    unjudged: Literal["withhold", "annotate"] = Field(
+        default="withhold",
+        description=(
+            "Not the flagged-content mode ruled out above: what a response "
+            "that could not be fully judged becomes (over the admission cap, "
+            "past the scan deadline, a required layer absent). withhold keeps "
+            "every event where it is and strips its language, so the client "
+            "stays in sync and the agent reads nothing unjudged. annotate "
+            "forwards the bytes with _trentina_warning, as before 0.43.0."
+        ),
+    )
     preprocess: MatrixPreProcessConfig = Field(
         default_factory=MatrixPreProcessConfig,
         description=(
