@@ -170,6 +170,18 @@ def test_deep_nesting_is_bounded() -> None:
     assert normalize_arguments({"x": 0}, {"properties": {"x": prop}}).dropped == {}
 
 
+def test_an_unresolved_ref_leaves_its_siblings_in_force() -> None:
+    schema = {"properties": {"n": {"$ref": "https://x/y.json", "type": "integer", "minimum": 1}}}
+
+    assert normalize_arguments({"n": 0}, schema).dropped == {"n": "dropped: below minimum 1"}
+
+
+def test_a_wide_all_of_stops_at_the_budget() -> None:
+    parts: list[Any] = [{"type": "integer"}] * 500 + [{"minimum": 1}]
+
+    assert normalize_arguments({"n": 0}, {"properties": {"n": {"allOf": parts}}}).dropped == {}
+
+
 def test_a_wide_schema_exhausts_the_budget_and_proves_nothing() -> None:
     """Width multiplies across levels; past the visit budget nothing is dropped."""
     prop: dict[str, Any] = {"type": "integer", "minimum": 1}

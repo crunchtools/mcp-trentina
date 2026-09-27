@@ -145,11 +145,10 @@ def _violation(value: Any, prop: dict[str, Any], walk: _Walk, depth: int) -> str
     walk.visits -= 1
     if depth > _MAX_DEPTH or walk.visits < 0:
         return None
-    if "$ref" in prop:
-        ref = prop["$ref"]
-        target = walk.defs.get(ref) if isinstance(ref, str) else None
-        if target is None:
-            return None
+    # An unresolvable $ref judges nothing, but its sibling keywords still do.
+    ref = prop.get("$ref")
+    target = walk.defs.get(ref) if isinstance(ref, str) else None
+    if target is not None:
         reason = _violation(value, target, walk, depth + 1)
         if reason is not None:
             return reason
@@ -171,6 +170,8 @@ def _composed_violation(value: Any, prop: dict[str, Any], walk: _Walk, depth: in
                 return _branch_reason(value, branches, reasons)
     branches = prop.get("allOf")
     for b in branches if isinstance(branches, list) else ():
+        if walk.visits <= 0:
+            break
         reason = _violation(value, b, walk, depth + 1) if isinstance(b, dict) else None
         if reason is not None:
             return reason

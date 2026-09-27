@@ -1399,6 +1399,21 @@ class TestArgumentHygiene:
         assert resp["error"]["code"] == -32602
         assert json.loads(row["normalized"]) == {"run_id": "dropped: empty"}
 
+    async def test_a_guard_refusal_outranks_a_schema_refusal(self, tmp_path: Any) -> None:
+        guarded = Backend(
+            url="http://luna:8000/mcp",
+            tools_allow=["*"],
+            parameter_guards={"save_output": {"priority": ParameterConstraint(deny=["0"])}},
+        )
+
+        resp, seen, row = await self._call(
+            tmp_path, "save_output", {"content": "x", "priority": 0}, guarded
+        )
+
+        assert seen is None
+        assert resp["error"]["code"] == -32602
+        assert row["outcome"] == "denied_guard"
+
     async def test_guards_judge_the_forwarded_arguments(self, tmp_path: Any) -> None:
         guarded = Backend(
             url="http://luna:8000/mcp",
