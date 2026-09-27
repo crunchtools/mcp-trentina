@@ -350,6 +350,27 @@ class TestAdmission:
         assert gaps.oversize and not gaps.l2_truncated and not gaps.l3_truncated
         assert not gaps.l2_unavailable and not gaps.l3_unavailable
 
+    async def test_the_report_and_warning_say_not_admitted(self) -> None:
+        from mcp_trentina_crunchtools.report import layer_states
+        from mcp_trentina_crunchtools.warning import build_warning
+
+        with ExitStack() as stack:
+            _patches(stack)
+            stack.enter_context(patch(f"{_D}.count_tokens", return_value=40_000))
+            verdict = await defend("text", source="s", source_type="url", stop_on_partial=True)
+        assert layer_states(verdict) == {
+            "l1": "complete",
+            "l2": "not_admitted",
+            "l3": "not_admitted",
+        }
+        warning = build_warning(verdict)
+        assert warning is not None
+        assert (warning["oversize"], warning["tokens"], warning["token_cap"]) == (
+            True,
+            40_000,
+            32_768,
+        )
+
     async def test_admitted_content_is_read_whole_by_l3(self) -> None:
         with ExitStack() as stack:
             mocks = _patches(stack)
