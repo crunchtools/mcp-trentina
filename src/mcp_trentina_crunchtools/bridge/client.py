@@ -26,6 +26,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +38,7 @@ from nio import (
     LoginResponse,
     MegolmEvent,
     RoomSendResponse,
+    ShareGroupSessionError,
     SyncError,
     SyncResponse,
 )
@@ -130,9 +132,13 @@ class Bridge:
         return self.settings.store_dir / "pending.json"
 
     def _write_private(self, path: Path, text: str) -> None:
+        """Write atomically, 0600 from the first byte: the session file holds
+        the upstream access token. O_EXCL refuses a planted file or symlink."""
         staged = path.with_suffix(".tmp")
-        staged.write_text(text, encoding="utf-8")
-        staged.chmod(0o600)
+        staged.unlink(missing_ok=True)
+        fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
         staged.replace(path)
 
     def _load_pending(self) -> dict[str, tuple[str, dict[str, Any], float]]:
@@ -267,7 +273,9 @@ class Bridge:
         So the agent's local room exists, and the agent is in it, before the
         first message arrives. Created on the first message instead, the room
         would invite the agent at the moment the message was written, and the
-        agent would join too late to read it. Once per room per process; the
+        agent would join too late to read it. Scans every room the client knows, not this sync's: a
+        resumed sync omits unchanged rooms, which a restart would then never
+        announce. Once per room per process; the
         gateway dedupes a repeat.
         """
         for room_id in sorted(set(self.client.rooms) - self._announced):
@@ -499,7 +507,13 @@ class Bridge:
             if olm is None:
                 raise SendError("encryption is not loaded")
             if olm.should_share_group_session(room_id):
-                await self.client.share_group_session(room_id, ignore_unverified_devices=True)
+                shared = await self.client.share_group_session(
+                    room_id, ignore_unverified_devices=True
+                )
+                # An error comes back as a response, not an exception. Sending
+                # anyway would post ciphertext its recipients hold no key for.
+                if isinstance(shared, ShareGroupSessionError):
+                    raise SendError(f"could not share the room key: {shared}")
             encrypted_type, encrypted = self.client.encrypt(room_id, event_type, content)
         if encrypted_type != "m.room.encrypted":
             raise SendError(f"refusing to send {event_type} unencrypted into {room_id}")

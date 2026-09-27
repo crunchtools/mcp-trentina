@@ -27,6 +27,7 @@ from nio import (
     LoginResponse,
     MegolmEvent,
     RoomSendResponse,
+    ShareGroupSessionError,
     SyncError,
 )
 from nio.crypto.sessions import (
@@ -1096,3 +1097,24 @@ class TestConnectionErrors:
         await _bridge(tmp_path, FakeNio(), gateway).process(_sync(_text_event()), first=False)
         assert len(attempts) == 2
         assert token_file.read_text() == "s2"
+
+
+class TestKeyShareFailure:
+    async def test_a_refused_key_share_sends_nothing(self, tmp_path: Path) -> None:
+        @dataclass
+        class Refusing(PreparingNio):
+            async def share_group_session(self, _room: str, **_kw: Any) -> Any:
+                return ShareGroupSessionError("M_FORBIDDEN")
+
+        nio = Refusing()
+        with pytest.raises(SendError, match="room key"):
+            await _bridge(tmp_path, nio).send(ROOM, "m.room.message", {"body": "x"}, "t1")
+        assert nio.wire == []
+
+
+class TestPrivateWrites:
+    async def test_the_session_file_is_owner_only_and_leaves_no_temp(self, tmp_path: Path) -> None:
+        bridge = _login_bridge(tmp_path, FakeLoginNio(), device_id="D", access_token="t")
+        await bridge.login()
+        assert (tmp_path / "session.json").stat().st_mode & 0o777 == 0o600
+        assert not (tmp_path / "session.tmp").exists()

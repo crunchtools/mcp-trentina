@@ -638,3 +638,21 @@ class TestShutdown:
         await close_bridges()
         assert closed == ["agent1"]
         assert routes_mod._registered == []
+
+
+class TestMetadataUpdates:
+    async def test_a_renamed_sender_and_room_are_mirrored(self, rig_factory: Any) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(_message())
+        later = _message("$e2")
+        later["sender_displayname"] = "Scott M"
+        later["room"] = {"name": "Ops 2", "topic": "new topic", "is_direct": False}
+        await rig.bridge.inbound(later)
+        calls = [(m, p) for m, p, _ in rig.conduit.calls]
+        assert ("PUT", "/profile/@remote__scott___m=3amatrix.org:agent1.local/displayname") in calls
+        assert ("PUT", "/rooms/!local1:agent1.local/state/m.room.name/") in calls
+        assert ("PUT", "/rooms/!local1:agent1.local/state/m.room.topic/") in calls
+        assert await rig.bridge.mapping.displayname(SCOTT) == "Scott M"
+        room = await rig.bridge.mapping.room_by_remote(ROOM)
+        assert room is not None
+        assert (room.name, room.topic) == ("Ops 2", "new topic")
