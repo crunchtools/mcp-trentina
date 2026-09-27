@@ -927,6 +927,16 @@ class TestTiming:
         assert record.levelno == logging.WARNING
         assert "in 7.00s (wait=7.00s judge=0.00s deliver=0.00s)" in record.getMessage()
 
+    async def test_an_upstream_event_id_cannot_forge_a_log_line(
+        self, rig_factory: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        rig = rig_factory()
+        with caplog.at_level(logging.INFO, logger=core.__name__):
+            await rig.bridge.inbound(_message("$e1\nmatrix_bridge: forged"))
+        [record] = [r for r in caplog.records if " inbound " in r.getMessage()]
+        assert "\n" not in record.getMessage()
+        assert "$e1\\nmatrix_bridge: forged" in record.getMessage()
+
     async def test_a_duplicate_logs_nothing(
         self, rig_factory: Any, caplog: pytest.LogCaptureFixture
     ) -> None:

@@ -72,6 +72,11 @@ class _Stages:
     def report(self, what: str) -> None:
         total = time.monotonic() - self._start
         level = logging.WARNING if total >= _SLOW_SECONDS else logging.INFO
+        if not logger.isEnabledFor(level):
+            return
+        # ``what`` carries upstream event IDs; escaped, one cannot forge a line.
+        if not what.isprintable():
+            what = repr(what)
         logger.log(level, "matrix_bridge: %s in %.2fs (%s)", what, total, " ".join(self._laps))
 
 
@@ -228,7 +233,10 @@ class ProfileBridge:
         else:
             # Event IDs are opaque; who said it and where stays out of the log.
             logger.warning(
-                "matrix_bridge: withheld inbound %s for %s: %s", event_id, self.profile.name, reason
+                "matrix_bridge: withheld inbound %r for %s: %s",
+                event_id,
+                self.profile.name,
+                reason,
             )
             # A withheld reaction has nothing to stand in for: it is dropped.
             out_type = "m.room.message"
