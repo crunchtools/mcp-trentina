@@ -365,7 +365,13 @@ class Bridge:
     def _room_info(self, room: MatrixRoom | None) -> dict[str, Any]:
         """Name, topic and, for a two-member room, the other member."""
         if room is None:
-            return {"name": "", "topic": "", "is_direct": False}
+            return {
+                "name": "",
+                "topic": "",
+                "is_direct": False,
+                "peer": "",
+                "peer_displayname": "",
+            }
         is_direct = room.member_count == 2
         peer = next((u for u in room.users if u != self.client.user_id), "") if is_direct else ""
         return {

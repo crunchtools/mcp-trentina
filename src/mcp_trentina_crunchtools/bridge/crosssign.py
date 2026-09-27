@@ -60,7 +60,22 @@ def _hkdf(key: bytes, info: bytes) -> tuple[bytes, bytes]:
 
 
 def decrypt_secret(key: bytes, name: str, encrypted: dict[str, str]) -> str:
-    """One SSSS secret, authenticated before it is decrypted."""
+    """One SSSS secret, authenticated before it is decrypted.
+
+    Args:
+        key: the 32-byte secret-storage key the recovery key decodes to.
+        name: the secret's account-data type, e.g. ``m.cross_signing.self_signing``;
+            it is the HKDF info, so a secret stored under another name fails.
+        encrypted: the stored object for this key: unpadded-base64 ``iv``,
+            ``ciphertext`` and ``mac``.
+
+    Returns:
+        The plaintext secret, itself unpadded base64 for a cross-signing seed.
+
+    Raises:
+        CrossSignError: the MAC does not match, so the key or the data is wrong.
+        KeyError, ValueError: a field is missing or not base64.
+    """
     aes_key, mac_key = _hkdf(key, name.encode())
     ciphertext = decode_base64(encrypted["ciphertext"])
     mac = hmac.new(mac_key, ciphertext, hashlib.sha256).digest()
@@ -72,7 +87,21 @@ def decrypt_secret(key: bytes, name: str, encrypted: dict[str, str]) -> str:
 
 def check_key(key: bytes, description: dict[str, Any]) -> None:
     """The recovery key opens this secret-storage key: it encrypts 32 zero
-    bytes under the empty name to the MAC the description publishes."""
+    bytes under the empty name to the MAC the description publishes.
+
+    Args:
+        key: the 32-byte secret-storage key the recovery key decodes to.
+        description: the ``m.secret_storage.key.<id>`` account data:
+            ``algorithm``, and unpadded-base64 ``iv`` and ``mac``.
+
+    Returns:
+        Nothing; returning at all means the key opens this storage.
+
+    Raises:
+        CrossSignError: the algorithm is not ``SSSS_ALGORITHM``, or the MAC
+            does not match (the key belongs to other storage).
+        KeyError, ValueError: a field is missing or not base64.
+    """
     if description.get("algorithm") != SSSS_ALGORITHM:
         raise CrossSignError(f"unsupported secret storage algorithm {description.get('algorithm')}")
     aes_key, mac_key = _hkdf(key, b"")

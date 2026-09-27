@@ -318,7 +318,8 @@ class ResettableAccount:
                     "params": {"org.matrix.cross_signing_reset": {"url": "https://account/reset"}},
                 },
             )
-        assert body["auth"] == {"type": "org.matrix.cross_signing_reset", "session": "uia1"}
+        if "auth" in body:
+            assert body["auth"] == {"type": "org.matrix.cross_signing_reset", "session": "uia1"}
         self.uploaded = body
         return httpx.Response(200, json={})
 
@@ -437,3 +438,72 @@ class TestResetIdentity:
         assert asked == []
         assert account.uploaded == {}
         assert account.signatures == []
+
+    async def test_an_upload_accepted_at_once_needs_no_approval(self) -> None:
+        account = ResettableAccount(approvals_needed=0)
+        asked: list[str] = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+            reset = await reset_identity(client, "https://hs", SESSION, asked.append, print)
+        assert asked == []
+        assert reset.master_key in account.uploaded["master_key"]["keys"]
+        assert "auth" not in account.uploaded
+        assert len(account.signatures) == 1
+
+
+def _route_clients(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
+    """Every client the one-shot commands open talks to ``handler``."""
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        main_mod.httpx,
+        "AsyncClient",
+        lambda **kw: real(transport=httpx.MockTransport(handler), **kw),
+    )
+
+
+class TestCommands:
+    """The sign-device and reset-identity wrappers around the functions above."""
+
+    async def test_sign_device_needs_the_recovery_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("BRIDGE_RECOVERY_KEY", raising=False)
+        with pytest.raises(SystemExit, match="needs BRIDGE_RECOVERY_KEY"):
+            await main_mod._sign_device(_settings(tmp_path))
+
+    async def test_sign_device_reports_a_wrong_key_as_an_exit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        account = Account()
+        _route_clients(monkeypatch, account)
+        monkeypatch.setenv("BRIDGE_RECOVERY_KEY", recovery_key(os.urandom(32)))
+        with pytest.raises(SystemExit, match=r"sign-device: .*does not open"):
+            await main_mod._sign_device(_settings(tmp_path))
+        assert account.uploads == []
+
+    async def test_sign_device_signs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        account = Account()
+        _route_clients(monkeypatch, account)
+        monkeypatch.setenv("BRIDGE_RECOVERY_KEY", recovery_key(account.key))
+        await main_mod._sign_device(_settings(tmp_path))
+        assert len(account.uploads) == 1
+
+    async def test_reset_prints_the_link_to_stderr_and_the_key_once_to_stdout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(crosssign, "_APPROVAL_POLL", 0.0)
+        _route_clients(monkeypatch, ResettableAccount())
+        await main_mod._reset_identity(_settings(tmp_path))
+        out, err = capsys.readouterr()
+        assert "https://account/reset" in err
+        assert "https://account/reset" not in out
+        assert out.count("Recovery key") == 1
+        assert "Recovery key" not in err
+
+    async def test_a_failed_reset_exits_and_points_at_sign_device(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _route_clients(
+            monkeypatch, ResettableAccount(challenge=httpx.Response(403, json={"errcode": "X"}))
+        )
+        with pytest.raises(SystemExit, match="finish with sign-device"):
+            await main_mod._reset_identity(_settings(tmp_path))
