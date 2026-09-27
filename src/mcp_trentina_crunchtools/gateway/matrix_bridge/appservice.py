@@ -282,7 +282,7 @@ class AppService:
 
     async def _hand_over(self, room: Room, owner: str) -> Room:
         """Turn a bot-made DM into a true one: the other person's stand-in
-        takes the bot's power, and the bot leaves (rooms made before 0.45.1)."""
+        takes the bot's power, and the bot leaves (rooms 0.45.0 made)."""
         await self.ensure_member(room, owner)
         levels = await self._call(
             "GET", "rooms", room.local_id, "state", "m.room.power_levels", "", as_user=self.bot_id

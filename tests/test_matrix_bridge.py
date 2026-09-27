@@ -762,6 +762,15 @@ class TestDirectMessages:
         assert notice["as"] == STAND_IN
         assert "not sent" in notice["content"]["body"]
 
+    async def test_a_dm_redaction_is_made_by_the_owner(self, rig_factory: Any, dm: Any) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(dm())
+        redaction = dm("$x") | {"type": "m.room.redaction", "redacts": "$d1", "content": {}}
+        assert await rig.bridge.inbound(redaction) == "redacted"
+        method, path, as_user = rig.conduit.calls[-1]
+        assert (method, as_user) == ("PUT", STAND_IN)
+        assert "/redact/" in path
+
     async def test_the_owner_is_remembered_across_a_restart(
         self, rig_factory: Any, dm: Any
     ) -> None:
@@ -776,7 +785,7 @@ class TestDirectMessages:
         assert restarted.upstream.sent == []
 
     async def test_a_bot_made_dm_is_handed_over(self, rig_factory: Any, dm: Any) -> None:
-        """Rooms made before 0.45.1 had the bot in them: it promotes the
+        """Rooms 0.45.0 made had the bot in them: it promotes the
         peer's stand-in and leaves."""
         rig = rig_factory()
         group_first = dm()

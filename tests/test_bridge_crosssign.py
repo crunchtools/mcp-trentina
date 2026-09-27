@@ -237,10 +237,15 @@ def _settings(tmp_path: Path) -> BridgeSettings:
 
 
 class TestLogoutDevice:
-    def _patch(self, monkeypatch: pytest.MonkeyPatch, calls: list[httpx.Request]) -> None:
+    def _patch(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        calls: list[httpx.Request],
+        answer: httpx.Response | None = None,
+    ) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             calls.append(request)
-            return httpx.Response(200, json={})
+            return answer or httpx.Response(200, json={})
 
         real = httpx.AsyncClient
         monkeypatch.setattr(
@@ -269,6 +274,15 @@ class TestLogoutDevice:
         with pytest.raises(SystemExit, match="own device"):
             await main_mod._logout_device(_settings(tmp_path))
         assert calls == []
+
+    async def test_a_refused_logout_is_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[httpx.Request] = []
+        self._patch(monkeypatch, calls, httpx.Response(401, json={"errcode": "M_UNKNOWN_TOKEN"}))
+        monkeypatch.setenv("BRIDGE_OLD_ACCESS_TOKEN", "old-token")
+        with pytest.raises(SystemExit, match=r"logout failed: 401 .*M_UNKNOWN_TOKEN"):
+            await main_mod._logout_device(_settings(tmp_path))
 
 
 class ResettableAccount:

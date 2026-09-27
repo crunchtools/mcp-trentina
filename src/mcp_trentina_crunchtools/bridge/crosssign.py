@@ -44,7 +44,10 @@ SELF_SIGNING = "m.cross_signing.self_signing"
 
 
 class CrossSignError(RuntimeError):
-    """The account cannot be read or signed as needed. Nothing was uploaded."""
+    """The account cannot be read, reset or signed as needed.
+
+    From ``sign_own_device`` nothing was uploaded. From ``reset_identity`` it
+    depends on the step, which its docstring lists."""
 
 
 def _hkdf(key: bytes, info: bytes) -> tuple[bytes, bytes]:
