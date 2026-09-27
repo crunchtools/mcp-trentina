@@ -40,6 +40,11 @@ class Channel(str, Enum):
     TOOL = "tool"
     # What a backend says about its own tools, on the tools/list path (#176).
     TOOL_DESCRIPTION = "tool_description"
+    # One inbound message's plaintext, handed over by a Matrix bridge (#162).
+    # TEXT: the bridge already did the decrypting, so what is scanned is what
+    # is delivered. No processor declares it yet; an empty chain is the only
+    # valid config until one earns its place on chat-sized payloads.
+    MATRIX_BRIDGE = "matrix_bridge"
 
 
 class Kind(str, Enum):

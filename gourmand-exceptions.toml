@@ -512,6 +512,13 @@ justification = "Not a runtime toggle. This test reads CI to FAIL when the vodoz
 classification = "by_design"
 
 [[exceptions]]
+check = "hidden_env_config"
+path = "tests/test_matrix_bridge_config.py"
+pattern = "CI"
+justification = "Not a runtime toggle. This test reads CI to FAIL when matrix-nio[e2e] is missing on a CI leg, so the bridge suite cannot skip itself into a green run. It changes no production behaviour -- there is no CI check anywhere in src/ -- and the check it guards is documented in the test's own docstring."
+classification = "by_design"
+
+[[exceptions]]
 check = "dead_structs"
 path = "src/mcp_trentina_crunchtools/matrix/keybackup.py"
 pattern = "KeyBackupProvider"

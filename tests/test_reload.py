@@ -93,6 +93,24 @@ BETA_MATRIX_YAML = BASE_YAML.replace(
     "        deadline_seconds: 20.0\n",
 )
 
+BETA_BRIDGE_YAML = BASE_YAML.replace(
+    "  beta:\n    auth:\n      bearer_token_env: TEST_BETA_TOKEN\n",
+    "  beta:\n    auth:\n      bearer_token_env: TEST_BETA_TOKEN\n"
+    "    matrix_bridge:\n"
+    "      public_user_id: '@beta:matrix.org'\n"
+    "      bridge_url: http://127.0.0.1:8471\n"
+    "      bridge_token_env: TEST_BETA_BRIDGE\n"
+    "      ingress_token_env: TEST_BETA_INGRESS\n"
+    "      enforcement: block\n"
+    "      local:\n"
+    "        homeserver: http://127.0.0.1:6167\n"
+    "        server_name: beta.local\n"
+    "        as_token_env: TEST_BETA_AS\n"
+    "        hs_token_env: TEST_BETA_HS\n",
+)
+
+BETA_BRIDGE_FLAG_YAML = BETA_BRIDGE_YAML.replace("enforcement: block", "enforcement: flag")
+
 # The same, with BOTH an operator-only field and an agent-settable one moved.
 BETA_MATRIX_NARROWED_YAML = BETA_MATRIX_YAML.replace(
     "        processors: []\n        deadline_seconds: 20.0\n",
@@ -532,6 +550,47 @@ class TestPerimeterIsOperatorOnly:
         result = await _reload_as("alpha")
 
         assert result["reloaded"] is False
+
+
+class TestBridgeIsOperatorOnly:
+    """Every field of matrix_bridge shapes the perimeter (#162)."""
+
+    async def test_agent_cannot_move_its_own_bridge(self, profiles_path: Path) -> None:
+        profiles_path.write_text(BETA_BRIDGE_YAML, encoding="utf-8")
+        await _reload_as("alpha")
+
+        profiles_path.write_text(BETA_BRIDGE_FLAG_YAML, encoding="utf-8")
+        result = await _reload_as("beta")
+
+        assert result["reloaded"] is True
+        assert _registry()["beta"].matrix_bridge.enforcement == "block"
+        assert "matrix_bridge" in result["not_applied"]["operator_only"]
+
+    async def test_agent_cannot_remove_its_own_bridge(self, profiles_path: Path) -> None:
+        profiles_path.write_text(BETA_BRIDGE_YAML, encoding="utf-8")
+        await _reload_as("alpha")
+
+        profiles_path.write_text(BASE_YAML, encoding="utf-8")
+        result = await _reload_as("beta")
+
+        assert _registry()["beta"].matrix_bridge is not None
+        assert "matrix_bridge" in result["not_applied"]["operator_only"]
+
+    async def test_removing_a_bridged_profile_says_so(self, profiles_path: Path) -> None:
+        profiles_path.write_text(BETA_BRIDGE_YAML, encoding="utf-8")
+        await _reload_as("alpha")
+
+        profiles_path.write_text(ALPHA_ONLY_YAML, encoding="utf-8")
+        result = await _reload_as("alpha")
+
+        assert any("matrix_bridge changed for ['beta']" in n for n in result["not_applied"])
+
+    async def test_operator_reload_says_a_restart_is_needed(self, profiles_path: Path) -> None:
+        profiles_path.write_text(BETA_BRIDGE_YAML, encoding="utf-8")
+        result = await _reload_as("alpha")
+
+        assert result["reloaded"] is True
+        assert any("matrix_bridge changed for ['beta']" in n for n in result["not_applied"])
 
 
 class TestUnknownCaller:

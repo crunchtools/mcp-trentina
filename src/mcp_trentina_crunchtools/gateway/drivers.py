@@ -96,6 +96,7 @@ CHANNEL_KIND: dict[Channel, Kind] = {
     Channel.TOOL_DESCRIPTION: Kind.TEXT,
     Channel.ALERT: Kind.TEXT,
     Channel.MATRIX: Kind.DOCUMENT,
+    Channel.MATRIX_BRIDGE: Kind.TEXT,
 }
 
 

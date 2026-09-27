@@ -1,6 +1,6 @@
 [project]
 name = "mcp-trentina-crunchtools"
-version = "0.43.1"
+version = "0.44.0"
 description = "Secure MCP gateway and quarantine for AI agent traffic — three-layer defense against prompt injection"
 requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
@@ -67,6 +67,14 @@ dependencies = [
 # wheels for cp310-cp315, so no compiler is involved.
 matrix = [
     "vodozemac>=0.10,<0.11",
+]
+# The Matrix bridge (#162, spec 015): the public-side client that holds the
+# login, device and crypto store. Its e2e extra is built on vodozemac, the same
+# library as `matrix` above, so the two resolve to one copy. Not in the image
+# yet: nothing runs a bridge until phase 1, and an unused crypto stack in the
+# gateway image is attack surface with no purpose.
+bridge = [
+    "matrix-nio[e2e]>=0.26,<0.27",
 ]
 dev = [
     "pytest>=8.0",

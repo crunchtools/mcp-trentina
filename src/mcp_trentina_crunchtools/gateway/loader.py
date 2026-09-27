@@ -89,6 +89,7 @@ def _build_profile(name: str, body: Any) -> Profile:
     _resolve_llm_key_secrets(name, profile)
     _expand_backend_headers(name, profile)
     _check_drivers(name, profile)
+    _check_matrix_bridge(name, profile)
     if profile.alert_ingress is not None:
         _resolve_alert_ingress_secrets(name, profile.alert_ingress)
 
@@ -136,6 +137,29 @@ def _check_drivers(name: str, profile: Profile) -> None:
             profile.matrix_ingress.preprocess,
             channel=Channel.MATRIX,
             profile_name=name,
+        )
+    if profile.matrix_bridge is not None:
+        build_preprocessors(
+            profile.matrix_bridge.preprocess,
+            channel=Channel.MATRIX_BRIDGE,
+            profile_name=name,
+        )
+
+
+def _check_matrix_bridge(name: str, profile: Profile) -> None:
+    """Refuse a bridge that claims to run before the bridge exists (#162).
+
+    Phase 0 settles the config shape and nothing consumes it. Accepting
+    ``enabled: true`` would give a profile that reads as bridged while its
+    messages still reach the agent as ciphertext through the old proxy, which
+    is the gap the bridge exists to close. Relaxed by the phase that ships
+    the inbound path.
+    """
+    bridge = profile.matrix_bridge
+    if bridge is not None and bridge.enabled:
+        raise ProfileConfigError(
+            f"Profile {name!r}: matrix_bridge.enabled is not supported yet — "
+            "the bridge's inbound path has not shipped (#162). Leave it false"
         )
 
 

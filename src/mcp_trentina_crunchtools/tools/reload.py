@@ -218,7 +218,22 @@ def _unapplied(active: ActiveConfig, new_config: GatewayConfig) -> list[str]:
             "restart to serve it"
         )
     notes.extend(_unapplied_delegated(current, new_config))
+    notes.extend(_unapplied_bridges(current, new_config))
     return notes
+
+
+def _unapplied_bridges(current: GatewayConfig, new_config: GatewayConfig) -> list[str]:
+    """Name the profiles whose ``matrix_bridge`` moved: a bridge binds its
+    endpoints at startup, so a reload validates the edit and applies none."""
+    moved = sorted(
+        name
+        for name in set(current.profiles) | set(new_config.profiles)
+        if getattr(current.profiles.get(name), "matrix_bridge", None)
+        != getattr(new_config.profiles.get(name), "matrix_bridge", None)
+    )
+    if not moved:
+        return []
+    return [f"matrix_bridge changed for {moved}: restart to apply"]
 
 
 def _uses_oauth_proxy(profile: Profile) -> bool:
@@ -304,6 +319,12 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
     effect is told rather than left to discover it.
     """
     held = _hold_preprocess_floor(before, after)
+    # The bridge block is perimeter end to end: where the plaintext side
+    # lives, who may write to it, what a flagged message becomes. None of it
+    # is an agent's performance knob, so the whole block is held.
+    if after.matrix_bridge != before.matrix_bridge:
+        after.matrix_bridge = before.matrix_bridge
+        held.append("matrix_bridge")
     b = before.matrix_ingress
     a = after.matrix_ingress
     if b is None or a is None:
@@ -447,7 +468,7 @@ async def _apply_own_profile(
     if held:
         not_applied["operator_only"] = held
         not_applied["reason"] = (
-            "these settings decide how much of a payload is scanned; an "
+            "these settings shape this profile's perimeter; an "
             "operator reload or a restart applies them"
         )
     if restart_required:
