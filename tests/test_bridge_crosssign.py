@@ -32,7 +32,12 @@ from mcp_trentina_crunchtools.bridge.crosssign import (
     sign_own_device,
 )
 from mcp_trentina_crunchtools.bridge.settings import BridgeSettings
-from mcp_trentina_crunchtools.matrix.recovery_key import PREFIX
+from mcp_trentina_crunchtools.matrix.recovery_key import (
+    PREFIX,
+    RecoveryKeyError,
+    decode_recovery_key,
+    encode_recovery_key,
+)
 
 USER = "@agent2-bot:matrix.org"
 DEVICE = "NEWDEV"
@@ -216,6 +221,27 @@ async def test_a_failed_homeserver_call_is_reported_not_taken_for_success(
     assert account.uploads == []
 
 
+def test_hkdf_matches_rfc_5869_with_no_salt() -> None:
+    """RFC 5869 test case 3: an empty salt is 32 zero bytes, as SSSS uses."""
+    first, second = crosssign._hkdf(b"\x0b" * 22, b"")
+    assert (first + second)[:42].hex() == (
+        "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8"
+    )
+
+
+class TestEncodeRecoveryKey:
+    def test_it_matches_an_independent_encoding_and_round_trips(self) -> None:
+        key = bytes(range(32))
+        encoded = encode_recovery_key(key)
+        assert encoded.replace(" ", "") == recovery_key(key)
+        assert all(len(group) == 4 for group in encoded.split()[:-1])
+        assert decode_recovery_key(encoded) == key
+
+    def test_a_key_of_the_wrong_length_is_refused(self) -> None:
+        with pytest.raises(RecoveryKeyError, match="expected 32"):
+            encode_recovery_key(b"short")
+
+
 def _settings(tmp_path: Path) -> BridgeSettings:
     (tmp_path / "session.json").write_text(json.dumps(SESSION))
     return BridgeSettings(
@@ -304,6 +330,7 @@ class ResettableAccount:
         self.challenge = challenge
         self.refused_writes: set[str] = set()
         self.refused_signatures = False
+        self.refused_reads: set[str] = set()
         self.uploaded: dict[str, Any] = {}
         self.signatures: list[dict[str, Any]] = []
         self.pending = approvals_needed
@@ -337,7 +364,8 @@ class ResettableAccount:
 
     def _account_data(self, request: httpx.Request) -> httpx.Response:
         kind = request.url.path.rsplit("/", 1)[1]
-        if request.method == "PUT" and kind in self.refused_writes:
+        refused = self.refused_writes if request.method == "PUT" else self.refused_reads
+        if kind in refused:
             return httpx.Response(500, json={"errcode": "M_UNKNOWN"})
         if request.method == "PUT":
             self.data[kind] = json.loads(request.content)
@@ -414,6 +442,28 @@ class TestResetIdentity:
         assert "m.secret_storage.default_key" in account.data, (
             "the stored keys match no published identity; a rerun replaces them"
         )
+
+    async def test_copies_under_other_storage_keys_survive(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(crosssign, "_APPROVAL_POLL", 0.0)
+        account = ResettableAccount()
+        old = {"iv": "i", "ciphertext": "c", "mac": "m"}
+        account.data["m.cross_signing.master"] = {"encrypted": {"old": old}}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+            await reset_identity(client, "https://hs", SESSION, print, print)
+        copies = account.data["m.cross_signing.master"]["encrypted"]
+        assert copies["old"] == old
+        assert len(copies) == 2
+
+    async def test_an_unreadable_secret_is_not_taken_for_an_absent_one(self) -> None:
+        account = ResettableAccount()
+        account.data["m.cross_signing.master"] = {"encrypted": {"old": {}}}
+        account.refused_reads = {"m.cross_signing.master"}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+            with pytest.raises(CrossSignError, match=r"reading m\.cross_signing\.master: 500"):
+                await reset_identity(client, "https://hs", SESSION, print, print)
+        assert account.data["m.cross_signing.master"] == {"encrypted": {"old": {}}}
 
     async def test_a_failed_store_hands_out_no_key_and_publishes_nothing(self) -> None:
         account = ResettableAccount()

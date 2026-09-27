@@ -135,7 +135,19 @@ def public_key(seed: bytes) -> str:
 
 
 def sign(value: dict[str, Any], seed: bytes) -> tuple[str, str]:
-    """``(key id, signature)`` over ``value`` minus signatures and unsigned."""
+    """Sign a Matrix object with an Ed25519 key.
+
+    Args:
+        value: the JSON object to sign, e.g. device keys or a cross-signing
+            key. Its ``signatures`` and ``unsigned`` are left out of what is
+            signed, as the spec requires; ``value`` itself is not changed.
+        seed: the key's 32-byte Ed25519 seed (the private key as stored).
+
+    Returns:
+        ``(key id, signature)``: ``ed25519:<unpadded-base64 public key>``,
+        the ID a signature is filed under, and the unpadded-base64 signature
+        over the canonical JSON.
+    """
     key = _signing_key(seed)
     public = _public(key)
     body = {k: v for k, v in value.items() if k not in ("signatures", "unsigned")}
@@ -354,23 +366,28 @@ async def reset_identity(
     key_id = encode_base64(os.urandom(_KEY_ID_BYTES))
     check = _encrypt_secret(storage_key, "", "\0" * 32)
 
+    def data_url(kind: str) -> str:
+        return f"{base}/user/{quote(user_id, safe='')}/account_data/{quote(kind, safe='')}"
+
     async def put(kind: str, content: dict[str, Any]) -> None:
-        resp = await client.put(
-            f"{base}/user/{quote(user_id, safe='')}/account_data/{quote(kind, safe='')}",
-            headers=auth,
-            json=content,
-        )
-        _require(resp, f"storing {kind}")
+        _require(await client.put(data_url(kind), headers=auth, json=content), f"storing {kind}")
 
     await put(
         f"m.secret_storage.key.{key_id}",
         {"algorithm": SSSS_ALGORITHM, "iv": check["iv"], "mac": check["mac"]},
     )
+    # Added beside the copies under other storage keys, never over them: a
+    # reset stopped before default_key moves leaves the old key's copies,
+    # and so the published identity, exactly as readable as before.
     for usage, seed in seeds.items():
         name = f"m.cross_signing.{usage}"
-        await put(
-            name, {"encrypted": {key_id: _encrypt_secret(storage_key, name, encode_base64(seed))}}
-        )
+        current = await client.get(data_url(name), headers=auth)
+        # 404 is "never stored"; any other failure must not be taken for it.
+        stored = {} if current.status_code == 404 else _require(current, f"reading {name}")
+        encrypted = stored.get("encrypted")
+        copies = dict(encrypted) if isinstance(encrypted, dict) else {}
+        copies[key_id] = _encrypt_secret(storage_key, name, encode_base64(seed))
+        await put(name, {"encrypted": copies})
     await put("m.secret_storage.default_key", {"key": key_id})
     on_recovery_key(recovery_key)
 
