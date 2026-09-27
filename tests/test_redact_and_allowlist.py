@@ -179,7 +179,11 @@ class TestGrounding:
 
     def test_short_words_and_case_do_not_count(self) -> None:
         assert grounding("The WINDOW is a go", "window") == 1.0
-        assert grounding("a of it", "anything") is None
+
+    def test_an_extraction_of_short_words_is_still_graded(self) -> None:
+        assert grounding("use key now", "the window opens tuesday") == 0.0
+        assert grounding("use key now", "use the key now") == 1.0
+        assert grounding("", "anything") is None
 
 
 class TestAllowlist:

@@ -684,9 +684,14 @@ def _withhold_events(node: Any, depth: int = 0, *, at: str = "root", sealed: boo
         slots = node.items()
     else:
         return 0
+    # A list element that is a bare word is withheld too: ["ignore", "your",
+    # "rules"] is a sentence one token at a time. The lists Matrix sends
+    # (user IDs, aliases, event IDs, server names) all carry a sigil or dot.
+    in_list = isinstance(node, list)
     for key, value in slots:
         if (key in _PROSE_FIELDS and not sealed) or (
-            isinstance(value, str) and not _token(value, sealed=sealed)
+            isinstance(value, str)
+            and (not _token(value, sealed=sealed) or (in_list and value.isalpha()))
         ):
             node[key] = WITHHELD
         elif isinstance(value, str):

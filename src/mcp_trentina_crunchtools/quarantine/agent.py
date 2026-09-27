@@ -389,6 +389,7 @@ only a title or an app shell for the model to reconstruct from its priors
 (#245). Such a call is answered without turn 2."""
 
 _WORD = re.compile(r"[^\W_]{4,}")
+_ANY_WORD = re.compile(r"[^\W_]+")
 _STEM = 6
 
 GROUNDING_REFUSAL = 0.3
@@ -403,15 +404,18 @@ def grounding(extracted: str, source: str) -> float | None:
 
     Words are runs of four or more letters or digits, case-folded and cut to
     ``_STEM`` characters, so connectives do not count either way and
-    ``restart`` matches ``restarts``. None when the extraction has none.
+    ``restart`` matches ``restarts``. An extraction with no such word is
+    graded on its short words instead, so "use key now" cannot skip the
+    refusal. None only when it has no word at all.
     An honest extraction reuses the source's vocabulary; paraphrase and
     translation lower the share, which is why it grades rather than decides
     everywhere above ``GROUNDING_REFUSAL``.
     """
-    words = {w.casefold()[:_STEM] for w in _WORD.findall(extracted)}
+    pattern = _WORD if _WORD.search(extracted) else _ANY_WORD
+    words = {w.casefold()[:_STEM] for w in pattern.findall(extracted)}
     if not words:
         return None
-    present = {w.casefold()[:_STEM] for w in _WORD.findall(source)}
+    present = {w.casefold()[:_STEM] for w in pattern.findall(source)}
     return len(words & present) / len(words)
 
 
@@ -419,7 +423,8 @@ def confidence_of(share: float | None) -> str:
     """``grounding`` as the delivered ``high``/``medium``/``low``."""
     if share is None:
         return "low"
-    return next((label for floor, label in _CONFIDENCE_BANDS if share >= floor), "low")
+    bands = sorted(_CONFIDENCE_BANDS, reverse=True)
+    return next((label for floor, label in bands if share >= floor), "low")
 
 
 VERIFIED_FIELDS = ("extracted_text", "title")
