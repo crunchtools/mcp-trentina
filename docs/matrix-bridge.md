@@ -180,10 +180,11 @@ It generates new cross-signing keys, stores them in new secret storage, and
 prints the new recovery key once, before anything is published. Keep it. Then
 it uploads the identity; a homeserver behind MAS first asks the account owner
 to approve the reset, so the command prints a link, to be opened while logged
-in as the account, and waits up to ten minutes. Last, it signs the bridge's
-device. If that step fails, `sign-device` with the printed key finishes it; if
-the reset is never approved, nothing was published and a rerun replaces the
-stored keys. Everyone who had verified the account sees its identity change and
+in as the account, and waits up to ten minutes. Once it is published, the new
+storage becomes the account's default and the bridge's device is signed. If
+signing fails, `sign-device` with the printed key finishes it; if the reset is
+never approved, nothing was published, the account's storage is as it was,
+and a rerun starts again. Everyone who had verified the account sees its identity change and
 verifies it again.
 
 ## Conduit

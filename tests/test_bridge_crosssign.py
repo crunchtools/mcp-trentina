@@ -267,6 +267,18 @@ async def test_device_keys_the_bridge_does_not_hold_are_never_signed() -> None:
     assert account.uploads == []
 
 
+@pytest.mark.parametrize("field", ["user_id", "device_id"])
+async def test_another_devices_keys_are_never_signed(field: str) -> None:
+    account = Account()
+    account.device[field] = "@other:hs" if field == "user_id" else "OTHER"
+    async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+        with pytest.raises(CrossSignError, match="another device's keys"):
+            await sign_own_device(
+                client, "https://hs", SESSION, DEVICE_KEYS, recovery_key(account.key)
+            )
+    assert account.uploads == []
+
+
 async def test_a_stored_seed_of_the_wrong_length_is_refused() -> None:
     account = Account()
     account.data["m.cross_signing.self_signing"]["encrypted"][KEY_ID] = encrypt(
@@ -497,8 +509,8 @@ class TestResetIdentity:
                 await reset_identity(client, "https://hs", SESSION, DEVICE_KEYS, print, print)
         assert account.uploaded == {}, "no identity was published"
         assert account.signatures == []
-        assert "m.secret_storage.default_key" in account.data, (
-            "the stored keys match no published identity; a rerun replaces them"
+        assert "m.secret_storage.default_key" not in account.data, (
+            "the account's storage is untouched until the identity is published"
         )
 
     async def test_copies_under_other_storage_keys_survive(

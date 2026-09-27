@@ -352,10 +352,12 @@ async def reset_identity(
         recovery key (also already handed to ``on_recovery_key``).
 
     Raises:
-        CrossSignError: storing the secrets failed (nothing was published),
-            the upload was refused or never approved (the stored keys match no
-            published identity and are replaced by a rerun), or signing
-            failed (finish with ``sign-device``).
+        CrossSignError: storing the secrets failed, or the upload was
+            refused or never approved: then nothing was published and the
+            account's default storage is untouched, the new copies sitting
+            unused beside it. Or the default could not be switched after
+            publishing (rerun the reset), or signing failed (finish with
+            ``sign-device``).
         httpx.HTTPError: the homeserver could not be reached, at any step;
             propagated, and the step it stopped at is as for CrossSignError.
     """
@@ -374,10 +376,9 @@ async def reset_identity(
         "self_signing_key": keys["self_signing"],
         "user_signing_key": keys["user_signing"],
     }
-    # Stored before anything is published, so the printed key and the
-    # account's secret storage always agree: if the upload then fails or is
-    # never approved, the stored keys match no published identity,
-    # sign-device refuses them, and a rerun replaces them.
+    # Stored before anything is published, so the printed key always opens
+    # what gets published; made the default only after, so a reset that is
+    # refused or never approved leaves the account exactly as it was.
     storage_key = os.urandom(32)
     recovery_key = encode_recovery_key(storage_key)
     key_id = encode_base64(os.urandom(_KEY_ID_BYTES))
@@ -393,9 +394,8 @@ async def reset_identity(
         f"m.secret_storage.key.{key_id}",
         {"algorithm": SSSS_ALGORITHM, "iv": check["iv"], "mac": check["mac"]},
     )
-    # Added beside the copies under other storage keys, never over them: a
-    # reset stopped before default_key moves leaves the old key's copies,
-    # and so the published identity, exactly as readable as before.
+    # Added beside the copies under other storage keys, never over them:
+    # until default_key moves, the old key's copies are what is in use.
     for usage, seed in seeds.items():
         name = f"m.cross_signing.{usage}"
         current = await client.get(data_url(name), headers=auth)
@@ -405,12 +405,12 @@ async def reset_identity(
         copies = dict(encrypted) if isinstance(encrypted, dict) else {}
         copies[key_id] = _encrypt_secret(storage_key, name, encode_base64(seed))
         await put(name, {"encrypted": copies})
-    await put("m.secret_storage.default_key", {"key": key_id})
     on_recovery_key(recovery_key)
 
     await _upload_with_approval(
         client, f"{base}/keys/device_signing/upload", auth, body, on_approval
     )
+    await put("m.secret_storage.default_key", {"key": key_id})
     await sign_own_device(client, homeserver, session, device_keys, recovery_key)
     return Reset(device_id, master_id, recovery_key)
 
@@ -439,8 +439,10 @@ async def _upload_with_approval(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _APPROVAL_WINDOW
     last = ""
-    while loop.time() < deadline:
-        await asyncio.sleep(_APPROVAL_POLL)
+    while (remaining := deadline - loop.time()) > 0:
+        await asyncio.sleep(min(_APPROVAL_POLL, remaining))
+        if loop.time() >= deadline:
+            break
         resp = await client.post(url, headers=auth, json=retry)
         if resp.status_code == 200:
             return
