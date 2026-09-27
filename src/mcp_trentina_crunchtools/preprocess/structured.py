@@ -80,7 +80,7 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any
+from typing import Any, NamedTuple
 
 from petit import pull_identifiers
 from petit.Filter import Filter
@@ -133,8 +133,20 @@ _OMITTED = "[structured] {count} more element(s) with this shape omitted"
 _LISTED = "[structured] {count} more element(s) with this shape; {fields}: {rows}"
 _IDENTICAL = "[structured] {count} more element(s) identical to the one above"
 
-# A listing's group: masked JSON, identifier pointers, where integers were.
-_GroupKey = tuple[str, tuple[str, ...], frozenset[str]]
+
+class _GroupKey(NamedTuple):
+    """What an element must share with the others to be listed with them."""
+
+    masked_json: str
+    fields: tuple[str, ...]
+    """Identifier pointers, as petit writes them."""
+    int_pointers: frozenset[str]
+    """Every pointer that held an integer, pulled or not."""
+
+
+class _Pulled(NamedTuple):
+    key: _GroupKey
+    values: tuple[str, ...]
 
 
 def _pointer_token(key: str) -> str:
@@ -168,7 +180,7 @@ def _stringify_ints(node: Any, pointer: str, depth: int, found: set[str]) -> Any
     return node if copied is None else copied
 
 
-def _identifiers(item: Any) -> tuple[_GroupKey, tuple[str, ...]] | None:
+def _identifiers(item: Any) -> _Pulled | None:
     """The element's listing key and its identifier values, or None.
 
     Tried with integers stringified first; if that finds nothing to pull, or
@@ -186,7 +198,7 @@ def _identifiers(item: Any) -> tuple[_GroupKey, tuple[str, ...]] | None:
     # not an identifier, stays in the masked text as "-1", and must not
     # match a record whose "-1" was a string all along.
     text = json.dumps(masked, sort_keys=True, ensure_ascii=False)
-    return (text, fields, frozenset(ints)), values
+    return _Pulled(_GroupKey(text, fields, frozenset(ints)), values)
 
 
 _TRUNCATED = "... [structured] {count} more character(s) truncated"
@@ -324,31 +336,31 @@ class _Lister:
         self._sizes: dict[_GroupKey, int] = {}
         for found in self.pulled:
             if found is not None:
-                self._sizes[found[0]] = self._sizes.get(found[0], 0) + 1
+                self._sizes[found.key] = self._sizes.get(found.key, 0) + 1
         self._open: dict[_GroupKey, _Listing] = {}
         self._all: list[_Listing] = []
         self.groups = 0
         self.elements = 0
 
-    def take(self, found: tuple[_GroupKey, tuple[str, ...]] | None) -> bool:
+    def take(self, found: _Pulled | None) -> bool:
         """List the element in its open group, if it has one with room."""
         if found is None:
             return False
-        listing = self._open.get(found[0])
+        listing = self._open.get(found.key)
         if listing is None or len(listing.rows) >= _MAX_LISTED:
             return False
-        listing.rows.append(found[1])
+        listing.rows.append(found.values)
         return True
 
-    def opens(self, found: tuple[_GroupKey, tuple[str, ...]]) -> bool:
+    def opens(self, found: _Pulled) -> bool:
         """Whether another element of the array shares this element's key."""
-        return self._sizes[found[0]] > 1
+        return self._sizes[found.key] > 1
 
-    def open(self, found: tuple[_GroupKey, tuple[str, ...]], kept: list[Any]) -> None:
+    def open(self, found: _Pulled, kept: list[Any]) -> None:
         """The element just appended to ``kept`` starts a group; reserve its marker."""
         kept.append(None)
-        listing = _Listing(len(kept) - 1, found[0][1], found[1])
-        self._open[found[0]] = listing
+        listing = _Listing(len(kept) - 1, found.key.fields, found.values)
+        self._open[found.key] = listing
         self._all.append(listing)
 
     def finish(self, kept: list[Any]) -> list[Any]:

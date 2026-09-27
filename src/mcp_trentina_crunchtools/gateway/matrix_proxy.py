@@ -615,16 +615,21 @@ def _withholds(profile: Profile) -> bool:
     return ingress is None or ingress.unjudged == "withhold"
 
 
-def _token(value: str) -> bool:
+def _token(value: str, *, sealed: bool = False) -> bool:
     """Whether an unjudged string may survive: one printable token.
 
     ``isprintable`` is False for the format characters (zero-width space,
     joiners, bidi controls) and ``isspace`` catches the printable spaces
     (no-break, ideographic) that would otherwise join a sentence into one
     "token". A token can still be ``ignore-all-rules``; it cannot be longer
-    than a Matrix ID may be.
+    than a Matrix ID may be, except ``sealed``: inside an E2EE to-device
+    event, where ciphertext and keys are long single tokens.
     """
-    return len(value) <= _TOKEN_MAX and value.isprintable() and not any(c.isspace() for c in value)
+    return (
+        (sealed or len(value) <= _TOKEN_MAX)
+        and value.isprintable()
+        and not any(c.isspace() for c in value)
+    )
 
 
 def _rebuild_room_event(node: dict[str, Any]) -> int:
@@ -657,9 +662,11 @@ def _withhold_events(node: Any, depth: int = 0, *, at: str = "root") -> int:
     client's room model and ``next_batch`` survive; no sentence does, in
     content, ``unsigned``, extensions or anywhere else. On top of that, a
     room event (``event_id``, no ``state_key``) is rebuilt as the notice
-    plus its relation; an encrypted one becomes a plain notice. Only an E2EE
-    event at the response's own ``to_device.events[i]`` passes verbatim
-    (``at``); the same shape anywhere else is walked like everything else.
+    plus its relation; an encrypted one becomes a plain notice. An E2EE
+    event at the response's own ``to_device.events[i]`` (``at``) is walked
+    ``sealed``: its tokens may be as long as ciphertext is, and its ``body``
+    is ciphertext, not prose. Whitespace text is withheld there too. The
+    same shape anywhere else is walked like everything else.
     Past ``_MAX_WALK_DEPTH`` a subtree is withheld whole: unwalked is
     withheld.
     """
@@ -668,22 +675,31 @@ def _withhold_events(node: Any, depth: int = 0, *, at: str = "root") -> int:
         events = 0
     elif isinstance(node, dict):
         if at == "to_device.events[]" and node.get("type") in _E2EE_TO_DEVICE:
-            return 0
-        events = _rebuild_room_event(node)
-        for key in [k for k in node if not _token(str(k))]:
+            at = "sealed"
+        events = _rebuild_room_event(node) if at != "sealed" else 0
+        for key in [k for k in node if not _token(str(k), sealed=at == "sealed")]:
             del node[key]
         slots = node.items()
     else:
         return 0
+    sealed = at == "sealed"
     for key, value in slots:
-        if key in _PROSE_FIELDS or (isinstance(value, str) and not _token(value)):
+        if (key in _PROSE_FIELDS and not sealed) or (
+            isinstance(value, str) and not _token(value, sealed=sealed)
+        ):
             node[key] = WITHHELD
         elif isinstance(value, str):
             continue
         elif depth >= _MAX_WALK_DEPTH and isinstance(value, (dict, list)):
             node[key] = WITHHELD
         else:
-            step = f"{at}[]" if at == "to_device.events" else _PATH_STEPS.get((at, key), "")
+            step = (
+                at
+                if sealed
+                else f"{at}[]"
+                if at == "to_device.events"
+                else _PATH_STEPS.get((at, key), "")
+            )
             events += _withhold_events(value, depth + 1, at=step)
     return events
 

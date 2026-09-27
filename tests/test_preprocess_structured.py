@@ -175,8 +175,15 @@ class TestIdentifierListing:
             "[structured] 100 more element(s) with this shape; /key: "
             + ", ".join(r["key"] for r in _KEYED[1:101])
         )
-        # Past _MAX_LISTED the next member opens a new group, verbatim.
-        assert _KEYED[101] in json.loads(result.content)
+        # Past _MAX_LISTED the next member opens a new group, verbatim, and
+        # its marker lists the rest: every record is reconstructible.
+        delivered = json.loads(result.content)
+        assert delivered[2] == _KEYED[101]
+        assert delivered[3] == (
+            "[structured] 98 more element(s) with this shape; /key: "
+            + ", ".join(r["key"] for r in _KEYED[102:])
+        )
+        assert len(delivered) == 4
 
     async def test_integer_ids_are_listed_not_deleted(self) -> None:
         records = [{"id": 10000 + i, "summary": "Nightly build failed"} for i in range(50)]
