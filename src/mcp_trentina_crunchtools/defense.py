@@ -61,7 +61,13 @@ from .l1.pipeline import (
     run_l1,
 )
 from .quarantine.agent import quarantine_detect
-from .quarantine.classifier import ClassifierResult, classify_async
+from .quarantine.classifier import (
+    ClassifierResult,
+    classify_async,
+    count_tokens,
+    estimate_tokens,
+    head,
+)
 from .quarantine.prompts import L2_BLINDSPOT_CAVEAT, RISK_LEVELS
 
 logger = logging.getLogger(__name__)
@@ -120,7 +126,13 @@ class DefenseVerdict:
     None rather than a synthesized score, because a made-up 0.0 would read as
     safety."""
     l3_truncated: bool = False
-    """L3 was shown only the first ``QUARANTINE_MAX_CONTENT`` characters."""
+    """flag only: the payload was over the admission cap and L3 read the
+    same token-bounded head L2 did."""
+    oversize: tuple[int, int] | None = None
+    """``(tokens, cap)`` when block or redact refused the payload at
+    admission (#225): over ``Config.admission_tokens``, so neither L2 nor L3
+    ran. ``l2_truncated`` and ``l3_truncated`` stay False; nothing was read
+    in part."""
 
     @property
     def flagged(self) -> bool:
@@ -283,6 +295,64 @@ async def _classify(
     return result, bool(result is not None and result.truncated)
 
 
+async def admission(content: str) -> tuple[int, int]:
+    """``(tokens, admission cap)`` for ``content``, before any inference.
+
+    Counted with L2's tokenizer, the unit the cap is stated in. Without the
+    model, ``estimate_tokens`` bounds it from above.
+    """
+    cap = get_config().admission_tokens
+    counted = await asyncio.to_thread(count_tokens, content)
+    return (estimate_tokens(content) if counted is None else counted), cap
+
+
+async def _stage_one(
+    content: str,
+    source: str,
+    precomputed_l1: PipelineResult | None,
+    *,
+    scan: bool,
+    stop_on_partial: bool,
+) -> tuple[PipelineResult, ClassifierResult | None, bool]:
+    """L1 and L2 in parallel on the arrived bytes, then L2 on L1's copy.
+
+    L2 reads L1's normalized copy as well when L1 normalized anything, and
+    the stronger score wins. ``scan`` False runs L1 alone.
+    """
+    first: tuple[ClassifierResult | None, bool] = (None, False)
+    if precomputed_l1 is not None:
+        pipeline = precomputed_l1
+        if scan:
+            first = await _classify(content, source, stop_on_partial=stop_on_partial)
+    elif scan:
+        pipeline, first = await asyncio.gather(
+            asyncio.to_thread(run_l1, content),
+            _classify(content, source, stop_on_partial=stop_on_partial),
+        )
+    else:
+        pipeline = await asyncio.to_thread(run_l1, content)
+
+    classification, truncated = first
+    if scan and pipeline.l2_reads_both() and pipeline.l2_input.strip():
+        normalized, normalized_truncated = await _classify(
+            pipeline.l2_input, source, stop_on_partial=stop_on_partial
+        )
+        classification = _stronger(classification, normalized)
+        truncated = truncated or normalized_truncated
+    return pipeline, classification, truncated
+
+
+async def _stage_two(content: str, defense: DefenseConfig | None, briefing: str) -> dict[str, Any]:
+    """L3 over what it is handed, or the gap that says it had no provider.
+
+    The gap is recorded rather than left None, which is indistinguishable
+    from "ran and found nothing".
+    """
+    if not _l3_provider_configured(defense):
+        return {"l3_unavailable": True, "injection_detected": False}
+    return await quarantine_detect(content, layer1_context=briefing)
+
+
 async def defend(
     content: str,
     *,
@@ -326,31 +396,23 @@ async def defend(
     Returns:
         A verdict. This function never raises on a detection.
     """
-    config = get_config()
     has_text = bool(content.strip())
+    tokens, cap = await admission(content) if has_text else (0, 0)
+    refuse_at_admission = stop_on_partial and tokens > cap
 
-    classification: ClassifierResult | None = None
-    l2_truncated = False
-    if precomputed_l1 is not None:
-        pipeline = precomputed_l1
-        if has_text:
-            classification, l2_truncated = await _classify(
-                content, source, stop_on_partial=stop_on_partial
-            )
-    elif has_text:
-        pipeline, (classification, l2_truncated) = await asyncio.gather(
-            asyncio.to_thread(run_l1, content),
-            _classify(content, source, stop_on_partial=stop_on_partial),
+    scan = has_text and not refuse_at_admission
+    pipeline, classification, l2_truncated = await _stage_one(
+        content, source, precomputed_l1, scan=scan, stop_on_partial=stop_on_partial
+    )
+    if scan and stop_on_partial and l2_truncated:
+        # The one partial read left under stop_on_partial: L1's normalized
+        # copy decoded past the cap. Refused at admission all the same; what
+        # L2 found in the original still stands.
+        refuse_at_admission, l2_truncated = True, False
+    if refuse_at_admission:
+        logger.warning(
+            "admission: refused %s, %d tokens against a %d-token cap", source, tokens, cap
         )
-    else:
-        pipeline = run_l1(content)
-
-    if has_text and pipeline.l2_reads_both() and pipeline.l2_input.strip():
-        normalized, normalized_truncated = await _classify(
-            pipeline.l2_input, source, stop_on_partial=stop_on_partial
-        )
-        classification = _stronger(classification, normalized)
-        l2_truncated = l2_truncated or normalized_truncated
 
     # Either leg flags: the model's own MALICIOUS label (global threshold),
     # or the profile's stricter l2_threshold.
@@ -360,24 +422,17 @@ async def defend(
     )
 
     l3_assessment: dict[str, Any] | None = None
-    l3_flagged = False
     l3_truncated = False
-    if has_text and _l3_provider_configured(defense):
-        l3_truncated = len(content) > config.max_content
-        l3_assessment = await quarantine_detect(
-            content[: config.max_content],
-            layer1_context=build_l3_briefing(
-                pipeline.stats,
-                classification,
-                l2_truncated=l2_truncated,
-                extra=l3_context,
+    if has_text and not refuse_at_admission:
+        l3_truncated = tokens > cap
+        l3_assessment = await _stage_two(
+            await asyncio.to_thread(head, content, cap) if l3_truncated else content,
+            defense,
+            build_l3_briefing(
+                pipeline.stats, classification, l2_truncated=l2_truncated, extra=l3_context
             ),
         )
-        l3_flagged = bool(l3_assessment.get("injection_detected"))
-    elif has_text:
-        # No provider to ask. Recorded as a gap rather than left None, which
-        # is indistinguishable from "ran and found nothing".
-        l3_assessment = {"l3_unavailable": True, "injection_detected": False}
+    l3_flagged = bool(l3_assessment and l3_assessment.get("injection_detected"))
 
     flagged_by, risk_level, assessment = _decide(
         pipeline=pipeline,
@@ -426,6 +481,7 @@ async def defend(
         flagged_by=flagged_by,
         l2_truncated=l2_truncated,
         l3_truncated=l3_truncated,
+        oversize=(tokens, cap) if refuse_at_admission else None,
     )
 
 

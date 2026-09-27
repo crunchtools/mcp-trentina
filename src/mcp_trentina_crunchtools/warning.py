@@ -99,6 +99,9 @@ def build_warning(
         warning["l2_unavailable"] = True
     if gaps.l3_unavailable:
         warning["l3_unavailable"] = True
+    if verdict.oversize is not None:
+        warning["oversize"] = True
+        warning["tokens"], warning["token_cap"] = verdict.oversize
     if unread:
         warning["unscannable"] = unread
     if extras:

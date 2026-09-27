@@ -9,6 +9,7 @@ cannot launder itself past the perimeter.
 from __future__ import annotations
 
 import inspect
+import json
 from contextlib import ExitStack
 from typing import Any
 from unittest.mock import patch
@@ -23,6 +24,7 @@ from mcp_trentina_crunchtools.defense import (
 )
 from mcp_trentina_crunchtools.errors import UnscannableContentError
 from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+from mcp_trentina_crunchtools.modes import gaps_of
 from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
 
 _D = "mcp_trentina_crunchtools.defense"
@@ -71,7 +73,7 @@ def _patches(
     }
     cfg = p("get_config")
     cfg.return_value.has_llm = has_api_key
-    cfg.return_value.max_content = 100_000
+    cfg.return_value.admission_tokens = 32_768
     mocks["get_config"] = cfg
     return mocks
 
@@ -310,14 +312,59 @@ class TestStopOnPartial:
         _, mocks = await _defend(stop_on_partial=True, has_api_key=False)
         assert mocks["classify_async"].call_args.kwargs["fail_on_truncate"] is True
 
-    async def test_an_unscannable_payload_is_truncated_with_no_score(self) -> None:
-        """No synthesized 0.0: a made-up score would read as safety."""
+    async def test_an_unscannable_payload_is_refused_with_no_score(self) -> None:
+        """No synthesized 0.0: a made-up score would read as safety. The one
+        partial read left under stop_on_partial, L1's normalized copy past the
+        cap, is refused at admission like any other oversize payload (#225)."""
         with ExitStack() as stack:
             mocks = _patches(stack, has_api_key=False)
             mocks["classify_async"].side_effect = UnscannableContentError("s", 9, 1)
             verdict = await defend("long text", source="s", source_type="url", stop_on_partial=True)
-        assert verdict.l2_truncated is True
+        assert verdict.l2_truncated is False
+        assert verdict.oversize is not None
         assert verdict.classification is None
+
+
+class TestAdmission:
+    """#225: one cap, in tokens, decided before any inference."""
+
+    async def test_a_dense_json_payload_is_refused_at_admission(self) -> None:
+        """The 2026-09-25 shape: 174 KB of Slack-style JSON under block.
+
+        It used to run L2 to its cap and L3 over the first 100k characters,
+        then refuse on Gaps(l2_truncated, l3_truncated). Now nothing runs.
+        """
+        messages = [
+            {"ts": f"1727{i:06d}.000100", "user": f"U0{i:05d}", "text": "deploy ok", "type": "m"}
+            for i in range(2_200)
+        ]
+        payload = json.dumps({"ok": True, "messages": messages})
+        assert len(payload) > 170_000
+        with ExitStack() as stack:
+            mocks = _patches(stack)
+            verdict = await defend(payload, source="s", source_type="url", stop_on_partial=True)
+        assert mocks["classify_async"].await_count == 0
+        assert mocks["quarantine_detect"].await_count == 0
+        assert verdict.oversize is not None and verdict.oversize[1] == 32_768
+        gaps = gaps_of(verdict)
+        assert gaps.oversize and not gaps.l2_truncated and not gaps.l3_truncated
+        assert not gaps.l2_unavailable and not gaps.l3_unavailable
+
+    async def test_admitted_content_is_read_whole_by_l3(self) -> None:
+        with ExitStack() as stack:
+            mocks = _patches(stack)
+            await defend("x" * 20_000, source="s", source_type="url", stop_on_partial=True)
+        assert mocks["quarantine_detect"].call_args.args[0] == "x" * 20_000
+
+    @pytest.mark.parametrize(("tokens", "admitted"), [(32_768, True), (32_769, False)])
+    async def test_the_cap_is_inclusive(self, tokens: int, admitted: bool) -> None:
+        with ExitStack() as stack:
+            mocks = _patches(stack)
+            stack.enter_context(patch(f"{_D}.count_tokens", return_value=tokens))
+            verdict = await defend("text", source="s", source_type="url", stop_on_partial=True)
+        assert (verdict.oversize is None) is admitted
+        assert (mocks["classify_async"].await_count > 0) is admitted
+        assert (mocks["quarantine_detect"].await_count > 0) is admitted
 
 
 class TestL3Briefing:
@@ -342,10 +389,13 @@ class TestL3Briefing:
         assert briefing.endswith("An HTTP error body.")
         assert "Layer 2" in briefing
 
-    async def test_l3_reads_at_most_max_content(self) -> None:
+    async def test_flag_over_the_cap_shows_l3_the_head_l2_read(self) -> None:
+        """Only flag reaches L3 over the cap. Without a tokenizer the head is
+        the prefix of at most cap UTF-8 bytes."""
         with ExitStack() as stack:
             mocks = _patches(stack)
-            mocks["get_config"].return_value.max_content = 10
+            mocks["get_config"].return_value.admission_tokens = 10
             verdict = await defend("x" * 50, source="s", source_type="url")
         assert mocks["quarantine_detect"].call_args.args[0] == "x" * 10
         assert verdict.l3_truncated is True
+        assert verdict.oversize is None

@@ -212,7 +212,7 @@ async def judge_and_deliver(
         if reason is None:
             return _deliver(call, verdict, original, extras)
         gaps = gaps_of(verdict)
-        absent = gaps.blocking() and not gaps.truncated_only()
+        absent = gaps.blocking() and not gaps.partial_only()
         if allowlisted and not absent:
             return await _redact(
                 call, verdict, DEFAULT_REDACT_PROMPT, redact_extras, downgraded=True
@@ -275,7 +275,7 @@ async def _redact(
 ) -> dict[str, Any]:
     """Turns 2 and 3 over L1's normalized text; refuse if either objects."""
     result = await quarantine_redact(
-        verdict.pipeline.l2_input[: get_config().max_content],
+        verdict.pipeline.l2_input,
         prompt,
         detection=verdict.l3_assessment,
     )

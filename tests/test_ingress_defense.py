@@ -95,7 +95,7 @@ def _l3_available_and_clean() -> Any:
         ),
     ):
         cfg.return_value.has_api_key = True
-        cfg.return_value.max_content = 100_000
+        cfg.return_value.admission_tokens = 32_768
         yield
 
 
@@ -178,6 +178,7 @@ class TestScanToolResponse:
             mock_defend.return_value.l3_assessment = {"injection_detected": False}
             mock_defend.return_value.l2_truncated = False
             mock_defend.return_value.l3_truncated = False
+            mock_defend.return_value.oversize = None
             for _ in range(3):
                 await scan_tool_response(
                     profile=profile,
@@ -199,6 +200,7 @@ class TestScanToolResponse:
             mock_defend.return_value.l3_assessment = {"injection_detected": False}
             mock_defend.return_value.l2_truncated = False
             mock_defend.return_value.l3_truncated = False
+            mock_defend.return_value.oversize = None
             for hidden in (None, HiddenStats(elements=2), HiddenStats(elements=2)):
                 await scan_tool_response(
                     profile=profile,
@@ -296,6 +298,7 @@ class TestScanToolList:
             mock_defend.return_value.l3_assessment = {"injection_detected": False}
             mock_defend.return_value.l2_truncated = False
             mock_defend.return_value.l3_truncated = False
+            mock_defend.return_value.oversize = None
             await scan_tool_list(_profile(), "jira", before, after)
         assert mock_defend.call_args.kwargs["provenance"] is Provenance.MODEL_OUTPUT
 
@@ -307,6 +310,7 @@ class TestScanToolList:
             mock_defend.return_value.l3_assessment = {"injection_detected": False}
             mock_defend.return_value.l2_truncated = False
             mock_defend.return_value.l3_truncated = False
+            mock_defend.return_value.oversize = None
             await scan_tool_list(_profile(), "jira", tools, tools)
         assert mock_defend.call_args.kwargs["provenance"] is Provenance.EXTERNAL
 
@@ -321,6 +325,7 @@ class TestScanToolList:
             mock_defend.return_value.l3_assessment = {"injection_detected": False}
             mock_defend.return_value.l2_truncated = False
             mock_defend.return_value.l3_truncated = False
+            mock_defend.return_value.oversize = None
             for _ in range(5):
                 await scan_tool_list(profile, "jira", tools, tools)
         assert mock_defend.call_count == 1
@@ -683,7 +688,7 @@ class TestAdversarialReviewFixes:
             ),
         ):
             cfg.return_value.has_api_key = True
-            cfg.return_value.max_content = 100_000
+            cfg.return_value.admission_tokens = 32_768
             decision = await scan_tool_response(
                 profile=self._block_profile(),
                 backend_name="jira",
@@ -925,6 +930,7 @@ class TestToolDescriptionBriefing:
             mock_defend.return_value.l3_assessment = {"injection_detected": False}
             mock_defend.return_value.l2_truncated = False
             mock_defend.return_value.l3_truncated = False
+            mock_defend.return_value.oversize = None
             await scan_tool_list(_profile("brief1"), "jira", tools, tools)
         assert mock_defend.call_args.kwargs["l3_context"] == TOOL_BRIEFING
 
@@ -944,6 +950,7 @@ class TestToolDescriptionBriefing:
             mock_defend.return_value.l3_assessment = {"injection_detected": False}
             mock_defend.return_value.l2_truncated = False
             mock_defend.return_value.l3_truncated = False
+            mock_defend.return_value.oversize = None
             for _ in range(3):
                 result = await scan_tool_list(profile, "jira", tools, tools)
         assert mock_defend.call_count == 1
@@ -1018,6 +1025,7 @@ class TestToolDescriptionBriefing:
             mock_defend.return_value.l3_assessment = {"injection_detected": False}
             mock_defend.return_value.l2_truncated = False
             mock_defend.return_value.l3_truncated = False
+            mock_defend.return_value.oversize = None
             await scan_tool_list(profile, "jira", tools, tools)
         assert mock_defend.called is judged
 
@@ -1053,7 +1061,7 @@ async def test_the_backend_briefing_reaches_l3_and_keys_the_cache() -> None:
         patch("mcp_trentina_crunchtools.defense.quarantine_detect", detect),
     ):
         cfg.return_value.has_api_key = True
-        cfg.return_value.max_content = 100_000
+        cfg.return_value.admission_tokens = 32_768
         for context in (briefing, None, briefing):
             await scan_tool_response(
                 profile=_profile(),

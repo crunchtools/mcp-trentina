@@ -61,7 +61,7 @@ def _patches(
     }
     cfg = p("get_config")
     cfg.return_value.has_llm = has_api_key
-    cfg.return_value.max_content = 100_000
+    cfg.return_value.admission_tokens = 32_768
     mocks["get_config"] = cfg
     return mocks
 

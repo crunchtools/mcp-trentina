@@ -28,10 +28,10 @@ async def test_oversized_content_is_rejected_before_judging(
 ) -> None:
     from mcp_trentina_crunchtools import config as config_mod
 
-    monkeypatch.setenv("QUARANTINE_MAX_CONTENT", "10")
+    monkeypatch.setenv("QUARANTINE_CONTEXT_TOKENS", "10")
     config_mod._config = None
-    with layers(env) as fakes, pytest.raises(ContentSizeError):
-        await block_content("A" * 11)
+    with layers(env) as fakes, pytest.raises(ContentSizeError, match="admission cap of 10"):
+        await block_content("A" * 30)
     assert fakes.classify.await_count == 0
 
 

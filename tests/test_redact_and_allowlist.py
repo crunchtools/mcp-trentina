@@ -203,18 +203,21 @@ class TestAllowlist:
                 await call("fetch", Mode.BLOCK, fakes)
             assert fakes.extract.await_count == 0
 
-    async def test_a_partial_read_goes_to_redact(
+    async def test_an_oversize_document_goes_to_redact(
         self, env: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A trusted document too large for L2 stays reachable (Fable R4)."""
-        from mcp_trentina_crunchtools.errors import UnscannableContentError
-
+        """A trusted document over the admission cap stays reachable (Fable R4);
+        its extraction is read whole and the output verified by all three layers."""
         allowlist(env, monkeypatch)
+        monkeypatch.setenv("QUARANTINE_CONTEXT_TOKENS", "8")
+        config_mod._config = None
         with layers(env) as fakes:
-            fakes.classify.side_effect = UnscannableContentError("s", 99_999, 32_768)
             result = await call("read", Mode.BLOCK, fakes)
+        assert fakes.classify.await_count == 0
+        assert fakes.extract.call_args.args[0] == fakes.payload
         assert result["scan"]["disposition"] == "extracted"
-        assert result["_trentina_warning"]["l2_truncated"] is True
+        assert result["scan"]["layers"]["l2"] == "not_admitted"
+        assert result["_trentina_warning"]["oversize"] is True
 
 
 class TestBlocklist:

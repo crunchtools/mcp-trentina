@@ -34,7 +34,9 @@ uv run mcp-trentina-crunchtools
   refuse when that layer is ABSENT. `false` turns absence into a warning; a
   partial read is never excused. `QUARANTINE_FALLBACK` was removed in 0.31.0
   and setting it fails startup.
-- `QUARANTINE_MAX_CONTENT` — Max chars to Q-Agent (default: 100000)
+- `QUARANTINE_CONTEXT_TOKENS` — what the L3 model reads in one call (default
+  1000000). With `CLASSIFIER_MAX_TOKENS` it sets `Config.admission_tokens`.
+  `QUARANTINE_MAX_CONTENT` was removed in 0.43.0 (#225); setting it fails startup.
 - `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-trentina/trentina.db)
 - `TRENTINA_PERIMETER_DB` — perimeter verdict store, a SEPARATE database from the
   blocklist (default: `perimeter.db` beside `QUARANTINE_DB`). See `perimeter_db.py`
@@ -56,7 +58,8 @@ uv run mcp-trentina-crunchtools
   is read again.
 - `CLASSIFIER_THRESHOLD` — L2 malicious score cutoff (default: 0.5)
 - `CLASSIFIER_MODEL_PATH` — Prompt Guard 2 ONNX dir (default: /models/prompt-guard-2-86m)
-- `CLASSIFIER_MAX_TOKENS` — Max tokens L2 will scan; 0 disables the cap (default: 32768)
+- `CLASSIFIER_MAX_TOKENS` — L2's CPU budget in tokens; 0 removes it, leaving
+  L3's context as the cap (default: 32768)
 - `CLASSIFIER_THREADS` — ONNX intra-op threads; 0 uses the ONNX default of one per core (default: 4).
   Set it to match the container's `--cpus`; threads beyond that quota contend and slow scans down.
 - `TRENTINA_L2_CONCURRENCY` — L2 scans at once (default 2); each uses `CLASSIFIER_THREADS`.
@@ -97,15 +100,16 @@ directly: a bare call is invisible to the limiter and competes with it blind.
 
 ## Layer 2 scanning limits
 
-`classify()` slides a 512-token window at stride 256, so cost grows linearly
-with input length. Two rules keep that bounded:
+`classify()` slides a 512-token window at stride 446, so cost grows linearly
+with input length. One cap bounds it (#225):
 
-- Input is capped at `CLASSIFIER_MAX_TOKENS`. Past that the result carries
-  `truncated=True`. The default sits above what `QUARANTINE_MAX_CONTENT`
-  (100k chars ≈ 28k tokens) can produce, so the two limits never fight.
-- A truncated scan is never reported as BENIGN. block and redact refuse it
-  (`modes.Gaps`), so they pass `fail_on_truncate=True` and skip the inference
-  at the token count; flag scans the head and delivers with `l2_truncated`.
+- `Config.admission_tokens` = `min(CLASSIFIER_MAX_TOKENS, QUARANTINE_CONTEXT_TOKENS)`,
+  in L2's tokens. `defend()` counts first (`defense.admission`), before any
+  inference. Admitted content is read WHOLE by every layer; nothing is sliced.
+- Over the cap, block and redact refuse at admission (`DefenseVerdict.oversize`,
+  `Gaps.oversize`, layers `not_admitted`) with no L2 or L3 call; L1 still runs. flag scans
+  the head and L3 reads the same token-bounded head (`classifier.head`), so
+  `l2_truncated`/`l3_truncated` exist only on flag.
 
 Async callers must use `classify_async`. Calling the
 synchronous `classify()` from a coroutine blocks the event loop for the whole
@@ -180,6 +184,8 @@ rewrite, not their span substitution. Precedence: block > redact > flag.
 ### Stats
 - quarantine_stats — operator `config` carries `provider` and `llm_available`
   (0.41.0); `has_api_key` there is Gemini's key only, deprecated for dashboards.
+  `admission_tokens` replaced `max_content` there and in the D-Bus status
+  (0.43.0, #225): the one cap, in L2's tokens.
 - quarantine_stats — role-scoped like the gateway admin tools below: an agent
   profile gets its own audit rows, its own detections and the defense settings
   it runs under; an operator gets the gateway.

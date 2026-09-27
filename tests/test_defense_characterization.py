@@ -91,6 +91,7 @@ class TestAlertIngressNowHonoursTheProfile:
             patch(f"{_DEFENSE}.get_config") as cfg,
         ):
             cfg.return_value.has_llm = False
+            cfg.return_value.admission_tokens = 32_768
             forward_body, _risk, flagged, _counts = await _defend_alert(
                 body.encode(), self._profile()
             )
@@ -121,6 +122,7 @@ class TestAlertIngressNowHonoursTheProfile:
             patch(f"{_DEFENSE}.get_config") as cfg,
         ):
             cfg.return_value.has_llm = False
+            cfg.return_value.admission_tokens = 32_768
             # Below the profile threshold: clean.
             _, _, flagged_loose, _ = await _defend_alert(
                 body.encode(), self._profile(DefenseConfig(l2_threshold=0.9))
@@ -148,6 +150,7 @@ class TestAlertIngressNowHonoursTheProfile:
             patch(f"{_DEFENSE}.get_config") as cfg,
         ):
             cfg.return_value.has_llm = False
+            cfg.return_value.admission_tokens = 32_768
             forward_body, _risk, flagged, _counts = await _defend_alert(
                 body.encode(), self._profile()
             )

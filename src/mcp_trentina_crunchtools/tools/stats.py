@@ -97,7 +97,7 @@ async def get_trentina_stats() -> dict[str, Any]:
             "model": config.model,
             "require_l2": config.require_l2,
             "require_l3": config.require_l3,
-            "max_content": config.max_content,
+            "admission_tokens": config.admission_tokens,
             "provider": config.provider,
             "llm_available": config.has_llm,
             # Gemini's key only; kept for dashboards, removed in 0.43.0.

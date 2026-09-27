@@ -191,7 +191,7 @@ profiles:
 | `delegation.worker_provider` | string | — | Provider for the worker model (`gemini`, `openai`, `anthropic`) |
 | `delegation.line_threshold` | int | `350` | File line count above which reads are delegated |
 | `delegation.temperature` | float | `0.2` | Temperature for worker model calls |
-| `delegation.max_input_chars` | int | `100000` | Max chars sent to worker (aligns with `QUARANTINE_MAX_CONTENT`) |
+| `delegation.max_input_chars` | int | `100000` | Max chars sent to worker (the old `QUARANTINE_MAX_CONTENT` default) |
 | `delegation.modes.bulk_read.enabled` | bool | `true` | Enable bulk-read delegation |
 | `delegation.modes.bulk_read.prompt` | string | (built-in) | System prompt for the bulk-read worker |
 | `delegation.modes.code_write.enabled` | bool | `true` | Enable code-write delegation |

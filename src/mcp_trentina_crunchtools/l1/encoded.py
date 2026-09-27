@@ -22,9 +22,9 @@ _DATA_URI_PATTERN = re.compile(r"data:text/[^;]*;base64,([A-Za-z0-9+/=]+)", re.I
 # no recorded reason, and that made padding a free bypass: repeat an
 # instruction until the blob clears ~700 encoded characters and it was never
 # decoded, so never detected (#179). Decode and scan are linear and cost
-# milliseconds at this size. The value matches `QUARANTINE_MAX_CONTENT`'s
-# default, the most one document delivers to L3. The cap stays as a backstop
-# for callers that hand L1 content nothing upstream has bounded.
+# milliseconds at this size. The value was `QUARANTINE_MAX_CONTENT`'s default
+# until that cap became a token count (#225). The cap stays as a backstop for
+# callers that hand L1 content nothing upstream has bounded.
 MAX_BASE64_DECODE_LENGTH = 100_000
 BASE64_EXPANSION_RATIO = 1.4
 

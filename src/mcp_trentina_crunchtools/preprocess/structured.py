@@ -98,8 +98,9 @@ from .base import Cost, PreProcessContext, PreProcessResult
 # file and this is the gateway's hot path.
 _SCRUB = Filter("strict.stopwords")
 
-# Past this, do not even parse. QUARANTINE_MAX_CONTENT caps what reaches
-# the gateway; this is the reducer refusing to be the expensive step.
+# Past this, do not even parse. A parse guard, not a content policy: the
+# token count at admission (#225) decides what is judged; this is the
+# reducer refusing to be the expensive step on the way there.
 _MAX_PARSE_BYTES = 4_000_000
 
 # Arrays shorter than this have nothing worth grouping.

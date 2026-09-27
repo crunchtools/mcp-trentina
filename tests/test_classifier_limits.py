@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -26,7 +27,12 @@ from mcp_trentina_crunchtools.quarantine.classifier import (
     classifier_status,
     classify,
     classify_async,
+    count_tokens,
+    estimate_tokens,
+    head,
 )
+
+_C = "mcp_trentina_crunchtools.quarantine.classifier"
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -66,6 +72,8 @@ def mocked_model(token_count: int, max_tokens: int = MAX_TOKENS) -> Iterator[Mag
 
     config = MagicMock()
     config.classifier_max_tokens = max_tokens
+    # Config.admission_tokens, as the real property derives it (#225).
+    config.admission_tokens = max_tokens if max_tokens > 0 else 1_000_000
     config.classifier_threshold = 0.5
 
     with (
@@ -82,7 +90,7 @@ def mocked_model(token_count: int, max_tokens: int = MAX_TOKENS) -> Iterator[Mag
 
 
 class TestSegmentCap:
-    """The segment loop must be bounded by CLASSIFIER_MAX_TOKENS."""
+    """The segment loop must be bounded by the admission cap."""
 
     def test_oversized_input_is_truncated(self) -> None:
         """A PDF-sized token count is capped instead of scanned in full.
@@ -110,13 +118,8 @@ class TestSegmentCap:
         assert result.tokens == 4_000
         assert session.run.call_count == pytest.approx(4_000 // STRIDE, abs=2)
 
-    def test_max_content_worth_of_prose_fits_under_the_cap(self) -> None:
-        """QUARANTINE_MAX_CONTENT-sized prose must not trip truncation.
-
-        100k chars of ordinary text is roughly 28k tokens. If the classifier
-        cap sat below that, every large-but-legitimate inline document would
-        fail closed.
-        """
+    def test_a_long_article_fits_under_the_default_cap(self) -> None:
+        """100k chars of prose, roughly 28k tokens, is admitted and read whole."""
         with mocked_model(token_count=28_000):
             result = classify("prose")
 
@@ -124,7 +127,7 @@ class TestSegmentCap:
         assert result.truncated is False
 
     def test_cap_disabled_when_zero(self) -> None:
-        """CLASSIFIER_MAX_TOKENS=0 restores unbounded scanning."""
+        """CLASSIFIER_MAX_TOKENS=0 removes L2's budget; L3's context still bounds it."""
         with mocked_model(token_count=2_000, max_tokens=0):
             result = classify("x")
 
@@ -383,3 +386,52 @@ class TestPadSegment:
         # zeros.
         assert set(widths[:-1]) in ({WINDOW}, set()), widths
         assert widths[-1] <= WINDOW
+
+
+@contextmanager
+def word_tokenizer(*, fast: bool = True) -> Iterator[None]:
+    """One token per whitespace-separated word, with offsets when ``fast``."""
+
+    def tokenize(text: str, **kwargs: Any) -> dict[str, Any]:
+        spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+        if kwargs.get("return_offsets_mapping"):
+            if not fast:
+                raise NotImplementedError("slow tokenizer")
+            return {"input_ids": list(range(len(spans))), "offset_mapping": spans}
+        return {"input_ids": [i + 10 for i in range(len(spans))]}
+
+    tokenizer = MagicMock(side_effect=tokenize)
+    tokenizer.decode.side_effect = lambda ids: " ".join(f"w{i - 10}" for i in ids)
+    with (
+        patch("mcp_trentina_crunchtools.quarantine.classifier._tokenizer", tokenizer),
+        patch("mcp_trentina_crunchtools.quarantine.classifier._loaded", True),
+    ):
+        yield
+
+
+class TestAdmissionHelpers:
+    """#225: the count admission decides on, and the head flag hands L3."""
+
+    def test_count_is_in_l2_tokens(self) -> None:
+        with word_tokenizer():
+            assert count_tokens("one two three") == 3
+
+    def test_head_cuts_at_the_token_boundary(self) -> None:
+        with word_tokenizer():
+            assert head("w0 w1  w2 w3", 3) == "w0 w1  w2"
+            assert head("w0 w1", 5) == "w0 w1"
+
+    def test_a_slow_tokenizer_decodes_the_same_prefix(self) -> None:
+        with word_tokenizer(fast=False):
+            assert head("w0 w1 w2 w3", 2) == "w0 w1"
+
+    def test_without_the_model_the_estimate_stands_in(self) -> None:
+        with patch(f"{_C}.is_classifier_available", return_value=False):
+            assert count_tokens("x" * 10) is None
+            assert head("x" * 100, 10) == "x" * 10
+            assert head("你好世界", 7) == "你好"
+
+    def test_the_estimate_never_undercounts_a_script(self) -> None:
+        """Bytes, not characters: two CJK characters are six bytes."""
+        assert estimate_tokens("你好") == 6
+        assert estimate_tokens("ab") == 2

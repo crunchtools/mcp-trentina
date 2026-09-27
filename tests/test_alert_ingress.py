@@ -248,7 +248,7 @@ class TestHandleAlertClassifierAndQAgent:
             ) as mock_detect,
         ):
             mock_config.return_value.has_llm = True
-            mock_config.return_value.max_content = 100000
+            mock_config.return_value.admission_tokens = 32_768
             mock_detect.return_value = {
                 "injection_detected": True,
                 "risk_level": "high",
@@ -283,7 +283,7 @@ class TestHandleAlertClassifierAndQAgent:
             ) as mock_detect,
         ):
             mock_config.return_value.has_llm = False
-            mock_config.return_value.max_content = 100000
+            mock_config.return_value.admission_tokens = 32_768
             resp = client.post("/alert/tok", json={"host": "web1", "output": "text"})
 
         assert resp.status_code == 200

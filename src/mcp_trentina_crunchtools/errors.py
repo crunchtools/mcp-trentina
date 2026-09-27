@@ -120,11 +120,12 @@ class FileReadError(TrentinaError):
 
 
 class ContentSizeError(TrentinaError):
-    """Raised when inline content exceeds the maximum allowed size."""
+    """Raised when inline content exceeds the admission cap (#225)."""
 
-    def __init__(self, size: int, max_size: int) -> None:
+    def __init__(self, tokens: int, cap: int) -> None:
         super().__init__(
-            f"Content too large: {size} chars (max {max_size}). Split content into smaller chunks."
+            f"Content too large: {tokens} tokens, over the admission cap of {cap}. "
+            "Split content into smaller chunks."
         )
 
 
