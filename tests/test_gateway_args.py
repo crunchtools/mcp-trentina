@@ -120,6 +120,23 @@ def test_the_remaining_keywords(prop: dict[str, Any], bad: Any, good: Any, reaso
     assert normalize_arguments({"x": good}, schema).dropped == {}
 
 
+@pytest.mark.parametrize(
+    ("declared", "value", "dropped"),
+    [
+        (["integer", "null"], 3, False),
+        (["integer", "null"], "3", True),
+        (["integer", "string"], "3", False),
+        (["integer", "string"], True, True),
+        (["integer", "widget"], "3", False),
+    ],
+)
+def test_a_type_list(declared: list[str], value: Any, dropped: bool) -> None:
+    """Any listed type passes; bool is not integer; an unknown name judges nothing."""
+    result = normalize_arguments({"x": value}, {"properties": {"x": {"type": declared}}})
+
+    assert ("x" in result.dropped) is dropped
+
+
 def test_a_huge_integer_is_judged_not_crashed() -> None:
     schema = {"properties": {"n": {"type": "integer", "maximum": 100}}}
 
