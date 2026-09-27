@@ -48,6 +48,9 @@ class RoomInfo(BaseModel):
     name: str = ""
     topic: str = ""
     is_direct: bool = False
+    # In a direct message, the other member, so the local DM can be theirs.
+    peer: str = ""
+    peer_displayname: str = ""
 
 
 class BridgeEvent(BaseModel):

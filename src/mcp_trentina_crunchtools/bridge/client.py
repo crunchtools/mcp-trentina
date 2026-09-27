@@ -220,8 +220,11 @@ class Bridge:
             # and holding the lock across it would stall every send. nio
             # applies a sync's crypto changes in receive_response, which has
             # no await in it, so they cannot interleave with an encryption.
+            # Full state on the first sync of every start, not only the first
+            # ever: nio keeps no room state across restarts, and a resumed sync
+            # carries only what changed, which left names and members unknown.
             resp = await self.client.sync(
-                timeout=_SYNC_TIMEOUT_MS, since=token, full_state=token is None
+                timeout=_SYNC_TIMEOUT_MS, since=token, full_state=not self.ready.is_set()
             )
             if isinstance(resp, SyncError) or not isinstance(resp, SyncResponse):
                 logger.warning("bridge[%s]: sync failed: %s", self.settings.profile, resp)
@@ -356,11 +359,21 @@ class Bridge:
             "type": source.get("type"),
             "content": source.get("content") or {},
             "redacts": source.get("redacts"),
-            "room": {
-                "name": (room.name if room else None) or "",
-                "topic": (room.topic if room else None) or "",
-                "is_direct": bool(room and room.member_count == 2),
-            },
+            "room": self._room_info(room),
+        }
+
+    def _room_info(self, room: MatrixRoom | None) -> dict[str, Any]:
+        """Name, topic and, for a two-member room, the other member."""
+        if room is None:
+            return {"name": "", "topic": "", "is_direct": False}
+        is_direct = room.member_count == 2
+        peer = next((u for u in room.users if u != self.client.user_id), "") if is_direct else ""
+        return {
+            "name": room.name or "",
+            "topic": room.topic or "",
+            "is_direct": is_direct,
+            "peer": peer,
+            "peer_displayname": (room.user_name(peer) or "") if peer else "",
         }
 
     async def forward(self, payload: dict[str, Any]) -> None:

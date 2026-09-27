@@ -2,35 +2,45 @@
 
     mcp-trentina-bridge run
     mcp-trentina-bridge import-mautrix --crypto-db /import/crypto.db
-    mcp-trentina-bridge delete-devices DEVICE [DEVICE ...]
+    mcp-trentina-bridge logout-device        # BRIDGE_OLD_ACCESS_TOKEN
+    mcp-trentina-bridge sign-device          # BRIDGE_RECOVERY_KEY
 
-``delete-devices`` exists for cutover: once the bridge holds an account, the
-agent's old devices are pruned, which is what leaves the agent with no
-upstream credential and makes the perimeter mandatory rather than optional.
-It needs BRIDGE_PASSWORD, because the homeserver gates device deletion on
-user-interactive auth.
+``logout-device`` exists for cutover: once the bridge holds an account, the
+agent's old device is pruned, which is what leaves the agent with no upstream
+credential and makes the perimeter mandatory rather than optional. It logs the
+old device out with that device's own token: matrix.org (behind its OAuth
+service) serves neither ``/delete_devices`` nor ``DELETE /devices``.
+
+``sign-device`` cross-signs the bridge's own device with the account's
+self-signing key from secret storage, so a device the bridge logged in fresh
+does not show as unverified.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
+import httpx
 import uvicorn
-from nio import DeleteDevicesResponse
 
 from ..gateway.loader import read_secret_env
+from ..matrix.recovery_key import RecoveryKeyError
 from .api import build_app
 from .client import Bridge
+from .crosssign import CrossSignError, sign_own_device
 from .import_mautrix import import_mautrix
 from .settings import BridgeSettings
 
 logger = logging.getLogger("mcp_trentina_crunchtools.bridge")
+
+# Seconds for each request of a one-shot command against the homeserver.
+_ONE_SHOT_TIMEOUT = 30.0
 
 
 async def _run(settings: BridgeSettings) -> None:
@@ -65,40 +75,47 @@ async def _run(settings: BridgeSettings) -> None:
         await bridge.aclose()
 
 
-async def _delete_devices(settings: BridgeSettings, devices: list[str]) -> None:
-    if not settings.password:
-        raise SystemExit("delete-devices needs BRIDGE_PASSWORD")
-    bridge = Bridge(settings)
-    try:
-        await delete_devices(bridge, devices)
-    finally:
-        await bridge.aclose()
+async def _logout_device(settings: BridgeSettings) -> None:
+    """Log out the agent's old device with its own access token."""
+    old = read_secret_env("BRIDGE_OLD_ACCESS_TOKEN")
+    if not old:
+        raise SystemExit("logout-device needs BRIDGE_OLD_ACCESS_TOKEN")
+    if old == _session(settings)["access_token"]:
+        raise SystemExit("refusing to log out the bridge's own device")
+    async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
+        resp = await client.post(
+            f"{settings.homeserver}/_matrix/client/v3/logout",
+            headers={"Authorization": f"Bearer {old}"},
+            json={},
+        )
+    if resp.status_code != 200:
+        raise SystemExit(f"logout failed: {resp.status_code} {resp.text[:200]}")
+    logger.warning("bridge[%s]: old device logged out", settings.profile)
 
 
-async def delete_devices(bridge: Bridge, devices: list[str]) -> Any:
-    """Delete other devices of the bridge's account, through password UIA.
+async def _sign_device(settings: BridgeSettings) -> None:
+    """Cross-sign the bridge's device from the account's secret storage."""
+    recovery_key = read_secret_env("BRIDGE_RECOVERY_KEY")
+    if not recovery_key:
+        raise SystemExit("sign-device needs BRIDGE_RECOVERY_KEY")
+    async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
+        try:
+            result = await sign_own_device(
+                client, settings.homeserver, _session(settings), recovery_key
+            )
+        except (CrossSignError, RecoveryKeyError) as exc:
+            raise SystemExit(f"sign-device: {exc}") from exc
+    verb = "was already signed" if result.already else "signed"
+    logger.warning("bridge[%s]: device %s %s", settings.profile, result.device_id, verb)
 
-    The first call asks the homeserver which auth it wants and returns a UIA
-    session; the second answers it with the password.
-    """
-    settings = bridge.settings
-    await bridge.login()
-    if bridge.client.device_id in devices:
-        raise SystemExit("refusing to delete the bridge's own device")
-    first = await bridge.client.delete_devices(devices)
-    auth: dict[str, Any] = {
-        "type": "m.login.password",
-        "identifier": {"type": "m.id.user", "user": settings.user_id},
-        "password": settings.password,
-    }
-    session = getattr(first, "session", None)
-    if session:
-        auth["session"] = session
-    result = await bridge.client.delete_devices(devices, auth)
-    if not isinstance(result, DeleteDevicesResponse):
-        raise SystemExit(f"delete failed: {result}")
-    logger.warning("bridge[%s]: deleted %s", settings.profile, devices)
-    return result
+
+def _session(settings: BridgeSettings) -> dict[str, str]:
+    """The session the bridge saved on its first start."""
+    path = settings.store_dir / "session.json"
+    if not path.exists():
+        raise SystemExit(f"{path} does not exist: run the bridge once first")
+    saved: dict[str, str] = json.loads(path.read_text(encoding="utf-8"))
+    return saved
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -111,8 +128,8 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("run", help="run the bridge")
     imp = sub.add_parser("import-mautrix", help="adopt a mautrix device into the store")
     imp.add_argument("--crypto-db", type=Path, required=True)
-    rm = sub.add_parser("delete-devices", help="delete the account's other devices")
-    rm.add_argument("devices", nargs="+")
+    sub.add_parser("logout-device", help="log out the old device (BRIDGE_OLD_ACCESS_TOKEN)")
+    sub.add_parser("sign-device", help="cross-sign the bridge's device (BRIDGE_RECOVERY_KEY)")
     args = parser.parse_args(argv)
 
     if args.command == "import-mautrix":
@@ -124,8 +141,11 @@ def main(argv: list[str] | None = None) -> None:
         sys.stdout.write(f"{result}\n")
         return
     settings = BridgeSettings.from_env()
-    if args.command == "delete-devices":
-        asyncio.run(_delete_devices(settings, args.devices))
+    if args.command == "logout-device":
+        asyncio.run(_logout_device(settings))
+        return
+    if args.command == "sign-device":
+        asyncio.run(_sign_device(settings))
         return
     asyncio.run(_run(settings))
 

@@ -105,6 +105,7 @@ class AppService:
         # first. A miss falls back to SQLite, so the bound costs a query, not
         # correctness.
         self._rooms: _Recent[str, Room] = _Recent()
+        self._rooms_by_local: _Recent[str, Room] = _Recent()
         self._names: _Recent[str, str] = _Recent()
         self._members: _Recent[tuple[str, str], bool] = _Recent()
         self.agent_id = f"@{agent_localpart}:{server_name}"
@@ -182,35 +183,128 @@ class AppService:
         self._names[remote_user] = displayname
         return local
 
-    async def ensure_room(self, remote_room: str, *, name: str, topic: str, is_direct: bool) -> str:
+    def actor(self, room: Room) -> str:
+        """Who administers ``room``: its owner in a DM, the bot otherwise."""
+        return room.owner or self.bot_id
+
+    async def room_for_local(self, local_room: str) -> Room | None:
+        """The mapped room with this local ID, cache first."""
+        room = self._rooms_by_local.get(local_room) or await self._mapping.room_by_local(local_room)
+        if room is not None:
+            self._remember(room)
+        return room
+
+    def _remember(self, room: Room) -> None:
+        self._rooms[room.remote_id] = room
+        self._rooms_by_local[room.local_id] = room
+
+    async def ensure_room(
+        self,
+        remote_room: str,
+        *,
+        name: str,
+        topic: str,
+        is_direct: bool,
+        peer: str = "",
+        peer_displayname: str = "",
+    ) -> Room:
         """The local room mirroring ``remote_room``, created on first use and
-        renamed when the remote name or topic moved."""
+        renamed when the remote name or topic moved.
+
+        A direct message becomes a true DM: created by the other person's
+        stand-in, with only the agent invited. Agents decide DM-or-group by
+        member count, and a bot sitting in the room makes three, which reads
+        as a group where the agent answers only when mentioned.
+
+        Args:
+            remote_room: the upstream room ID.
+            name, topic: the upstream name and topic, already judged. A DM
+                carries neither.
+            is_direct: the upstream room has exactly two members.
+            peer: in a DM, the other member's upstream user ID; its stand-in
+                owns the local room. Empty for a group.
+            peer_displayname: the peer's display name, already judged, for
+                the stand-in. Defaults to the peer's ID.
+
+        Returns:
+            The ``Room``. ``owner`` is the peer's stand-in for a DM and empty
+            for a group, where the appservice bot administers; ``actor``
+            resolves either to the user that acts in the room.
+        """
         room = self._rooms.get(remote_room) or await self._mapping.room_by_remote(remote_room)
         if room is None:
-            await self._ensure_bot()
-            created = await self._call(
-                "POST",
-                "createRoom",
-                as_user=self.bot_id,
-                body={
-                    "preset": "private_chat",
-                    "name": name,
-                    "topic": topic,
-                    "invite": [self.agent_id],
-                    "is_direct": is_direct,
-                },
+            room = await self._create_room(
+                remote_room,
+                name=name,
+                topic=topic,
+                owner=await self.ensure_user(peer, peer_displayname or peer)
+                if is_direct and peer
+                else "",
             )
-            local_id = str(created["room_id"])
-            await self._mapping.put_room(remote_room, local_id, name, topic)
-            self._rooms[remote_room] = Room(remote_room, local_id, name, topic)
-            logger.info("matrix_bridge: mapped a new room for %s", self.agent_id)
-            return local_id
-        await self._sync_metadata(room, name=name, topic=topic)
-        self._rooms[remote_room] = Room(remote_room, room.local_id, name, topic)
-        return room.local_id
+        elif is_direct and peer and not room.owner:
+            room = await self._hand_over(
+                room, await self.ensure_user(peer, peer_displayname or peer)
+            )
+        else:
+            await self._sync_metadata(room, name=name, topic=topic)
+            room = Room(remote_room, room.local_id, name, topic, room.owner)
+        self._remember(room)
+        return room
+
+    async def _create_room(self, remote_room: str, *, name: str, topic: str, owner: str) -> Room:
+        if owner:
+            creator = owner
+            body: dict[str, Any] = {
+                "preset": "trusted_private_chat",
+                "invite": [self.agent_id],
+                "is_direct": True,
+            }
+            name = topic = ""
+        else:
+            await self._ensure_bot()
+            creator = self.bot_id
+            body = {
+                "preset": "private_chat",
+                "name": name,
+                "topic": topic,
+                "invite": [self.agent_id],
+            }
+        created = await self._call("POST", "createRoom", as_user=creator, body=body)
+        room = Room(remote_room, str(created["room_id"]), name, topic, owner)
+        await self._mapping.put_room(remote_room, room.local_id, name, topic, owner)
+        if owner:
+            await self._mapping.put_member(room.local_id, owner)
+            self._members[(room.local_id, owner)] = True
+        logger.info(
+            "matrix_bridge: mapped a new %s for %s", "DM" if owner else "room", self.agent_id
+        )
+        return room
+
+    async def _hand_over(self, room: Room, owner: str) -> Room:
+        """Turn a bot-made DM into a true one: the other person's stand-in
+        takes the bot's power, and the bot leaves (rooms made before 0.45.1)."""
+        await self.ensure_member(room, owner)
+        levels = await self._call(
+            "GET", "rooms", room.local_id, "state", "m.room.power_levels", "", as_user=self.bot_id
+        )
+        levels.setdefault("users", {})[owner] = 100
+        await self._call(
+            "PUT",
+            "rooms",
+            room.local_id,
+            "state",
+            "m.room.power_levels",
+            "",
+            as_user=self.bot_id,
+            body=levels,
+        )
+        await self._call("POST", "rooms", room.local_id, "leave", as_user=self.bot_id)
+        await self._mapping.set_owner(room.remote_id, owner)
+        logger.warning("matrix_bridge: %s's DM is now two-member", self.agent_id)
+        return Room(room.remote_id, room.local_id, room.name, room.topic, owner)
 
     async def _ensure_bot(self) -> None:
-        """Register the appservice's own user, which creates every room.
+        """Register the appservice's own user, which creates every group room.
 
         Homeservers differ on whether registering an appservice creates its
         sender user; registering it is idempotent either way.
@@ -225,8 +319,8 @@ class AppService:
         )
         self._bot_registered = True
 
-    async def wait_for_agent(self, local_room: str, timeout: float = 30.0) -> bool:
-        """Wait until the agent has joined ``local_room``; False on timeout.
+    async def wait_for_agent(self, room: Room, timeout: float = 30.0) -> bool:
+        """Wait until the agent has joined ``room``; False on timeout.
 
         A message written before the agent joins may never reach it, so a
         freshly created room is not handed messages until the agent is in.
@@ -234,7 +328,7 @@ class AppService:
         deadline = asyncio.get_running_loop().time() + timeout
         while True:
             joined = await self._call(
-                "GET", "rooms", local_room, "joined_members", as_user=self.bot_id
+                "GET", "rooms", room.local_id, "joined_members", as_user=self.actor(room)
             )
             if self.agent_id in (joined.get("joined") or {}):
                 return True
@@ -243,50 +337,46 @@ class AppService:
             await asyncio.sleep(1.0)
 
     async def _sync_metadata(self, room: Room, *, name: str, topic: str) -> None:
-        if name != room.name:
-            await self._call(
-                "PUT",
-                "rooms",
-                room.local_id,
-                "state",
-                "m.room.name",
-                "",
-                as_user=self.bot_id,
-                body={"name": name},
-            )
-        if topic != room.topic:
-            await self._call(
-                "PUT",
-                "rooms",
-                room.local_id,
-                "state",
-                "m.room.topic",
-                "",
-                as_user=self.bot_id,
-                body={"topic": topic},
-            )
+        if room.owner:
+            return  # a DM carries no name or topic of its own
+        for event_type, key, value, old in (
+            ("m.room.name", "name", name, room.name),
+            ("m.room.topic", "topic", topic, room.topic),
+        ):
+            if value != old:
+                await self._call(
+                    "PUT",
+                    "rooms",
+                    room.local_id,
+                    "state",
+                    event_type,
+                    "",
+                    as_user=self.bot_id,
+                    body={key: value},
+                )
         if (name, topic) != (room.name, room.topic):
             await self._mapping.put_room(room.remote_id, room.local_id, name, topic)
 
-    async def ensure_member(self, local_room: str, local_user: str) -> None:
-        """Put a stand-in in a room: the bot invites, the stand-in joins."""
-        if self._members.get((local_room, local_user)):
+    async def ensure_member(self, room: Room, local_user: str) -> None:
+        """Put a stand-in in a room: the owner invites, the stand-in joins."""
+        key = (room.local_id, local_user)
+        if self._members.get(key):
             return
-        if await self._mapping.is_member(local_room, local_user):
-            self._members[(local_room, local_user)] = True
+        if await self._mapping.is_member(room.local_id, local_user):
+            self._members[key] = True
             return
         await self._call(
             "POST",
             "rooms",
-            local_room,
+            room.local_id,
             "invite",
-            as_user=self.bot_id,
+            as_user=self.actor(room),
             body={"user_id": local_user},
             ok_errcodes=frozenset({"M_FORBIDDEN"}),  # already joined
         )
-        await self._call("POST", "rooms", local_room, "join", as_user=local_user)
-        await self._mapping.put_member(local_room, local_user)
-        self._members[(local_room, local_user)] = True
+        await self._call("POST", "rooms", room.local_id, "join", as_user=local_user)
+        await self._mapping.put_member(room.local_id, local_user)
+        self._members[key] = True
 
     async def send(
         self, local_room: str, sender: str, event_type: str, content: dict[str, Any], txn_id: str
@@ -315,8 +405,12 @@ class AppService:
             as_user=sender,
         )
 
-    async def notice(self, local_room: str, body: str, txn_id: str) -> str:
-        """A message from the gateway itself, as the appservice bot."""
+    async def notice(self, room: Room, body: str, txn_id: str) -> str:
+        """A message from the gateway itself, sent by the room's owner."""
         return await self.send(
-            local_room, self.bot_id, "m.room.message", {"msgtype": "m.notice", "body": body}, txn_id
+            room.local_id,
+            self.actor(room),
+            "m.room.message",
+            {"msgtype": "m.notice", "body": body},
+            txn_id,
         )

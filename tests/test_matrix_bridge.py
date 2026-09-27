@@ -697,3 +697,85 @@ class TestRestartRegistration:
         rig.conduit.user_in_use = True
         assert await rig.bridge.inbound(_message()) == "delivered"
         assert len(rig.conduit.created) == 1
+
+
+STAND_IN = "@remote__scott___m=3amatrix.org:agent1.local"
+
+
+def _direct(event_id: str = "$d1", body: str = "hola") -> dict[str, Any]:
+    event = _message(event_id, body)
+    event["room_id"] = "!dm:matrix.org"
+    event["room"] = {
+        "name": "",
+        "topic": "",
+        "is_direct": True,
+        "peer": SCOTT,
+        "peer_displayname": "Scott",
+    }
+    return event
+
+
+@pytest.fixture
+def dm() -> Any:
+    """Build a direct-message event from Scott."""
+    return _direct
+
+
+class TestDirectMessages:
+    """A bridged DM is a true DM: two members, the peer's stand-in owns it."""
+
+    async def test_the_peer_creates_it_and_the_bot_is_never_in_it(
+        self, rig_factory: Any, dm: Any
+    ) -> None:
+        rig = rig_factory()
+        assert await rig.bridge.inbound(dm()) == "delivered"
+        creates = [(p, u) for m, p, u in rig.conduit.calls if p == "/createRoom"]
+        assert creates == [("/createRoom", STAND_IN)]
+        [created] = rig.conduit.created
+        assert created["is_direct"] is True
+        assert created["invite"] == [AGENT]
+        assert "name" not in created
+        assert not any(u == BOT for _, _, u in rig.conduit.calls), "the bot never acts in a DM"
+        [sent] = rig.conduit.sent
+        assert sent["as"] == STAND_IN
+
+    async def test_a_withheld_dm_message_is_noticed_by_the_owner(
+        self, rig_factory: Any, dm: Any
+    ) -> None:
+        rig = rig_factory()
+        rig.verdicts.append(_verdict(flagged_by=Layer.L2))
+        await rig.bridge.inbound(dm())
+        [sent] = rig.conduit.sent
+        assert sent["as"] == STAND_IN
+        assert sent["content"]["body"].startswith("[trentina] withheld")
+
+    async def test_an_outbound_refusal_is_noticed_by_the_owner(
+        self, rig_factory: Any, dm: Any
+    ) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(dm())
+        rig.verdicts.append(_verdict(flagged_by=Layer.L3))
+        await rig.bridge.outbound("t1", [_agent_event("$o1") | {"room_id": "!local1:agent1.local"}])
+        notice = rig.conduit.sent[-1]
+        assert notice["as"] == STAND_IN
+        assert "not sent" in notice["content"]["body"]
+
+    async def test_a_bot_made_dm_is_handed_over(self, rig_factory: Any, dm: Any) -> None:
+        """Rooms made before 0.45.1 had the bot in them: it promotes the
+        peer's stand-in and leaves."""
+        rig = rig_factory()
+        group_first = dm()
+        group_first["room"] = {"name": "", "topic": "", "is_direct": False}
+        await rig.bridge.inbound(group_first)
+        await rig.bridge.inbound(dm("$d2"))
+        calls = [(m, p, u) for m, p, u in rig.conduit.calls]
+        assert ("PUT", "/rooms/!local1:agent1.local/state/m.room.power_levels/", BOT) in calls
+        assert ("POST", "/rooms/!local1:agent1.local/leave", BOT) in calls
+        room = await rig.bridge.mapping.room_by_remote("!dm:matrix.org")
+        assert room is not None
+        assert room.owner == STAND_IN
+
+    async def test_the_peer_name_is_judged(self, rig_factory: Any, dm: Any) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(dm())
+        assert rig.judged[0]["peer"] == "Scott"

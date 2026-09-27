@@ -95,7 +95,13 @@ class TestIngress:
         assert resp.json() == {"outcome": "delivered"}
         [event] = stub.inbound_events
         assert event["event_id"] == "$e"
-        assert event["room"] == {"name": "", "topic": "", "is_direct": False}
+        assert event["room"] == {
+            "name": "",
+            "topic": "",
+            "is_direct": False,
+            "peer": "",
+            "peer_displayname": "",
+        }
 
     @pytest.mark.parametrize(
         "bad",

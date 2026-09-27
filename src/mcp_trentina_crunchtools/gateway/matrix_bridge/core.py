@@ -34,7 +34,7 @@ from .rewrite import IdMap, referenced_ids, rewrite_content
 if TYPE_CHECKING:
     from ..profile import MatrixBridgeConfig, Profile
     from .appservice import AppService
-    from .mapping import BridgeMapping
+    from .mapping import BridgeMapping, Room
 
 logger = logging.getLogger(__name__)
 
@@ -180,11 +180,12 @@ class ProfileBridge:
             "sender": str(event.get("sender_displayname") or ""),
             "room_name": str(room.get("name") or ""),
             "room_topic": str(room.get("topic") or ""),
+            "peer": str(room.get("peer_displayname") or ""),
             "content": content,
         }
         verdict = await self._judge(scanned, room=remote_room, direction="inbound")
         reason = self._refusal(verdict)
-        local_room, stand_in = await self._place(event, scanned, withheld=reason is not None)
+        local, stand_in = await self._place(event, scanned, withheld=reason is not None)
 
         if reason is None:
             out_type = event_type
@@ -207,7 +208,7 @@ class ProfileBridge:
             await self.mapping.mark(key)
             return "withheld" if reason else "skipped"
         local_event = await self.appservice.send(
-            local_room, stand_in, out_type, out, _txn("in", event_id)
+            local.local_id, stand_in, out_type, out, _txn("in", event_id)
         )
         await self.mapping.put_event(event_id, local_event)
         await self.mapping.mark(key)
@@ -223,7 +224,7 @@ class ProfileBridge:
 
     async def _place(
         self, event: dict[str, Any], scanned: dict[str, str | Any], *, withheld: bool
-    ) -> tuple[str, str]:
+    ) -> tuple[Room, str]:
         """The local room and the sender's stand-in, created as needed.
 
         A withheld event writes nothing it carried: not its words, not its
@@ -231,20 +232,28 @@ class ProfileBridge:
         """
         remote_room = str(event["room_id"])
         sender = str(event["sender"])
-        is_direct = bool((event.get("room") or {}).get("is_direct"))
+        info = event.get("room") or {}
+        peer = str(info.get("peer") or "")
         if withheld:
             known = await self.mapping.room_by_remote(remote_room)
             name, topic = (known.name, known.topic) if known else ("", "")
             displayname = await self.mapping.displayname(sender) or sender
+            peer_name = await self.mapping.displayname(peer) or peer if peer else ""
         else:
             name, topic = scanned["room_name"], scanned["room_topic"]
             displayname = scanned["sender"] or sender
-        local_room = await self.appservice.ensure_room(
-            remote_room, name=name, topic=topic, is_direct=is_direct
+            peer_name = scanned["peer"] or peer
+        room = await self.appservice.ensure_room(
+            remote_room,
+            name=name,
+            topic=topic,
+            is_direct=bool(info.get("is_direct")),
+            peer=peer,
+            peer_displayname=peer_name,
         )
         stand_in = await self.appservice.ensure_user(sender, displayname)
-        await self.appservice.ensure_member(local_room, stand_in)
-        return local_room, stand_in
+        await self.appservice.ensure_member(room, stand_in)
+        return room, stand_in
 
     async def _withheld_notice(self, content: dict[str, Any], reason: str) -> dict[str, Any] | None:
         """The notice that replaces a withheld message, in its thread or reply."""
@@ -259,23 +268,27 @@ class ProfileBridge:
         The name and topic are the only text, and they are judged like any
         other before they are written; refused, the room is created unnamed.
         """
-        room = event.get("room") or {}
+        info = event.get("room") or {}
+        peer = str(info.get("peer") or "")
         scanned = {
-            "room_name": str(room.get("name") or ""),
-            "room_topic": str(room.get("topic") or ""),
+            "room_name": str(info.get("name") or ""),
+            "room_topic": str(info.get("topic") or ""),
+            "peer": str(info.get("peer_displayname") or ""),
         }
         verdict = await self._judge(scanned, room=remote_room, direction="inbound")
         if self._refusal(verdict) is not None:
-            scanned = {"room_name": "", "room_topic": ""}
-        local_room = await self.appservice.ensure_room(
+            scanned = {"room_name": "", "room_topic": "", "peer": ""}
+        room = await self.appservice.ensure_room(
             remote_room,
             name=scanned["room_name"],
             topic=scanned["room_topic"],
-            is_direct=bool(room.get("is_direct")),
+            is_direct=bool(info.get("is_direct")),
+            peer=peer,
+            peer_displayname=scanned["peer"] or peer,
         )
         # Held until the agent is in, so the room's first messages (which the
         # bridge forwards next) are not written before it can read them.
-        if not await self.appservice.wait_for_agent(local_room):
+        if not await self.appservice.wait_for_agent(room):
             logger.warning(
                 "matrix_bridge: %s has not joined a new room; carrying on", self.profile.name
             )
@@ -296,10 +309,13 @@ class ProfileBridge:
         room = await self.mapping.room_by_remote(remote_room)
         if target is None or room is None:
             return "skipped"
-        # As the bot: it created every local room, so it holds power level
-        # 100 there and may redact any stand-in's event.
+        # As the room's owner: the bot in a room it created, the other
+        # person's stand-in in a DM. Either holds power level 100.
         await self.appservice.redact(
-            room.local_id, self.appservice.bot_id, target, _txn("rd", str(event["event_id"]))
+            room.local_id,
+            self.appservice.actor(room),
+            target,
+            _txn("rd", str(event["event_id"])),
         )
         return "redacted"
 
@@ -322,12 +338,12 @@ class ProfileBridge:
     async def _outbound(self, event: dict[str, Any]) -> None:
         if event.get("sender") != self.appservice.agent_id:
             return
-        local_room = str(event.get("room_id"))
-        remote_room = await self.mapping.remote_room(local_room)
+        room = await self.appservice.room_for_local(str(event.get("room_id")))
         event_id = str(event.get("event_id"))
         key = f"out:{event_id}"
-        if remote_room is None or await self.mapping.seen(key):
+        if room is None or await self.mapping.seen(key):
             return
+        remote_room = room.remote_id
         event_type = str(event.get("type"))
         content = event.get("content") or {}
 
@@ -355,7 +371,7 @@ class ProfileBridge:
                 reason,
             )
             await self.appservice.notice(
-                local_room,
+                room,
                 f"[trentina] your message was not sent: {reason}",
                 _txn("wo", event_id),
             )

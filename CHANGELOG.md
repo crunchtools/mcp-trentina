@@ -10,6 +10,36 @@ under that name.
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-09-27
+
+### Added
+
+- `mcp-trentina-bridge sign-device`: cross-signs the bridge's own device
+  with the account's self-signing key, read from secret storage with
+  `BRIDGE_RECOVERY_KEY`. A device the bridge logged in fresh no longer shows
+  as unverified, and no identity is reset.
+- `mcp-trentina-bridge logout-device`: prunes the agent's old device by
+  logging it out with its own token (`BRIDGE_OLD_ACCESS_TOKEN`).
+
+### Fixed
+
+- A bridged direct message is a true DM: created by the other person's
+  stand-in, with only the agent invited, and no appservice bot in it. With
+  the bot present the room had three members, which agents read as a group
+  and answered only when mentioned, so DMs went unanswered. DMs made by
+  0.45.0 are handed over on the bridge's next start: the bot gives the
+  stand-in its power level and leaves.
+- The bridge's first sync after every start asks for full state. nio keeps
+  no room state across restarts, and a resumed sync carries only changes, so
+  a restart blanked local room names and display names.
+- The peer's display name, which names the DM's owner, is judged like the
+  rest of the room's text.
+
+### Removed
+
+- `mcp-trentina-bridge delete-devices`: matrix.org (behind its OAuth
+  service) serves neither `/delete_devices` nor `DELETE /devices`.
+
 ## [0.45.0] - 2026-09-27
 
 ### Added
