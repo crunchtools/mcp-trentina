@@ -213,9 +213,7 @@ class TestBenignNoFalsePositives:
         result = classify(content)
         assert result is not None
         assert result.label == "BENIGN"
-        assert result.score < 0.1, (
-            f"Benign content scored {result.score:.4f} — suspiciously high"
-        )
+        assert result.score < 0.1, f"Benign content scored {result.score:.4f} — suspiciously high"
 
 
 @requires_model

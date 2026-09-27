@@ -1,6 +1,6 @@
 # mcp-trentina-crunchtools Constitution
 
-> **Version:** 1.3.0
+> **Version:** 1.4.0
 > **Ratified:** 2026-09-22
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.17.0
@@ -38,7 +38,14 @@ Every change MUST preserve all five security layers.
 - No shell execution or code evaluation
 - No `eval()`/`exec()` functions
 - No `safe_exec` tool — permanently out of scope (incompatible with MCP Server profile)
-- File reading scoped to text files only — binary rejected, read-only, no writes
+- File reading scoped to text files only — binary rejected, read-only, no writes.
+  This governs the file TOOLS, the paths an agent names. It does not govern
+  state the process owns: the SQLite stores (blocklist, perimeter verdicts,
+  OAuth, bridge mappings), the caches, and the Matrix bridge's crypto store
+  and session, all written by deterministic code under the process's own
+  configured data directory only: the blocklist's directory for the gateway,
+  `BRIDGE_STORE_DIR` for the bridge (each its container's `/data`). The one binary read is `import-mautrix`: an operator-run command that
+  opens a crypto store read-only, never reachable from a tool or an agent.
 
 **Layer 5 — Supply Chain Security:**
 - Weekly automated CVE scanning via GitHub Actions
@@ -83,7 +90,20 @@ The SQLite blocklist is write-accessible by deterministic code ONLY:
 - Q-Agent output is parsed by deterministic code which decides whether to record
 - This prevents a compromised Q-Agent from manipulating the blocklist
 
-### 5. Trust Allowlist
+### 5. Matrix Bridge Credential Split
+
+Matrix end-to-end encryption terminates in the bridge process, never in the
+agent (spec 015). The split is structural, not a convention:
+- The bridge process holds the upstream Matrix login and crypto store and no
+  credential for the agent's homeserver, and shares no network with it
+- The gateway holds the appservice token for the agent's homeserver and no
+  upstream Matrix credential
+- Every event that carries content crosses all three layers in both
+  directions before it is written to either side. A redaction carries none:
+  it names an event already judged, and its reason text is dropped rather
+  than carried, so it is mirrored without a verdict
+
+### 6. Trust Allowlist
 
 Trust decisions are administrator-set, NOT agent-controlled:
 - Server-side JSON config file
@@ -91,7 +111,7 @@ Trust decisions are administrator-set, NOT agent-controlled:
   what a finding costs, never whether a layer runs
 - A compromised agent cannot override trust levels
 
-### 6. Three Distribution Channels
+### 7. Three Distribution Channels
 
 Every release MUST be available through all three channels simultaneously:
 
@@ -101,14 +121,14 @@ Every release MUST be available through all three channels simultaneously:
 | pip | `pip install mcp-trentina-crunchtools` | Virtual environments |
 | Container | `podman run quay.io/crunchtools/mcp-trentina` | Isolated, systemd |
 
-### 7. Three Transport Modes
+### 8. Three Transport Modes
 
 The server MUST support all three MCP transports:
 - **stdio** (default) — spawned per-session by Claude Code
 - **SSE** — legacy HTTP transport
 - **streamable-http** — production HTTP, systemd-managed containers
 
-### 8. Semantic Versioning
+### 9. Semantic Versioning
 
 Follow [Semantic Versioning 2.0.0](https://semver.org/) strictly.
 
@@ -309,3 +329,4 @@ Container CI workflows MUST use two separate jobs:
 | 1.2.0 | 2026-09-24 | Inherit v1.17.0 (Gatehouse pre-commit hook + triage). Section 2 rewritten for the three-layer defense it has had since 0.10 — it still described a 7-stage stripping L1 and an L2 extraction agent (Gatehouse critical on #182, unanswered). Allowlist, quality gates and the L1 stage recipe corrected to match the code |
 | 1.2.1 | 2026-09-25 | Q-Agent backend row brought up to date: pluggable provider drivers (Gemini, OpenAI-compatible incl. OpenRouter, Anthropic, Ollama), default gemini-2.5-flash-lite since spec 002 |
 | 1.3.0 | 2026-09-27 | Layer 3: the 100K-character truncation before the Q-Agent becomes one token admission cap (#225). Two caps in two units held their invariant only in a docstring, broke on dense JSON, and let L3 read a slice of what L2 read |
+| 1.4.0 | 2026-09-27 | Layer 4's file rule scoped to the file tools, which is what it always governed: process-owned state under the data directory (SQLite stores, caches, the bridge's crypto store) was already written and is now named. Add Section 5, the Matrix bridge credential split (#162) |

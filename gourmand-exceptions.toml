@@ -283,6 +283,18 @@ classification = "by_design"
 
 [[exceptions]]
 check = "hidden_env_config"
+path = "src/mcp_trentina_crunchtools/bridge/settings.py"
+justification = "Every BRIDGE_* variable read here is the bridge process's own configuration surface, documented with its default in docs/matrix-bridge.md's Bridge process table and summarized in CLAUDE.md. The bridge deliberately reads its own environment rather than profiles.yaml: it must hold the upstream Matrix credential and nothing of the gateway's (spec 015)."
+classification = "by_design"
+
+[[exceptions]]
+check = "hidden_env_config"
+path = "src/mcp_trentina_crunchtools/bridge/main.py"
+justification = "BRIDGE_LOG_LEVEL and BRIDGE_STORE_DIR are documented with their defaults in docs/matrix-bridge.md's Bridge process table. main.py reads BRIDGE_STORE_DIR itself only for import-mautrix, which runs before a full BridgeSettings can be built (the upstream tokens are not needed to import a store)."
+classification = "by_design"
+
+[[exceptions]]
+check = "hidden_env_config"
 path = "tests/test_l3_live.py"
 justification = "TRENTINA_LIVE_L3 is a test-only opt-in gate (pytest.mark.skipif) for live-provider integration tests that need a real GEMINI_API_KEY -- it is not part of the deployed application's runtime configuration surface, so it belongs in an exception rather than README's env var reference."
 classification = "by_design"

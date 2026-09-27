@@ -16,9 +16,9 @@ import pytest
 from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
 from mcp_trentina_crunchtools.gateway.loader import (
     _expand_env_refs,
-    _read_secret_env,
     _require_env,
     load_profiles,
+    read_secret_env,
 )
 
 PROFILE_YAML = """\
@@ -33,18 +33,18 @@ profiles:
 class TestReadSecretEnv:
     def test_plain_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("SECRET_X", "from-env")
-        assert _read_secret_env("SECRET_X") == "from-env"
+        assert read_secret_env("SECRET_X") == "from-env"
 
     def test_absent_is_empty_not_an_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("SECRET_X", raising=False)
         monkeypatch.delenv("SECRET_X_FILE", raising=False)
-        assert _read_secret_env("SECRET_X") == ""
+        assert read_secret_env("SECRET_X") == ""
 
     def test_file_variant(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         secret = tmp_path / "token"
         secret.write_text("from-file\n")
         monkeypatch.setenv("SECRET_X_FILE", str(secret))
-        assert _read_secret_env("SECRET_X") == "from-file"
+        assert read_secret_env("SECRET_X") == "from-file"
 
     def test_file_takes_precedence_over_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -55,7 +55,7 @@ class TestReadSecretEnv:
         secret.write_text("from-file")
         monkeypatch.setenv("SECRET_X", "from-env")
         monkeypatch.setenv("SECRET_X_FILE", str(secret))
-        assert _read_secret_env("SECRET_X") == "from-file"
+        assert read_secret_env("SECRET_X") == "from-file"
 
     def test_trailing_newline_stripped(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -63,7 +63,7 @@ class TestReadSecretEnv:
         secret = tmp_path / "token"
         secret.write_text("  padded  \n\n")
         monkeypatch.setenv("SECRET_X_FILE", str(secret))
-        assert _read_secret_env("SECRET_X") == "padded"
+        assert read_secret_env("SECRET_X") == "padded"
 
     def test_missing_file_is_an_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -73,18 +73,18 @@ class TestReadSecretEnv:
         monkeypatch.setenv("SECRET_X", "from-env")
         monkeypatch.setenv("SECRET_X_FILE", str(tmp_path / "nope"))
         with pytest.raises(ProfileConfigError, match="cannot read the secret file"):
-            _read_secret_env("SECRET_X")
+            read_secret_env("SECRET_X")
 
-    def test_empty_file_is_empty(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_file_is_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         secret = tmp_path / "token"
         secret.write_text("\n")
         monkeypatch.setenv("SECRET_X_FILE", str(secret))
-        assert _read_secret_env("SECRET_X") == ""
+        assert read_secret_env("SECRET_X") == ""
 
     def test_the_secret_path_is_never_logged(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Name the env var, never the path.
@@ -99,7 +99,7 @@ class TestReadSecretEnv:
         secret.chmod(0o644)
         monkeypatch.setenv("SECRET_X_FILE", str(secret))
         with caplog.at_level("WARNING"):
-            _read_secret_env("SECRET_X")
+            read_secret_env("SECRET_X")
         assert "SECRET_X_FILE" in caplog.text
         assert "very-secret-location" not in caplog.text
         assert str(tmp_path) not in caplog.text
@@ -110,12 +110,14 @@ class TestReadSecretEnv:
         missing = tmp_path / "very-secret-location"
         monkeypatch.setenv("SECRET_X_FILE", str(missing))
         with pytest.raises(ProfileConfigError) as exc:
-            _read_secret_env("SECRET_X")
+            read_secret_env("SECRET_X")
         assert "SECRET_X_FILE" in str(exc.value)
         assert "very-secret-location" not in str(exc.value)
 
     def test_loose_permissions_warn_but_do_not_fail(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         secret = tmp_path / "token"
@@ -123,11 +125,13 @@ class TestReadSecretEnv:
         secret.chmod(0o644)
         monkeypatch.setenv("SECRET_X_FILE", str(secret))
         with caplog.at_level("WARNING"):
-            assert _read_secret_env("SECRET_X") == "value"
+            assert read_secret_env("SECRET_X") == "value"
         assert "more permissive than 0600" in caplog.text
 
     def test_tight_permissions_are_silent(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         secret = tmp_path / "token"
@@ -135,7 +139,7 @@ class TestReadSecretEnv:
         secret.chmod(0o600)
         monkeypatch.setenv("SECRET_X_FILE", str(secret))
         with caplog.at_level("WARNING"):
-            _read_secret_env("SECRET_X")
+            read_secret_env("SECRET_X")
         assert "more permissive" not in caplog.text
 
 
@@ -154,9 +158,7 @@ class TestConsumersRouteThroughIt:
             "bearer-from-file"
         )
 
-    def test_require_env_error_names_both_spellings(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_require_env_error_names_both_spellings(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("TEST_BEARER", raising=False)
         monkeypatch.delenv("TEST_BEARER_FILE", raising=False)
         with pytest.raises(ProfileConfigError, match="TEST_BEARER_FILE"):
@@ -172,9 +174,7 @@ class TestConsumersRouteThroughIt:
         out = _expand_env_refs("Bearer ${HDR_TOKEN}", context="t")
         assert out == "Bearer hdr-from-file"
 
-    def test_end_to_end_profile_load(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_end_to_end_profile_load(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = tmp_path / "profiles.yaml"
         cfg.write_text(PROFILE_YAML)
         secret = tmp_path / "bearer"

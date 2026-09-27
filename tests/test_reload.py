@@ -106,7 +106,8 @@ BETA_BRIDGE_YAML = BASE_YAML.replace(
     "        homeserver: http://127.0.0.1:6167\n"
     "        server_name: beta.local\n"
     "        as_token_env: TEST_BETA_AS\n"
-    "        hs_token_env: TEST_BETA_HS\n",
+    "        hs_token_env: TEST_BETA_HS\n"
+    "        agent_localpart: beta\n",
 )
 
 BETA_BRIDGE_FLAG_YAML = BETA_BRIDGE_YAML.replace("enforcement: block", "enforcement: flag")

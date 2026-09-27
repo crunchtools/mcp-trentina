@@ -84,15 +84,11 @@ class TestLifetimes:
         monkeypatch.delenv("TRENTINA_REGISTRATION_TTL_DAYS", raising=False)
         assert promoted_ttl_seconds() == DEFAULT_PROMOTED_TTL_DAYS * 24 * 3600
 
-    def test_promoted_lifetime_is_configurable(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_promoted_lifetime_is_configurable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRENTINA_REGISTRATION_TTL_DAYS", "7")
         assert promoted_ttl_seconds() == 7 * 24 * 3600
 
-    def test_unparseable_lifetime_falls_back(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_unparseable_lifetime_falls_back(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRENTINA_REGISTRATION_TTL_DAYS", "ninety")
         assert promoted_ttl_seconds() == DEFAULT_PROMOTED_TTL_DAYS * 24 * 3600
 
@@ -113,9 +109,7 @@ class TestProvisionalMarking:
 
         await mark_provisional(store, "fresh")
 
-        assert store.puts == [
-            ("fresh", {"client_id": "fresh"}, PROVISIONAL_TTL_SECONDS)
-        ]
+        assert store.puts == [("fresh", {"client_id": "fresh"}, PROVISIONAL_TTL_SECONDS)]
 
     async def test_an_unknown_registration_is_a_silent_no_op(self) -> None:
         store = _FakeClientStore()
@@ -176,9 +170,7 @@ class TestPromotion:
 
         assert store.puts == []
 
-    async def test_store_failure_never_propagates(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    async def test_store_failure_never_propagates(self, caplog: pytest.LogCaptureFixture) -> None:
         """Housekeeping must not fail a login. The worst case is a record that
         keeps its provisional hour, which every DCR client re-registers."""
 
@@ -213,9 +205,7 @@ class TestSweeping:
         assert await cull_once(_Wrapper(store)) is True
         assert store.culled == 1
 
-    async def test_sweep_failure_is_swallowed(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    async def test_sweep_failure_is_swallowed(self, caplog: pytest.LogCaptureFixture) -> None:
         store = _Cullable(fail=True)
         with caplog.at_level(logging.WARNING):
             assert await cull_once(_Wrapper(store)) is False
@@ -224,18 +214,14 @@ class TestSweeping:
     async def test_sweep_on_an_uncullable_store_is_a_no_op(self) -> None:
         assert await cull_once(object()) is False
 
-    def test_interval_defaults_and_has_a_floor(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_interval_defaults_and_has_a_floor(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("TRENTINA_OAUTH_CULL_INTERVAL", raising=False)
         assert cull_interval_seconds() == DEFAULT_CULL_INTERVAL_SECONDS
         # A one-second sweep would walk the whole tree in a hot loop.
         monkeypatch.setenv("TRENTINA_OAUTH_CULL_INTERVAL", "1")
         assert cull_interval_seconds() == 60
 
-    async def test_first_request_starts_the_sweeper(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_first_request_starts_the_sweeper(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Records accumulate as a consequence of traffic, so the routes that
         cause them are what start the task that removes them."""
         monkeypatch.setenv("TRENTINA_OAUTH_CULL_INTERVAL", "60")
@@ -255,9 +241,7 @@ class TestSweeping:
         assert served == 1
         assert store.culled >= 1
 
-    async def test_the_sweeper_is_started_once(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_the_sweeper_is_started_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRENTINA_OAUTH_CULL_INTERVAL", "3600")
         store = _Cullable()
 
@@ -281,9 +265,7 @@ class _StubProvider:
         self._client_store = client_store
         self.exchanges: list[str] = []
 
-    async def exchange_authorization_code(
-        self, client: Any, authorization_code: Any
-    ) -> str:
+    async def exchange_authorization_code(self, client: Any, authorization_code: Any) -> str:
         self.exchanges.append("code")
         return "access-token"
 
@@ -343,6 +325,4 @@ class TestPromoteOnExchangeMixin:
 
         provider = self._provider(_Broken())
 
-        assert await provider.exchange_authorization_code(
-            _Client("c"), object()
-        ) == "access-token"
+        assert await provider.exchange_authorization_code(_Client("c"), object()) == "access-token"

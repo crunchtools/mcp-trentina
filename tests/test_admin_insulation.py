@@ -71,8 +71,7 @@ profiles:
 # The edit each tool is run against: alpha moves, beta does not.
 EDITED_YAML = YAML.replace(
     '        tools_allow: ["alpha_only_tool"]\n',
-    '        tools_allow: ["alpha_only_tool"]\n'
-    '        tools_deny: ["alpha_only_tool"]\n',
+    '        tools_allow: ["alpha_only_tool"]\n        tools_deny: ["alpha_only_tool"]\n',
 )
 
 
@@ -126,9 +125,7 @@ async def _reconnect_own() -> dict[str, Any]:
     async def ok(_url: str, _headers: Any) -> ListToolsResult:
         return ListToolsResult(tools=[Tool(name="beta_tool", description="", input_schema={})])
 
-    with patch(
-        "mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok
-    ):
+    with patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok):
         return await reconnect_backend("beta-backend")
 
 
@@ -153,9 +150,7 @@ ADMIN_CALLS: list[tuple[str, Callable[[], Any], str | None]] = [
 ]
 
 
-@pytest.mark.parametrize(
-    ("label", "call", "echoed"), ADMIN_CALLS, ids=[c[0] for c in ADMIN_CALLS]
-)
+@pytest.mark.parametrize(("label", "call", "echoed"), ADMIN_CALLS, ids=[c[0] for c in ADMIN_CALLS])
 async def test_no_admin_tool_hands_an_agent_another_profiles_shape(
     gateway: Path, label: str, call: Callable[[], Any], echoed: str | None
 ) -> None:
@@ -163,10 +158,12 @@ async def test_no_admin_tool_hands_an_agent_another_profiles_shape(
     gateway.write_text(EDITED_YAML, encoding="utf-8")
     profiles = compress.get_profiles() or {}
 
-    with profile_context(profiles["beta"]), patch(
-        "mcp_trentina_crunchtools.gateway.sessions.session_registry."
-        "broadcast_tools_changed",
-        AsyncMock(return_value=0),
+    with (
+        profile_context(profiles["beta"]),
+        patch(
+            "mcp_trentina_crunchtools.gateway.sessions.session_registry.broadcast_tools_changed",
+            AsyncMock(return_value=0),
+        ),
     ):
         result = await call()
 

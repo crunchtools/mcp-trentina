@@ -50,7 +50,7 @@ def _expand_env_refs(value: str, *, context: str) -> str:
 
     def _replace(match: re.Match[str]) -> str:
         var_name = match.group(1)
-        resolved = _read_secret_env(var_name)
+        resolved = read_secret_env(var_name)
         if not resolved:
             raise ProfileConfigError(
                 f"{context}: env var {var_name} (or {var_name}"
@@ -89,7 +89,7 @@ def _build_profile(name: str, body: Any) -> Profile:
     _resolve_llm_key_secrets(name, profile)
     _expand_backend_headers(name, profile)
     _check_drivers(name, profile)
-    _check_matrix_bridge(name, profile)
+    _resolve_matrix_bridge_secrets(name, profile)
     if profile.alert_ingress is not None:
         _resolve_alert_ingress_secrets(name, profile.alert_ingress)
 
@@ -146,21 +146,21 @@ def _check_drivers(name: str, profile: Profile) -> None:
         )
 
 
-def _check_matrix_bridge(name: str, profile: Profile) -> None:
-    """Refuse a bridge that claims to run before the bridge exists (#162).
+def _resolve_matrix_bridge_secrets(name: str, profile: Profile) -> None:
+    """Resolve an enabled bridge's four tokens, failing closed on any gap.
 
-    Phase 0 settles the config shape and nothing consumes it. Accepting
-    ``enabled: true`` would give a profile that reads as bridged while its
-    messages still reach the agent as ciphertext through the old proxy, which
-    is the gap the bridge exists to close. Relaxed by the phase that ships
-    the inbound path.
+    A disabled block resolves nothing: nothing reads its tokens, and demanding
+    them would make an operator provision secrets to write down a plan.
     """
     bridge = profile.matrix_bridge
-    if bridge is not None and bridge.enabled:
-        raise ProfileConfigError(
-            f"Profile {name!r}: matrix_bridge.enabled is not supported yet — "
-            "the bridge's inbound path has not shipped (#162). Leave it false"
-        )
+    if bridge is None or not bridge.enabled:
+        return
+    bridge.bridge_token = _require_env(name, bridge.bridge_token_env, "matrix_bridge bridge token")
+    bridge.ingress_token = _require_env(
+        name, bridge.ingress_token_env, "matrix_bridge ingress token"
+    )
+    bridge.local.as_token = _require_env(name, bridge.local.as_token_env, "matrix_bridge as_token")
+    bridge.local.hs_token = _require_env(name, bridge.local.hs_token_env, "matrix_bridge hs_token")
 
 
 def _resolve_bearer_token(name: str, profile: Profile) -> None:
@@ -228,7 +228,7 @@ def _resolve_llm_key_secrets(name: str, profile: Profile) -> None:
                 f"Profile {name!r} llm_keys.{provider_name}: must provide "
                 f"either 'api_key' or 'api_key_env'"
             )
-        key_value = _read_secret_env(override.api_key_env)
+        key_value = read_secret_env(override.api_key_env)
         if not key_value:
             raise ProfileConfigError(
                 f"Profile {name!r} llm_keys.{provider_name}: env var "
@@ -277,7 +277,7 @@ def _warn_on_loose_mode(path: Path, file_var: str) -> None:
         )
 
 
-def _read_secret_env(env_var: str) -> str:
+def read_secret_env(env_var: str) -> str:
     """Resolve a secret from ``FOO``, or from the file named by ``FOO_FILE``.
 
     The ``_FILE`` indirection is the preferred shape for container
@@ -316,7 +316,7 @@ def _require_env(name: str, env_var: str, what: str) -> SecretStr:
     Shared by every ingress that authenticates by a token-in-env: a missing
     or empty var is a fatal config error, not a silent None.
     """
-    value = _read_secret_env(env_var)
+    value = read_secret_env(env_var)
     if not value:
         raise ProfileConfigError(
             f"Profile {name!r}: {what} env var {env_var} (or "
@@ -357,7 +357,7 @@ def _resolve_alert_ingress_secrets(name: str, alert_ingress: AlertIngressConfig)
     alert_ingress.token = _require_env(name, alert_ingress.token_env, "alert_ingress")
 
     if alert_ingress.forward_secret_env:
-        fwd_secret = _read_secret_env(alert_ingress.forward_secret_env)
+        fwd_secret = read_secret_env(alert_ingress.forward_secret_env)
         if not fwd_secret:
             raise ProfileConfigError(
                 f"Profile {name!r}: alert_ingress forward_secret_env "

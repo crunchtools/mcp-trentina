@@ -1,7 +1,7 @@
 # Specification: Matrix E2EE Termination by Bridge
 
 > **Spec ID:** 015-matrix-bridge
-> **Status:** Phase 0 shipped (0.44.0); phases 1–5 open
+> **Status:** Phases 0–3 shipped (0.44.0, 0.45.0); cutover in progress
 > **Version:** 0.1.0
 > **Author:** crunchtools
 > **Date:** 2026-09-27
@@ -36,7 +36,7 @@ matrix.org ──(E2EE)──▶ bridge-<profile>   untrusted. Holds the matrix.
                             │              Sole holder of the appservice token.
                             ▼
                      conduit-<profile>    local homeserver, plaintext,
-                            │              loopback-only, federation off
+                            │              agent's internal network, federation off
                             ▼
                           agent
 ```
@@ -56,7 +56,7 @@ gateway. Five credentials exist, split so that no process holds both write paths
 | matrix.org login, device, crypto store | bridge only | speaking upstream |
 | `as_token` | gateway only | writing into the agent's local rooms |
 | `hs_token` | gateway and Conduit | authenticating Conduit's pushes to the appservice |
-| `ingress_token` | bridge and gateway | the bridge handing plaintext to `/bridge/{token}` |
+| `ingress_token` | bridge and gateway | the bridge handing plaintext to `/bridge/{profile}/event` |
 | `bridge_token` | gateway and bridge | the gateway handing scanned outbound text to the bridge |
 
 The last two are service-to-service and grant nothing on either homeserver. So:
@@ -123,14 +123,15 @@ withholding uses. `flag` delivers it with the warning attached.
 profiles:
   agent1:
     matrix_bridge:
-      enabled: false                       # refused as true until phase 2
+      enabled: true
       public_user_id: "@agent1:matrix.org"
-      bridge_url: http://127.0.0.1:8471    # gateway -> bridge, loopback only
+      bridge_url: http://bridge-agent1:8471  # gateway -> bridge, private host
       bridge_token_env: AGENT1_BRIDGE_TOKEN
       ingress_token_env: AGENT1_BRIDGE_INGRESS   # bridge -> gateway
       enforcement: block
       local:
-        homeserver: http://127.0.0.1:6167  # loopback only
+        homeserver: http://10.0.10.3:6167  # private host
+        agent_localpart: agent1
         server_name: agent1.local
         as_token_env: AGENT1_AS_TOKEN
         hs_token_env: AGENT1_HS_TOKEN
@@ -140,7 +141,13 @@ profiles:
         processors: []
 ```
 
-- Both URLs must be on a loopback host; anything else is a load error.
+- Both URLs must be on a private host: loopback, a private address, or a
+  single-label container name. A public address or a dotted name is a load
+  error. (0.44.0 required loopback; the deployment put the bridge and Conduit
+  in separate containers on separate networks, which is the stronger
+  boundary, so 0.45.0 relaxed it to private.)
+- Tokens travel in `Authorization` headers, never in a path, so no access log
+  line holds one.
 - Secrets are not resolved while `enabled` is false, so an inert block does not
   demand env vars nothing reads.
 - RBAC: an agent-scope reload holds the whole block (`operator_only`). An
@@ -179,15 +186,17 @@ at the old proxy URL, until phase 5 prunes the old devices.
 
 0. **This spec, config models, driver channel, RBAC hold, `nio` extra.** No
    behaviour change. *Shipped in 0.44.0.*
-1. **Public client.** Bridge process: login, device, sync loop, E2EE via nio,
-   fallback keys. Verifiable: appears as a device, joins a test room, decrypts
-   and logs. No path to an agent. Adds the extra to the image.
-2. **Inbound.** Remote event → bridge → `/bridge/{token}` → `defend()` → local
-   room as the stand-in sender. Closes the injection gap. Relaxes the
-   `enabled` refusal.
-3. **Outbound.** Agent event → appservice push → `defend()` → bridge → remote.
-   Echo suppression by transaction id and by `public_user_id`. Edits, replies,
-   threads, reactions, redactions.
+1. **Public client.** Bridge process: login (resume, adopt a mautrix device,
+   or password), sync loop, E2EE via nio, parked undecryptables with key
+   requests. *Shipped in 0.45.0.*
+2. **Inbound.** Remote event → bridge → `/bridge/{profile}/event` →
+   `defend_json` → local room as the stand-in sender. Closes the injection
+   gap. *Shipped in 0.45.0.*
+3. **Outbound.** Agent event → appservice push → `defend_json` → bridge →
+   remote. Echo suppression by sender on both sides; replies, threads,
+   reactions, edits, redactions. *Shipped in 0.45.0.* Phases 1–3 shipped
+   together: the operator accepted agent downtime, and a half-bridge (inbound
+   only) leaves the agent unable to answer.
 4. **Fidelity and ops.** Membership, room metadata, media, mentions computed
    locally; metrics, `/health`, Nagios.
 5. **Escrow and cutover.** Key backup upload, secret storage, cross-signing.

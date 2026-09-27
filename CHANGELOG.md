@@ -10,6 +10,44 @@ under that name.
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-09-27
+
+### Added
+
+- **Matrix E2EE termination by bridge (#162, spec 015, phases 1–3).** Every
+  message in an encrypted room is now judged by L1 ∥ L2 → L3 as plaintext, in
+  both directions. `docs/matrix-bridge.md` covers setup.
+  - `mcp-trentina-bridge` / `python -m mcp_trentina_crunchtools.bridge.main`:
+    the upstream Matrix client, run as its own container. It holds the login,
+    device and crypto store and nothing else; it can reach only matrix.org and
+    the gateway. It resumes a saved session, adopts a mautrix device
+    (`import-mautrix`: identity, Olm and Megolm sessions), or logs in with a
+    password. The sync position advances only after the gateway answered
+    every event: outages, auth mismatches and rate limits are retried, and
+    only an event the gateway refuses as malformed is dropped (logged at
+    ERROR). An event whose key has not arrived is parked, its key requested,
+    and after ten minutes reported to the agent as undecryptable. An
+    encrypted payload claiming to be a redaction is dropped: real
+    redactions are never encrypted.
+    It encrypts every event type itself: nio 0.26 sends `m.reaction` in the
+    clear.
+  - Gateway: `POST /bridge/{profile}/event` judges each upstream event
+    (content, sender name, room name and topic) and writes it into the
+    agent's Conduit as the sender's stand-in, or a `[trentina] withheld`
+    notice under `block`. The appservice transaction endpoint carries the
+    agent's own events upstream after judging them; a refused one is not
+    sent. Relations, mentions and the agent's own ID are translated both ways.
+  - `delete-devices` prunes an account's other devices once the bridge holds
+    it.
+
+### Changed
+
+- `matrix_bridge.enabled: true` is accepted; its four tokens are resolved at
+  load. `bridge_url` and `local.homeserver` must be on a private host
+  (loopback, private address or container name) rather than loopback only.
+  New required `local.agent_localpart`.
+- The image installs the `bridge` extra.
+
 ## [0.44.0] - 2026-09-27
 
 ### Added
