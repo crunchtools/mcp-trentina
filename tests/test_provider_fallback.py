@@ -212,6 +212,59 @@ class TestCallWithFallback:
         assert call_count["n"] == 1
         assert result["extracted_text"] == "hello world"
 
+    @pytest.mark.parametrize(
+        ("replies", "succeeds"), [(["{bad", "good"], True), (["{bad", "{bad"], False)]
+    )
+    async def test_a_malformed_reply_is_asked_once_more(self, monkeypatch, replies, succeeds):
+        """One bad sample must not make L3 unavailable: under Matrix withholding
+        that costs the agent a sync's events (#227). Two in a row still does."""
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        monkeypatch.delenv("TRENTINA_PROVIDER_FALLBACK", raising=False)
+        get_config()
+        texts = [make_good_response() if r == "good" else r for r in replies]
+        mock = AsyncMock(side_effect=[make_provider_result(t) for t in texts])
+
+        with patch(
+            "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+            new=mock,
+        ):
+            call = _call_with_fallback(
+                content="test content", system_prompt="test prompt", response_schema=FAKE_SCHEMA
+            )
+            if succeeds:
+                result, _ = await call
+                assert result["extracted_text"] == "hello world"
+            else:
+                with pytest.raises(QuarantineAgentError, match="Invalid JSON"):
+                    await call
+        assert mock.await_count == 2
+
+    async def test_a_retry_that_fails_retryably_falls_back(self, monkeypatch):
+        monkeypatch.setenv("TRENTINA_L3_THROTTLE_BUDGET", "0")
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        monkeypatch.setenv("TRENTINA_PROVIDER_FALLBACK", "openai")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        get_config()
+        gemini_mock = AsyncMock(side_effect=[make_provider_result("{bad"), make_429_error()])
+        openai_mock = AsyncMock(return_value=make_provider_result(make_good_response()))
+
+        with (
+            patch(
+                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                new=gemini_mock,
+            ),
+            patch(
+                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                new=openai_mock,
+            ),
+        ):
+            result, _ = await _call_with_fallback(
+                content="test content", system_prompt="test prompt", response_schema=FAKE_SCHEMA
+            )
+        assert gemini_mock.await_count == 2
+        assert openai_mock.await_count == 1
+        assert result["extracted_text"] == "hello world"
+
     async def test_429_triggers_fallback(self, monkeypatch):
         # No throttle budget: a 429 moves down the chain at once.
         monkeypatch.setenv("TRENTINA_L3_THROTTLE_BUDGET", "0")

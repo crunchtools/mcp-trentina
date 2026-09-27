@@ -10,6 +10,16 @@ under that name.
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-09-27
+
+### Fixed
+
+- An L3 reply that is not valid JSON is asked for once more, of the same
+  provider, before L3 is reported unavailable. Under 0.43.0's Matrix
+  withholding an unjudged `/sync` costs the agent that sync's events for
+  good, and production saw three such syncs in the first six hours, each
+  from one malformed reply.
+
 ## [0.43.0] - 2026-09-27
 
 ### Added

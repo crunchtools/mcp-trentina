@@ -67,6 +67,13 @@ class QuarantineAgentError(TrentinaError):
         self.retry_after = retry_after
 
 
+class MalformedResponseError(QuarantineAgentError):
+    """The provider replied, but not with JSON. Asked again once (0.43.1)."""
+
+    def __init__(self) -> None:
+        super().__init__("Invalid JSON in provider response")
+
+
 class BlockedSourceError(TrentinaError):
     """Refused: flagged, not fully judged, or on the blocklist.
 

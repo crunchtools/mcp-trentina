@@ -16,6 +16,7 @@ import logging
 import re
 import secrets
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -23,7 +24,7 @@ import httpx
 
 from ..client import MAX_RESPONSE_SIZE
 from ..config import DEFAULT_SEARCH_MODEL, get_config
-from ..errors import QuarantineAgentError
+from ..errors import MalformedResponseError, QuarantineAgentError
 from ..l1.pipeline import run_l1
 from .limiter import THROTTLE_STATUS, limited_generate, throttle_budget
 from .prompts import (
@@ -165,15 +166,23 @@ async def _call_with_fallback(
 
     last_exc: QuarantineAgentError | None = None
     for i, (name, key) in enumerate(chain):
+        call = partial(
+            _call_throttle_aware,
+            content=content,
+            system_prompt=system_prompt,
+            response_schema=response_schema,
+            user_prompt=user_prompt,
+            provider_name=name,
+            api_key=key,
+        )
         try:
-            return await _call_throttle_aware(
-                content=content,
-                system_prompt=system_prompt,
-                response_schema=response_schema,
-                user_prompt=user_prompt,
-                provider_name=name,
-                api_key=key,
-            )
+            try:
+                return await call()
+            except MalformedResponseError:
+                # Usually one bad sample, and under Matrix withholding an
+                # unjudged /sync costs the agent that sync's events (#227).
+                logger.warning("provider %s returned malformed JSON; asking once more", name)
+                return await call()
         except QuarantineAgentError as exc:
             if not _is_retryable(exc):
                 raise
@@ -360,7 +369,7 @@ async def _call_gemini(
     try:
         parsed: dict[str, Any] = json.loads(provider_result.text)
     except json.JSONDecodeError as exc:
-        raise QuarantineAgentError("Invalid JSON in provider response") from exc
+        raise MalformedResponseError from exc
 
     if _check_canary(parsed, canary):
         raise QuarantineAgentError(
