@@ -85,6 +85,23 @@ TXN_PATH = "/bridge/as/agent1/_matrix/app/v1/transactions/t1"
 
 
 class TestIngress:
+    def test_a_dms_peer_reaches_the_bridge(self, stub: StubBridge, client: TestClient) -> None:
+        room = {
+            "name": "",
+            "topic": "",
+            "is_direct": True,
+            "peer": "@s:matrix.org",
+            "peer_displayname": "S",
+        }
+        resp = client.post(
+            EVENT_PATH,
+            json=_event(room=room),
+            headers={"Authorization": "Bearer ingress-secret"},
+        )
+        assert resp.status_code == 200
+        [event] = stub.inbound_events
+        assert event["room"] == room
+
     def test_the_bridge_token_hands_over_an_event(
         self, stub: StubBridge, client: TestClient
     ) -> None:
