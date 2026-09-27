@@ -189,9 +189,11 @@ async def sign_own_device(
         keys = _require(query, "keys query")
         published = keys["self_signing_keys"][user_id]["keys"]
         device = keys["device_keys"][user_id][device_id]
+        seed = decode_base64(decrypt_secret(key, SELF_SIGNING, encrypted))
     except (KeyError, TypeError) as exc:
         raise CrossSignError(f"the account has no {exc} where its keys should be") from exc
-    seed = decode_base64(decrypt_secret(key, SELF_SIGNING, encrypted))
+    except ValueError as exc:
+        raise CrossSignError(f"the account's secret storage is malformed: {exc}") from exc
     signer, signature = sign(device, seed)
     if signer not in published:
         raise CrossSignError("the stored self-signing key is not the published one")

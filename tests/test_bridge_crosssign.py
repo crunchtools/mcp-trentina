@@ -291,6 +291,7 @@ class ResettableAccount:
     def __init__(self, approvals_needed: int = 1, challenge: httpx.Response | None = None) -> None:
         self.data: dict[str, Any] = {}
         self.challenge = challenge
+        self.refused_writes: set[str] = set()
         self.uploaded: dict[str, Any] = {}
         self.signatures: list[dict[str, Any]] = []
         self.pending = approvals_needed
@@ -323,6 +324,8 @@ class ResettableAccount:
 
     def _account_data(self, request: httpx.Request) -> httpx.Response:
         kind = request.url.path.rsplit("/", 1)[1]
+        if request.method == "PUT" and kind in self.refused_writes:
+            return httpx.Response(500, json={"errcode": "M_UNKNOWN"})
         if request.method == "PUT":
             self.data[kind] = json.loads(request.content)
             return httpx.Response(200, json={})
@@ -395,6 +398,19 @@ class TestResetIdentity:
         assert "m.secret_storage.default_key" in account.data, (
             "the stored keys match no published identity; a rerun replaces them"
         )
+
+    async def test_a_failed_store_hands_out_no_key_and_publishes_nothing(self) -> None:
+        account = ResettableAccount()
+        account.refused_writes.add("m.cross_signing.self_signing")
+        kept: list[str] = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+            with pytest.raises(
+                CrossSignError, match=r"storing m\.cross_signing\.self_signing: 500"
+            ):
+                await reset_identity(client, "https://hs", SESSION, print, kept.append)
+        assert kept == []
+        assert account.uploaded == {}
+        assert "m.secret_storage.default_key" not in account.data
 
     @pytest.mark.parametrize(
         ("challenge", "match"),
