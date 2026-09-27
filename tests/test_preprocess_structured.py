@@ -106,8 +106,8 @@ class TestSecurityProperties:
         issue and a count: the keys are what the agent needs in order to act,
         and collapsing them deletes 197 of them behind a number.
 
-        The cost is real — an array whose only variation is an identifier now
-        reduces by nothing — and it is preferred to silent data loss.
+        Since #173 such an array is listed rather than left whole
+        (``TestIdentifierListing``); this pins that it still loses nothing.
         """
         records = [
             {"key": f"PROJ-{1000 + i}", "summary": "Nightly build failed"} for i in range(200)
@@ -147,7 +147,112 @@ class TestSecurityProperties:
         ]
         result = await _run(json.dumps(pair * 20, indent=2))
         assert result.applied
-        assert result.details["groups_collapsed"] == 1
+        assert result.details["groups_listed"] == 1
+        assert json.loads(result.content)[1] == (
+            "[structured] 39 more element(s) identical to the one above"
+        )
+
+
+_KEYED = [{"key": f"PROJ-{1000 + i}", "summary": "Nightly build failed"} for i in range(200)]
+
+
+class TestIdentifierListing:
+    """#173: records that differ only in an identifier are listed, not sampled."""
+
+    async def test_every_key_survives_a_substantial_reduction(self) -> None:
+        result = await _run(json.dumps(_KEYED, indent=2))
+        assert result.applied
+        assert result.details["elements_dropped"] == 0
+        assert result.bytes_out < result.bytes_in * 0.3
+        for record in _KEYED:
+            assert record["key"] in result.content
+
+    async def test_the_listing_reconstructs_every_record(self) -> None:
+        result = await _run(json.dumps(_KEYED))
+        first, *markers = json.loads(result.content)
+        assert first == _KEYED[0]
+        assert markers[0] == (
+            "[structured] 100 more element(s) with this shape; /key: "
+            + ", ".join(r["key"] for r in _KEYED[1:101])
+        )
+        # Past _MAX_LISTED the next member opens a new group, verbatim.
+        assert _KEYED[101] in json.loads(result.content)
+
+    async def test_integer_ids_are_listed_not_deleted(self) -> None:
+        records = [{"id": 10000 + i, "summary": "Nightly build failed"} for i in range(50)]
+        result = await _run(json.dumps(records))
+        assert result.details["elements_dropped"] == 0
+        for record in records:
+            assert str(record["id"]) in result.content
+
+    async def test_several_fields_list_together_and_constants_stay_out(self) -> None:
+        records = [
+            {"id": str(10001 + i), "key": f"PROJ-{1 + i}", "project": "10000", "summary": "x y"}
+            for i in range(10)
+        ]
+        result = await _run(json.dumps(records))
+        marker = json.loads(result.content)[1]
+        assert marker.startswith("[structured] 9 more element(s) with this shape; /id /key: ")
+        assert "10002 PROJ-2, 10003 PROJ-3" in marker
+        assert "10000" not in marker
+
+    async def test_an_integer_and_its_string_do_not_merge(self) -> None:
+        records = [{"id": 100 + i, "summary": "x y"} for i in range(5)]
+        records += [{"id": str(100 + i), "summary": "x y"} for i in range(5)]
+        result = await _run(json.dumps(records))
+        delivered = json.loads(result.content)
+        assert result.details["groups_listed"] == 2
+        assert {"id": 100, "summary": "x y"} in delivered
+        assert {"id": "100", "summary": "x y"} in delivered
+
+    async def test_a_negative_integer_and_its_string_do_not_merge(self) -> None:
+        """-1 is not an identifier, so it stays in the masked text as "-1"."""
+        records = [{"key": f"PROJ-{i}", "x": -1} for i in range(5)]
+        records += [{"key": f"PROJ-{i}", "x": "-1"} for i in range(5, 10)]
+        result = await _run(json.dumps(records))
+        delivered = json.loads(result.content)
+        assert {"key": "PROJ-0", "x": -1} in delivered
+        assert {"key": "PROJ-5", "x": "-1"} in delivered
+
+    async def test_nested_identifiers_list_by_escaped_pointer(self) -> None:
+        records = [{"a/b": {"ids": [f"PROJ-{i}"]}, "s": "x y"} for i in range(10)]
+        result = await _run(json.dumps(records))
+        marker = json.loads(result.content)[1]
+        assert marker.startswith("[structured] 9 more element(s) with this shape; /a~1b/ids/0: ")
+        assert "PROJ-9" in marker
+
+    async def test_too_many_integers_fall_back_to_the_string_identifiers(self) -> None:
+        """Stringified, five integers exceed petit's four fields; without them
+        the key alone is pulled, and records varying only in it are listed."""
+        records = [
+            {"key": f"PROJ-{i}", "a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "s": "x y"}
+            for i in range(10)
+        ]
+        result = await _run(json.dumps(records))
+        assert result.details["elements_listed"] == 9
+        for record in records:
+            assert record["key"] in result.content
+
+    async def test_a_literal_id_placeholder_does_not_merge_with_masked_records(self) -> None:
+        records = [{"key": f"PROJ-{i}", "summary": "<ID>"} for i in range(10)]
+        records += [{"key": "<ID>", "summary": f"PROJ-{i}"} for i in range(10)]
+        result = await _run(json.dumps(records))
+        assert result.details["groups_listed"] == 2
+
+    async def test_records_with_too_many_identifiers_are_untouched(self) -> None:
+        records = [{f"f{j}": f"PROJ-{i * 10 + j}" for j in range(5)} for i in range(10)]
+        result = await _run(json.dumps(records))
+        assert result.details.get("elements_listed", 0) == 0
+        for record in records:
+            for value in record.values():
+                assert value in result.content
+
+    async def test_same_key_shape_with_different_prose_stays_separate(self) -> None:
+        records = [
+            {"key": f"PROJ-{i}", "summary": f"problem {chr(97 + i)} here"} for i in range(10)
+        ]
+        result = await _run(json.dumps(records))
+        assert json.loads(result.content) == records
 
 
 class TestDeclines:

@@ -37,13 +37,16 @@ dependencies = [
     # which is a clearer error than most but says nothing about which name is
     # right — hence this comment rather than a bare pin.
     #
-    # 4.1.1 is the floor. 4.1.0 is where petit gained the two drivers
+    # 4.1.1 was the first floor. 4.1.0 is where petit gained the two drivers
     # this package used to carry itself: StructuredHash (JSON records) and
     # EmailHash (mail threads). Below that floor `preprocess/structured.py`
     # and `preprocess/email.py` have no library to delegate to and the
     # grouping they call for silently does not exist.
     # See crunchtools/petit#31 and mcp-trentina#95.
-    "petit-log-crunchtools>=4.1.1",
+    #
+    # 4.10.1 is the floor now: 4.10.0 added pull_identifiers, which
+    # `preprocess/structured.py` lists identifier-varying records with (#173).
+    "petit-log-crunchtools>=4.10.1",
     "httpx>=0.28",
     "pydantic>=2.0",
     "beautifulsoup4>=4.12",
