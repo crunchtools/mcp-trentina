@@ -514,6 +514,21 @@ class TestResetIdentity:
         assert copies["old"] == old
         assert len(copies) == 2
 
+    async def test_a_reset_stopped_midway_leaves_the_old_storage_in_charge(self) -> None:
+        account = ResettableAccount()
+        old = {"iv": "i", "ciphertext": "c", "mac": "m"}
+        account.data["m.secret_storage.default_key"] = {"key": "old"}
+        for usage in ("master", "self_signing", "user_signing"):
+            account.data[f"m.cross_signing.{usage}"] = {"encrypted": {"old": old}}
+        account.refused_writes.add("m.cross_signing.user_signing")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+            with pytest.raises(CrossSignError, match="storing"):
+                await reset_identity(client, "https://hs", SESSION, DEVICE_KEYS, print, print)
+        assert account.data["m.secret_storage.default_key"] == {"key": "old"}
+        for usage in ("master", "self_signing", "user_signing"):
+            assert account.data[f"m.cross_signing.{usage}"]["encrypted"]["old"] == old
+        assert account.uploaded == {}
+
     async def test_an_unreadable_secret_is_not_taken_for_an_absent_one(self) -> None:
         account = ResettableAccount()
         account.data["m.cross_signing.master"] = {"encrypted": {"old": {}}}
