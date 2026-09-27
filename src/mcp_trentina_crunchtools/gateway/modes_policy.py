@@ -39,6 +39,7 @@ from ..preprocess.policy import (
     INTERNAL_DEFAULTS,
     PREPROCESS_PARAM,
     PreProcessPolicy,
+    switch_value,
 )
 from .guards import evaluate_constraint
 from .transform import resolve as resolve_preprocess_config
@@ -228,5 +229,5 @@ def resolve_preprocess(
             deprecated list form.
     """
     policy = preprocess_policy_for(profile, backend, tool_name)
-    requested = arguments.get(PREPROCESS_PARAM)
+    requested = switch_value(arguments.get(PREPROCESS_PARAM))
     return policy, requested, None if requested is None else policy.minifies(requested)

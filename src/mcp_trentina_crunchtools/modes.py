@@ -30,6 +30,7 @@ where the payload hides past the cap and the head reads clean.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import asdict, dataclass, fields
 from enum import Enum
@@ -71,6 +72,12 @@ def parse_mode_arg(value: Any, legacy_prompt: Any = None) -> tuple[str | None, s
     beside a string mode is the pre-0.39.0 spelling, read with a warning
     until 0.43.0.
 
+    The dict may also arrive as its JSON text (#244). No tool declares
+    ``trentina_mode`` unless the profile sets ``declare_modes``, and a client
+    that marshals arguments against the declared schema sends an undeclared
+    object as a string. A string that starts with ``{`` is therefore parsed,
+    and one that does not parse is refused, never read as a mode name.
+
     Args:
         value: the call's ``trentina_mode``: None, a mode name, or
             ``{"redact": "<question>"}``.
@@ -86,6 +93,11 @@ def parse_mode_arg(value: Any, legacy_prompt: Any = None) -> tuple[str | None, s
         ModeNotPermittedError: a dict that is not exactly one ``redact`` key
             with a non-empty question, or a value of any other type.
     """
+    if isinstance(value, str) and value.lstrip().startswith("{"):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            raise ModeNotPermittedError(value, MODE_SHAPES) from None
     if isinstance(value, dict):
         items = list(value.items())
         question = items[0][1] if len(items) == 1 else None

@@ -150,6 +150,8 @@ class TestModeArg:
             ({"redact": "What ships?"}, "ignored", ("redact", "What ships?")),
             ("redact", "What ships?", ("redact", "What ships?")),
             ("redact", "  ", ("redact", None)),
+            ('{"redact": "What ships?"}', None, ("redact", "What ships?")),
+            (' {"redact": "What ships?"}', "ignored", ("redact", "What ships?")),
         ],
     )
     def test_shapes(self, value: Any, legacy: Any, expected: tuple[Any, Any]) -> None:
@@ -165,6 +167,11 @@ class TestModeArg:
             {"redact": "a", "block": "b"},
             1,
             ["block"],
+            '{"redact": "x"',
+            '{"flag": "x"}',
+            '{"redact": ""}',
+            "{}",
+            '{"redact": "a"} trailing',
         ],
     )
     def test_anything_else_is_refused(self, bad: Any) -> None:
