@@ -491,6 +491,9 @@ class TestResetIdentity:
         for usage in ("self_signing_key", "user_signing_key"):
             signatures = account.uploaded[usage]["signatures"][USER]
             assert reset.master_key in signatures, f"{usage} is signed by the master key"
+        default = account.data["m.secret_storage.default_key"]["key"]
+        assert default.isalnum(), "the key ID goes into URL paths"
+        assert f"m.secret_storage.key.{default}" in account.data
         for secret in (
             "m.cross_signing.master",
             "m.cross_signing.self_signing",
@@ -540,6 +543,27 @@ class TestResetIdentity:
         for usage in ("master", "self_signing", "user_signing"):
             assert account.data[f"m.cross_signing.{usage}"]["encrypted"]["old"] == old
         assert account.uploaded == {}
+
+    async def test_malformed_copies_are_not_replaced(self) -> None:
+        account = ResettableAccount()
+        account.data["m.cross_signing.master"] = {"encrypted": "garbage"}
+        async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+            with pytest.raises(CrossSignError, match="malformed"):
+                await reset_identity(client, "https://hs", SESSION, DEVICE_KEYS, print, print)
+        assert account.data["m.cross_signing.master"] == {"encrypted": "garbage"}
+
+    async def test_a_default_switch_that_fails_after_publishing_is_reported(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(crosssign, "_APPROVAL_POLL", 0.0)
+        account = ResettableAccount()
+        account.refused_writes.add("m.secret_storage.default_key")
+        kept: list[str] = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
+            with pytest.raises(CrossSignError, match=r"storing m\.secret_storage\.default_key"):
+                await reset_identity(client, "https://hs", SESSION, DEVICE_KEYS, print, kept.append)
+        assert len(kept) == 1, "the key was surfaced before the upload"
+        assert account.uploaded, "the identity was published"
 
     async def test_an_unreadable_secret_is_not_taken_for_an_absent_one(self) -> None:
         account = ResettableAccount()

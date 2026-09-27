@@ -21,6 +21,8 @@ import hmac
 import json
 import logging
 import os
+import secrets
+import string
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote
@@ -277,9 +279,13 @@ _APPROVAL_WINDOW = 600.0
 _APPROVAL_POLL = 10.0
 _CROSS_SIGNING = ("master", "self_signing", "user_signing")
 # Clear bit 63 of the IV, as clients do, so the CTR counter cannot overflow
-# into the upper half; and the random bytes behind a new storage key's ID.
+# into the upper half.
 _COUNTER_HEADROOM = 0x7F
-_KEY_ID_BYTES = 24
+# A new storage key's ID: letters and digits only, as clients make them. It
+# is part of an account-data type in a URL path, where base64's "/" and "+"
+# do not survive every homeserver's decoding.
+_KEY_ID_LENGTH = 32
+_KEY_ID_ALPHABET = string.ascii_letters + string.digits
 
 
 def _encrypt_secret(key: bytes, name: str, secret: str) -> dict[str, str]:
@@ -381,7 +387,7 @@ async def reset_identity(
     # refused or never approved leaves the account exactly as it was.
     storage_key = os.urandom(32)
     recovery_key = encode_recovery_key(storage_key)
-    key_id = encode_base64(os.urandom(_KEY_ID_BYTES))
+    key_id = "".join(secrets.choice(_KEY_ID_ALPHABET) for _ in range(_KEY_ID_LENGTH))
     check = _encrypt_secret(storage_key, "", "\0" * 32)
 
     def data_url(kind: str) -> str:
@@ -401,8 +407,10 @@ async def reset_identity(
         current = await client.get(data_url(name), headers=auth)
         # 404 is "never stored"; any other failure must not be taken for it.
         stored = {} if current.status_code == 404 else _require(current, f"reading {name}")
-        encrypted = stored.get("encrypted")
-        copies = dict(encrypted) if isinstance(encrypted, dict) else {}
+        copies = stored.get("encrypted", {})
+        if not isinstance(copies, dict):
+            raise CrossSignError(f"{name} is malformed; not replacing it")
+        copies = dict(copies)
         copies[key_id] = _encrypt_secret(storage_key, name, encode_base64(seed))
         await put(name, {"encrypted": copies})
     on_recovery_key(recovery_key)
