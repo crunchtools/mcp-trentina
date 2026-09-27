@@ -60,6 +60,14 @@ thread or reply; a withheld reaction is dropped. Under `flag` it is delivered
 with `_trentina_warning` in its content. **Outbound**, only the agent's own
 events are carried; a refused one is not sent, and the agent gets a notice.
 
+Local rooms exist before anyone speaks in them. The bridge announces every
+room it is in when it starts, and each room it joins later; the gateway judges
+the room's name and topic, creates the local room, invites the agent, and
+holds the announcement up to 30 seconds for the agent to join, so the room's
+first messages are not written before the agent can read them. An agent that
+has not joined by then does not stall the bridge: the room is used anyway,
+and the delay is logged.
+
 Remote senders appear as stand-ins, `@<user_prefix><escaped id>:<server_name>`,
 where the escape is the spec's mapping (`@Scott_M:matrix.org` →
 `@remote__scott___m=3amatrix.org:agent1.local`). The agent's own remote ID is

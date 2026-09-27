@@ -1019,7 +1019,7 @@ def _valid_server_name(value: str) -> bool:
 _LOCALPART_RE = re.compile(r"^[a-z0-9._=/-]{1,64}$")
 
 
-def _private_url(value: str) -> str:
+def private_url(value: str) -> str:
     """Refuse any URL whose host could be on the public internet.
 
     Both ends the gateway talks to on the bridge path live on private
@@ -1105,7 +1105,7 @@ class MatrixBridgeLocalConfig(BaseModel):
     @field_validator("homeserver")
     @classmethod
     def _homeserver(cls, value: str) -> str:
-        return _private_url(value)
+        return private_url(value)
 
     @field_validator("server_name")
     @classmethod
@@ -1177,7 +1177,7 @@ class MatrixBridgeConfig(BaseModel):
     @field_validator("bridge_url")
     @classmethod
     def _bridge_url(cls, value: str) -> str:
-        return _private_url(value)
+        return private_url(value)
 
     @field_validator("public_user_id")
     @classmethod

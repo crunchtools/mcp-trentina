@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 from ..gateway.errors import ProfileConfigError
 from ..gateway.loader import read_secret_env
+from ..gateway.profile import private_url
 
 DEFAULT_HOMESERVER = "https://matrix-client.matrix.org"
 DEFAULT_PORT = 8471
@@ -48,6 +49,19 @@ def _port(value: str) -> int:
     if not value.isdigit() or not 0 < int(value) <= _MAX_PORT:
         raise SettingsError(f"BRIDGE_LISTEN_PORT must be a port number, got {value!r}")
     return int(value)
+
+
+def _private_gateway(value: str) -> str:
+    """The gateway receives decrypted events and the ingress token, so it
+    must be on a private host, by the same rule as the gateway's own bridge
+    URLs; no userinfo or fragment either."""
+    parsed = urlparse(value)
+    if parsed.username or parsed.password or parsed.fragment:
+        raise SettingsError("BRIDGE_GATEWAY_URL must not carry credentials or a fragment")
+    try:
+        return private_url(value)
+    except ValueError as exc:
+        raise SettingsError(f"BRIDGE_GATEWAY_URL: {exc}") from exc
 
 
 def _required(name: str) -> str:
@@ -87,7 +101,7 @@ class BridgeSettings:
             user_id=_required("BRIDGE_USER_ID"),
             store_dir=Path(os.environ.get("BRIDGE_STORE_DIR", "/data")),
             pickle_key=_required("BRIDGE_PICKLE_KEY"),
-            gateway_url=_http_url("BRIDGE_GATEWAY_URL", _required("BRIDGE_GATEWAY_URL")),
+            gateway_url=_private_gateway(_required("BRIDGE_GATEWAY_URL")),
             ingress_token=_required("BRIDGE_INGRESS_TOKEN"),
             bridge_token=_required("BRIDGE_TOKEN"),
             listen_host=os.environ.get("BRIDGE_LISTEN_HOST", "127.0.0.1"),

@@ -1118,3 +1118,14 @@ class TestPrivateWrites:
         await bridge.login()
         assert (tmp_path / "session.json").stat().st_mode & 0o777 == 0o600
         assert not (tmp_path / "session.tmp").exists()
+
+
+class TestGatewayUrl:
+    @pytest.mark.parametrize(
+        "url",
+        ["https://gateway.example.com", "http://8.8.8.8:8019", "http://u:p@mcp-trentina:8019"],
+    )
+    def test_the_gateway_must_be_private(self, monkeypatch: pytest.MonkeyPatch, url: str) -> None:
+        TestSettings()._env(monkeypatch, BRIDGE_GATEWAY_URL=url)
+        with pytest.raises(SettingsError, match="BRIDGE_GATEWAY_URL"):
+            BridgeSettings.from_env()

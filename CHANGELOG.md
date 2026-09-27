@@ -37,6 +37,8 @@ under that name.
     notice under `block`. The appservice transaction endpoint carries the
     agent's own events upstream after judging them; a refused one is not
     sent. Relations, mentions and the agent's own ID are translated both ways.
+    Rooms are announced by the bridge and created, agent invited and held up
+    to 30s for its join, before their first message.
   - `delete-devices` prunes an account's other devices once the bridge holds
     it.
 
