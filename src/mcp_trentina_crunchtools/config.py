@@ -17,7 +17,7 @@ _config: Config | None = None
 
 DEFAULT_PROVIDER = "gemini"
 DEFAULT_MODEL = "gemini-2.5-flash-lite"
-DEFAULT_SEARCH_MODEL = "gemini-2.5-flash"
+DEFAULT_SEARCH_MODEL = "google/gemini-2.5-flash"
 DEFAULT_MAX_CONTENT = 100_000
 DEFAULT_CLASSIFIER_THRESHOLD = 0.5
 DEFAULT_CLASSIFIER_MODEL_PATH = "/models/prompt-guard-2-86m"
@@ -135,8 +135,9 @@ def _mode_policy_env() -> tuple[str, tuple[str, ...]]:
 class Config:
     """Trentina configuration from environment variables.
 
-    Requires GEMINI_API_KEY for Layer 2 (Q-Agent) operations.
-    Layer 1 (deterministic detection) works without it.
+    L3 (the Q-Agent) needs a key for its provider: TRENTINA_MODEL_PROVIDER
+    and the matching *_API_KEY standalone, a profile's llm_keys behind the
+    gateway. L1 and L2 work without one.
     """
 
     def __init__(self) -> None:
@@ -238,8 +239,32 @@ class Config:
 
     @property
     def has_api_key(self) -> bool:
-        """Check if a Gemini API key is configured."""
+        """Whether a Gemini key is set. Only Gemini's; see ``has_llm``."""
         return bool(self.api_key.get_secret_value())
+
+    def provider_key(self, provider: str) -> str:
+        """The global env key for *provider*; empty when unset or keyless."""
+        keys = {
+            "gemini": self.api_key.get_secret_value(),
+            "openai": self.openai_api_key,
+            "anthropic": self.anthropic_api_key,
+            "openrouter": self.openrouter_api_key.get_secret_value(),
+        }
+        return keys.get(provider, "")
+
+    @property
+    def has_llm(self) -> bool:
+        """Whether a standalone model call has somewhere to go.
+
+        The global provider or any configured fallback, each either ollama
+        (keyless) or holding its key: the same chain the calls walk.
+        ``has_api_key`` answered this until 0.41.0 and only ever knew about
+        Gemini, so a gateway judging on OpenRouter looked like it had no L3.
+        """
+        return any(
+            name == "ollama" or bool(self.provider_key(name))
+            for name in (self.provider, *self.provider_fallback)
+        )
 
     def is_trusted_domain(self, url: str) -> bool:
         """Check if a URL's domain is in the trust allowlist."""

@@ -16,10 +16,12 @@ import logging
 import secrets
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import httpx
 
-from ..config import get_config
+from ..client import MAX_RESPONSE_SIZE
+from ..config import DEFAULT_SEARCH_MODEL, get_config
 from ..errors import QuarantineAgentError
 from ..l1.pipeline import run_l1
 from .limiter import THROTTLE_STATUS, limited_generate, throttle_budget
@@ -55,6 +57,8 @@ _CANARY_PREFIX = "CANARY-"
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_TIMEOUT = 60.0
+#: L0 web search, either route.
+L0_SEARCH_TIMEOUT = 60.0
 #: Re-exported from the provider so both call sites carry the credential the
 #: same way. See the note there for why it is never a query parameter.
 GEMINI_API_KEY_HEADER = "x-goog-api-key"
@@ -118,6 +122,23 @@ def resolve_profile_llm(
             f"{resolved!r}. Add llm_keys.{resolved} to the profile configuration."
         )
     return resolved, llm_keys[resolved].api_key, profile.defense.model
+
+
+def llm_available(profile: Profile | None = None) -> bool:
+    """Whether a model call made now would have a provider to go to.
+
+    The bound profile when there is one (its provider, and its own key for
+    it), the global provider otherwise. The one answer to "is there an LLM",
+    so no gate asks the narrower "is there a Gemini key" by mistake.
+    """
+    profile = profile if profile is not None else get_current_profile()
+    if profile is None:
+        return get_config().has_llm
+    try:
+        resolve_profile_llm(profile)
+    except QuarantineAgentError:
+        return False
+    return True
 
 
 async def _call_with_fallback(
@@ -692,19 +713,233 @@ def _extract_grounding_supports(
     ]
 
 
+#: OpenRouter's web plugin. The one capability L0 is given on this route.
+WEB_SEARCH_PLUGIN_ID = "web"
+
+
+def _search_route() -> tuple[str, str]:
+    """Which backend L0 searches with, and the key it uses.
+
+    A bound profile searches on its OWN OpenRouter key or not at all: the
+    same isolation rule as ``resolve_profile_llm``, so one profile can never
+    bill against the global key or another provider. With no profile bound
+    (standalone), the global OpenRouter key, then Gemini grounding as the
+    pre-0.41.0 fallback. A gateway never reaches Google for search.
+    """
+    config = get_config()
+    profile = get_current_profile()
+    if profile is not None:
+        _name, key, _model = resolve_profile_llm(profile, "openrouter")
+        if key is None or not key.get_secret_value():
+            raise QuarantineAgentError(
+                f"Profile {profile.name!r} has no OpenRouter key for web search"
+            )
+        return "openrouter", key.get_secret_value()
+    if config.openrouter_api_key.get_secret_value():
+        return "openrouter", config.openrouter_api_key.get_secret_value()
+    if config.has_api_key:
+        return "gemini", config.api_key.get_secret_value()
+    raise QuarantineAgentError(
+        "no search provider: set OPENROUTER_API_KEY, or GEMINI_API_KEY for grounding"
+    )
+
+
+def _enforce_openrouter_search_quarantine(request_body: dict[str, Any]) -> None:
+    """L0 on OpenRouter gets the web plugin and nothing else.
+
+    The same rule as ``_enforce_search_quarantine`` in the other request
+    shape: one capability, and no way to hand the model a tool.
+    """
+    for forbidden in ("tools", "tool_choice", "functions", "function_call"):
+        if forbidden in request_body:
+            raise QuarantineAgentError(f"SECURITY: {forbidden} in L0 search request")
+    plugins = request_body.get("plugins", [])
+    if len(plugins) != 1 or plugins[0].get("id") != WEB_SEARCH_PLUGIN_ID:
+        raise QuarantineAgentError("SECURITY: L0 search must carry exactly the web plugin")
+
+
+def _build_openrouter_search_body(
+    query: str, system_prompt: str, model: str, num_results: int
+) -> dict[str, Any]:
+    """A chat completion with OpenRouter's web plugin, routed like L3."""
+    from .providers.openai import OPENROUTER_ROUTING
+
+    return {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    f"Search the web for: {query}\n\n"
+                    f"Return approximately {num_results} results. For each result, "
+                    "include the page title, a brief factual summary, and the source URL."
+                ),
+            },
+        ],
+        "plugins": [{"id": WEB_SEARCH_PLUGIN_ID, "max_results": num_results}],
+        # No require_parameters here: the web plugin is not a model parameter,
+        # and it would exclude every host. data_collection: deny still holds.
+        "provider": {k: v for k, v in OPENROUTER_ROUTING.items() if k != "require_parameters"},
+        "temperature": 0.1,
+        "max_tokens": MAX_OUTPUT_TOKENS,
+    }
+
+
+def _citation_sources(message: dict[str, Any]) -> list[dict[str, str]]:
+    """``url_citation`` annotations as ``{uri, title}``, first mention kept.
+
+    Only http(s): a citation is untrusted model output, and a ``javascript:``
+    or ``file:`` link has no business reaching an agent as a source.
+    """
+    sources: list[dict[str, str]] = []
+    seen: set[str] = set()
+    notes = message.get("annotations")
+    for note in notes if isinstance(notes, list) else []:
+        if not isinstance(note, dict) or note.get("type") != "url_citation":
+            continue
+        cite = note.get("url_citation")
+        if not isinstance(cite, dict):
+            continue
+        uri = cite.get("url", "")
+        if not isinstance(uri, str):
+            continue
+        try:
+            scheme = urlparse(uri).scheme
+        except ValueError:
+            continue
+        if scheme not in ("http", "https"):
+            continue
+        if uri not in seen:
+            seen.add(uri)
+            title = cite.get("title", "")
+            sources.append({"uri": uri, "title": title if isinstance(title, str) else ""})
+    return sources
+
+
+async def _read_bounded(resp: httpx.Response) -> bytes:
+    """The body, read as it arrives and abandoned past the fetch limit.
+
+    The completion is capped by max_tokens, the web plugin's excerpts are
+    not, so the limit is enforced while streaming rather than after httpx
+    has buffered whatever the upstream chose to send.
+    """
+    buf = bytearray()
+    async for chunk in resp.aiter_bytes():
+        buf.extend(chunk)
+        if len(buf) > MAX_RESPONSE_SIZE:
+            raise QuarantineAgentError(f"L0 search response exceeds {MAX_RESPONSE_SIZE} bytes")
+    return bytes(buf)
+
+
+def _json_object(raw: bytes) -> dict[str, Any]:
+    """*raw* as a JSON object, or QuarantineAgentError: never a parser exception."""
+    try:
+        value = json.loads(raw)
+    except (ValueError, RecursionError) as exc:
+        raise QuarantineAgentError("L0 search response is not JSON") from exc
+    if not isinstance(value, dict):
+        raise QuarantineAgentError("L0 search response is not a JSON object")
+    return value
+
+
+def _parse_openrouter_search(raw: bytes, canary: str) -> dict[str, Any]:
+    """An OpenRouter search body as L0's result, or QuarantineAgentError.
+
+    Every shape an upstream can get wrong is refused here, never raised as
+    an unrelated exception: not JSON, not an object, no choice, no message,
+    no answer, a leaked canary.
+    """
+    resp_json = _json_object(raw)
+    choices = resp_json.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise QuarantineAgentError("No choices in OpenRouter search response")
+    first = choices[0]
+    message = first.get("message") if isinstance(first, dict) else None
+    if not isinstance(message, dict):
+        raise QuarantineAgentError("No message in OpenRouter search response")
+    text = message.get("content")
+    if not isinstance(text, str) or not text.strip():
+        raise QuarantineAgentError("Empty answer in OpenRouter search response")
+    sources = _citation_sources(message)
+    # Everything returned came from the same untrusted message, citations too.
+    if canary in text or any(canary in value for src in sources for value in src.values()):
+        raise QuarantineAgentError("SECURITY: canary leaked in L0 search response")
+    usage = resp_json.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}
+    return {
+        "text": text,
+        "sources": sources,
+        "supports": [],
+        "usage": {
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+        },
+    }
+
+
+async def _search_openrouter(query: str, num_results: int, api_key: str) -> dict[str, Any]:
+    """L0 through OpenRouter's web plugin. Same contract as the Gemini path."""
+    from .providers.openai import OPENROUTER_API_BASE
+
+    canary = _generate_canary()
+    system_prompt = _inject_canary(SEARCH_L0_SYSTEM_PROMPT, canary)
+    body = _build_openrouter_search_body(
+        query, system_prompt, get_config().search_model, num_results
+    )
+    _enforce_openrouter_search_quarantine(body)
+
+    try:
+        async with (
+            httpx.AsyncClient(timeout=httpx.Timeout(L0_SEARCH_TIMEOUT)) as http_client,
+            http_client.stream(
+                "POST",
+                f"{OPENROUTER_API_BASE}/chat/completions",
+                json=body,
+                headers={"Authorization": f"Bearer {api_key}"},
+            ) as resp,
+        ):
+            resp.raise_for_status()
+            raw = await _read_bounded(resp)
+    except httpx.HTTPStatusError as exc:
+        raise QuarantineAgentError(f"HTTP {exc.response.status_code}") from exc
+    except httpx.TimeoutException as exc:
+        raise QuarantineAgentError("Request timed out") from exc
+    except httpx.RequestError as exc:
+        raise QuarantineAgentError(str(exc)) from exc
+    return _parse_openrouter_search(raw, canary)
+
+
 async def search_grounded(
     query: str,
     num_results: int = 5,
 ) -> dict[str, Any]:
-    """Run L0: Gemini with google_search grounding.
+    """Run L0: a model with web search, and nothing else.
 
-    Returns synthesized text + grounding metadata. The caller MUST
-    run this output through L1 and L2 before downstream use.
+    OpenRouter's web plugin, or Gemini google_search grounding when that is
+    the only key there is (``_search_route``). The caller MUST run this
+    output through L1, L2 and L3 before downstream use.
+
+    Args:
+        query: What to search the web for.
+        num_results: Results to ask for (the web plugin's ``max_results``).
+
+    Returns:
+        ``text``: L0's synthesized answer. ``sources``: ``[{uri, title}]``.
+        ``supports``: Gemini citation spans (empty on OpenRouter).
+        ``usage``: ``{input_tokens, output_tokens}``.
+
+    Raises:
+        QuarantineAgentError: no key for the route (a bound profile without
+            its own OpenRouter key included), a transport or HTTP failure, an
+            empty response, a leaked canary, or a request that breaks the
+            one-capability rule.
     """
+    route, api_key = _search_route()
+    if route == "openrouter":
+        return await _search_openrouter(query, num_results, api_key)
     config = get_config()
-
-    if not config.has_api_key:
-        raise QuarantineAgentError("GEMINI_API_KEY not configured")
 
     canary = _generate_canary()
     system_prompt = _inject_canary(SEARCH_L0_SYSTEM_PROMPT, canary)
@@ -712,8 +947,11 @@ async def search_grounded(
     request_body = _build_search_request_body(query, system_prompt, num_results)
     _enforce_search_quarantine(request_body)
 
-    api_key = config.api_key.get_secret_value()
-    model = config.search_model
+    # The default is an OpenRouter id; Google's own API takes the bare name,
+    # and only a Gemini model. Anything else falls back to the known default.
+    model = config.search_model.removeprefix("google/")
+    if "/" in model or not model.startswith("gemini"):
+        model = DEFAULT_SEARCH_MODEL.removeprefix("google/")
     url = f"{GEMINI_API_BASE}/{model}:generateContent"
 
     try:

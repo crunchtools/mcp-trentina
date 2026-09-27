@@ -90,7 +90,7 @@ class TestAlertIngressNowHonoursTheProfile:
             patch(f"{_DEFENSE}.classify_async", return_value=MALICIOUS),
             patch(f"{_DEFENSE}.get_config") as cfg,
         ):
-            cfg.return_value.has_api_key = False
+            cfg.return_value.has_llm = False
             forward_body, _risk, flagged, _counts = await _defend_alert(
                 body.encode(), self._profile()
             )
@@ -120,7 +120,7 @@ class TestAlertIngressNowHonoursTheProfile:
             patch(f"{_DEFENSE}.classify_async", return_value=scored),
             patch(f"{_DEFENSE}.get_config") as cfg,
         ):
-            cfg.return_value.has_api_key = False
+            cfg.return_value.has_llm = False
             # Below the profile threshold: clean.
             _, _, flagged_loose, _ = await _defend_alert(
                 body.encode(), self._profile(DefenseConfig(l2_threshold=0.9))
@@ -147,7 +147,7 @@ class TestAlertIngressNowHonoursTheProfile:
             patch(f"{_DEFENSE}.classify_async", return_value=partial),
             patch(f"{_DEFENSE}.get_config") as cfg,
         ):
-            cfg.return_value.has_api_key = False
+            cfg.return_value.has_llm = False
             forward_body, _risk, flagged, _counts = await _defend_alert(
                 body.encode(), self._profile()
             )

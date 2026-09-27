@@ -64,6 +64,15 @@ async def start_dbus() -> None:
         logger.warning("D-Bus unavailable — interface disabled", exc_info=True)
 
 
+def l3_status(config: Any) -> dict[str, Any]:
+    """L3 as D-Bus reports it: live when a provider has its key, or is keyless (ollama)."""
+    return {
+        "active": config.has_llm,
+        "description": f"Semantic judge ({config.provider})",
+        "model": config.model,
+    }
+
+
 def _build_interface() -> Any:
     """Build the Trentina1 D-Bus interface object."""
     from dbus_fast.service import ServiceInterface, method, signal
@@ -97,7 +106,7 @@ def _build_interface() -> Any:
                     "layers": {
                         "l1": True,
                         "l2": is_classifier_available(),
-                        "l3": config.has_api_key,
+                        "l3": l3_status(config)["active"],
                     },
                 }
             )
@@ -124,11 +133,7 @@ def _build_interface() -> Any:
                         "active": is_classifier_available(),
                         "description": "Prompt Guard 2 classifier",
                     },
-                    "l3": {
-                        "active": config.has_api_key,
-                        "description": "Gemini semantic judge",
-                        "model": config.model,
-                    },
+                    "l3": l3_status(config),
                 }
             )
 

@@ -10,6 +10,32 @@ under that name.
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-09-26
+
+### Changed
+
+- **Web search (L0) runs on OpenRouter's `web` plugin**, on the bound
+  profile's own OpenRouter key and with `data_collection: deny`, like L3. It
+  used Gemini `google_search` grounding on the global `GEMINI_API_KEY`. The
+  quarantine rule carries over: exactly one plugin, `web`, and no tools.
+  Gemini grounding remains only as the standalone fallback when there is no
+  OpenRouter key. `QUARANTINE_SEARCH_MODEL` is now an OpenRouter id (default
+  `google/gemini-2.5-flash`).
+- **"Is there an LLM" asks the provider actually in use.** The summarize
+  gate, L3 availability, `quarantine_stats` and D-Bus checked
+  `has_api_key`, which is Gemini's key only, so a gateway judging on
+  OpenRouter with no Gemini key reported no L3. New: `config.has_llm`,
+  `agent.llm_available()`, and `llm_available` plus `provider` in
+  `quarantine_stats`. `has_api_key` in stats is deprecated.
+- The standalone fallback chain can use `openrouter`.
+- `GEMINI_API_KEY` is optional. A gateway without it makes no direct
+  Google calls.
+
+### Deprecated
+
+- `<backend>__<tool>` names and `trentina_prompt` now run until 0.42.0.
+  Both still have live callers in the gateway logs.
+
 ## [0.40.1] - 2026-09-26
 
 ### Fixed

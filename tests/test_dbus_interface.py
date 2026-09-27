@@ -253,3 +253,14 @@ class TestEventDataShapes:
         assert d["source"] == "https://bad.com"
         assert d["severity"] == "critical"
         assert d["details"] == {}
+
+
+def test_l3_status_follows_the_provider_not_the_gemini_key() -> None:
+    from mcp_trentina_crunchtools.dbus_interface import l3_status
+
+    config = MagicMock(has_llm=True, has_api_key=False, provider="openrouter", model="m")
+
+    status = l3_status(config)
+
+    assert status["active"] is True
+    assert "openrouter" in status["description"]

@@ -35,9 +35,8 @@ import logging
 from typing import TYPE_CHECKING, Any, Literal
 
 from ..channels import Channel, Kind
-from ..config import get_config
 from ..errors import QuarantineAgentError
-from ..quarantine.agent import quarantine_generate
+from ..quarantine.agent import llm_available, quarantine_generate
 from ..quarantine.limiter import limited_generate
 from .base import Cost, PreProcessContext, PreProcessResult
 
@@ -91,7 +90,7 @@ class SummarizeProcessor:
 
         if bytes_in < _MIN_BYTES:
             return PreProcessResult.declined(self.name, self.cost, payload, reason="too_small")
-        if not get_config().has_api_key:
+        if not llm_available():
             return PreProcessResult.declined(self.name, self.cost, payload, reason="no_api_key")
 
         try:

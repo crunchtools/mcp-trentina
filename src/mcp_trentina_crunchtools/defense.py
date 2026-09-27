@@ -144,9 +144,9 @@ def _l3_provider_configured(defense: DefenseConfig | None) -> bool:
     as ``l3_unavailable`` in the verdict, and block and redact refuse on it
     unless ``TRENTINA_REQUIRE_L3=false``.
     """
-    # has_api_key is Gemini's; a profile that overrides defense.provider
-    # brings its own key (validated at profile load) or is keyless ollama.
-    return get_config().has_api_key or (defense is not None and defense.provider is not None)
+    # A profile that overrides defense.provider brings its own key
+    # (validated at profile load) or is keyless ollama.
+    return get_config().has_llm or (defense is not None and defense.provider is not None)
 
 
 def _decide(

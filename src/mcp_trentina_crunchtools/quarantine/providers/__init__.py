@@ -167,15 +167,7 @@ def get_fallback_providers(profile: object = None) -> list[tuple[str, SecretStr 
                 continue
             chain.append((name, llm_keys[name].api_key))
         else:
-            match name:
-                case "gemini":
-                    key_str = config.api_key.get_secret_value()
-                case "openai":
-                    key_str = config.openai_api_key
-                case "anthropic":
-                    key_str = config.anthropic_api_key
-                case _:
-                    key_str = ""
+            key_str = config.provider_key(name)
             if not key_str:
                 logger.warning(
                     "provider fallback: skipping %r — no global API key configured", name
