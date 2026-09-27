@@ -116,7 +116,18 @@ class TestLocal:
         with pytest.raises(ValidationError, match="invalid port"):
             MatrixBridgeConfig.model_validate(_bridge(bridge_url=url))
 
-    @pytest.mark.parametrize("name", ["agent1.local", "a", "matrix.example.com"])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "agent1.local",
+            "a",
+            "matrix.example.com",
+            "agent1.local:8448",
+            "[::1]",
+            "[::1]:6167",
+            "10.89.10.3",
+        ],
+    )
     def test_server_names_accepted(self, name: str) -> None:
         body = _bridge()
         body["local"]["server_name"] = name

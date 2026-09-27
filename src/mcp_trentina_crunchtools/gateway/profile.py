@@ -982,9 +982,12 @@ class MatrixIngressConfig(BaseModel):
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _MATRIX_USER_ID_RE = re.compile(r"^@[a-z0-9._=/+-]+:[A-Za-z0-9.-]+(:[0-9]{1,5})?$")
-# Dot-separated DNS labels, none empty and none starting or ending with '-'.
+# The Matrix server-name grammar: a DNS name, an IPv4 address or a bracketed
+# IPv6 literal, then an optional port. DNS labels may not be empty or start or
+# end with '-'.
 _SERVER_NAME_RE = re.compile(
-    r"^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$"
+    r"^(?:(?=[a-z0-9.-]{1,253}(?::|$))[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+    r"(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*|\[[0-9a-f:.]{2,45}\])(:[0-9]{1,5})?$"
 )
 _LOCALPART_RE = re.compile(r"^[a-z0-9._=/-]{1,64}$")
 
