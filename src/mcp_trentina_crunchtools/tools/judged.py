@@ -212,7 +212,7 @@ async def judge_and_deliver(
         if reason is None:
             return _deliver(call, verdict, original, extras)
         gaps = gaps_of(verdict)
-        absent = gaps.blocking() and not gaps.truncated_only()
+        absent = gaps.blocking() and not gaps.redactable_only()
         if allowlisted and not absent:
             return await _redact(
                 call, verdict, DEFAULT_REDACT_PROMPT, redact_extras, downgraded=True
@@ -257,6 +257,14 @@ def _deliver(
     return response
 
 
+def _scripted(extras: Mapping[str, Any] | None) -> bool:
+    """Whether pre-processing removed script tags: the app-shell shape (#245)."""
+    runs = (extras or {}).get("preprocess")
+    return isinstance(runs, list) and any(
+        isinstance(r, dict) and r.get("script_tags") for r in runs
+    )
+
+
 async def _redact(
     call: _Call,
     verdict: DefenseVerdict,
@@ -267,7 +275,7 @@ async def _redact(
 ) -> dict[str, Any]:
     """Turns 2 and 3 over L1's normalized text; refuse if either objects."""
     result = await quarantine_redact(
-        verdict.pipeline.l2_input[: get_config().max_content],
+        verdict.pipeline.l2_input,
         prompt,
         detection=verdict.l3_assessment,
     )
@@ -275,6 +283,11 @@ async def _redact(
         raise call.refuse(verdict, f"redact refused: {result.refused_by}", judged=False)
 
     extraction = result.content
+    if "nothing_to_extract" in extraction and _scripted(redact_extras):
+        extraction["nothing_to_extract"] += (
+            "; the page carried <script> tags, so it likely renders its content "
+            "with JavaScript, which fetch does not run"
+        )
     # A downgraded block keeps block's response shape: `content` is text.
     content: Any = extraction.get("extracted_text", "") if downgraded else extraction
     warning = call.warning(verdict, downgraded_to_redact=downgraded)

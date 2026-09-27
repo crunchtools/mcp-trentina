@@ -224,7 +224,7 @@ def classify(
     For text longer than ``WINDOW_TOKENS``, splits into overlapping segments
     (advancing by ``WINDOW_STRIDE``, leaving a 64-token guard band) and
     returns the highest malicious score.  Scanning stops
-    after ``CLASSIFIER_MAX_TOKENS`` tokens and the result is marked
+    after ``Config.admission_tokens`` tokens and the result is marked
     ``truncated``; callers must treat a truncated scan of an untrusted
     source as unscannable rather than clean.  Without that bound an 855 KB
     PDF decoded as text produced ~462k tokens and ~1,800 inference passes,
@@ -244,16 +244,10 @@ def classify(
     max_length = WINDOW_TOKENS
     stride = WINDOW_STRIDE
 
-    encoding = _tokenizer(
-        text,
-        truncation=False,
-        add_special_tokens=False,
-        return_attention_mask=False,
-    )
-    all_ids: list[int] = encoding["input_ids"]
+    all_ids = _encode(text)
 
     total_tokens = len(all_ids)
-    max_tokens = get_config().classifier_max_tokens
+    max_tokens = get_config().admission_tokens
     truncated = max_tokens > 0 and total_tokens > max_tokens
     if truncated:
         if fail_on_truncate:
@@ -314,6 +308,64 @@ def classify(
         truncated=truncated,
         tokens=total_tokens,
     )
+
+
+def _encode(text: str) -> list[int]:
+    """Content token IDs, no special tokens, no truncation."""
+    return list(
+        _tokenizer(text, truncation=False, add_special_tokens=False, return_attention_mask=False)[
+            "input_ids"
+        ]
+    )
+
+
+def count_tokens(text: str) -> int | None:
+    """``text``'s length in L2's tokens, or None when the model is absent.
+
+    The unit ``Config.admission_tokens`` is stated in. Tokenizing is
+    milliseconds where inference is minutes, which is why admission can
+    afford to count before anything runs.
+    """
+    if not is_classifier_available():
+        return None
+    return len(_encode(text))
+
+
+def head(text: str, tokens: int) -> str:
+    """The longest prefix of ``text`` that is at most ``tokens`` of L2's tokens.
+
+    What flag hands L3 when a payload is over the cap, so L2 and L3 read the
+    same prefix. Without the model there is no token boundary to cut at; the
+    longest prefix whose ``estimate_tokens`` fits stands in.
+    """
+    if not is_classifier_available():
+        return text.encode("utf-8")[:tokens].decode("utf-8", errors="ignore")
+    try:
+        offsets = _tokenizer(
+            text,
+            truncation=False,
+            add_special_tokens=False,
+            return_attention_mask=False,
+            return_offsets_mapping=True,
+        )["offset_mapping"]
+    except NotImplementedError:
+        # A slow (Python) tokenizer has no offsets; decoding the same IDs
+        # is the same prefix, give or take whitespace normalization.
+        return str(_tokenizer.decode(_encode(text)[:tokens]))
+    if len(offsets) <= tokens:
+        return text
+    return text[: offsets[tokens - 1][1]] if tokens > 0 else ""
+
+
+def estimate_tokens(text: str) -> int:
+    """An upper bound on ``text``'s tokens when there is no tokenizer: its UTF-8 bytes.
+
+    A SentencePiece token covers at least one byte of input (byte fallback
+    is exactly one), so bytes do not undercount any script. Ruthlessly
+    high on ASCII: an estimate may refuse what a count would admit, never
+    the reverse.
+    """
+    return len(text.encode("utf-8"))
 
 
 async def classify_async(

@@ -52,6 +52,7 @@ def judged() -> Iterator[list[tuple[str, str | None]]]:
 
 def _profile(**more: Any) -> Profile:
     p = Profile(
+        short_names=False,  # calls below use <backend>__<tool>
         name="agent1",
         auth=AuthConfig(bearer_token_env="TEST"),
         defense=DefenseConfig(enforcement="flag", provider="openrouter"),
@@ -160,6 +161,7 @@ def test_a_profile_without_its_own_key_is_warned_about(
     from mcp_trentina_crunchtools.gateway.loader import _check_judges
 
     profile = Profile(
+        short_names=False,  # calls below use <backend>__<tool>
         name="agent1",
         auth=AuthConfig(bearer_token_env="TEST"),
         defense=DefenseConfig(enforcement="flag", provider=provider),

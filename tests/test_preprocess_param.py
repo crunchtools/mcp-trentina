@@ -75,6 +75,7 @@ def _profile(
     url: str = "http://cms:8000/mcp",
 ) -> Profile:
     p = Profile(
+        short_names=False,  # calls below use <backend>__<tool>
         name="agent",
         auth=AuthConfig(bearer_token_env="TEST"),
         defense=DefenseConfig(enforcement="flag", modes=["flag"]),
@@ -109,7 +110,12 @@ class TestPolicy:
         off = PreProcessPolicy(["detect"], default=False)
         assert off.resolve(True) == ("detect",)
 
-    @pytest.mark.parametrize("bad", ["false", 0, {"html": 1}, ["html"], []])
+    @pytest.mark.parametrize(("spelled", "runs"), [("false", False), (" TRUE ", True)])
+    def test_a_spelled_switch_is_the_boolean(self, spelled: str, runs: bool) -> None:
+        """#244: an undeclared switch reaches us as a string from a strict client."""
+        assert self.POLICY.minifies(spelled) is runs
+
+    @pytest.mark.parametrize("bad", ["no", 0, {"html": 1}, ["html"], []])
     def test_anything_but_a_switch_is_refused(self, bad: Any) -> None:
         with pytest.raises(PreProcessNotPermittedError, match="trentina_preprocess"):
             self.POLICY.resolve(bad)

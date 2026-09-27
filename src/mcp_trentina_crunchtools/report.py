@@ -62,8 +62,11 @@ class LayerState(str, Enum):
     """Ran over the whole input and returned a result."""
 
     PARTIAL = "partial"
-    """Ran, but did not read everything — L2 past its token cap, or L3 past
-    ``QUARANTINE_MAX_CONTENT``."""
+    """flag only: ran over the head of a payload past the admission cap."""
+
+    NOT_ADMITTED = "not_admitted"
+    """block or redact: the payload was over the admission cap, so the layer
+    was never asked (#225). Not UNAVAILABLE: nothing is missing."""
 
     UNAVAILABLE = "unavailable"
     """Could not run: no ONNX model for L2, no API key or a provider error
@@ -108,6 +111,12 @@ def layer_states(verdict: DefenseVerdict) -> dict[str, str]:
             "l3": LayerState.NOT_APPLICABLE.value,
         }
     gaps = gaps_of(verdict)
+    if gaps.oversize:
+        return {
+            "l1": LayerState.COMPLETE.value,
+            "l2": LayerState.NOT_ADMITTED.value,
+            "l3": LayerState.NOT_ADMITTED.value,
+        }
     l2 = (
         LayerState.UNAVAILABLE
         if gaps.l2_unavailable

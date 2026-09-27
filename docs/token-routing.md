@@ -191,7 +191,7 @@ profiles:
 | `delegation.worker_provider` | string | — | Provider for the worker model (`gemini`, `openai`, `anthropic`) |
 | `delegation.line_threshold` | int | `350` | File line count above which reads are delegated |
 | `delegation.temperature` | float | `0.2` | Temperature for worker model calls |
-| `delegation.max_input_chars` | int | `100000` | Max chars sent to worker (aligns with `QUARANTINE_MAX_CONTENT`) |
+| `delegation.max_input_chars` | int | `100000` | Max chars sent to worker (the old `QUARANTINE_MAX_CONTENT` default) |
 | `delegation.modes.bulk_read.enabled` | bool | `true` | Enable bulk-read delegation |
 | `delegation.modes.bulk_read.prompt` | string | (built-in) | System prompt for the bulk-read worker |
 | `delegation.modes.code_write.enabled` | bool | `true` | Enable code-write delegation |
@@ -325,6 +325,17 @@ What is forbidden is the other direction. A pre-processor never marks content cl
 
 One consequence is worth knowing before you build on it. A per-record **filtering** processor — one that drops the records a policy names and delivers the rest — is permitted by that invariant and is a better fit than a whole-response guard wherever partial results beat no results. It is not safe on this framework yet: composition fails **open** by design (`compose.py` swallows a processor's exception and passes the original through), so a filter that raised would deliver exactly what it exists to remove. Fail-closed handling has to come first.
 
+##### Listing, not deleting (0.43.0)
+
+`structured` has one transformation that reshapes rather than deletes, and this is its argument. Array elements that differ only in identifier-shaped values (`PROJ-1000`, `"10234"`, an integer id, a UUID, `#42`, a git SHA) and are otherwise EXACTLY equal are delivered as the first element and one marker:
+
+```json
+[{"key":"PROJ-1000","summary":"Nightly build failed"},
+ "[structured] 100 more element(s) with this shape; /key: PROJ-1001, PROJ-1002, ..."]
+```
+
+The marker lists every element; the `...` is only this page's. Exact equality is what makes it lossless: the representative plus the list reconstructs each record. Fields that do not vary stay out of the list, a marker names at most 100 elements before the next one opens a fresh group, and a record with more than four identifier fields is left alone so the list never becomes the payload. Everything listed is delivered and judged. An identifier is at most 64 characters with no whitespace, matched by bounded patterns (petit's `pull_identifiers`), so a listed value cannot carry a sentence. The details report `groups_listed` and `elements_listed` beside `groups_collapsed` and `elements_dropped`.
+
 ##### Composition is still size-driven
 
 The contract is transformation; the selection strategies are not. A processor that does not shrink behaves differently per strategy:
@@ -336,7 +347,7 @@ The contract is transformation; the selection strategies are not. A processor th
 | `auto` | runs if FREE; METERED escalation is gated on `target_bytes` |
 | `none` | never runs |
 
-Below the `min_bytes` floor (default 4096) nothing runs at all, and each FREE processor self-declines when `bytes_out >= bytes_in`. That gate is currently discarding a real improvement: `structured` re-serializes with indentation, which is more parseable and larger, so whenever indentation costs more than grouping saves the minified original ships instead. Use `chain` if you need a reshaping processor's output to survive.
+Below the `min_bytes` floor (default 4096) nothing runs at all, and each FREE processor self-declines when `bytes_out >= bytes_in`. Use `chain` if you need a reshaping processor's output to survive.
 
 Why the original reasoning was wrong: the risk is not the *input*, it is the *worker*. A model reading hostile text can be talked into emitting a payload, and what it emits is short, fluent, and free of instruction-override syntax — precisely the shape L2 is documented to miss. Gating L3 on an L2 score would let a poisoned summary through every time.
 

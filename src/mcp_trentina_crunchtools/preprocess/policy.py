@@ -41,6 +41,16 @@ logger = logging.getLogger(__name__)
 
 PREPROCESS_PARAM = "trentina_preprocess"
 
+_SPELLED = {"true": True, "false": False}
+
+
+def switch_value(requested: Any) -> Any:
+    """``"true"``/``"false"`` as the booleans they spell; anything else unchanged."""
+    if isinstance(requested, str):
+        return _SPELLED.get(requested.strip().lower(), requested)
+    return requested
+
+
 #: Declines that mean a processor did not do its job, rather than that the
 #: payload was not its shape. A REQUIRED processor that reports one refuses
 #: the call. ``too_large`` is here because padding a payload past the parse
@@ -89,9 +99,14 @@ class PreProcessPolicy:
     def minifies(self, requested: Any) -> bool:
         """Whether this call runs the chain.
 
+        ``"true"`` and ``"false"`` count as the booleans: the switch is
+        undeclared on most tools, and a client that marshals against the
+        declared schema sends an undeclared value as a string (#244).
+
         Raises:
-            PreProcessNotPermittedError: anything but a bool or None.
+            PreProcessNotPermittedError: anything but a bool, its spelling, or None.
         """
+        requested = switch_value(requested)
         if requested is None:
             return self.default
         if isinstance(requested, bool):

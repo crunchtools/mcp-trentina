@@ -91,6 +91,22 @@ class ModeNotPermittedError(TrentinaError):
         self.mode = mode
 
 
+class PromptParamGoneError(ModeNotPermittedError):
+    """A call still sent ``trentina_prompt``, which 0.43.0 no longer reads.
+
+    Refused rather than ignored: ignoring it would answer the tool's default
+    question instead of the one the caller asked.
+    """
+
+    def __init__(self) -> None:
+        TrentinaError.__init__(
+            self,
+            "Parameter 'trentina_prompt' no longer exists (0.43.0); "
+            'pass trentina_mode={"redact": "<question>"}',
+        )
+        self.mode = "redact"
+
+
 class PreProcessNotPermittedError(TrentinaError):
     """The call named a pre-processor the caller's policy does not offer (#183)."""
 
@@ -120,11 +136,12 @@ class FileReadError(TrentinaError):
 
 
 class ContentSizeError(TrentinaError):
-    """Raised when inline content exceeds the maximum allowed size."""
+    """Raised when inline content exceeds the admission cap (#225)."""
 
-    def __init__(self, size: int, max_size: int) -> None:
+    def __init__(self, tokens: int, cap: int) -> None:
         super().__init__(
-            f"Content too large: {size} chars (max {max_size}). Split content into smaller chunks."
+            f"Content too large: {tokens} tokens, over the admission cap of {cap}. "
+            "Split content into smaller chunks."
         )
 
 

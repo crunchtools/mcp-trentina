@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from ..config import get_config
 from ..database import is_blocked
+from ..defense import admission
 from ..errors import ContentSizeError
 from ..modes import Mode
 from .judged import blocklisted, judge_and_deliver
@@ -36,9 +36,11 @@ async def judge_content(
     converted, the way fetch converts a page its server calls HTML. Minified
     by default; ``preprocess=False`` judges and returns the text as given.
     """
-    max_size = get_config().max_content
-    if len(content) > max_size:
-        raise ContentSizeError(len(content), max_size)
+    # Before the blocklist and pre-processing: the agent's own text, so it is
+    # told to split it rather than handed a refusal or flag's partial scan.
+    tokens, cap = await admission(content)
+    if tokens > cap:
+        raise ContentSizeError(tokens, cap)
 
     chash = _content_hash(content)
     blocked = is_blocked(chash)

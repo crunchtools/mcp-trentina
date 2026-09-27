@@ -10,6 +10,67 @@ under that name.
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-09-27
+
+### Added
+
+- **One admission cap, in tokens (#225).** `defend()` counts a payload in
+  L2's tokens before any inference and admits or refuses it on
+  `Config.admission_tokens`, the smaller of `CLASSIFIER_MAX_TOKENS` (L2's
+  CPU budget) and the new `QUARANTINE_CONTEXT_TOKENS` (L3's context,
+  default 1,000,000). `block` and `redact` refuse an over-cap payload with
+  no L2 or L3 call: the refusal says `over the admission cap`, the warning
+  carries `oversize`, `tokens` and `token_cap`, and the layers report
+  `not_admitted`, allowlisted or not. Admitted content is read whole; no
+  slice of it reaches L3.
+  `flag` still scans the head of an over-cap payload, and L3 now reads the
+  same token-bounded head L2 did.
+- **`matrix_ingress.unjudged` (#227)**, default `withhold`. A Matrix
+  response no layer finished judging (over the cap, past the deadline, a
+  required layer absent) keeps every event where it is and loses its
+  language: a string survives only as one printable token of at most 255
+  characters outside the prose fields, room events become a withheld
+  notice keeping their relation, E2EE to-device events keep their long
+  ciphertext and key tokens but no text, and
+  `next_batch` holds, so the client stays in sync. A response that is not
+  a JSON object, cannot be parsed, or is over 32 MB is refused with 502.
+  `annotate` keeps the old forwarding.
+- **Identifier listing in `structured` (#173).** Array elements that differ
+  only in identifier-shaped values (`PROJ-1000`, `"10234"`, integer ids,
+  UUIDs) are delivered as the first element and one marker listing every
+  other element's identifiers, instead of verbatim. Grouped only when the
+  masked JSON is exactly equal, so nothing is deleted. Needs
+  `petit-log-crunchtools>=4.10.1`.
+- A transform that leaves a payload over its byte target logs that, naming
+  the step before admission refuses what follows.
+
+### Changed
+
+- **redact does not invent (#245).** Under 64 characters of text, turn 2 is
+  not called: the answer is an empty extraction with `nothing_to_extract`,
+  plus a JavaScript hint when `fetch` removed script tags. `confidence` is
+  now the gateway's, from how much of the extraction's vocabulary occurs in
+  the source; under 30% the extraction is refused as `ungrounded`.
+- `trentina_mode` given as the JSON text of `{"redact": "<question>"}`, and
+  `trentina_preprocess` given as `"true"`/`"false"`, are read as the values
+  they spell (#244). A client that marshals against declared schemas sends
+  undeclared arguments as strings.
+- Inline `content` is refused on its token count against the admission cap.
+- `quarantine_stats` and the D-Bus status report `admission_tokens` where
+  they reported `max_content`.
+- The Matrix proxy judges with `stop_on_partial` under `withhold`, and its
+  "incomplete scan" log names only the gaps that are true. It had listed
+  every gap key, `False` included, so each `/sync` read as truncated.
+
+### Removed
+
+- `QUARANTINE_MAX_CONTENT`. Setting it now fails startup.
+- `trentina_prompt`: a call that still sends it is refused with a pointer to
+  `trentina_mode={"redact": "<question>"}`.
+- `<backend>__<tool>` names under `short_names`; only the names
+  `tools/list` serves route.
+- `has_api_key` from `quarantine_stats`' operator config.
+
 ## [0.42.0] - 2026-09-26
 
 ### Added

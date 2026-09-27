@@ -101,7 +101,7 @@ def _build_interface() -> Any:
                         "model": config.model,
                         "require_l2": config.require_l2,
                         "require_l3": config.require_l3,
-                        "max_content": config.max_content,
+                        "admission_tokens": config.admission_tokens,
                     },
                     "layers": {
                         "l1": True,

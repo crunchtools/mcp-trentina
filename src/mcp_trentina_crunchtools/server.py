@@ -91,7 +91,6 @@ def _as_arg(mode: str | RedactMode | None) -> str | dict[str, str] | None:
 async def fetch_tool(
     url: str,
     trentina_mode: str | RedactMode | None = None,
-    trentina_prompt: str | None = None,
     trentina_preprocess: bool | list[str] | None = None,
 ) -> dict[str, Any]:
     """Fetch a URL through all three layers.
@@ -104,15 +103,14 @@ async def fetch_tool(
     Args:
         url: URL to fetch (http:// or https://)
         trentina_mode: block, flag, or {"redact": "<what you need>"}
-        trentina_prompt: Deprecated; put the question in trentina_mode
         trentina_preprocess: false for exact text; see the server instructions
     """
-    name, trentina_prompt = parse_mode_arg(_as_arg(trentina_mode), trentina_prompt)
+    name, question = parse_mode_arg(_as_arg(trentina_mode))
     mode = current_policy().resolve(name)
     return await fetch_page(
         url,
         mode,
-        trentina_prompt or "Extract the main content from this page.",
+        question or "Extract the main content from this page.",
         trentina_preprocess,
     )
 
@@ -121,7 +119,6 @@ async def fetch_tool(
 async def read_tool(
     path: str,
     trentina_mode: str | RedactMode | None = None,
-    trentina_prompt: str | None = None,
     trentina_preprocess: bool | list[str] | None = None,
 ) -> dict[str, Any]:
     """Read a local text file through all three layers. Binary is rejected.
@@ -129,15 +126,14 @@ async def read_tool(
     Args:
         path: Path to the file to read
         trentina_mode: block, flag, or {"redact": "<what you need>"}
-        trentina_prompt: Deprecated; put the question in trentina_mode
         trentina_preprocess: false for exact text; see the server instructions
     """
-    name, trentina_prompt = parse_mode_arg(_as_arg(trentina_mode), trentina_prompt)
+    name, question = parse_mode_arg(_as_arg(trentina_mode))
     mode = current_policy().resolve(name)
     return await read_file(
         path,
         mode,
-        trentina_prompt or "Extract the main content from this file.",
+        question or "Extract the main content from this file.",
         trentina_preprocess,
     )
 
@@ -146,7 +142,6 @@ async def read_tool(
 async def dir_tool(
     path: str,
     trentina_mode: str | RedactMode | None = None,
-    trentina_prompt: str | None = None,
 ) -> dict[str, Any]:
     """List a directory through all three layers.
 
@@ -158,11 +153,10 @@ async def dir_tool(
     Args:
         path: Directory to list
         trentina_mode: block, flag, or {"redact": "<what you need>"}
-        trentina_prompt: Deprecated; put the question in trentina_mode
     """
-    name, trentina_prompt = parse_mode_arg(_as_arg(trentina_mode), trentina_prompt)
+    name, question = parse_mode_arg(_as_arg(trentina_mode))
     mode = current_policy().resolve(name)
-    return await list_dir(path, mode, trentina_prompt or "Summarize what this directory contains.")
+    return await list_dir(path, mode, question or "Summarize what this directory contains.")
 
 
 @mcp.tool()
@@ -170,7 +164,6 @@ async def content_tool(
     content: str,
     content_type: str = "text/plain",
     trentina_mode: str | RedactMode | None = None,
-    trentina_prompt: str | None = None,
     trentina_preprocess: bool | list[str] | None = None,
 ) -> dict[str, Any]:
     """Judge inline text through all three layers. It is always untrusted.
@@ -179,15 +172,14 @@ async def content_tool(
         content: The text to judge
         content_type: Its media type; text/html is converted to Markdown
         trentina_mode: block, flag, or {"redact": "<what you need>"}
-        trentina_prompt: Deprecated; put the question in trentina_mode
         trentina_preprocess: false for exact text; see the server instructions
     """
-    name, trentina_prompt = parse_mode_arg(_as_arg(trentina_mode), trentina_prompt)
+    name, question = parse_mode_arg(_as_arg(trentina_mode))
     mode = current_policy().resolve(name)
     return await judge_content(
         content,
         mode,
-        trentina_prompt or "Extract the main content.",
+        question or "Extract the main content.",
         content_type=content_type,
         preprocess=trentina_preprocess,
     )
@@ -198,7 +190,6 @@ async def search_tool(
     query: str,
     num_results: int = 5,
     trentina_mode: str | RedactMode | None = None,
-    trentina_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Search the web; the grounded answer, titles and URLs are judged as one.
 
@@ -209,13 +200,10 @@ async def search_tool(
         query: Search query string
         num_results: Approximate number of results (default 5)
         trentina_mode: block, flag, or {"redact": "<what you need>"}
-        trentina_prompt: Deprecated; put the question in trentina_mode
     """
-    name, trentina_prompt = parse_mode_arg(_as_arg(trentina_mode), trentina_prompt)
+    name, question = parse_mode_arg(_as_arg(trentina_mode))
     mode = current_policy().resolve(name)
-    return await web_search(
-        query, num_results, mode, trentina_prompt or "Summarize the search results."
-    )
+    return await web_search(query, num_results, mode, question or "Summarize the search results.")
 
 
 @mcp.tool()

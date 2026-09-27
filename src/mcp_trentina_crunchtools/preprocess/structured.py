@@ -37,6 +37,18 @@ count marker still shows the elements existed, and every marker this module
 writes is in-band and therefore spoofable — consumers must treat reduced
 output as untrusted, which the perimeter already assumes.
 
+Identifier-varying records are LISTED, not sampled (#173). Records that
+differ only in identifier-shaped values (``PROJ-1000``, ``"10234"``, a UUID,
+an integer id) would otherwise each keep their own fingerprint and reduce by
+nothing. petit's ``pull_identifiers`` masks those values; records whose
+masked JSON is EXACTLY equal form a group, delivered as its first element
+verbatim and one marker listing every other element's values. Exact, not
+scrubbed and not cut at ``_FINGERPRINT_MAX_CHARS``: the representative plus
+the list reconstructs every record, so the group deletes nothing. A group
+past ``_MAX_LISTED`` opens a new group rather than dropping the rest.
+Integers are not petit's to pull, so they are stringified first and the
+group key records which fields were integers.
+
 Output is always valid JSON. A reducer that emits something a caller cannot
 parse has moved the cost rather than removed it.
 
@@ -66,9 +78,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass, field
 from functools import partial
-from typing import Any
+from typing import Any, NamedTuple
 
+from petit import pull_identifiers
 from petit.Filter import Filter
 
 from ..channels import Channel, Kind
@@ -84,8 +98,9 @@ from .base import Cost, PreProcessContext, PreProcessResult
 # file and this is the gateway's hot path.
 _SCRUB = Filter("strict.stopwords")
 
-# Past this, do not even parse. QUARANTINE_MAX_CONTENT caps what reaches
-# the gateway; this is the reducer refusing to be the expensive step.
+# Past this, do not even parse. A parse guard, not a content policy: the
+# token count at admission (#225) decides what is judged; this is the
+# reducer refusing to be the expensive step on the way there.
 _MAX_PARSE_BYTES = 4_000_000
 
 # Arrays shorter than this have nothing worth grouping.
@@ -109,8 +124,83 @@ _FINGERPRINT_MAX_CHARS = 400
 # so content with nothing to collapse can come out no smaller than it
 # went in, and delivering that would cost bytes for nothing.
 
+# Elements one listing marker names before the next element of the group
+# opens a new one. Bounds a marker, never what is delivered.
+_MAX_LISTED = 100
+
 # Marker text. In-band and therefore spoofable, like petit's [petit] prefix.
 _OMITTED = "[structured] {count} more element(s) with this shape omitted"
+_LISTED = "[structured] {count} more element(s) with this shape; {fields}: {rows}"
+_IDENTICAL = "[structured] {count} more element(s) identical to the one above"
+
+
+class _GroupKey(NamedTuple):
+    """What an element must share with the others to be listed with them."""
+
+    masked_json: str
+    fields: tuple[str, ...]
+    """Identifier pointers, as petit writes them."""
+    int_pointers: frozenset[str]
+    """Every pointer that held an integer, pulled or not."""
+
+
+class _Pulled(NamedTuple):
+    key: _GroupKey
+    values: tuple[str, ...]
+
+
+def _pointer_token(key: str) -> str:
+    """RFC 6901 escaping, as petit writes its pointers."""
+    return key.replace("~", "~0").replace("/", "~1")
+
+
+def _stringify_ints(node: Any, pointer: str, depth: int, found: set[str]) -> Any:
+    """``node`` with every integer (never a bool) as its decimal string.
+
+    ``found`` collects the pointers that held one. Copy-on-write: a container
+    is copied only once a child has changed, so a record without integers
+    costs one walk and no allocation. Past ``_MAX_DEPTH`` the subtree comes
+    back as it is.
+    """
+    if depth >= _MAX_DEPTH:
+        return node
+    if isinstance(node, int) and not isinstance(node, bool):
+        found.add(pointer)
+        return str(node)
+    if not isinstance(node, (dict, list)):
+        return node
+    slots = node.items() if isinstance(node, dict) else enumerate(node)
+    copied: Any = None
+    for k, v in slots:
+        new = _stringify_ints(v, f"{pointer}/{_pointer_token(str(k))}", depth + 1, found)
+        if new is not v and copied is None:
+            copied = dict(node) if isinstance(node, dict) else list(node)
+        if copied is not None:
+            copied[k] = new
+    return node if copied is None else copied
+
+
+def _identifiers(item: Any) -> _Pulled | None:
+    """The element's listing key and its identifier values, or None.
+
+    Tried with integers stringified first; if that finds nothing to pull, or
+    too many fields for petit to take, again with integers left alone.
+    """
+    ints: set[str] = set()
+    widened = _stringify_ints(item, "", 0, ints)
+    masked, fields, values = pull_identifiers(widened) if ints else (item, (), ())
+    if not fields:
+        ints = set()
+        masked, fields, values = pull_identifiers(item)
+    if not fields:
+        return None
+    # Every integer's pointer, not only the pulled ones: `-1` stringified is
+    # not an identifier, stays in the masked text as "-1", and must not
+    # match a record whose "-1" was a string all along.
+    text = json.dumps(masked, sort_keys=True, ensure_ascii=False)
+    return _Pulled(_GroupKey(text, fields, frozenset(ints)), values)
+
+
 _TRUNCATED = "... [structured] {count} more character(s) truncated"
 
 
@@ -129,12 +219,14 @@ class _Reducer:
         self.truncate = truncate
         self.groups_collapsed = 0
         self.elements_dropped = 0
+        self.groups_listed = 0
+        self.elements_listed = 0
         self.strings_truncated = 0
         self.chars_truncated = 0
 
     @property
     def changed(self) -> bool:
-        return bool(self.elements_dropped or self.strings_truncated)
+        return bool(self.elements_dropped or self.elements_listed or self.strings_truncated)
 
     def walk(self, node: Any, depth: int = 0) -> Any:
         """Reduce arrays and long strings, leaving everything else alone.
@@ -166,12 +258,25 @@ class _Reducer:
 
         if len(node) < _MIN_ARRAY_ITEMS:
             return [self.walk(item, depth + 1) for item in node]
+        return self._reduce_array(node, depth)
 
+    def _reduce_array(self, node: list[Any], depth: int) -> list[Any]:
+        """Listing groups first, then sample-and-count for everything else."""
+        lister = _Lister(node)
         seen: dict[str, int] = {}
         kept: list[Any] = []
         dropped: dict[str, int] = {}
 
-        for item in node:
+        for item, found in zip(node, lister.pulled, strict=True):
+            if lister.take(found):
+                continue
+            if found is not None and lister.opens(found):
+                # Verbatim, not walked: the marker below reconstructs the
+                # group from exactly this record.
+                kept.append(item)
+                lister.open(found, kept)
+                continue
+
             # Every item came out of json.loads, so it is serializable by
             # construction; there is no unserializable case to guard.
             text = json.dumps(item, sort_keys=True, ensure_ascii=False)
@@ -184,6 +289,9 @@ class _Reducer:
             else:
                 dropped[fingerprint] = dropped.get(fingerprint, 0) + 1
 
+        kept = lister.finish(kept)
+        self.groups_listed += lister.groups
+        self.elements_listed += lister.elements
         if dropped:
             self.groups_collapsed += len(dropped)
             self.elements_dropped += sum(dropped.values())
@@ -191,6 +299,83 @@ class _Reducer:
                 _OMITTED.format(count=count) for count in sorted(dropped.values(), reverse=True)
             )
         return kept
+
+
+@dataclass
+class _Listing:
+    """One open group: where its marker goes, the first element's values, the rest's."""
+
+    slot: int
+    fields: tuple[str, ...]
+    first: tuple[str, ...]
+    rows: list[tuple[str, ...]] = field(default_factory=list)
+
+    def marker(self) -> str:
+        """Fields constant across the group are named by the element above
+        the marker, so only the varying ones are listed."""
+        varying = [
+            i for i in range(len(self.fields)) if any(r[i] != self.first[i] for r in self.rows)
+        ]
+        if not varying:
+            return _IDENTICAL.format(count=len(self.rows))
+        return _LISTED.format(
+            count=len(self.rows),
+            fields=" ".join(self.fields[i] for i in varying),
+            rows=", ".join(" ".join(row[i] for i in varying) for row in self.rows),
+        )
+
+
+class _Lister:
+    """The identifier groups of one array (#173).
+
+    An element joins a group only when at least one other element shares its
+    key, and a group's marker takes at most ``_MAX_LISTED`` rows; the next
+    member after that is delivered verbatim and opens a fresh marker.
+    """
+
+    def __init__(self, node: list[Any]) -> None:
+        self.pulled = [_identifiers(item) for item in node]
+        self._sizes: dict[_GroupKey, int] = {}
+        for found in self.pulled:
+            if found is not None:
+                self._sizes[found.key] = self._sizes.get(found.key, 0) + 1
+        self._open: dict[_GroupKey, _Listing] = {}
+        self._all: list[_Listing] = []
+        self.groups = 0
+        self.elements = 0
+
+    def take(self, found: _Pulled | None) -> bool:
+        """List the element in its open group, if it has one with room."""
+        if found is None:
+            return False
+        listing = self._open.get(found.key)
+        if listing is None or len(listing.rows) >= _MAX_LISTED:
+            return False
+        listing.rows.append(found.values)
+        return True
+
+    def opens(self, found: _Pulled) -> bool:
+        """Whether another element of the array shares this element's key."""
+        return self._sizes[found.key] > 1
+
+    def open(self, found: _Pulled, kept: list[Any]) -> None:
+        """The element just appended to ``kept`` starts a group; reserve its marker."""
+        kept.append(None)
+        listing = _Listing(len(kept) - 1, found.key.fields, found.values)
+        self._open[found.key] = listing
+        self._all.append(listing)
+
+    def finish(self, kept: list[Any]) -> list[Any]:
+        """Fill each reserved slot with its marker, or remove it if nothing joined."""
+        empty = set()
+        for listing in self._all:
+            if listing.rows:
+                kept[listing.slot] = listing.marker()
+                self.groups += 1
+                self.elements += len(listing.rows)
+            else:
+                empty.add(listing.slot)
+        return [k for i, k in enumerate(kept) if i not in empty]
 
 
 def _parse_and_reduce(payload: str, *, truncate: bool) -> tuple[str | None, _Reducer, str]:
@@ -287,6 +472,8 @@ class StructuredProcessor:
             details={
                 "groups_collapsed": reducer.groups_collapsed,
                 "elements_dropped": reducer.elements_dropped,
+                "groups_listed": reducer.groups_listed,
+                "elements_listed": reducer.elements_listed,
                 "strings_truncated": reducer.strings_truncated,
                 "chars_truncated": reducer.chars_truncated,
             },

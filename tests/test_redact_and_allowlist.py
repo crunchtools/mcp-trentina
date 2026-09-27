@@ -18,6 +18,7 @@ import pytest
 from mcp_trentina_crunchtools import config as config_mod
 from mcp_trentina_crunchtools.errors import BlockedSourceError, QuarantineAgentError
 from mcp_trentina_crunchtools.modes import Mode
+from mcp_trentina_crunchtools.quarantine.agent import confidence_of, grounding
 from mcp_trentina_crunchtools.tools import block_dir, flag_dir, redact_dir
 
 from .mode_harness import (
@@ -41,7 +42,11 @@ class TestRedactTurns:
         assert result["_trentina_warning"]["flagged_by"] == "L3"
 
     async def test_turn_two_reads_normalized_text_and_is_briefed(self, env: Path) -> None:
-        with layers(env, payload="x\u200by is here", detection=FLAGGED) as fakes:
+        with layers(
+            env,
+            payload="x\u200by is here. The maintenance window is Tuesday at 02:00 UTC, as usual.",
+            detection=FLAGGED,
+        ) as fakes:
             await call("content", Mode.REDACT, fakes)
         text, prompt = fakes.extract.call_args.args
         assert "\u200b" not in text
@@ -81,6 +86,107 @@ class TestRedactTurns:
             with pytest.raises(BlockedSourceError):
                 await call("content", Mode.REDACT, fakes)
             assert fakes.verify.await_count == 0
+
+
+class TestGrounding:
+    """#245: 23 bytes of app shell came back as 90 invented words, "high"."""
+
+    async def test_near_empty_content_is_not_sent_to_turn_two(self, env: Path) -> None:
+        with layers(env, payload="Red Hat Hardened Images") as fakes:
+            result = await call("content", Mode.REDACT, fakes)
+        assert fakes.extract.await_count == 0
+        assert result["content"]["extracted_text"] == ""
+        assert result["content"]["confidence"] == "none"
+        assert "23 characters" in result["content"]["nothing_to_extract"]
+
+    @pytest.mark.parametrize(("chars", "extracts"), [(63, False), (64, True)])
+    async def test_the_floor_is_64_characters(self, env: Path, chars: int, extracts: bool) -> None:
+        payload = ("the maintenance window is tuesday " * 3)[:chars]
+        with layers(env, payload=f"  {payload}  ") as fakes:
+            await call("content", Mode.REDACT, fakes)
+        assert (fakes.extract.await_count == 1) is extracts
+
+    async def test_an_app_shell_says_it_needs_javascript(self, env: Path) -> None:
+        shell = (
+            "<html><head><title>CVE feed</title><script src='a.js'></script></head>"
+            "<body><div id='root'></div></body></html>"
+        )
+        with layers(env) as fakes:
+            fakes.fetch_url.return_value = (shell, "text/html")
+            result = await call("fetch", Mode.REDACT, fakes)
+        assert fakes.extract.await_count == 0
+        assert "JavaScript" in result["content"]["nothing_to_extract"]
+
+    async def test_an_invented_extraction_is_refused(self, env: Path) -> None:
+        invented = {
+            "content": {
+                "extracted_text": "Hardened images meet PCI DSS, HIPAA and NIST compliance "
+                "standards across cloud and on-premises platforms.",
+                "confidence": "high",
+            },
+            "usage": {},
+        }
+        with (
+            layers(env, extraction=invented) as fakes,
+            pytest.raises(BlockedSourceError, match="redact refused: ungrounded"),
+        ):
+            await call("content", Mode.REDACT, fakes)
+        assert fakes.verify.await_count == 0
+
+    async def test_confidence_is_ours_not_turn_twos(self, env: Path) -> None:
+        paraphrase = {
+            "content": {
+                "extracted_text": (
+                    "Maintenance is Tuesday; expect the gateway restarts once, briefly."
+                ),
+                "confidence": "high",
+            },
+            "usage": {},
+        }
+        with layers(env, extraction=paraphrase) as fakes:
+            result = await call("content", Mode.REDACT, fakes)
+        assert result["content"]["confidence"] == "medium"
+
+    @pytest.mark.parametrize(
+        ("share", "label"),
+        [
+            (None, "low"),
+            (0.2, "low"),
+            (0.59, "low"),
+            (0.6, "medium"),
+            (0.84, "medium"),
+            (0.85, "high"),
+            (0.9, "high"),
+        ],
+    )
+    def test_bands(self, share: float | None, label: str) -> None:
+        assert confidence_of(share) == label
+
+    @pytest.mark.parametrize(("grounded", "refused"), [(3, False), (2, True)])
+    async def test_the_refusal_boundary_is_30_percent(
+        self, env: Path, grounded: int, refused: bool
+    ) -> None:
+        """Ten distinct words, `grounded` of them in the source."""
+        source = ["maintenance", "window", "tuesday"][:grounded]
+        invented = ["alpha", "bravo", "charlie", "delta", "echoes", "foxtrot", "golfer"]
+        words = source + invented[: 10 - len(source)]
+        extraction = {"content": {"extracted_text": " ".join(words)}, "usage": {}}
+        with layers(env, extraction=extraction) as fakes:
+            if refused:
+                with pytest.raises(BlockedSourceError, match="ungrounded"):
+                    await call("content", Mode.REDACT, fakes)
+            else:
+                result = await call("content", Mode.REDACT, fakes)
+                assert result["content"]["confidence"] == "low"
+
+    def test_short_words_and_case_do_not_count(self) -> None:
+        assert grounding("The WINDOW is a go", "the window") == 1.0
+        assert grounding("The WINDOW", "window") == 0.5
+
+    def test_an_extraction_of_short_words_is_still_graded(self) -> None:
+        assert grounding("use key now", "the window opens tuesday") == 0.0
+        assert grounding("use key now", "use the key now") == 1.0
+        assert grounding("", "anything") is None
 
 
 class TestAllowlist:
@@ -130,18 +236,19 @@ class TestAllowlist:
                 await call("fetch", Mode.BLOCK, fakes)
             assert fakes.extract.await_count == 0
 
-    async def test_a_partial_read_goes_to_redact(
+    async def test_an_oversize_document_is_refused_even_allowlisted(
         self, env: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A trusted document too large for L2 stays reachable (Fable R4)."""
-        from mcp_trentina_crunchtools.errors import UnscannableContentError
-
+        """#225: the admission cap has no exceptions. The allowlist changes
+        the cost of a finding, never whether the payload is admitted."""
         allowlist(env, monkeypatch)
+        monkeypatch.setenv("CLASSIFIER_MAX_TOKENS", "8")
+        config_mod._config = None
         with layers(env) as fakes:
-            fakes.classify.side_effect = UnscannableContentError("s", 99_999, 32_768)
-            result = await call("read", Mode.BLOCK, fakes)
-        assert result["scan"]["disposition"] == "extracted"
-        assert result["_trentina_warning"]["l2_truncated"] is True
+            with pytest.raises(BlockedSourceError, match="admission cap"):
+                await call("read", Mode.BLOCK, fakes)
+            assert fakes.classify.await_count == 0
+            assert fakes.extract.await_count == 0
 
 
 class TestBlocklist:

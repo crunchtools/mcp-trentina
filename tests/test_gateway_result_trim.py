@@ -32,6 +32,7 @@ DOC = {"issues": [{"key": "RT-1", "summary": "disk full"}], "total": 1}
 
 def _profile() -> Profile:
     p = Profile(
+        short_names=False,  # calls below use <backend>__<tool>
         name="agent",
         auth=AuthConfig(bearer_token_env="TEST"),
         defense=DefenseConfig(enforcement="flag", modes=["flag"]),

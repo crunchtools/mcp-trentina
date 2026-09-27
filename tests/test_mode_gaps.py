@@ -37,7 +37,7 @@ def _l2_truncated() -> Any:
     return fake
 
 
-GAPS = ("l2_absent", "l2_truncated", "l3_absent", "l3_truncated")
+GAPS = ("l2_absent", "l2_truncated", "l3_absent", "over_cap")
 
 
 def _arrange(gap: str, monkeypatch: pytest.MonkeyPatch, fakes: Any) -> None:
@@ -49,8 +49,8 @@ def _arrange(gap: str, monkeypatch: pytest.MonkeyPatch, fakes: Any) -> None:
         case "l3_absent":
             monkeypatch.delenv("GEMINI_API_KEY")
             config_mod._config = None
-        case "l3_truncated":
-            monkeypatch.setenv("QUARANTINE_MAX_CONTENT", "8")
+        case "over_cap":
+            monkeypatch.setenv("QUARANTINE_CONTEXT_TOKENS", "8")
             config_mod._config = None
 
 
@@ -59,18 +59,19 @@ def _key(gap: str) -> str:
         "l2_absent": "l2_unavailable",
         "l2_truncated": "l2_truncated",
         "l3_absent": "l3_unavailable",
-        "l3_truncated": "l3_truncated",
+        # flag scans the head of an over-cap payload: L3 reads it in part.
+        "over_cap": "l3_truncated",
     }[gap]
 
 
-# content refuses anything over QUARANTINE_MAX_CONTENT before judging, so the
-# L3-truncated cell does not exist for it.
+# content refuses anything over the admission cap before judging, so the
+# over-cap cell does not exist for it.
 def _cells() -> list[tuple[str, str]]:
     return [
         (family, gap)
         for family in FAMILIES
         for gap in GAPS
-        if not (family == "content" and gap == "l3_truncated")
+        if not (family == "content" and gap == "over_cap")
     ]
 
 
@@ -81,9 +82,14 @@ async def test_block_and_redact_refuse(
 ) -> None:
     with layers(env) as fakes:
         _arrange(gap, monkeypatch, fakes)
-        with pytest.raises(BlockedSourceError):
+        with pytest.raises(BlockedSourceError) as refused:
             await call(family, mode, fakes)
         assert fakes.extract.await_count == 0
+    if gap == "over_cap":
+        # Refused at admission (#225): no inference ran, and it says why.
+        assert fakes.classify.await_count == 0
+        assert fakes.detect.await_count == 0
+        assert "over the admission cap" in str(refused.value)
 
 
 @pytest.mark.parametrize(("family", "gap"), _cells())
@@ -132,6 +138,33 @@ async def test_no_optout_excuses_a_partial_read(
         fakes.classify.side_effect = _l2_truncated()
         with pytest.raises(BlockedSourceError):
             await call("fetch", Mode.BLOCK, fakes)
+
+
+def test_quarantine_max_content_is_refused_at_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#225: a character cap beside the token cap was two units for one question."""
+    from mcp_trentina_crunchtools.errors import ConfigError
+
+    monkeypatch.setenv("QUARANTINE_MAX_CONTENT", "100000")
+    config_mod._config = None
+    with pytest.raises(ConfigError, match="QUARANTINE_CONTEXT_TOKENS"):
+        config_mod.get_config()
+    config_mod._config = None
+
+
+@pytest.mark.parametrize(
+    ("l2_budget", "l3_context", "cap"),
+    [("32768", "1000000", 32_768), ("32768", "8000", 8_000), ("0", "8000", 8_000)],
+)
+def test_the_cap_is_the_smaller_budget(
+    monkeypatch: pytest.MonkeyPatch, l2_budget: str, l3_context: str, cap: int
+) -> None:
+    monkeypatch.setenv("CLASSIFIER_MAX_TOKENS", l2_budget)
+    monkeypatch.setenv("QUARANTINE_CONTEXT_TOKENS", l3_context)
+    config_mod._config = None
+    assert config_mod.get_config().admission_tokens == cap
+    config_mod._config = None
 
 
 def test_quarantine_fallback_is_refused_at_startup(

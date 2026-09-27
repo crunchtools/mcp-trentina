@@ -153,10 +153,10 @@ these variables control the process itself. Profile tokens
 | `TRENTINA_REQUIRE_L3` | `true` | The same for an absent L3 provider. Replaces `QUARANTINE_FALLBACK` (removed in 0.31.0; setting it now fails startup). |
 | `TRENTINA_MODE` | `block` | Standalone only: the mode an omitted `trentina_mode` resolves to. `flag` or `block`. Under the gateway the profile's `defense.enforcement` decides. |
 | `TRENTINA_MODES` | the default | Standalone only: comma-separated modes a call may choose (`block,redact`). A default outside the set fails startup. Under the gateway the profile's `defense.modes` decides. |
-| `QUARANTINE_MAX_CONTENT` | `100000` | Max characters of content sent to the quarantine LLM per call. See [Token Routing](docs/token-routing.md). |
+| `QUARANTINE_CONTEXT_TOKENS` | `1000000` | What the L3 model reads in one call. The admission cap is the smaller of this and `CLASSIFIER_MAX_TOKENS`; `block` and `redact` refuse a payload over it before any layer runs. Replaces `QUARANTINE_MAX_CONTENT` (removed in 0.43.0; setting it now fails startup). |
 | `CLASSIFIER_THRESHOLD` | `0.5` | Malicious-score threshold above which the L2 classifier flags content. |
 | `CLASSIFIER_MODEL_PATH` | `/models/prompt-guard-2-86m` | Filesystem path to the ONNX classifier model. Set to `/models/prompt-guard-2-86m` by the container image. |
-| `CLASSIFIER_MAX_TOKENS` | `32768` | Max tokens the L2 classifier will scan before truncating. |
+| `CLASSIFIER_MAX_TOKENS` | `32768` | L2's CPU budget in tokens, and with `QUARANTINE_CONTEXT_TOKENS` the admission cap. `0` removes L2's budget. |
 | `CLASSIFIER_THREADS` | `4` | ONNX Runtime intra-op thread count for the L2 classifier. |
 | `TRENTINA_L2_CONCURRENCY` | `2` | L2 scans run at once. Each already uses `CLASSIFIER_THREADS` threads, so size the product to the container's `--cpus`. |
 | `TRENTINA_L3_CONCURRENCY_START` | `4` | L3 calls in flight per (provider, model) before the adaptive limiter has learned anything. It grows from here until the provider throttles. |

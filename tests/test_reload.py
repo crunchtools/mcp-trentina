@@ -745,7 +745,7 @@ class TestCacheBehaviour:
             patch(f"{_INGRESS}.defend", counting_defend),
         ):
             _cfg.return_value.has_api_key = True
-            _cfg.return_value.max_content = 100_000
+            _cfg.return_value.admission_tokens = 32_768
             assert await _list_tools("alpha") == ["get_issue", "delete_issue"]
             after_warmup = len(judged)
             assert after_warmup == 2

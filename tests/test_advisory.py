@@ -285,7 +285,7 @@ class TestScanErrorBody:
         ):
             mock_classify.return_value = None
             mock_config.return_value.has_api_key = True
-            mock_config.return_value.max_content = 100_000
+            mock_config.return_value.admission_tokens = 32_768
 
             mock_detect.return_value = {
                 "injection_detected": True,

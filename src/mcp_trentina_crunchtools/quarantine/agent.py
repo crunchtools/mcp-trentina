@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import secrets
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -374,10 +375,57 @@ async def _call_gemini(
     return parsed, canary
 
 
-DELIVERED_EXTRACTION_FIELDS = ("extracted_text", "title", "confidence")
-"""What a clean_* caller receives from turn 2. ``injection_details`` is NOT
+DELIVERED_EXTRACTION_FIELDS = ("extracted_text", "title")
+"""What a redact caller receives from turn 2. ``injection_details`` is NOT
 here: it is L3 prose about the payload, the channel D2 closes. It goes to the
-detections table with the rest of the assessment."""
+detections table with the rest of the assessment. Nor is turn 2's own
+``confidence``: models are poorly calibrated about their own invention, and a
+23-byte app shell came back as 90 invented words marked "high" (#245). The
+delivered ``confidence`` is ours, from ``grounding``."""
+
+MIN_EXTRACTABLE_CHARS = 64
+"""Below this many characters of text there is no document to extract from,
+only a title or an app shell for the model to reconstruct from its priors
+(#245). Such a call is answered without turn 2."""
+
+_WORD = re.compile(r"[^\W_]{3,}")
+_ANY_WORD = re.compile(r"[^\W_]+")
+_STEM = 6
+
+GROUNDING_REFUSAL = 0.3
+"""Below this share of its words found in the source, an extraction is
+invention, and redact refuses it rather than label it."""
+
+_CONFIDENCE_BANDS = ((0.85, "high"), (0.6, "medium"))
+
+
+def grounding(extracted: str, source: str) -> float | None:
+    """The share of the extraction's distinct words that occur in the source.
+
+    Words are runs of three or more letters or digits, case-folded and cut
+    to ``_STEM`` characters, so ``restart`` matches ``restarts`` and a short
+    invented instruction ("use key now") counts against the share. An
+    extraction with no such word is graded on its one- and two-letter words.
+    None only when it has no word at all.
+    An honest extraction reuses the source's vocabulary; paraphrase and
+    translation lower the share, which is why it grades rather than decides
+    everywhere above ``GROUNDING_REFUSAL``.
+    """
+    pattern = _WORD if _WORD.search(extracted) else _ANY_WORD
+    words = {w.casefold()[:_STEM] for w in pattern.findall(extracted)}
+    if not words:
+        return None
+    present = {w.casefold()[:_STEM] for w in pattern.findall(source)}
+    return len(words & present) / len(words)
+
+
+def confidence_of(share: float | None) -> str:
+    """``grounding`` as the delivered ``high``/``medium``/``low``."""
+    if share is None:
+        return "low"
+    bands = sorted(_CONFIDENCE_BANDS, reverse=True)
+    return next((label for floor, label in bands if share >= floor), "low")
+
 
 VERIFIED_FIELDS = ("extracted_text", "title")
 """Every free-text field that is delivered, so every one is verified. The
@@ -495,7 +543,21 @@ async def quarantine_redact(
     Extract, check every delivered string with L1 and L2, then have a third
     L3 call verify the same strings. Any failure refuses; there is no turn 4,
     because a retry after a flagged verification is an attacker's retry loop.
+    An extraction whose words are mostly absent from ``content`` refuses too
+    (``ungrounded``); one that passes carries our ``confidence``, never turn 2's.
+
+    Content under ``MIN_EXTRACTABLE_CHARS`` is not sent to turn 2 at all: the
+    answer is an empty extraction that says how little there was.
     """
+    chars = len(content.strip())
+    if chars < MIN_EXTRACTABLE_CHARS:
+        return CleanResult(
+            content={
+                "extracted_text": "",
+                "confidence": "none",
+                "nothing_to_extract": f"{chars} characters of text; no document to extract from",
+            }
+        )
     try:
         extraction = await quarantine_extract(
             content, prompt, briefing=extraction_briefing(detection)
@@ -503,9 +565,18 @@ async def quarantine_redact(
     except QuarantineAgentError as exc:
         logger.warning("Q-Agent extraction failed: %s", exc)
         return CleanResult(refused_by="t2_unavailable")
+    return await _judge_extraction(extraction, content)
 
+
+async def _judge_extraction(extraction: dict[str, Any], content: str) -> CleanResult:
+    """Turn 2's output against its source, then L1, L2 and turn 3."""
     parsed = extraction["content"]
     delivered = {k: parsed[k] for k in DELIVERED_EXTRACTION_FIELDS if k in parsed}
+    text = delivered.get("extracted_text")
+    share = grounding(text, content) if isinstance(text, str) else None
+    if share is not None and share < GROUNDING_REFUSAL:
+        return CleanResult(refused_by="ungrounded", usage=extraction.get("usage", {}))
+    delivered["confidence"] = confidence_of(share)
     strings = {
         k: v for k in VERIFIED_FIELDS if isinstance(v := delivered.get(k), str) and v.strip()
     }

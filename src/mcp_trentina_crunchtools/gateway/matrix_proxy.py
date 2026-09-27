@@ -19,8 +19,17 @@ this proxy never injects or reads Matrix credentials.
 by the shared pipeline (latency is noise against a 120s poll). Annotate
 mode: the body forwards byte-identical, a flagged response gains a root
 ``_trentina_warning`` key (Matrix clients ignore unknown root keys), and
-the flag is recorded as ``source_type="matrix_sync"``. Everything else
-streams through untouched.
+the flag is recorded as ``source_type="matrix_sync"``. Endpoints that
+carry no room content stream through untouched.
+
+**Unjudged responses (#227).** A response no layer finished judging — over
+the admission cap, past the deadline, a required layer absent — is not a
+flagged one, and does not forward unchanged: under ``unjudged: withhold``
+(the default) every room event keeps its ID, sender and place, and its
+content becomes a notice. The client stays in sync, ``next_batch`` is
+honoured, and the agent reads nothing unjudged. Judging runs with
+``stop_on_partial``, so an over-cap response costs a token count, not ~74
+L2 windows.
 
 **E2EE honesty.** For encrypted rooms this proxy sees ciphertext;
 plaintext materializes inside the agent's Matrix client, past the
@@ -42,6 +51,7 @@ from starlette.responses import Response, StreamingResponse
 from ..channels import Channel
 from ..defense import defend, defend_selection
 from ..matrix.keybackup import KeyBackupProvider
+from ..modes import gaps_of
 from ..preprocess import SelectionContext
 from ..warning import build_warning
 from .context import profile_context
@@ -115,6 +125,44 @@ expiry the body forwards — fail open on the request path, as everything else
 here does — but it forwards WITH a warning, because an unscanned response must
 never look like a clean one.
 """
+
+WITHHELD = "[trentina] withheld: this event could not be fully judged"
+"""What a withheld event's text becomes. Ours, never the payload's."""
+
+_PROSE_FIELDS = frozenset(
+    {"body", "formatted_body", "topic", "name", "displayname", "reason", "status_msg"}
+)
+"""Fields that carry language even as one word; withheld whatever their shape."""
+
+_TOKEN_MAX = 255
+"""Longest string an unjudged response keeps. Together with "no whitespace",
+that admits every ID, token, enum and timestamp Matrix sends and no sentence."""
+
+_E2EE_TO_DEVICE = frozenset(
+    {
+        "m.room.encrypted",
+        "m.room_key",
+        "m.room_key_request",
+        "m.forwarded_room_key",
+        "m.dummy",
+        "m.secret.request",
+        "m.secret.send",
+    }
+)
+"""To-device types E2EE needs byte for byte. Ciphertext and keys are long
+single tokens the rule above would cut; what they decrypt to is inside the
+agent's client, past the perimeter, as the module docstring says."""
+
+_CIPHER_KEYS = frozenset({"ciphertext", "session_key", "sender_key", "secret", "key"})
+"""The fields of an E2EE to-device event that hold ciphertext or key
+material. Only these, and everything under them, may exceed ``_TOKEN_MAX``;
+every other field of the event is walked like any other."""
+
+_RELATION_KEYS = ("rel_type", "event_id", "key", "m.in_reply_to", "is_falling_back")
+"""What a withheld event's ``m.relates_to`` keeps, so threads, replies and
+edits still point where they did."""
+
+_MAX_WALK_DEPTH = 64
 
 _matrix_client: httpx.AsyncClient | None = None
 
@@ -377,23 +425,14 @@ def reset_extractors() -> None:
     _PROVIDERS.clear()
 
 
-async def _scan_and_forward(
+async def _buffer(
     resp: httpx.Response,
-    resp_headers: dict[str, str],
+    headers: dict[str, str],
     content_type: str,
     profile: Profile,
     path: str,
-) -> Response:
-    """Buffer a message-bearing response, judge it, forward it annotated.
-
-    The body always forwards intact; ``content-length`` is recomputed only
-    when a warning key is added. On any parse or scan failure the original
-    bytes forward unscanned with a logged warning — the proxy degrading to
-    a relay is survivable, the proxy eating the agent's Matrix traffic is
-    not.
-    """
-    headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
-
+) -> bytes | Response:
+    """The whole body, or the response to send instead when it is too big to judge."""
     chunks: list[bytes] = []
     size = 0
     body_iter = resp.aiter_bytes()
@@ -402,8 +441,21 @@ async def _scan_and_forward(
         chunks.append(chunk)
         if size > _MAX_SCAN_BYTES:
             # Too big to judge: stop BUFFERING (the old guard kept
-            # accumulating and only skipped the scan — an OOM lever), stream
-            # what we have plus the remainder, and say so loudly.
+            # accumulating and only skipped the scan — an OOM lever). Under
+            # withhold nothing unjudged forwards; under annotate, stream what
+            # we have plus the remainder and say so loudly.
+            if _withholds(profile):
+                logger.warning(
+                    "matrix_proxy: %s response exceeds %d bytes — refused, too large to judge",
+                    path,
+                    _MAX_SCAN_BYTES,
+                )
+                await resp.aclose()
+                return Response(
+                    content="Matrix response too large to judge",
+                    status_code=502,
+                    media_type=PLAIN_TEXT,
+                )
             logger.warning(
                 "matrix_proxy: %s response exceeds %d bytes — forwarded unscanned",
                 path,
@@ -426,7 +478,31 @@ async def _scan_and_forward(
                 media_type=content_type,
             )
     await resp.aclose()
-    body = b"".join(chunks)
+    return b"".join(chunks)
+
+
+async def _scan_and_forward(
+    resp: httpx.Response,
+    resp_headers: dict[str, str],
+    content_type: str,
+    profile: Profile,
+    path: str,
+) -> Response:
+    """Buffer a message-bearing response, judge it, forward it.
+
+    A judged response, clean or flagged, forwards intact; ``content-length``
+    is recomputed only when a warning key is added. An unjudged one follows
+    ``matrix_ingress.unjudged``: withheld event by event (``_respond``), or
+    forwarded annotated. Unparseable JSON is scanned as text, then refused
+    under withhold (there is no event to withhold, and no client can parse
+    it either) or forwarded under annotate.
+    """
+    headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
+
+    buffered = await _buffer(resp, headers, content_type, profile, path)
+    if isinstance(buffered, Response):
+        return buffered
+    body = buffered
 
     ingress = profile.matrix_ingress
     cfg = ingress.preprocess if ingress is not None else None
@@ -455,6 +531,10 @@ async def _scan_and_forward(
                 source=f"matrix:{profile.name}:{path}",
                 source_type="matrix_sync",
                 defense=profile.defense,
+                # Withholding refuses a partial scan anyway, so it is refused
+                # at admission rather than paid for (#227). annotate keeps
+                # the head scan it forwards with.
+                stop_on_partial=_withholds(profile),
                 record=True,
                 attribution={
                     "profile": profile.name,
@@ -479,7 +559,12 @@ async def _scan_and_forward(
             profile.name,
         )
         return _respond(
-            payload, body, headers, content_type, {"risk_level": "unknown", "scan_timeout": True}
+            payload,
+            body,
+            headers,
+            content_type,
+            {"risk_level": "unknown", "scan_timeout": True},
+            withhold=_withholds(profile),
         )
     except Exception:
         # A parse failure here is attacker-reachable (any room member can
@@ -492,10 +577,12 @@ async def _scan_and_forward(
             path,
         )
         await _text_fallback_scan(body, profile, path)
-        return Response(content=body, status_code=200, headers=headers, media_type=content_type)
+        # No events to withhold, and no client can parse it either.
+        return _respond(None, body, headers, content_type, None, withhold=_withholds(profile))
 
     extras = describe(view, cfg) if (view is not None and cfg is not None) else {}
     warning = build_warning(verdict, extras=extras)
+    gaps = gaps_of(verdict)
     if verdict.flagged:
         logger.warning(
             "matrix_proxy: flagged %s for profile=%s risk=%s flagged_by=%s",
@@ -504,20 +591,134 @@ async def _scan_and_forward(
             verdict.risk_level,
             verdict.flagged_by.value if verdict.flagged_by else None,
         )
-    elif warning is not None:
-        # Not flagged, but the scan did not fully happen — L2 truncated the
-        # input, the classifier never loaded, or the judge was unavailable.
-        # This branch is the whole point of sharing the builder: this path
-        # used to annotate on `flagged` alone, so a partial scan of a Matrix
-        # response was delivered indistinguishable from a complete clean one.
+    elif gaps.any():
+        # Not flagged, but the scan did not fully happen — over the cap, the
+        # classifier never loaded, or the judge was unavailable. Only the
+        # gaps that are TRUE: the warning carries every gap key, False
+        # included, and naming those made a coverage note on every /sync
+        # read as a steady stream of truncated scans (#227).
         logger.warning(
             "matrix_proxy: incomplete scan of %s for profile=%s — %s",
             path,
             profile.name,
-            ",".join(sorted(k for k in warning if k.endswith(("truncated", "unavailable")))),
+            ",".join(gaps.names()),
         )
 
-    return _respond(payload, body, headers, content_type, warning)
+    return _respond(
+        payload,
+        body,
+        headers,
+        content_type,
+        warning,
+        withhold=gaps.blocking() and _withholds(profile),
+    )
+
+
+def _withholds(profile: Profile) -> bool:
+    """``matrix_ingress.unjudged`` is withhold, which is also its default."""
+    ingress = profile.matrix_ingress
+    return ingress is None or ingress.unjudged == "withhold"
+
+
+def _token(value: str, *, sealed: bool = False) -> bool:
+    """Whether an unjudged string may survive: one printable token.
+
+    ``isprintable`` is False for the format characters (zero-width space,
+    joiners, bidi controls) and ``isspace`` catches the printable spaces
+    (no-break, ideographic) that would otherwise join a sentence into one
+    "token". A token can still be ``ignore-all-rules``; it cannot be longer
+    than a Matrix ID may be, except ``sealed``: inside an E2EE to-device
+    event, where ciphertext and keys are long single tokens.
+    """
+    return (
+        (sealed or len(value) <= _TOKEN_MAX)
+        and value.isprintable()
+        and not any(c.isspace() for c in value)
+    )
+
+
+def _id_like(value: str) -> bool:
+    """Whether a string carries a Matrix sigil or a digit, as IDs and aliases do."""
+    return any(c in "@!#$:+" or c.isdigit() for c in value)
+
+
+def _rebuild_room_event(node: dict[str, Any]) -> int:
+    """1 if ``node`` is an event; a room event becomes the notice plus its relation."""
+    content = node.get("content")
+    if not (isinstance(content, dict) and isinstance(node.get("type"), str)):
+        return 0
+    if "state_key" not in node and isinstance(node.get("event_id"), str):
+        relation = content.get("m.relates_to")
+        node["content"] = {"msgtype": "m.notice", "body": WITHHELD}
+        if isinstance(relation, dict):
+            kept = {k: relation[k] for k in _RELATION_KEYS if k in relation}
+            node["content"]["m.relates_to"] = kept
+        if node["type"] == "m.room.encrypted":
+            node["type"] = "m.room.message"
+    return 1
+
+
+_PATH_STEPS = {("root", "to_device"): "to_device", ("to_device", "events"): "to_device.events"}
+"""Where the walk is, by the keys that lead to the one exempt position:
+``to_device.events[i]`` of the response itself, never the same keys nested."""
+
+
+def _withhold_events(node: Any, depth: int = 0, *, at: str = "root", sealed: bool = False) -> int:
+    """Strip the language from an unjudged response in place; count the events.
+
+    One rule everywhere: a string survives only as a single token
+    (``_token``) outside ``_PROSE_FIELDS``, and a dict key only as a single
+    token. IDs, sync tokens, types, memberships and timestamps pass, so the
+    client's room model and ``next_batch`` survive; no sentence does, in
+    content, ``unsigned``, extensions or anywhere else. On top of that, a
+    room event (``event_id``, no ``state_key``) is rebuilt as the notice
+    plus its relation; an encrypted one becomes a plain notice. An E2EE
+    event at the response's own ``to_device.events[i]`` (``at``) is walked
+    like everything else except its ``_CIPHER_KEYS``, which are ``sealed``:
+    tokens there may be as long as ciphertext is, and ``body`` inside them is
+    ciphertext, not prose. Whitespace text is withheld even there. The same
+    shape anywhere else gets no allowance at all.
+    Past ``_MAX_WALK_DEPTH`` a subtree is withheld whole: unwalked is
+    withheld.
+    """
+    kind = node.get("type") if isinstance(node, dict) else None
+    e2ee = at == "to_device.events[]" and isinstance(kind, str) and kind in _E2EE_TO_DEVICE
+    cipher_level = at == "e2ee.content"
+    if isinstance(node, list):
+        slots: Any = enumerate(node)
+        events = 0
+    elif isinstance(node, dict):
+        events = _rebuild_room_event(node)
+        for key in [k for k in node if not _token(str(k), sealed=sealed)]:
+            del node[key]
+        slots = node.items()
+    else:
+        return 0
+    # A list element must look like an identifier: ["ignore!", "your",
+    # "rules."] is a sentence one element at a time, and every list Matrix
+    # sends (user, room and event IDs, aliases) carries a sigil.
+    in_list = isinstance(node, list) and not sealed
+    for key, value in slots:
+        long_ok = sealed or (cipher_level and key in _CIPHER_KEYS)
+        if (key in _PROSE_FIELDS and not sealed) or (
+            isinstance(value, str)
+            and (not _token(value, sealed=long_ok) or (in_list and not _id_like(value)))
+        ):
+            node[key] = WITHHELD
+        elif isinstance(value, str):
+            continue
+        elif depth >= _MAX_WALK_DEPTH and isinstance(value, (dict, list)):
+            node[key] = WITHHELD
+        else:
+            step = (
+                "e2ee.content"
+                if e2ee and key == "content"
+                else f"{at}[]"
+                if at == "to_device.events"
+                else _PATH_STEPS.get((at, key), "")
+            )
+            events += _withhold_events(value, depth + 1, at=step, sealed=long_ok)
+    return events
 
 
 def _respond(
@@ -526,14 +727,26 @@ def _respond(
     headers: dict[str, str],
     content_type: str,
     warning: dict[str, Any] | None,
+    *,
+    withhold: bool = False,
 ) -> Response:
     """Forward the upstream bytes, re-serialising only to attach a warning.
 
     The delivered content is the upstream buffer. The only thing this proxy
     adds is the `_trentina_warning` key, and only when there is something to
     say — so a response with nothing to report is byte-identical to what the
-    homeserver sent.
+    homeserver sent. ``withhold`` is the exception: an unjudged response's
+    events are rewritten first (``_withhold_events``), or, when there is no
+    JSON object to rewrite, nothing is forwarded at all.
     """
+    if withhold:
+        if not isinstance(payload, dict):
+            return Response(
+                content="Matrix response could not be judged",
+                status_code=502,
+                media_type=PLAIN_TEXT,
+            )
+        warning = {**(warning or {}), "withheld_events": _withhold_events(payload)}
     if warning is not None and isinstance(payload, dict):
         payload["_trentina_warning"] = warning
         body = json.dumps(payload).encode("utf-8")

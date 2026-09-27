@@ -53,7 +53,6 @@ from collections import OrderedDict
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..config import get_config
 from ..defense import Provenance, defend
 from ..errors import scrub_credentials
 from ..l1.pipeline import run_l1
@@ -110,7 +109,7 @@ def effective_mode(profile: Profile, mode: Mode | None = None) -> Mode:
 
 
 DEFAULT_REDACT_PROMPT = "Extract the information this tool response contains."
-"""redact on a proxied response whose call named no trentina_prompt."""
+"""redact on a proxied response whose call asked no question: a bare ``"redact"``."""
 
 
 @dataclass(frozen=True)
@@ -232,6 +231,7 @@ def _cache_put(key: str, value: dict[str, Any] | None, *, persist: bool = False)
         or value.get("l3_truncated")
         or value.get("l2_truncated")
         or value.get("l2_unavailable")
+        or value.get("oversize")
     ):
         return
 
@@ -500,7 +500,7 @@ async def _redact_response(
             refusal=_refusal_from_warning(blocked_warning, Mode.REDACT, policy),
         )
     result = await quarantine_redact(
-        verdict.pipeline.l2_input[: get_config().max_content],
+        verdict.pipeline.l2_input,
         prompt or DEFAULT_REDACT_PROMPT,
         detection=verdict.l3_assessment,
     )

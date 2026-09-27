@@ -18,15 +18,19 @@ _config: Config | None = None
 DEFAULT_PROVIDER = "gemini"
 DEFAULT_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_SEARCH_MODEL = "google/gemini-2.5-flash"
-DEFAULT_MAX_CONTENT = 100_000
 DEFAULT_CLASSIFIER_THRESHOLD = 0.5
 DEFAULT_CLASSIFIER_MODEL_PATH = "/models/prompt-guard-2-86m"
 DEFAULT_CLASSIFIER_MAX_TOKENS = 32_768
-"""Token ceiling for a Layer 2 scan, ~74 sliding windows at stride 448.
+"""L2's CPU budget per payload, ~74 sliding windows at stride 446.
 
-Kept above what DEFAULT_MAX_CONTENT (100k chars, roughly 28k tokens of
-ordinary prose) can produce, so the two limits never fight: content small
-enough for the Q-Agent is always small enough to scan in full."""
+A DoS guard, not a model limit: Prompt Guard's window is 512 tokens and
+``classify()`` slides it across everything it is given. One of the two
+inputs to ``Config.admission_tokens``."""
+
+DEFAULT_QUARANTINE_CONTEXT_TOKENS = 1_000_000
+"""What the L3 model can read in one call. Gemini 2.5 Flash-Lite's window;
+set it lower for a smaller provider (Ollama's default model reads 32k). The
+other input to ``Config.admission_tokens``."""
 
 DEFAULT_CLASSIFIER_THREADS = 4
 """ONNX intra-op threads. Its own default is one per core with a spin-wait,
@@ -180,8 +184,19 @@ class Config:
         # and an omitted one is TRENTINA_MODE. Both default to block, so an
         # injection cannot argue a standalone server into warn either.
         self.default_mode, self.allowed_modes = _mode_policy_env()
-        self.max_content: int = int(
-            os.environ.get("QUARANTINE_MAX_CONTENT", str(DEFAULT_MAX_CONTENT))
+        if "QUARANTINE_MAX_CONTENT" in os.environ:
+            from .errors import ConfigError
+
+            # Gone as of 0.43.0 (#225), and refused rather than ignored: a
+            # character cap beside a token cap was two units governing one
+            # question, and an operator who still sets it believes it applies.
+            raise ConfigError(
+                "QUARANTINE_MAX_CONTENT no longer exists (0.43.0). Content is "
+                "admitted on its token count: CLASSIFIER_MAX_TOKENS for L2's "
+                "budget, QUARANTINE_CONTEXT_TOKENS for L3's context window."
+            )
+        self.l3_context_tokens: int = int_env(
+            "QUARANTINE_CONTEXT_TOKENS", DEFAULT_QUARANTINE_CONTEXT_TOKENS, minimum=1
         )
 
         fallback_raw = os.environ.get("TRENTINA_PROVIDER_FALLBACK", "")
@@ -236,6 +251,21 @@ class Config:
                 "trusted_paths": [],
                 "default_trust": "untrusted",
             }
+
+    @property
+    def admission_tokens(self) -> int:
+        """The one cap (#225): the most tokens a payload may carry and be judged.
+
+        ``min(L2 CPU budget, L3 context)``, so raising either alone lets the
+        other take over instead of reintroducing a second cap in a second
+        unit. ``CLASSIFIER_MAX_TOKENS=0`` removes L2's budget, never L3's.
+        Content at or under it is read WHOLE by every layer: nothing
+        admitted is sliced.
+        """
+        budgets = [self.l3_context_tokens]
+        if self.classifier_max_tokens > 0:
+            budgets.append(self.classifier_max_tokens)
+        return min(budgets)
 
     @property
     def has_api_key(self) -> bool:

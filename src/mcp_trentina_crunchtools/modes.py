@@ -30,6 +30,7 @@ where the payload hides past the cap and the head reads clean.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import asdict, dataclass, fields
 from enum import Enum
@@ -45,37 +46,27 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_legacy_prompt_warned = False
-
-
-def _warn_legacy_prompt() -> None:
-    """Once per process: a client on the old spelling sends it on every call."""
-    global _legacy_prompt_warned
-    _legacy_prompt_warned = True
-    logger.warning(
-        "trentina_prompt is deprecated and removed in 0.43.0; "
-        'pass trentina_mode={"redact": "<question>"}'
-    )
-
-
 #: What a malformed ``trentina_mode`` is told it may send instead.
 MODE_SHAPES = ["block", "flag", '{"redact": "<what you need>"}']
 
 
-def parse_mode_arg(value: Any, legacy_prompt: Any = None) -> tuple[str | None, str | None]:
+def parse_mode_arg(value: Any) -> tuple[str | None, str | None]:
     """``trentina_mode`` as (mode name, extraction question), unchecked by policy.
 
     Since 0.39.0 the question travels inside the mode, because it only means
     something there: ``"block"``, ``"flag"``, or ``{"redact": "<question>"}``.
-    A bare ``"redact"`` keeps the tool's default question. ``trentina_prompt``
-    beside a string mode is the pre-0.39.0 spelling, read with a warning
-    until 0.43.0.
+    A bare ``"redact"`` keeps the tool's default question. The pre-0.39.0
+    ``trentina_prompt`` beside it no longer exists (0.43.0).
+
+    The dict may also arrive as its JSON text (#244). No tool declares
+    ``trentina_mode`` unless the profile sets ``declare_modes``, and a client
+    that marshals arguments against the declared schema sends an undeclared
+    object as a string. A string that starts with ``{`` is therefore parsed,
+    and one that does not parse is refused, never read as a mode name.
 
     Args:
         value: the call's ``trentina_mode``: None, a mode name, or
             ``{"redact": "<question>"}``.
-        legacy_prompt: the call's ``trentina_prompt``. Used, with a warning,
-            only when ``value`` is not the dict form.
 
     Returns:
         ``(mode name or None, question or None)``. The name is not yet checked
@@ -86,6 +77,11 @@ def parse_mode_arg(value: Any, legacy_prompt: Any = None) -> tuple[str | None, s
         ModeNotPermittedError: a dict that is not exactly one ``redact`` key
             with a non-empty question, or a value of any other type.
     """
+    if isinstance(value, str) and value.lstrip().startswith("{"):
+        try:
+            value = json.loads(value)
+        except (ValueError, RecursionError):
+            raise ModeNotPermittedError(value, MODE_SHAPES) from None
     if isinstance(value, dict):
         items = list(value.items())
         question = items[0][1] if len(items) == 1 else None
@@ -98,10 +94,6 @@ def parse_mode_arg(value: Any, legacy_prompt: Any = None) -> tuple[str | None, s
         return "redact", question
     if value is not None and not isinstance(value, str):
         raise ModeNotPermittedError(str(value), MODE_SHAPES)
-    if isinstance(legacy_prompt, str) and legacy_prompt.strip():
-        if not _legacy_prompt_warned:
-            _warn_legacy_prompt()
-        return value, legacy_prompt
     return value, None
 
 
@@ -131,9 +123,21 @@ class Gaps:
     l2_truncated: bool = False
     l3_unavailable: bool = False
     l3_truncated: bool = False
+    oversize: bool = False
+    """Over the admission cap (#225): refused before L2 or L3 ran."""
+
+    def names(self) -> list[str]:
+        """The gaps that are true, by field name."""
+        return [name for name, present in asdict(self).items() if present]
 
     def any(self) -> bool:
-        return self.l2_unavailable or self.l2_truncated or self.l3_unavailable or self.l3_truncated
+        return (
+            self.l2_unavailable
+            or self.l2_truncated
+            or self.l3_unavailable
+            or self.l3_truncated
+            or self.oversize
+        )
 
     def blocking(self) -> bool:
         """Whether block and redact must refuse. flag never consults this."""
@@ -141,6 +145,7 @@ class Gaps:
         return (
             self.l2_truncated
             or self.l3_truncated
+            or self.oversize
             or (self.l2_unavailable and config.require_l2)
             or (self.l3_unavailable and config.require_l3)
         )
@@ -156,30 +161,35 @@ class Gaps:
         """
         return cls(**{f.name: bool(warning.get(f.name)) for f in fields(cls)})
 
-    def truncated_only(self) -> bool:
-        """Every gap is a partial read, none an absent layer.
+    def redactable_only(self) -> bool:
+        """Every gap is a partial read, none an absent layer or an oversize payload.
 
-        The allowlist may send these to redact, which reads the whole payload
-        through L3's own cap; an absent layer it may not excuse.
+        The allowlist may send these to redact, whose output all three layers
+        verify. An absent layer it may not excuse, and an over-cap payload is
+        refused at admission for every caller (#225), allowlisted or not.
         """
         return (self.l2_truncated or self.l3_truncated) and not (
-            self.l2_unavailable or self.l3_unavailable
+            self.l2_unavailable or self.l3_unavailable or self.oversize
         )
 
 
 def gaps_of(verdict: DefenseVerdict) -> Gaps:
     """The one derivation of a verdict's gaps. warning, report and gateway read it."""
     has_text = bool(verdict.pipeline.content.strip())
+    oversize = verdict.oversize is not None
+    # A layer that was never asked is not a layer that is missing.
+    asked = has_text and not oversize
     assessment = verdict.l3_assessment
     classification = verdict.classification
     l2_truncated = verdict.l2_truncated or bool(
         classification is not None and classification.truncated
     )
     return Gaps(
-        l2_unavailable=has_text and classification is None and not l2_truncated,
+        l2_unavailable=asked and classification is None and not l2_truncated,
         l2_truncated=l2_truncated,
-        l3_unavailable=bool(has_text and (assessment is None or assessment.get("l3_unavailable"))),
+        l3_unavailable=bool(asked and (assessment is None or assessment.get("l3_unavailable"))),
         l3_truncated=verdict.l3_truncated,
+        oversize=oversize,
     )
 
 
@@ -199,6 +209,8 @@ def refusal_reason(flagged_by: str | None, gaps: Gaps) -> str | None:
             ("L2 read only part of the payload", gaps.l2_truncated),
             ("L3 unavailable", gaps.l3_unavailable),
             ("L3 read only part of the payload", gaps.l3_truncated),
+            # Not "token cap": scrub_credentials redacts whatever follows "token ".
+            ("over the admission cap, so neither L2 nor L3 read it", gaps.oversize),
         )
         if present
     ]

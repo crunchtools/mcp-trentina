@@ -317,6 +317,16 @@ async def _transform_blocks(
         if block.content != text:
             new_blocks[idx] = {**new_blocks[idx], "text": block.content}
     outcome = _account(ctx.source, content_blocks, new_blocks, results, metered, *sizes)
+    if ctx.target_bytes is not None and sizes[1] > ctx.target_bytes:
+        # The step to blame when admission refuses what follows (#225): the
+        # line above names what declined; this one says it was not enough,
+        # rather than leaving that to surface three steps later as a refusal.
+        logger.warning(
+            "transform: %s left %d bytes, over its %d-byte target; admission may refuse it",
+            ctx.source,
+            sizes[1],
+            ctx.target_bytes,
+        )
     removed = hiding_removed(results)
     if removed is None:
         return outcome

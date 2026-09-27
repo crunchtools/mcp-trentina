@@ -92,7 +92,7 @@ class TestLayerStates:
         states = layer_states(_verdict(classification=None, l2_truncated=True))
         assert states["l2"] == LayerState.PARTIAL.value
 
-    def test_l3_partial_when_it_read_only_max_content(self) -> None:
+    def test_l3_partial_when_flag_read_only_the_head(self) -> None:
         states = layer_states(_verdict(l3={"injection_detected": False}, l3_truncated=True))
         assert states["l3"] == LayerState.PARTIAL.value
 

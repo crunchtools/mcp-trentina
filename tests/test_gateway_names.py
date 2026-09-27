@@ -150,9 +150,11 @@ class TestTheEdge:
         _, backend = await _call(_profile(), "search_fields")
         assert backend.call_args.args[2] == "jira_search_fields"
 
-    async def test_the_long_form_still_routes(self) -> None:
-        _, backend = await _call(_profile(), "jira__jira_get_issue")
-        assert backend.call_args.args[2] == "jira_get_issue"
+    async def test_the_long_form_no_longer_routes_under_short_names(self) -> None:
+        """0.43.0: only a name tools/list serves resolves."""
+        resp, backend = await _call(_profile(), "jira__jira_get_issue")
+        assert "Unknown tool" in resp["error"]["message"]
+        backend.assert_not_awaited()
 
     async def test_an_unknown_name_is_refused(self) -> None:
         resp, backend = await _call(_profile(), "no_such_tool")
