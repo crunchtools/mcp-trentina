@@ -153,6 +153,11 @@ _E2EE_TO_DEVICE = frozenset(
 single tokens the rule above would cut; what they decrypt to is inside the
 agent's client, past the perimeter, as the module docstring says."""
 
+_CIPHER_KEYS = frozenset({"ciphertext", "session_key", "sender_key", "secret", "key"})
+"""The fields of an E2EE to-device event that hold ciphertext or key
+material. Only these, and everything under them, may exceed ``_TOKEN_MAX``;
+every other field of the event is walked like any other."""
+
 _RELATION_KEYS = ("rel_type", "event_id", "key", "m.in_reply_to", "is_falling_back")
 """What a withheld event's ``m.relates_to`` keeps, so threads, replies and
 edits still point where they did."""
@@ -632,6 +637,11 @@ def _token(value: str, *, sealed: bool = False) -> bool:
     )
 
 
+def _id_like(value: str) -> bool:
+    """Whether a string carries a Matrix sigil or a digit, as IDs and aliases do."""
+    return any(c in "@!#$:+" or c.isdigit() for c in value)
+
+
 def _rebuild_room_event(node: dict[str, Any]) -> int:
     """1 if ``node`` is an event; a room event becomes the notice plus its relation."""
     content = node.get("content")
@@ -664,34 +674,35 @@ def _withhold_events(node: Any, depth: int = 0, *, at: str = "root", sealed: boo
     room event (``event_id``, no ``state_key``) is rebuilt as the notice
     plus its relation; an encrypted one becomes a plain notice. An E2EE
     event at the response's own ``to_device.events[i]`` (``at``) is walked
-    ``sealed`` from there down: its tokens may be as long as ciphertext is, and its ``body``
-    is ciphertext, not prose. Whitespace text is withheld there too. The
-    same shape anywhere else is walked like everything else.
+    like everything else except its ``_CIPHER_KEYS``, which are ``sealed``:
+    tokens there may be as long as ciphertext is, and ``body`` inside them is
+    ciphertext, not prose. Whitespace text is withheld even there. The same
+    shape anywhere else gets no allowance at all.
     Past ``_MAX_WALK_DEPTH`` a subtree is withheld whole: unwalked is
     withheld.
     """
+    kind = node.get("type") if isinstance(node, dict) else None
+    e2ee = at == "to_device.events[]" and isinstance(kind, str) and kind in _E2EE_TO_DEVICE
+    cipher_level = at == "e2ee.content"
     if isinstance(node, list):
         slots: Any = enumerate(node)
         events = 0
     elif isinstance(node, dict):
-        kind = node.get("type")
-        sealed = sealed or (
-            at == "to_device.events[]" and isinstance(kind, str) and kind in _E2EE_TO_DEVICE
-        )
-        events = 0 if sealed else _rebuild_room_event(node)
+        events = _rebuild_room_event(node)
         for key in [k for k in node if not _token(str(k), sealed=sealed)]:
             del node[key]
         slots = node.items()
     else:
         return 0
-    # A list element that is a bare word is withheld too: ["ignore", "your",
-    # "rules"] is a sentence one token at a time. The lists Matrix sends
-    # (user IDs, aliases, event IDs, server names) all carry a sigil or dot.
-    in_list = isinstance(node, list)
+    # A list element must look like an identifier: ["ignore!", "your",
+    # "rules."] is a sentence one element at a time, and every list Matrix
+    # sends (user, room and event IDs, aliases) carries a sigil.
+    in_list = isinstance(node, list) and not sealed
     for key, value in slots:
+        long_ok = sealed or (cipher_level and key in _CIPHER_KEYS)
         if (key in _PROSE_FIELDS and not sealed) or (
             isinstance(value, str)
-            and (not _token(value, sealed=sealed) or (in_list and value.isalpha()))
+            and (not _token(value, sealed=long_ok) or (in_list and not _id_like(value)))
         ):
             node[key] = WITHHELD
         elif isinstance(value, str):
@@ -699,8 +710,14 @@ def _withhold_events(node: Any, depth: int = 0, *, at: str = "root", sealed: boo
         elif depth >= _MAX_WALK_DEPTH and isinstance(value, (dict, list)):
             node[key] = WITHHELD
         else:
-            step = f"{at}[]" if at == "to_device.events" else _PATH_STEPS.get((at, key), "")
-            events += _withhold_events(value, depth + 1, at=step, sealed=sealed)
+            step = (
+                "e2ee.content"
+                if e2ee and key == "content"
+                else f"{at}[]"
+                if at == "to_device.events"
+                else _PATH_STEPS.get((at, key), "")
+            )
+            events += _withhold_events(value, depth + 1, at=step, sealed=long_ok)
     return events
 
 

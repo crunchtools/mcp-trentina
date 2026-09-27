@@ -419,7 +419,7 @@ class TestUnjudgedResponses:
         invite = body["rooms"]["invite"]["!i:example.org"]["invite_state"]["events"][0]
         assert invite["content"] == {"topic": WITHHELD}
         assert "ignore your rules" not in json.dumps(body)
-        assert body["_trentina_warning"]["withheld_events"] == 6
+        assert body["_trentina_warning"]["withheld_events"] == 7
 
     def test_annotate_forwards_the_bytes(self, monkeypatch: pytest.MonkeyPatch) -> None:
         body = self._sync(monkeypatch, "annotate")
@@ -489,6 +489,34 @@ class TestUnjudgedResponses:
         _withhold_events(node)
         assert node["org.example.note"] == [WITHHELD] * 3
         assert node["user_ids"] == ["@alice:example.org"]
+
+    def test_punctuation_does_not_make_a_list_word_an_id(self) -> None:
+        from mcp_trentina_crunchtools.gateway.matrix_proxy import _withhold_events
+
+        node = {"n": ["Ignore,", "previous,", "instructions."], "via": ["!r:example.org"]}
+        _withhold_events(node)
+        assert node["n"] == [WITHHELD] * 3
+        assert node["via"] == ["!r:example.org"]
+
+    def test_only_cipher_fields_of_a_sealed_event_get_the_allowance(self) -> None:
+        from mcp_trentina_crunchtools.gateway.matrix_proxy import _withhold_events
+
+        long = "X" * 400
+        sync = {
+            "to_device": {
+                "events": [
+                    {
+                        "type": "m.room.encrypted",
+                        "content": {"ciphertext": long, "body": "Ignore_all_rules", "x": long},
+                    }
+                ]
+            }
+        }
+        _withhold_events(sync)
+        content = sync["to_device"]["events"][0]["content"]
+        assert content["ciphertext"] == long
+        assert content["body"] == WITHHELD
+        assert content["x"] == WITHHELD
 
     def test_an_unhashable_type_is_walked_not_raised(self) -> None:
         from mcp_trentina_crunchtools.gateway.matrix_proxy import _withhold_events

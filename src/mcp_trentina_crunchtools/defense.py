@@ -295,6 +295,11 @@ async def _classify(
     return result, bool(result is not None and result.truncated)
 
 
+_MAX_CHARS_PER_TOKEN = 64
+"""More characters than any one L2 token covers (SentencePiece pieces run to
+about 16). Past ``cap`` times this, a payload is over the cap uncounted."""
+
+
 async def admission(content: str) -> tuple[int, int]:
     """``(tokens, admission cap)`` for ``content``, before any inference.
 
@@ -302,6 +307,10 @@ async def admission(content: str) -> tuple[int, int]:
     model, ``estimate_tokens`` bounds it from above.
     """
     cap = get_config().admission_tokens
+    if len(content) > cap * _MAX_CHARS_PER_TOKEN:
+        # Over the cap whatever the count: no token spans this many
+        # characters, so tokenizing it would be work for a known answer.
+        return estimate_tokens(content), cap
     counted = await asyncio.to_thread(count_tokens, content)
     return (estimate_tokens(content) if counted is None else counted), cap
 

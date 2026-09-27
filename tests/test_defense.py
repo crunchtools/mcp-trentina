@@ -371,6 +371,15 @@ class TestAdmission:
             32_768,
         )
 
+    async def test_a_payload_far_over_the_cap_is_not_tokenized(self) -> None:
+        with ExitStack() as stack:
+            mocks = _patches(stack)
+            mocks["get_config"].return_value.admission_tokens = 10
+            counter = stack.enter_context(patch(f"{_D}.count_tokens"))
+            verdict = await defend("x" * 1_000, source="s", source_type="url", stop_on_partial=True)
+        counter.assert_not_called()
+        assert verdict.oversize == (1_000, 10)
+
     async def test_admitted_content_is_read_whole_by_l3(self) -> None:
         with ExitStack() as stack:
             mocks = _patches(stack)
