@@ -175,6 +175,7 @@ class TestModeArg:
             '{"redact": "x"',
             '{"flag": "x"}',
             '{"redact": ""}',
+            "{" * 5000,
             "{}",
             '{"redact": "a"} trailing',
         ],
@@ -808,12 +809,12 @@ class TestPre035SpellingsAreGone:
     [
         (Gaps(l2_truncated=True), True),
         (Gaps(l3_truncated=True), True),
-        (Gaps(oversize=True), True),
+        (Gaps(oversize=True), False),
         (Gaps(l2_truncated=True, l3_unavailable=True), False),
         (Gaps(l2_unavailable=True), False),
         (Gaps(), False),
     ],
 )
-def test_only_partial_or_oversize_gaps_are_redactable(gaps: Gaps, redactable: bool) -> None:
+def test_only_partial_reads_are_redactable(gaps: Gaps, redactable: bool) -> None:
     """The allowlist may send these to redact; an absent layer it may not excuse."""
     assert gaps.redactable_only() is redactable

@@ -80,7 +80,7 @@ def parse_mode_arg(value: Any) -> tuple[str | None, str | None]:
     if isinstance(value, str) and value.lstrip().startswith("{"):
         try:
             value = json.loads(value)
-        except ValueError:
+        except (ValueError, RecursionError):
             raise ModeNotPermittedError(value, MODE_SHAPES) from None
     if isinstance(value, dict):
         items = list(value.items())
@@ -162,15 +162,14 @@ class Gaps:
         return cls(**{f.name: bool(warning.get(f.name)) for f in fields(cls)})
 
     def redactable_only(self) -> bool:
-        """Every gap is one redact may answer: a partial read or an oversize
-        payload, never an absent layer.
+        """Every gap is a partial read, none an absent layer or an oversize payload.
 
-        The allowlist may send these to redact, whose extraction reads the
-        whole payload and whose output all three layers verify; an absent
-        layer it may not excuse.
+        The allowlist may send these to redact, whose output all three layers
+        verify. An absent layer it may not excuse, and an over-cap payload is
+        refused at admission for every caller (#225), allowlisted or not.
         """
-        return (self.l2_truncated or self.l3_truncated or self.oversize) and not (
-            self.l2_unavailable or self.l3_unavailable
+        return (self.l2_truncated or self.l3_truncated) and not (
+            self.l2_unavailable or self.l3_unavailable or self.oversize
         )
 
 

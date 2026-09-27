@@ -388,7 +388,7 @@ MIN_EXTRACTABLE_CHARS = 64
 only a title or an app shell for the model to reconstruct from its priors
 (#245). Such a call is answered without turn 2."""
 
-_WORD = re.compile(r"[^\W_]{4,}")
+_WORD = re.compile(r"[^\W_]{3,}")
 _ANY_WORD = re.compile(r"[^\W_]+")
 _STEM = 6
 
@@ -402,11 +402,11 @@ _CONFIDENCE_BANDS = ((0.85, "high"), (0.6, "medium"))
 def grounding(extracted: str, source: str) -> float | None:
     """The share of the extraction's distinct words that occur in the source.
 
-    Words are runs of four or more letters or digits, case-folded and cut to
-    ``_STEM`` characters, so connectives do not count either way and
-    ``restart`` matches ``restarts``. An extraction with no such word is
-    graded on its short words instead, so "use key now" cannot skip the
-    refusal. None only when it has no word at all.
+    Words are runs of three or more letters or digits, case-folded and cut
+    to ``_STEM`` characters, so ``restart`` matches ``restarts`` and a short
+    invented instruction ("use key now") counts against the share. An
+    extraction with no such word is graded on its one- and two-letter words.
+    None only when it has no word at all.
     An honest extraction reuses the source's vocabulary; paraphrase and
     translation lower the share, which is why it grades rather than decides
     everywhere above ``GROUNDING_REFUSAL``.

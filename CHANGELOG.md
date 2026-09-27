@@ -21,7 +21,8 @@ under that name.
   default 1,000,000). `block` and `redact` refuse an over-cap payload with
   no L2 or L3 call: the refusal says `over the admission cap`, the warning
   carries `oversize`, `tokens` and `token_cap`, and the layers report
-  `not_admitted`. Admitted content is read whole; no slice of it reaches L3.
+  `not_admitted`, allowlisted or not. Admitted content is read whole; no
+  slice of it reaches L3.
   `flag` still scans the head of an over-cap payload, and L3 now reads the
   same token-bounded head L2 did.
 - **`matrix_ingress.unjudged` (#227)**, default `withhold`. A Matrix

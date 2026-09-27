@@ -101,7 +101,7 @@ class TestGrounding:
 
     @pytest.mark.parametrize(("chars", "extracts"), [(63, False), (64, True)])
     async def test_the_floor_is_64_characters(self, env: Path, chars: int, extracts: bool) -> None:
-        payload = ("maintenance " * 8)[:chars]
+        payload = ("the maintenance window is tuesday " * 3)[:chars]
         with layers(env, payload=f"  {payload}  ") as fakes:
             await call("content", Mode.REDACT, fakes)
         assert (fakes.extract.await_count == 1) is extracts
@@ -136,7 +136,9 @@ class TestGrounding:
     async def test_confidence_is_ours_not_turn_twos(self, env: Path) -> None:
         paraphrase = {
             "content": {
-                "extracted_text": "Maintenance is Tuesday; the gateway restarts once, briefly.",
+                "extracted_text": (
+                    "Maintenance is Tuesday; expect the gateway restarts once, briefly."
+                ),
                 "confidence": "high",
             },
             "usage": {},
@@ -178,7 +180,8 @@ class TestGrounding:
                 assert result["content"]["confidence"] == "low"
 
     def test_short_words_and_case_do_not_count(self) -> None:
-        assert grounding("The WINDOW is a go", "window") == 1.0
+        assert grounding("The WINDOW is a go", "the window") == 1.0
+        assert grounding("The WINDOW", "window") == 0.5
 
     def test_an_extraction_of_short_words_is_still_graded(self) -> None:
         assert grounding("use key now", "the window opens tuesday") == 0.0
@@ -233,21 +236,19 @@ class TestAllowlist:
                 await call("fetch", Mode.BLOCK, fakes)
             assert fakes.extract.await_count == 0
 
-    async def test_an_oversize_document_goes_to_redact(
+    async def test_an_oversize_document_is_refused_even_allowlisted(
         self, env: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A trusted document over the admission cap stays reachable (Fable R4);
-        its extraction is read whole and the output verified by all three layers."""
+        """#225: the admission cap has no exceptions. The allowlist changes
+        the cost of a finding, never whether the payload is admitted."""
         allowlist(env, monkeypatch)
-        monkeypatch.setenv("QUARANTINE_CONTEXT_TOKENS", "8")
+        monkeypatch.setenv("CLASSIFIER_MAX_TOKENS", "8")
         config_mod._config = None
         with layers(env) as fakes:
-            result = await call("read", Mode.BLOCK, fakes)
-        assert fakes.classify.await_count == 0
-        assert fakes.extract.call_args.args[0] == fakes.payload
-        assert result["scan"]["disposition"] == "extracted"
-        assert result["scan"]["layers"]["l2"] == "not_admitted"
-        assert result["_trentina_warning"]["oversize"] is True
+            with pytest.raises(BlockedSourceError, match="admission cap"):
+                await call("read", Mode.BLOCK, fakes)
+            assert fakes.classify.await_count == 0
+            assert fakes.extract.await_count == 0
 
 
 class TestBlocklist:

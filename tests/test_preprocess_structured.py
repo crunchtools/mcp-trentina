@@ -209,6 +209,23 @@ class TestIdentifierListing:
         result = await _run(json.dumps(records))
         assert json.loads(result.content)[0] == records[0]
 
+    async def test_integers_past_the_depth_cutoff_keep_records_apart(self) -> None:
+        """Past _MAX_DEPTH integers are left as integers, so records that
+        differ only down there are not grouped and nothing is lost."""
+        from mcp_trentina_crunchtools.preprocess.structured import _MAX_DEPTH
+
+        def deep(n: int) -> dict:
+            node: dict = {"leaf": n}
+            for _ in range(_MAX_DEPTH + 2):
+                node = {"x": node}
+            return node
+
+        records = [{"key": f"PROJ-{i}", "d": deep(i % 2)} for i in range(10)]
+        result = await _run(json.dumps(records))
+        assert result.details.get("elements_dropped", 0) == 0
+        delivered = json.dumps(json.loads(result.content))
+        assert '"leaf": 0' in delivered and '"leaf": 1' in delivered
+
     async def test_an_integer_and_its_string_do_not_merge(self) -> None:
         records = [{"id": 100 + i, "summary": "x y"} for i in range(5)]
         records += [{"id": str(100 + i), "summary": "x y"} for i in range(5)]
