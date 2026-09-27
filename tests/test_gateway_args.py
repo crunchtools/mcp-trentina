@@ -60,23 +60,24 @@ def test_values_the_schema_allows_are_kept(key: str, value: Any) -> None:
     assert result.dropped == {}
 
 
-def test_a_value_equal_to_the_default_is_dropped() -> None:
+def test_a_value_equal_to_the_default_is_forwarded() -> None:
+    """``default`` is an annotation; the backend may not apply it on omission."""
     result = _norm(limit=20, unread_only=False)
 
-    assert result.dropped == {
-        "limit": "dropped: equals default",
-        "unread_only": "dropped: equals default",
-    }
+    assert result.arguments["limit"] == 20
+    assert result.arguments["unread_only"] is False
+    assert result.dropped == {}
 
 
-def test_default_equality_is_json_equality() -> None:
+@pytest.mark.parametrize(
+    ("allowed", "value", "dropped"),
+    [(True, 1, True), (True, True, False), (20, 20.0, False), ({"a": 1}, {"a": 1}, False)],
+)
+def test_enum_membership_is_json_equality(allowed: Any, value: Any, dropped: bool) -> None:
     """``true`` is not ``1``; ``20.0`` is ``20``."""
-    schema = {"properties": {"flag": {"default": True}, "n": {"default": 20}}}
+    schema = {"properties": {"x": {"enum": [allowed]}}}
 
-    result = normalize_arguments({"flag": 1, "n": 20.0}, schema)
-
-    assert result.arguments == {"flag": 1}
-    assert result.dropped == {"n": "dropped: equals default"}
+    assert ("x" in normalize_arguments({"x": value}, schema).dropped) is dropped
 
 
 @pytest.mark.parametrize(
@@ -254,12 +255,6 @@ def test_one_of_is_as_lenient_as_any_of() -> None:
     assert normalize_arguments({"n": 3}, schema).dropped == {}
     assert normalize_arguments({"n": "x"}, schema).dropped == {}
     assert "n" in normalize_arguments({"n": -1.5}, schema).dropped
-
-
-def test_the_default_rule_wins_over_the_violation_rule() -> None:
-    schema = {"properties": {"n": {"type": "integer", "minimum": 1, "default": 0}}}
-
-    assert normalize_arguments({"n": 0}, schema).dropped == {"n": "dropped: equals default"}
 
 
 def test_the_callers_dict_is_not_mutated() -> None:

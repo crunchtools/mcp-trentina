@@ -1329,11 +1329,10 @@ class TestArgumentHygiene:
             {"feed_id": 0, "published_after": "", "limit": 50, "unread_only": True},
         )
 
-        assert seen == {"unread_only": True}
+        assert seen == {"limit": 50, "unread_only": True}
         dropped = {
             "feed_id": "dropped: below minimum 1",
             "published_after": "dropped: empty",
-            "limit": "dropped: equals default",
         }
         assert resp["result"]["_trentina_warning"] == {"normalized": dropped}
         assert row["outcome"] == "ok"

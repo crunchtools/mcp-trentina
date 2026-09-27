@@ -16,10 +16,11 @@ under that name.
 
 - **Schema-driven argument normalization (#241).** Before a proxied call is
   forwarded, each argument is checked against the tool's cached
-  `inputSchema`. An optional argument that equals its `default`, or that
-  provably fails its schema (`0` against `minimum: 1`, `""` against
-  `format: date-time`, a value outside an `enum`, a wrong type), is dropped
-  like the empty ones 0.40.1 already dropped. A required argument that
+  `inputSchema`. An optional argument that provably fails its schema
+  (`0` against `minimum: 1`, `""` against `format: date-time`, a value
+  outside an `enum`, a wrong type) is dropped like the empty ones 0.40.1
+  already dropped. One equal to its `default` is forwarded: `default` is
+  only an annotation. A required argument that
   provably fails is refused at the gateway with `-32602`, so the backend
   and its breaker never see it. The validator judges only keywords it
   understands and never `pattern`; anything else is forwarded unchanged.

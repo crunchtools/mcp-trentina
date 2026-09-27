@@ -10,13 +10,16 @@ What the schema proves decides, never a list of "dumb values": ``offset: 0``
 and ``unread_only: false`` are legitimate. For each argument, the first rule
 that matches:
 
-1. optional and ``""`` or ``null``        -> dropped
-2. optional and equal to its ``default``  -> dropped
-3. optional and provably invalid          -> dropped
-4. required and provably invalid          -> reported; the router refuses
+1. optional and ``""`` or ``null``  -> dropped
+2. optional and provably invalid    -> dropped
+3. required and provably invalid    -> reported; the router refuses
 
 Dropping an optional cannot widen a call. The result is the call the agent
 would have made by omitting it, and omitting an optional is always permitted.
+
+A value equal to the schema's ``default`` is forwarded. It is valid, so the
+backend accepts it, and ``default`` is only an annotation: a backend may not
+apply it on omission, and then dropping the value changes the call.
 
 "Provably" is the point. :func:`_violation` answers only what it can check,
 and anything it does not understand counts as valid, so a value is never
@@ -73,7 +76,7 @@ class _Walk:
 
 
 def normalize_arguments(arguments: dict[str, Any], schema: dict[str, Any] | None) -> Normalized:
-    """Apply the module's four rules to *arguments*, a tools/call's, under *schema*.
+    """Apply the module's three rules to *arguments*, a tools/call's, under *schema*.
 
     *schema* is the tool's ``inputSchema`` as the backend listed it. The result
     carries ``arguments``, what to forward; ``dropped``, each removed optional
@@ -111,7 +114,8 @@ def normalize_arguments(arguments: dict[str, Any], schema: dict[str, Any] | None
                 result.invalid_required[key] = reason
             result.arguments[key] = value
             continue
-        drop = "empty" if value is None or value == "" else _drop_reason(value, prop, defs)
+        empty = value is None or value == ""
+        drop = "empty" if empty else _violation(value, prop, _Walk(defs), 0)
         if drop is None:
             result.arguments[key] = value
         else:
@@ -119,13 +123,6 @@ def normalize_arguments(arguments: dict[str, Any], schema: dict[str, Any] | None
     if not result.dropped:
         result.arguments = arguments
     return result
-
-
-def _drop_reason(value: Any, prop: dict[str, Any], defs: dict[str, Any]) -> str | None:
-    reason = _violation(value, prop, _Walk(defs), 0)
-    if "default" in prop and _same(value, prop["default"]):
-        return "equals default"
-    return reason
 
 
 def _same(a: Any, b: Any) -> bool:

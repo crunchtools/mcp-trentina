@@ -333,7 +333,8 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
     the thread, where petit's `EmailHash` only fingerprints its skeleton.
 - `gateway/` — Per-consumer MCP gateway proxy with tool allowlists, parameter guards, and defense pipeline
   - `args.py` — schema-driven argument normalization (#241): drops an
-    optional that is empty, equals its default, or provably fails its schema;
+    optional that is empty or provably fails its schema (never one equal to
+    its `default`, which is only an annotation);
     reports a failing required one for the router to refuse. Never evaluates
     `pattern` (a backend's regex is a ReDoS here).
   - `ratelimit.py` — the token bucket and the ASGI guard on `/register`,

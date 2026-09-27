@@ -98,7 +98,6 @@ call is forwarded, the gateway checks each argument against the tool's cached
 | Argument | Value | Result |
 |---|---|---|
 | optional | `""` or `null` | dropped |
-| optional | equals the schema's `default` | dropped |
 | optional | provably fails the schema | dropped |
 | required | provably fails the schema | refused with `-32602`; the backend is not called |
 
@@ -110,6 +109,8 @@ run on the gateway is a ReDoS. With no cached schema, nothing changes.
 
 Dropping an optional cannot widen a call. The result is the call the agent
 would have made by omitting the argument, which is always permitted.
+A value equal to the schema's `default` is forwarded: it is valid, and
+`default` is only an annotation, so a backend may not apply it on omission.
 Parameter guards judge the arguments as forwarded. Each drop is reported to
 the agent in `_trentina_warning.normalized` and recorded in the audit row.
 Internal tools are exempt, since they already read an empty value as unset.
