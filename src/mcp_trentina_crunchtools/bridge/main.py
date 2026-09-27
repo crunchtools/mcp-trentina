@@ -137,10 +137,7 @@ async def _reset_identity(settings: BridgeSettings) -> None:
                 client, settings.homeserver, session, _device_keys(settings, session), ask, keep
             )
         except (CrossSignError, httpx.HTTPError) as exc:
-            raise SystemExit(
-                f"reset-identity: {exc}. If a recovery key was printed above, "
-                "finish with sign-device and that key."
-            ) from exc
+            raise SystemExit(f"reset-identity: {exc}") from exc
     logger.warning(
         "bridge[%s]: new identity %s; device %s signed",
         settings.profile,

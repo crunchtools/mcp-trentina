@@ -588,7 +588,7 @@ class TestResetIdentity:
         account.refused_writes.add("m.secret_storage.default_key")
         kept: list[str] = []
         async with httpx.AsyncClient(transport=httpx.MockTransport(account)) as client:
-            with pytest.raises(CrossSignError, match=r"storing m\.secret_storage\.default_key"):
+            with pytest.raises(CrossSignError, match="not the default; rerun reset-identity"):
                 await reset_identity(client, "https://hs", SESSION, DEVICE_KEYS, print, kept.append)
         assert len(kept) == 1, "the key was surfaced before the upload"
         assert account.uploaded, "the identity was published"
@@ -720,13 +720,14 @@ class TestCommands:
         assert out.count("Recovery key") == 1
         assert "Recovery key" not in err
 
-    async def test_a_failed_reset_exits_and_points_at_sign_device(
+    async def test_a_refused_reset_exits_without_pointing_at_sign_device(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Nothing was published, so there is nothing for sign-device to finish."""
         _route_clients(
             monkeypatch, ResettableAccount(challenge=httpx.Response(403, json={"errcode": "X"}))
         )
-        with pytest.raises(SystemExit, match="finish with sign-device"):
+        with pytest.raises(SystemExit, match=r"reset-identity: key upload refused: 403 X$"):
             await main_mod._reset_identity(_settings(tmp_path))
 
     async def test_a_signing_failure_after_publishing_keeps_the_key_shown(

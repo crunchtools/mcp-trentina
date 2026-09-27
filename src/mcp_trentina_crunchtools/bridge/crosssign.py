@@ -420,8 +420,19 @@ async def reset_identity(
     await _upload_with_approval(
         client, f"{base}/keys/device_signing/upload", auth, body, on_approval
     )
-    await put("m.secret_storage.default_key", {"key": key_id})
-    await sign_own_device(client, homeserver, session, device_keys, recovery_key)
+    try:
+        await put("m.secret_storage.default_key", {"key": key_id})
+    except CrossSignError as exc:
+        raise CrossSignError(
+            f"{exc}: the identity is published but its storage is not the default;"
+            " rerun reset-identity"
+        ) from exc
+    try:
+        await sign_own_device(client, homeserver, session, device_keys, recovery_key)
+    except CrossSignError as exc:
+        raise CrossSignError(
+            f"{exc}; finish with sign-device and the recovery key printed above"
+        ) from exc
     return Reset(device_id, master_id, recovery_key)
 
 
