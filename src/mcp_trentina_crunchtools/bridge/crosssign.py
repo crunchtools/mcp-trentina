@@ -19,6 +19,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -35,6 +36,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     import httpx
+
+logger = logging.getLogger(__name__)
 
 SSSS_ALGORITHM = "m.secret_storage.v1.aes-hmac-sha2"
 SELF_SIGNING = "m.cross_signing.self_signing"
@@ -341,9 +344,16 @@ async def _upload_with_approval(
     retry = {**body, "auth": {"type": stage, "session": challenge["session"]}}
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _APPROVAL_WINDOW
+    last = ""
     while loop.time() < deadline:
         await asyncio.sleep(_APPROVAL_POLL)
         resp = await client.post(url, headers=auth, json=retry)
         if resp.status_code == 200:
             return
-    raise CrossSignError("the reset was not approved in time; nothing was changed")
+        answer = f"{resp.status_code} {resp.json().get('errcode', '')}".strip()
+        if answer != last:
+            logger.warning("cross-signing reset not accepted yet: %s", answer)
+            last = answer
+    raise CrossSignError(
+        f"the reset was not approved in time (last answer: {last}); no identity was published"
+    )
