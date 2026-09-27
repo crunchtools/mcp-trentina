@@ -1390,6 +1390,15 @@ class TestArgumentHygiene:
         assert row["outcome"] == "tool_error"
         assert breaker._get(url).consecutive_failures == 0
 
+    async def test_a_refused_call_still_records_its_drops(self, tmp_path: Any) -> None:
+        resp, seen, row = await self._call(
+            tmp_path, "save_output", {"content": "x", "run_id": "", "priority": 0}
+        )
+
+        assert seen is None
+        assert resp["error"]["code"] == -32602
+        assert json.loads(row["normalized"]) == {"run_id": "dropped: empty"}
+
     async def test_guards_judge_the_forwarded_arguments(self, tmp_path: Any) -> None:
         guarded = Backend(
             url="http://luna:8000/mcp",
