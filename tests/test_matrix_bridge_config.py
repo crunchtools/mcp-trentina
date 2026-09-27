@@ -136,6 +136,8 @@ class TestLocal:
             "[::1]",
             "[::1]:6167",
             "10.89.10.3",
+            "agent1.local:1",
+            "agent1.local:65535",
         ],
     )
     def test_server_names_accepted(self, name: str) -> None:
@@ -154,6 +156,15 @@ class TestLocal:
             "agent1..local",
             "agent1-.local",
             ".local",
+            "[::::]",
+            "[::1",
+            "[::1]junk",
+            "[::1]:0",
+            "agent1.local:",
+            "agent1.local:0",
+            "agent1.local:65536",
+            "agent1.local:99999",
+            "a:b:c",
         ],
     )
     def test_server_names_refused(self, name: str) -> None:

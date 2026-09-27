@@ -576,6 +576,15 @@ class TestBridgeIsOperatorOnly:
         assert _registry()["beta"].matrix_bridge is not None
         assert "matrix_bridge" in result["not_applied"]["operator_only"]
 
+    async def test_removing_a_bridged_profile_says_so(self, profiles_path: Path) -> None:
+        profiles_path.write_text(BETA_BRIDGE_YAML, encoding="utf-8")
+        await _reload_as("alpha")
+
+        profiles_path.write_text(ALPHA_ONLY_YAML, encoding="utf-8")
+        result = await _reload_as("alpha")
+
+        assert any("matrix_bridge changed for ['beta']" in n for n in result["not_applied"])
+
     async def test_operator_reload_says_a_restart_is_needed(self, profiles_path: Path) -> None:
         profiles_path.write_text(BETA_BRIDGE_YAML, encoding="utf-8")
         result = await _reload_as("alpha")

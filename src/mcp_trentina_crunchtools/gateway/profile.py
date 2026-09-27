@@ -996,23 +996,24 @@ _MAX_PORT = 65535
 def _valid_server_name(value: str) -> bool:
     """The Matrix server-name grammar: a DNS name, an IPv4 address or a
     bracketed IPv6 literal, then an optional port in 1-65535."""
+    # port_suffix is everything after the host, colon included, in both forms.
     if value.startswith("["):
-        literal, sep, rest = value[1:].partition("]")
+        literal, bracket, port_suffix = value[1:].partition("]")
         try:
             ipaddress.IPv6Address(literal)
         except ValueError:
             return False
-        host_ok = bool(sep)
+        host_ok = bool(bracket)
     else:
-        literal, colon, port_part = value.partition(":")
-        rest = colon + port_part
+        literal, colon, port = value.partition(":")
+        port_suffix = colon + port
         host_ok = len(literal) <= _MAX_DNS_NAME and bool(_DNS_NAME_RE.match(literal))
     if not host_ok:
         return False
-    if not rest:
+    if not port_suffix:
         return True
-    port = rest[1:]
-    return rest[0] == ":" and port.isdigit() and 1 <= int(port) <= _MAX_PORT
+    port = port_suffix[1:]
+    return port_suffix[0] == ":" and port.isdigit() and 1 <= int(port) <= _MAX_PORT
 
 
 _LOCALPART_RE = re.compile(r"^[a-z0-9._=/-]{1,64}$")

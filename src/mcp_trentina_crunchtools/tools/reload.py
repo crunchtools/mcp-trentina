@@ -227,8 +227,9 @@ def _unapplied_bridges(current: GatewayConfig, new_config: GatewayConfig) -> lis
     endpoints at startup, so a reload validates the edit and applies none."""
     moved = sorted(
         name
-        for name, profile in new_config.profiles.items()
-        if profile.matrix_bridge != getattr(current.profiles.get(name), "matrix_bridge", None)
+        for name in set(current.profiles) | set(new_config.profiles)
+        if getattr(current.profiles.get(name), "matrix_bridge", None)
+        != getattr(new_config.profiles.get(name), "matrix_bridge", None)
     )
     if not moved:
         return []
