@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -47,9 +48,36 @@ _ROOM_ANNOUNCE = "org.crunchtools.trentina.room"
 
 _BRIDGE_TIMEOUT = httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0)
 
+# An event slower than this is logged at WARNING, which production runs at, so
+# a stalled turn shows where its time went without turning on INFO.
+_SLOW_SECONDS = 5.0
+
 
 class BridgeUnavailableError(RuntimeError):
     """The bridge process refused or did not answer. Conduit retries the txn."""
+
+
+class _Stages:
+    """Wall-clock time per stage of one event, for the line that closes it."""
+
+    def __init__(self) -> None:
+        self._start = self._mark = time.monotonic()
+        self._laps: list[str] = []
+
+    def lap(self, stage: str) -> None:
+        now = time.monotonic()
+        self._laps.append(f"{stage}={now - self._mark:.2f}s")
+        self._mark = now
+
+    def report(self, what: str) -> None:
+        total = time.monotonic() - self._start
+        level = logging.WARNING if total >= _SLOW_SECONDS else logging.INFO
+        if not logger.isEnabledFor(level):
+            return
+        # ``what`` carries upstream event IDs; escaped, one cannot forge a line.
+        if not what.isprintable():
+            what = repr(what)
+        logger.log(level, "matrix_bridge: %s in %.2fs (%s)", what, total, " ".join(self._laps))
 
 
 def _txn(prefix: str, event_id: str) -> str:
@@ -151,10 +179,18 @@ class ProfileBridge:
 
     async def inbound(self, event: dict[str, Any]) -> str:
         """Judge and deliver one upstream event. Returns what happened."""
+        stages = _Stages()
         async with self._inbound_lock:
-            return await self._inbound(event)
+            stages.lap("wait")
+            outcome = await self._inbound(event, stages)
+        if outcome in {"delivered", "withheld"}:
+            stages.lap("deliver")
+            stages.report(
+                f"{self.profile.name} inbound {event.get('event_id')} {event.get('type')} {outcome}"
+            )
+        return outcome
 
-    async def _inbound(self, event: dict[str, Any]) -> str:
+    async def _inbound(self, event: dict[str, Any], stages: _Stages) -> str:
         event_id = str(event["event_id"])
         key = f"in:{event_id}"
         if await self.mapping.seen(key):
@@ -184,6 +220,7 @@ class ProfileBridge:
             "content": content,
         }
         verdict = await self._judge(scanned, room=remote_room, direction="inbound")
+        stages.lap("judge")
         reason = self._refusal(verdict)
         local, stand_in = await self._place(event, scanned, withheld=reason is not None)
 
@@ -196,7 +233,10 @@ class ProfileBridge:
         else:
             # Event IDs are opaque; who said it and where stays out of the log.
             logger.warning(
-                "matrix_bridge: withheld inbound %s for %s: %s", event_id, self.profile.name, reason
+                "matrix_bridge: withheld inbound %r for %s: %s",
+                event_id,
+                self.profile.name,
+                reason,
             )
             # A withheld reaction has nothing to stand in for: it is dropped.
             out_type = "m.room.message"
@@ -212,15 +252,7 @@ class ProfileBridge:
         )
         await self.mapping.put_event(event_id, local_event)
         await self.mapping.mark(key)
-        outcome = "withheld" if reason else "delivered"
-        logger.info(
-            "matrix_bridge: %s inbound %s -> %s (%s)",
-            self.profile.name,
-            event_id,
-            local_event,
-            outcome,
-        )
-        return outcome
+        return "withheld" if reason else "delivered"
 
     async def _place(
         self, event: dict[str, Any], scanned: dict[str, str | Any], *, withheld: bool
@@ -361,7 +393,9 @@ class ProfileBridge:
             await self.mapping.mark(key)
             return
 
+        stages = _Stages()
         verdict = await self._judge({"content": content}, room=remote_room, direction="outbound")
+        stages.lap("judge")
         reason = self._refusal(verdict)
         if reason is not None:
             logger.warning(
@@ -376,6 +410,8 @@ class ProfileBridge:
                 _txn("wo", event_id),
             )
             await self.mapping.mark(key)
+            stages.lap("notice")
+            stages.report(f"{self.profile.name} outbound {event_id} withheld")
             return
 
         out = rewrite_content(content, await self._outbound_ids(content))
@@ -393,9 +429,8 @@ class ProfileBridge:
         )
         await self.mapping.put_event(str(sent["event_id"]), event_id)
         await self.mapping.mark(key)
-        logger.info(
-            "matrix_bridge: %s outbound %s -> %s", self.profile.name, event_id, sent["event_id"]
-        )
+        stages.lap("send")
+        stages.report(f"{self.profile.name} outbound {event_id} {event_type} sent")
 
     async def _bridge(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         try:

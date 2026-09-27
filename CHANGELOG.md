@@ -10,6 +10,20 @@ under that name.
 
 ## [Unreleased]
 
+## [0.46.1] - 2026-09-27
+
+### Added
+
+- Every event the Matrix bridge carries is logged with its total time and
+  its stages (queue wait, judgement, delivery). The line is WARNING once an event
+  takes 5 seconds, so a stalled turn is visible at the production log
+  level; the per-event INFO lines it replaces never were.
+
+### Fixed
+
+- `docs/matrix-bridge.md` said a 0.45.0 DM is handed over on the bridge's
+  next start; it is handed over when the next event arrives in it.
+
 ## [0.46.0] - 2026-09-27
 
 ### Added
