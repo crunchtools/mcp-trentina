@@ -161,8 +161,9 @@ class Gaps:
         """
         return cls(**{f.name: bool(warning.get(f.name)) for f in fields(cls)})
 
-    def partial_only(self) -> bool:
-        """Every gap is a partial read or an oversize payload, none an absent layer.
+    def redactable_only(self) -> bool:
+        """Every gap is one redact may answer: a partial read or an oversize
+        payload, never an absent layer.
 
         The allowlist may send these to redact, whose extraction reads the
         whole payload and whose output all three layers verify; an absent

@@ -38,7 +38,13 @@ from mcp_trentina_crunchtools.gateway.profile import (
     Profile,
 )
 from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
-from mcp_trentina_crunchtools.modes import Mode, ModePolicy, parse_mode_arg, refusal_body
+from mcp_trentina_crunchtools.modes import (
+    Gaps,
+    Mode,
+    ModePolicy,
+    parse_mode_arg,
+    refusal_body,
+)
 
 ROUTER = "mcp_trentina_crunchtools.gateway.router"
 TOOL = {
@@ -795,3 +801,19 @@ class TestPre035SpellingsAreGone:
         assert body["alternatives"] == ["redact"]
         assert "warn" not in mode_instructions(_profile(["block", "flag", "redact"]))
         assert "clean" not in mode_instructions(_profile(["block", "flag", "redact"]))
+
+
+@pytest.mark.parametrize(
+    ("gaps", "redactable"),
+    [
+        (Gaps(l2_truncated=True), True),
+        (Gaps(l3_truncated=True), True),
+        (Gaps(oversize=True), True),
+        (Gaps(l2_truncated=True, l3_unavailable=True), False),
+        (Gaps(l2_unavailable=True), False),
+        (Gaps(), False),
+    ],
+)
+def test_only_partial_or_oversize_gaps_are_redactable(gaps: Gaps, redactable: bool) -> None:
+    """The allowlist may send these to redact; an absent layer it may not excuse."""
+    assert gaps.redactable_only() is redactable

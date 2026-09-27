@@ -479,6 +479,13 @@ class TestUnjudgedResponses:
         assert sync["to_device"]["events"][0]["content"]["ciphertext"] == ciphertext
         assert sync["events"][0]["content"]["m.relates_to"]["event_id"] == "$r"
 
+    def test_an_unhashable_type_is_walked_not_raised(self) -> None:
+        from mcp_trentina_crunchtools.gateway.matrix_proxy import _withhold_events
+
+        sync = {"to_device": {"events": [{"type": ["x"], "content": {"n": "a b"}}]}}
+        _withhold_events(sync)
+        assert sync["to_device"]["events"][0]["content"]["n"] == WITHHELD
+
     def test_a_sealed_to_device_event_still_loses_sentences(self) -> None:
         from mcp_trentina_crunchtools.gateway.matrix_proxy import _withhold_events
 

@@ -29,7 +29,8 @@ under that name.
   required layer absent) keeps every event where it is and loses its
   language: a string survives only as one printable token of at most 255
   characters outside the prose fields, room events become a withheld
-  notice keeping their relation, E2EE to-device events pass verbatim, and
+  notice keeping their relation, E2EE to-device events keep their long
+  ciphertext and key tokens but no text, and
   `next_batch` holds, so the client stays in sync. A response that is not
   a JSON object, cannot be parsed, or is over 32 MB is refused with 502.
   `annotate` keeps the old forwarding.

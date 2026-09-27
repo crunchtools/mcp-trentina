@@ -212,7 +212,7 @@ async def judge_and_deliver(
         if reason is None:
             return _deliver(call, verdict, original, extras)
         gaps = gaps_of(verdict)
-        absent = gaps.blocking() and not gaps.partial_only()
+        absent = gaps.blocking() and not gaps.redactable_only()
         if allowlisted and not absent:
             return await _redact(
                 call, verdict, DEFAULT_REDACT_PROMPT, redact_extras, downgraded=True

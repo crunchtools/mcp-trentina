@@ -653,7 +653,7 @@ _PATH_STEPS = {("root", "to_device"): "to_device", ("to_device", "events"): "to_
 ``to_device.events[i]`` of the response itself, never the same keys nested."""
 
 
-def _withhold_events(node: Any, depth: int = 0, *, at: str = "root") -> int:
+def _withhold_events(node: Any, depth: int = 0, *, at: str = "root", sealed: bool = False) -> int:
     """Strip the language from an unjudged response in place; count the events.
 
     One rule everywhere: a string survives only as a single token
@@ -664,7 +664,7 @@ def _withhold_events(node: Any, depth: int = 0, *, at: str = "root") -> int:
     room event (``event_id``, no ``state_key``) is rebuilt as the notice
     plus its relation; an encrypted one becomes a plain notice. An E2EE
     event at the response's own ``to_device.events[i]`` (``at``) is walked
-    ``sealed``: its tokens may be as long as ciphertext is, and its ``body``
+    ``sealed`` from there down: its tokens may be as long as ciphertext is, and its ``body``
     is ciphertext, not prose. Whitespace text is withheld there too. The
     same shape anywhere else is walked like everything else.
     Past ``_MAX_WALK_DEPTH`` a subtree is withheld whole: unwalked is
@@ -674,15 +674,16 @@ def _withhold_events(node: Any, depth: int = 0, *, at: str = "root") -> int:
         slots: Any = enumerate(node)
         events = 0
     elif isinstance(node, dict):
-        if at == "to_device.events[]" and node.get("type") in _E2EE_TO_DEVICE:
-            at = "sealed"
-        events = _rebuild_room_event(node) if at != "sealed" else 0
-        for key in [k for k in node if not _token(str(k), sealed=at == "sealed")]:
+        kind = node.get("type")
+        sealed = sealed or (
+            at == "to_device.events[]" and isinstance(kind, str) and kind in _E2EE_TO_DEVICE
+        )
+        events = 0 if sealed else _rebuild_room_event(node)
+        for key in [k for k in node if not _token(str(k), sealed=sealed)]:
             del node[key]
         slots = node.items()
     else:
         return 0
-    sealed = at == "sealed"
     for key, value in slots:
         if (key in _PROSE_FIELDS and not sealed) or (
             isinstance(value, str) and not _token(value, sealed=sealed)
@@ -693,14 +694,8 @@ def _withhold_events(node: Any, depth: int = 0, *, at: str = "root") -> int:
         elif depth >= _MAX_WALK_DEPTH and isinstance(value, (dict, list)):
             node[key] = WITHHELD
         else:
-            step = (
-                at
-                if sealed
-                else f"{at}[]"
-                if at == "to_device.events"
-                else _PATH_STEPS.get((at, key), "")
-            )
-            events += _withhold_events(value, depth + 1, at=step)
+            step = f"{at}[]" if at == "to_device.events" else _PATH_STEPS.get((at, key), "")
+            events += _withhold_events(value, depth + 1, at=step, sealed=sealed)
     return events
 
 

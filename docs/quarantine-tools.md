@@ -84,7 +84,7 @@ A provider error at turn 2 or 3 refuses. Until 0.31.0 a provider error handed ba
 An extraction model asked about a near-empty page answers from its priors. A 23-byte app shell once came back as 90 fluent, fabricated words marked `confidence: "high"` (#245). Two gates stop that:
 
 - **Nothing to extract.** Under 64 characters of text after pre-processing, turn 2 is not called. The response is `{"extracted_text": "", "confidence": "none", "nothing_to_extract": "<n> characters of text; ..."}`; when `fetch` removed `<script>` tags it adds that the page likely renders with JavaScript. Use `block` to read a short document.
-- **Grounding.** `confidence` is the gateway's, not the model's: the share of the extraction's words (four or more letters, compared on their first six) that occur in the source. At least 85% is `high`, 60% `medium`, less `low`. Under 30% the extraction is refused as `redact refused: ungrounded`, before turn 3 is paid for. Translation and heavy paraphrase grade lower; that is the cost of a number that means something.
+- **Grounding.** `confidence` is the gateway's, not the model's: the share of the extraction's distinct words (runs of four or more letters or digits, case-folded, compared on their first six characters) that occur in the source. At least 85% is `high`, 60% `medium`, less `low`. Under 30% the extraction is refused as `redact refused: ungrounded`, before turn 3 is paid for. Translation and heavy paraphrase grade lower; that is the cost of a number that means something.
 
 ### A layer that could not finish
 
