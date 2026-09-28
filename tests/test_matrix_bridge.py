@@ -35,7 +35,7 @@ from mcp_trentina_crunchtools.gateway.matrix_bridge.core import (
     BridgeUnavailableError,
     ProfileBridge,
 )
-from mcp_trentina_crunchtools.gateway.matrix_bridge.mapping import BridgeMapping
+from mcp_trentina_crunchtools.gateway.matrix_bridge.mapping import BridgeMapping, Room
 from mcp_trentina_crunchtools.gateway.matrix_bridge.rewrite import (
     IdMap,
     escape_localpart,
@@ -556,6 +556,38 @@ class TestRetention:
         assert await mapping.local_event("$r") == "$l"
 
 
+class TestReopen:
+    async def test_everything_written_survives_a_close_and_reopen(self, tmp_path: Path) -> None:
+        path = tmp_path / "m.db"
+        mapping = BridgeMapping(path)
+        await mapping.put_room("!r:hs", "!l:agent1.local", "ops", "on call")
+        await mapping.put_room(
+            "!dm:hs", "!ldm:agent1.local", "", "", owner="@remote_x:agent1.local"
+        )
+        await mapping.put_user(SCOTT, "@remote_scott:agent1.local", "Scott")
+        await mapping.put_member("!l:agent1.local", "@remote_scott:agent1.local")
+        await mapping.put_event("$r", "$l")
+        await mapping.mark("in:$r")
+        mapping.close()
+
+        mapping = BridgeMapping(path)
+        try:
+            assert await mapping.room_by_remote("!r:hs") == Room(
+                "!r:hs", "!l:agent1.local", "ops", "on call"
+            )
+            dm = await mapping.room_by_local("!ldm:agent1.local")
+            assert dm is not None
+            assert dm.owner == "@remote_x:agent1.local"
+            assert await mapping.local_user(SCOTT) == "@remote_scott:agent1.local"
+            assert await mapping.displayname(SCOTT) == "Scott"
+            assert await mapping.is_member("!l:agent1.local", "@remote_scott:agent1.local")
+            assert await mapping.local_event("$r") == "$l"
+            assert await mapping.remote_event("$l") == "$r"
+            assert await mapping.seen("in:$r"), "a restart must not redeliver a processed event"
+        finally:
+            mapping.close()
+
+
 class TestOutboundLookup:
     async def test_only_the_named_stand_ins_are_resolved(
         self, rig_factory: Any, monkeypatch: pytest.MonkeyPatch
@@ -697,6 +729,24 @@ class TestNewRoomWaitsForTheAgent:
 
         monkeypatch.setattr(rig.bridge.appservice, "wait_for_agent", short)
         assert await rig.bridge.inbound(TestRoomAnnouncement()._announce()) == "mapped"
+
+    async def test_an_agent_that_joins_late_is_waited_for(
+        self, rig_factory: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rig = rig_factory()
+        rig.conduit.agent = None
+        sleeps: list[float] = []
+
+        async def agent_joins(seconds: float) -> None:
+            sleeps.append(seconds)
+            rig.conduit.agent = AGENT
+
+        monkeypatch.setattr(appservice_mod.asyncio, "sleep", agent_joins)
+        room = Room(ROOM, "!local1:agent1.local", "", "")
+        assert await rig.bridge.appservice.wait_for_agent(room)
+        polls = [c for c in rig.conduit.calls if c[1].endswith("/joined_members")]
+        assert len(polls) == 2
+        assert sleeps == [1.0]
 
 
 class TestRestartRegistration:
