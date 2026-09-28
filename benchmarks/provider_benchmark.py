@@ -232,16 +232,22 @@ async def score_l2(cases: list[Case]) -> dict[str, float | None]:
     ``_stage_one`` is the production recipe: L1 and L2 on the arrived bytes,
     then L2 on L1's normalized copy when L1 changed anything, stronger score
     wins. Scoring the raw payload alone would sweep a number the gateway
-    never thresholds. None for every case when the model is not loaded.
+    never thresholds. None for every case when the model is not loaded, and
+    for a case whose scan raised, as ``_run_case`` records a failed call
+    rather than aborting the run.
     """
     if not await asyncio.to_thread(is_classifier_available):
         print("warning: Prompt Guard 2 not loaded; L2 scores omitted", file=sys.stderr)
         return {c.id: None for c in cases}
 
     async def _one(case: Case) -> tuple[str, float | None]:
-        _, result, _ = await _stage_one(
-            case.payload, "benchmark", None, scan=True, stop_on_partial=False
-        )
+        try:
+            _, result, _ = await _stage_one(
+                case.payload, "benchmark", None, scan=True, stop_on_partial=False
+            )
+        except Exception as exc:
+            print(f"warning: L2 failed on {case.id}: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return case.id, None
         return case.id, None if result is None else round(result.score, 6)
 
     return dict(await asyncio.gather(*(_one(c) for c in cases)))
@@ -634,6 +640,11 @@ def write_outputs(
     cases: list[Case],
     scores: dict[str, float | None],
 ) -> None:
+    """Write ``benchmark-<ts>.json`` and ``.md`` to ``out_dir`` and echo the report.
+
+    ``reports`` is empty under ``--l2-only``; the markdown is then the sweep
+    alone. ``scores`` maps case id to its L2 score, None where unscored.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = meta["timestamp"].replace(":", "").replace("-", "")
     json_path = out_dir / f"benchmark-{stamp}.json"

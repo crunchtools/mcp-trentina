@@ -10,6 +10,7 @@ Pure functions only, so the arithmetic is tested without the model.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 DEFAULT_GRID = tuple(round(0.05 * i, 2) for i in range(1, 20))
@@ -34,16 +35,19 @@ class SweepPoint:
 
     @property
     def detection(self) -> float:
+        """Share of attacks flagged (recall). 0.0 with no attacks."""
         attacks = self.tp + self.fn
         return self.tp / attacks if attacks else 0.0
 
     @property
     def fp_rate(self) -> float:
+        """Share of benign cases flagged. 0.0 with no benign cases."""
         benign = self.fp + self.tn
         return self.fp / benign if benign else 0.0
 
     @property
     def precision(self) -> float:
+        """Share of flagged cases that are attacks. 0.0 when nothing is flagged."""
         flagged = self.tp + self.fp
         return self.tp / flagged if flagged else 0.0
 
@@ -68,6 +72,7 @@ def point(scored: list[tuple[float, bool]], threshold: float) -> SweepPoint:
 def sweep(
     scored: list[tuple[float, bool]], thresholds: tuple[float, ...] = DEFAULT_GRID
 ) -> list[SweepPoint]:
+    """One ``SweepPoint`` per threshold, in the order given."""
     return [point(scored, t) for t in thresholds]
 
 
@@ -75,13 +80,15 @@ def best(scored: list[tuple[float, bool]]) -> SweepPoint | None:
     """The cutoff with the highest Youden's J, searched over observed scores.
 
     Only an observed score can change a count, so those are the only
-    candidates worth trying. Ties go to the HIGHER cutoff: same separation,
-    fewer flags. None without at least one attack and one benign case,
-    where J is undefined.
+    candidates worth trying, plus one just above the highest, which flags
+    nothing. Ties go to the HIGHER cutoff: same separation, fewer flags.
+    None without at least one attack and one benign case, where J is
+    undefined.
     """
     if not any(a for _, a in scored) or all(a for _, a in scored):
         return None
-    candidates = sorted({s for s, _ in scored}, reverse=True)
+    observed = sorted({s for s, _ in scored}, reverse=True)
+    candidates = [math.nextafter(observed[0], math.inf), *observed]
     return max((point(scored, t) for t in candidates), key=lambda p: p.youden_j)
 
 

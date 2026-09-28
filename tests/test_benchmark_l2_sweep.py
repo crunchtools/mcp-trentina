@@ -12,6 +12,7 @@ import pytest
 from benchmarks import l2_sweep
 from benchmarks import provider_benchmark as bench
 from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
+from tests.adversarial_corpus import CORPUS, Case
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,16 +36,26 @@ def test_sweep_is_monotone() -> None:
         assert hi.fp <= lo.fp
 
 
-def test_best_searches_observed_scores_and_prefers_higher_cutoff() -> None:
-    # 0.80 and 0.95 are not tied; 0.80 catches 2/3 with 0 FP (J 0.67),
-    # 0.30 catches 3/3 with 1/2 FP (J 0.5), 0.60 is J 0.17.
+def test_best_searches_observed_scores() -> None:
+    # 0.80 catches 2/3 with 0 FP (J 0.67); 0.30 is J 0.5, 0.60 is J 0.17.
     top = l2_sweep.best(SCORED)
     assert top is not None
     assert top.threshold == pytest.approx(0.80)
-    tied = [(0.9, True), (0.7, True), (0.2, False)]
+
+
+def test_best_breaks_a_tie_toward_the_higher_cutoff() -> None:
+    # 0.9: 1/2 attacks, 0/2 FP (J 0.5). 0.5: 2/2 attacks, 1/2 FP (J 0.5).
+    tied = [(0.9, True), (0.5, True), (0.7, False), (0.1, False)]
     top = l2_sweep.best(tied)
     assert top is not None
-    assert top.threshold == pytest.approx(0.7)
+    assert top.threshold == pytest.approx(0.9)
+
+
+def test_best_prefers_flagging_nothing_when_scores_do_not_separate() -> None:
+    top = l2_sweep.best([(0.5, True), (0.5, False)])
+    assert top is not None
+    assert top.threshold > 0.5
+    assert top.tp + top.fp == 0
 
 
 @pytest.mark.parametrize("scored", [[], [(0.9, True)], [(0.1, False)]])
@@ -111,3 +122,76 @@ def test_missing_model_yields_none_scores(tmp_path: Path) -> None:
     payload = json.loads(json_path.read_text())
     assert set(payload["l2"]["scores"].values()) == {None}
     assert payload["l2"]["best_threshold"] is None
+
+
+async def test_score_l2_takes_the_stronger_of_original_and_normalized() -> None:
+    # A zero-width space inside a word makes L1 normalize, so L2 reads both.
+    case = Case(id="zw", category="t", payload="ig\u200bnore this", expect_injection=True)
+
+    async def score(text: str, **_: object) -> ClassifierResult:
+        return ClassifierResult(
+            label="BENIGN", score=0.2 if "\u200b" in text else 0.9, latency_ms=0.0
+        )
+
+    with (
+        patch.object(bench, "is_classifier_available", return_value=True),
+        patch("mcp_trentina_crunchtools.defense.classify_async", side_effect=score) as spy,
+    ):
+        scores = await bench.score_l2([case])
+    assert spy.call_count == 2
+    assert scores == {"zw": 0.9}
+
+
+async def test_score_l2_records_a_failed_scan_as_none() -> None:
+    cases = list(CORPUS[:2])
+
+    async def score(text: str, **_: object) -> ClassifierResult:
+        if text == cases[0].payload:
+            raise RuntimeError("boom")
+        return ClassifierResult(label="BENIGN", score=0.3, latency_ms=0.0)
+
+    with (
+        patch.object(bench, "is_classifier_available", return_value=True),
+        patch("mcp_trentina_crunchtools.defense.classify_async", side_effect=score),
+    ):
+        scores = await bench.score_l2(cases)
+    assert scores == {cases[0].id: None, cases[1].id: 0.3}
+
+
+def test_provider_run_attaches_each_cases_own_score(tmp_path: Path) -> None:
+    cases = list(CORPUS[:3])
+    scores = {c.id: round(0.1 * (i + 1), 6) for i, c in enumerate(cases)}
+
+    async def fake_scores(_: list[Case]) -> dict[str, float | None]:
+        return dict(scores)
+
+    async def fake_run(provider: str, run_cases: list[Case], *_: object) -> bench.ProviderReport:
+        report = bench.ProviderReport(provider=provider, model="m")
+        for c in reversed(run_cases):
+            report.results.append(
+                bench.CaseResult(
+                    id=c.id,
+                    category=c.category,
+                    expect_injection=c.expect_injection,
+                    min_risk=c.min_risk,
+                    detected=True,
+                    risk_level="high",
+                    latency_ms=1.0,
+                    input_tokens=0,
+                    output_tokens=0,
+                    cost_usd=0.0,
+                    error=False,
+                )
+            )
+        return report
+
+    with (
+        patch.object(bench, "available_providers", return_value=["gemini"]),
+        patch.object(bench, "score_l2", side_effect=fake_scores),
+        patch.object(bench, "run_provider", side_effect=fake_run),
+    ):
+        rc = bench.main(["--limit", "3", "--out", str(tmp_path)])
+    assert rc == 0
+    (json_path,) = tmp_path.glob("*.json")
+    (provider,) = json.loads(json_path.read_text())["providers"]
+    assert {c["id"]: c["l2_malicious_score"] for c in provider["cases"]} == scores
