@@ -107,9 +107,15 @@ def render_markdown(scored: list[tuple[float, bool]], current: float, unscored: 
         "",
     ]
     if unscored:
-        out += [f"{unscored} case(s) had no score (classifier unavailable) and are excluded.", ""]
+        out += [
+            (
+                f"{unscored} case(s) had no score (model not loaded, or the scan failed) "
+                "and are excluded."
+            ),
+            "",
+        ]
     if not scored:
-        out += ["No scores: the Prompt Guard 2 model is not loaded.", ""]
+        out += ["No scores were produced; the run's warnings say why.", ""]
         return "\n".join(out)
     if n_benign < MIN_BENIGN_FOR_FP:
         step = f"moves in steps of {1 / n_benign:.0%}" if n_benign else "is undefined"

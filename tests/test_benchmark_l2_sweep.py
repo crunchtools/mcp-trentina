@@ -55,6 +55,13 @@ def test_best_searches_observed_scores() -> None:
     assert top.threshold == pytest.approx(0.80)
 
 
+def test_best_returns_an_off_grid_observed_score() -> None:
+    scored = [(0.8123, True), (0.95, True), (0.30, True), (0.60, False), (0.10, False)]
+    top = l2_sweep.best(scored)
+    assert top is not None
+    assert top.threshold == 0.8123
+
+
 def test_best_breaks_a_tie_toward_the_higher_cutoff() -> None:
     # 0.9: 1/2 attacks, 0/2 FP (J 0.5). 0.5: 2/2 attacks, 1/2 FP (J 0.5).
     tied = [(0.9, True), (0.5, True), (0.7, False), (0.1, False)]
@@ -95,7 +102,7 @@ def test_markdown_inserts_off_grid_current() -> None:
 
 
 def test_markdown_without_scores_says_so() -> None:
-    assert "not loaded" in l2_sweep.render_markdown([], 0.5, unscored=4)
+    assert "No scores were produced" in l2_sweep.render_markdown([], 0.5, unscored=4)
 
 
 def test_default_threshold_tracks_the_profile_default() -> None:
