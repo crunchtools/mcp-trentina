@@ -306,10 +306,11 @@ def test_categories_filter_before_each_corpus_limit() -> None:
     with patch.object(external_corpus, "load", lambda split: external_corpus._cases(split, CSV)):
         cases = bench.select_cases(
             bench.parse_args(
-                ["--corpus", "both", "--categories", "external_benign", "--limit", "1"]
+                ["--corpus", "both", "--categories", "external_jailbreak", "--limit", "1"]
             )
         )
-    assert [c.id for c in cases] == ["ext-test-0000"]
+    # The first row is benign: limiting before filtering would select nothing.
+    assert [c.id for c in cases] == ["ext-test-0001"]
 
 
 def test_l2_only_dry_run_projects_no_provider_cost(capsys: pytest.CaptureFixture[str]) -> None:

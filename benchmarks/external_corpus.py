@@ -109,6 +109,10 @@ def _split_bytes(split: str, cache_dir: Path, fetch: Callable[[str], bytes]) -> 
 
 
 def _cases(split: str, csv_bytes: bytes) -> list[Case]:
+    """One ``Case`` per CSV row: ``prompt`` is the payload, ``type`` the label.
+
+    Ids are ``ext-<split>-<row>``, stable for a pinned revision.
+    """
     # field_size_limit is process-wide; restore it so no other reader inherits ours.
     previous = csv.field_size_limit(_CSV_FIELD_LIMIT)
     try:

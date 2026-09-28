@@ -524,6 +524,7 @@ NOTABLE_LIST_CAP = 25
 
 
 def _ids(ids: list[str]) -> str:
+    """Sorted, backticked, cut at ``NOTABLE_LIST_CAP`` with a count of the rest."""
     shown = ", ".join(f"`{i}`" for i in sorted(ids)[:NOTABLE_LIST_CAP])
     more = len(ids) - NOTABLE_LIST_CAP
     return f"{shown}, and {more} more" if more > 0 else shown
@@ -554,6 +555,7 @@ def _notable(reports: list[ProviderReport]) -> list[str]:
 
 
 def _summary(reports: list[ProviderReport]) -> list[str]:
+    """The summary table: one row of headline metrics per provider."""
     out = [
         "## Summary",
         "",
@@ -630,6 +632,7 @@ def render_markdown(
 
 
 def _corpus_counts(cases: list[Case]) -> dict[str, int]:
+    """Total, attack, benign and category counts of ``cases``."""
     attacks = sum(1 for c in cases if c.expect_injection)
     return {
         "n_total": len(cases),
@@ -746,6 +749,7 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
 
 
 def _dry_run(cases: list[Case], providers: list[str], l2_only: bool) -> None:
+    """Print the target, per-corpus counts, projected cost unless ``l2_only``, and each case."""
     target = "L2 only" if l2_only else (providers or "(none available)")
     print(f"Would run {len(cases)} cases against: {target}")
     for name, sub in by_corpus(cases).items():
