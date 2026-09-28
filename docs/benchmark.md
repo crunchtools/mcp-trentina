@@ -57,14 +57,16 @@ uv run python benchmarks/provider_benchmark.py --categories detector_meta --limi
 | Flag | Default | Purpose |
 |------|---------|---------|
 | `--providers` | all with creds | Comma-separated subset. |
+| `--corpus` | `internal` | `internal`, `external`, or `both` (reported separately). See below. |
+| `--external-split` | `test` | External split: `test` (262), `train` (1,044), `all` (1,306). |
 | `--categories` | all | Comma-separated category filter. |
-| `--limit N` | all | Run only the first N cases (smoke test). |
+| `--limit N` | all | Run only the first N cases of each corpus (smoke test). |
 | `--concurrency N` | 4 | Max concurrent calls per provider. Lower it if you hit rate limits. |
 | `--delay S` | 0 | Sleep S seconds after each call (gentler on rate limits). |
 | `--retries N` | 0 | Retry transient failures (503/429/timeouts) up to N times with exponential backoff. Terminal errors (auth, schema) are not retried. Use when a cheap model's endpoint is capacity-throttling — e.g. `gemini-2.5-flash-lite` under load. |
 | `--out DIR` | `benchmarks/results` | Where JSON + markdown land. |
 | `--l2-only` | off | Score through L1+L2 and sweep `l2_threshold`; no provider calls. |
-| `--dry-run` | off | List providers and cases, call nothing. |
+| `--dry-run` | off | List providers, cases and a projected cost; call nothing. |
 
 ## Output
 
@@ -75,6 +77,30 @@ Each run writes two timestamped files to `--out`:
 - `benchmark-<ts>.md` — the human-readable report (summary table, per-category
   detection, false-positive breakdown, and the attacks/benign that *every*
   provider got wrong). This is the artifact for the blog follow-up in issue #43.
+
+## External corpus (issue #85)
+
+`--corpus external` runs [`jackhhao/jailbreak-classification`](https://huggingface.co/datasets/jackhhao/jailbreak-classification)
+(Apache-2.0), a third-party labeled set, so the defense is not graded only
+against attacks its own author wrote, and the FP rate gets a denominator in
+the hundreds. `benchmarks/external_corpus.py` pins one dataset revision and
+checks each split's SHA-256, downloads on first use into `benchmarks/data/`
+(gitignored, never vendored), and maps rows onto `Case` as
+`external_jailbreak` / `external_benign`.
+
+Read its results for what they are. It is **direct jailbreak** (user to
+model, DAN-style personas), not indirect injection in retrieved content,
+which is Trentina's threat model. It measures L2, which is trained on exactly
+this syntax, and over-triggering on benign roleplay ("Act as a yoga
+instructor…"), which looks like our `role_reassignment` attacks. It says
+little about L3's semantic gap; high L3 detection here is a sanity floor.
+The internal corpus stays the L3 measurement.
+
+The two are never blended: `--corpus both` writes a separate report, sweep
+and JSON block (`providers[].corpora.<name>`, `l2.<name>`) per corpus. The
+dataset has no severity labels, so Risk-cal is n/a for it rather than a
+number invented to fill the column. A full external pass is 262 L3 calls per
+provider; `--dry-run` prints a projected cost first.
 
 ## Cost figures
 

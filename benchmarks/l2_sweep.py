@@ -92,12 +92,14 @@ def best(scored: list[tuple[float, bool]]) -> SweepPoint | None:
     return max((point(scored, t) for t in candidates), key=lambda p: p.youden_j)
 
 
-def render_markdown(scored: list[tuple[float, bool]], current: float, unscored: int = 0) -> str:
+def render_markdown(
+    scored: list[tuple[float, bool]], current: float, unscored: int = 0, corpus: str = ""
+) -> str:
     """The report section: the grid, the current setting, and the best cutoff."""
     n_attacks = sum(1 for _, a in scored if a)
     n_benign = len(scored) - n_attacks
     out = [
-        "## L2 threshold sweep",
+        f"## L2 threshold sweep: {corpus} corpus" if corpus else "## L2 threshold sweep",
         "",
         (
             f"Prompt Guard 2 scores for {n_attacks} attacks and {n_benign} benign "
