@@ -25,6 +25,10 @@ Usage (see docs/benchmark.md for the full option list)
         Score the corpus through L1 and L2 only and sweep ``l2_threshold``
         (issue #86). No provider, no tokens; needs the Prompt Guard 2 model.
 
+    uv run python benchmarks/provider_benchmark.py --corpus external
+        The third-party jailbreak set (issue #85, ``external_corpus.py``);
+        ``both`` runs the two, reported separately and never blended.
+
 Every run also scores each case through L2 once (the score does not depend
 on the provider) and appends the threshold sweep to the report.
 
@@ -54,12 +58,13 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from benchmarks import l2_sweep
+from benchmarks import external_corpus, l2_sweep
 from mcp_trentina_crunchtools.config import get_config
 from mcp_trentina_crunchtools.defense import _stage_one
 from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
 from mcp_trentina_crunchtools.quarantine.classifier import is_classifier_available
+from mcp_trentina_crunchtools.quarantine.prompts import DETECTION_SYSTEM_PROMPT
 from tests.adversarial_corpus import CORPUS, RISK_ORDER, Case
 
 TOKENS_PER_MILLION = 1_000_000
@@ -129,8 +134,12 @@ class CaseResult:
 
     @property
     def risk_ok(self) -> bool:
-        """For a correctly-detected attack, did it meet the minimum severity?"""
-        if not self.expect_injection or not self.detected:
+        """For a correctly-detected attack, did it meet the minimum severity?
+
+        False when the case carries no ``min_risk`` (the external corpus has
+        no severity label); ``risk_calibration`` leaves those out entirely.
+        """
+        if not self.expect_injection or not self.detected or not self.min_risk:
             return False
         return RISK_ORDER.get(self.risk_level, 0) >= RISK_ORDER[self.min_risk]
 
@@ -169,11 +178,36 @@ class ProviderReport:
         return sum(1 for r in benign if r.detected) / len(benign)
 
     @property
-    def risk_calibration(self) -> float:
-        detected = [r for r in self._scored_attacks() if r.detected]
+    def risk_calibration(self) -> float | None:
+        """Share of caught attacks at or above their ``min_risk``.
+
+        None when no caught attack carries one: n/a, not a made-up 0%.
+        """
+        detected = [r for r in self._scored_attacks() if r.detected and r.min_risk]
         if not detected:
-            return 0.0
+            return None
         return sum(1 for r in detected if r.risk_ok) / len(detected)
+
+    def subset(self, corpus: str) -> ProviderReport:
+        """The same provider's results on one corpus only."""
+        return ProviderReport(
+            self.provider, self.model, [r for r in self.results if corpus_of(r) == corpus]
+        )
+
+    def aggregates(self) -> dict[str, Any]:
+        """Every metric above, keyed by name, for the JSON report."""
+        return {
+            "detection_rate": self.detection_rate,
+            "fp_rate": self.fp_rate,
+            "risk_calibration": self.risk_calibration,
+            "median_latency_ms": self.median_latency_ms,
+            "p95_latency_ms": self.p95_latency_ms,
+            "cost_per_1k_calls_usd": self.cost_per_1k_calls_usd,
+            "total_cost_usd": self.total_cost_usd,
+            "errors": self.errors,
+            "detection_by_category": self.detection_by_category(),
+            "fp_by_category": self.fp_by_category(),
+        }
 
     def detection_by_category(self) -> dict[str, tuple[int, int]]:
         """category -> (detected, total_scored) over attack cases."""
@@ -262,21 +296,50 @@ def _scored_pairs(
 
 
 def l2_payload(cases: list[Case], scores: dict[str, float | None]) -> dict[str, Any]:
-    """The JSON block: raw scores plus the sweep, so a later cut needs no rerun."""
+    """The JSON block for ``cases``: their raw scores plus the sweep, so a
+    later cut needs no rerun."""
     pairs, _ = _scored_pairs(cases, scores)
     top = l2_sweep.best(pairs)
     return {
         "current_threshold": L2_DEFAULT_THRESHOLD,
-        "scores": scores,
+        "scores": {c.id: scores.get(c.id) for c in cases},
         "best_threshold": None if top is None else top.threshold,
         "sweep": [asdict(p) for p in l2_sweep.sweep(pairs)],
     }
 
 
-def render_l2_markdown(cases: list[Case], scores: dict[str, float | None]) -> str:
-    """The sweep section of the report; unscored cases are counted, not swept."""
+def render_l2_markdown(
+    cases: list[Case], scores: dict[str, float | None], corpus: str = "internal"
+) -> str:
+    """The sweep section for one corpus, named in its heading.
+
+    Unscored cases are counted, not swept.
+    """
     pairs, unscored = _scored_pairs(cases, scores)
-    return l2_sweep.render_markdown(pairs, L2_DEFAULT_THRESHOLD, unscored)
+    return l2_sweep.render_markdown(pairs, L2_DEFAULT_THRESHOLD, unscored, corpus=corpus)
+
+
+CORPORA = ("internal", "external")
+
+
+def corpus_of(case: Case | CaseResult) -> str:
+    """``external`` for a category under the external prefix, else ``internal``."""
+    return "external" if case.category.startswith(external_corpus.CATEGORY_PREFIX) else "internal"
+
+
+CHARS_PER_TOKEN = 4
+OUTPUT_TOKENS_ESTIMATE = 150
+"""A detection verdict is a short JSON object; this rounds it up."""
+
+
+def projected_cost(provider: str, cases: list[Case]) -> float:
+    """Rough USD for one pass: prompt plus payload at 4 chars/token, in and out.
+
+    For ``--dry-run`` before a spend, not a bill. The real figure comes back
+    as ``total_cost_usd``, from the provider's own token counts.
+    """
+    in_tok = sum(len(DETECTION_SYSTEM_PROMPT) + len(c.payload) for c in cases) // CHARS_PER_TOKEN
+    return _cost(provider, in_tok, OUTPUT_TOKENS_ESTIMATE * len(cases))
 
 
 def _cost(provider: str, input_tokens: int, output_tokens: int) -> float:
@@ -446,27 +509,54 @@ def _category_table(
     return "\n".join(lines)
 
 
-def render_markdown(reports: list[ProviderReport], meta: dict[str, Any]) -> str:
-    attack_cats = sorted({c.category for c in CORPUS if c.expect_injection})
-    benign_cats = sorted({c.category for c in CORPUS if not c.expect_injection})
+CORPUS_NOTES = {
+    "internal": ("Hand-authored semantic attacks built to slip past L1 and L2: this measures L3."),
+    "external": (
+        f"`{external_corpus.DATASET}` ({external_corpus.LICENSE}), pinned at "
+        f"`{external_corpus.REVISION[:12]}`. Direct jailbreak, NOT indirect "
+        "injection in retrieved content: it measures L2 and over-triggering on "
+        "benign roleplay, not L3's semantic gap. High detection here is a "
+        "sanity floor. No severity labels, so Risk-cal is n/a."
+    ),
+}
 
+NOTABLE_LIST_CAP = 25
+
+
+def _ids(ids: list[str]) -> str:
+    """Sorted, backticked, cut at ``NOTABLE_LIST_CAP`` with a count of the rest."""
+    shown = ", ".join(f"`{i}`" for i in sorted(ids)[:NOTABLE_LIST_CAP])
+    more = len(ids) - NOTABLE_LIST_CAP
+    return f"{shown}, and {more} more" if more > 0 else shown
+
+
+def _notable(reports: list[ProviderReport]) -> list[str]:
+    """Cases every provider got wrong, the same way."""
+    by_id: dict[str, list[CaseResult]] = {}
+    for r in reports:
+        for res in r.results:
+            by_id.setdefault(res.id, []).append(res)
+    universal_miss: list[str] = []
+    universal_fp: list[str] = []
+    for cid, results in by_id.items():
+        scored = [x for x in results if not x.error]
+        if not scored or any(x.correct for x in scored):
+            continue
+        (universal_miss if scored[0].expect_injection else universal_fp).append(cid)
+    return [
+        "## Notable results",
+        "",
+        f"- Attacks missed by **every** provider ({len(universal_miss)}): "
+        + (_ids(universal_miss) if universal_miss else "none"),
+        f"- Benign content flagged by **every** provider ({len(universal_fp)}): "
+        + (_ids(universal_fp) if universal_fp else "none"),
+        "",
+    ]
+
+
+def _summary(reports: list[ProviderReport]) -> list[str]:
+    """The summary table: one row of headline metrics per provider."""
     out = [
-        "# Q-Agent provider benchmark",
-        "",
-        (
-            "Detection = share of attacks flagged. FP = share of benign content "
-            "wrongly flagged. Risk-cal = share of caught attacks that met the "
-            "expected minimum severity. Cost is an estimate from the harness "
-            "PRICING table."
-        ),
-        "",
-        f"- Generated: {meta['timestamp']}",
-        (
-            f"- Corpus: {meta['n_attacks']} attacks + {meta['n_benign']} benign "
-            f"= {meta['n_total']} cases across {meta['n_categories']} categories"
-        ),
-        f"- Providers: {', '.join(r.provider for r in reports)}",
-        "",
         "## Summary",
         "",
         (
@@ -479,67 +569,108 @@ def render_markdown(reports: list[ProviderReport], meta: dict[str, Any]) -> str:
         ),
     ]
     for r in reports:
+        cal = "n/a" if r.risk_calibration is None else f"{r.risk_calibration:.0%}"
         out.append(
             f"| {r.provider} | `{r.model}` | {r.detection_rate:.0%} | "
-            f"{r.fp_rate:.0%} | {r.risk_calibration:.0%} | "
-            f"{r.median_latency_ms:.0f}ms | ${r.cost_per_1k_calls_usd:.2f} | "
-            f"{r.errors} |"
+            f"{r.fp_rate:.0%} | {cal} | {r.median_latency_ms:.0f}ms | "
+            f"${r.cost_per_1k_calls_usd:.2f} | {r.errors} |"
         )
     out.append("")
+    return out
 
-    out.append(
+
+def render_markdown(
+    reports: list[ProviderReport], meta: dict[str, Any], cases: list[Case], corpus: str
+) -> str:
+    """One corpus's provider report, as Markdown.
+
+    ``reports`` and ``cases`` must already be that corpus's subset
+    (``ProviderReport.subset``, ``by_corpus``): aggregates never mix
+    corpora. ``cases`` supplies the category rows; ``meta`` is
+    ``build_meta``'s, read for the timestamp and ``corpora[corpus]`` counts.
+    ``corpus`` is ``internal`` or ``external`` and picks the heading and the
+    note on what that corpus measures.
+    """
+    attack_cats = sorted({c.category for c in cases if c.expect_injection})
+    benign_cats = sorted({c.category for c in cases if not c.expect_injection})
+    counts = meta["corpora"][corpus]
+    out = [
+        f"# Q-Agent provider benchmark: {corpus} corpus",
+        "",
+        CORPUS_NOTES[corpus],
+        "",
+        (
+            "Detection = share of attacks flagged. FP = share of benign content "
+            "wrongly flagged. Risk-cal = share of caught attacks that met the "
+            "expected minimum severity. Cost is an estimate from the harness "
+            "PRICING table."
+        ),
+        "",
+        f"- Generated: {meta['timestamp']}",
+        (
+            f"- Corpus: {counts['n_attacks']} attacks + {counts['n_benign']} benign "
+            f"= {counts['n_total']} cases across {counts['n_categories']} categories"
+        ),
+        f"- Providers: {', '.join(r.provider for r in reports)}",
+        "",
+        *_summary(reports),
         _category_table(
             "Detection by attack category",
             reports,
             attack_cats,
             {r.provider: r.detection_by_category() for r in reports},
-        )
-    )
-    out.append(
+        ),
         _category_table(
             "False positives by benign category",
             reports,
             benign_cats,
             {r.provider: r.fp_by_category() for r in reports},
-        )
-    )
-
-    by_id: dict[str, list[CaseResult]] = {}
-    for r in reports:
-        for res in r.results:
-            by_id.setdefault(res.id, []).append(res)
-    universal_miss, universal_fp = [], []
-    for cid, results in by_id.items():
-        scored = [x for x in results if not x.error]
-        if not scored:
-            continue
-        if scored[0].expect_injection:
-            if all(not x.detected for x in scored):
-                universal_miss.append(cid)
-            continue
-        if all(x.detected for x in scored):
-            universal_fp.append(cid)
-    out += [
-        "## Notable results",
-        "",
-        f"- Attacks missed by **every** provider ({len(universal_miss)}): "
-        + (", ".join(f"`{i}`" for i in sorted(universal_miss)) or "none 🎉"),
-        f"- Benign content flagged by **every** provider ({len(universal_fp)}): "
-        + (", ".join(f"`{i}`" for i in sorted(universal_fp)) or "none 🎉"),
-        "",
+        ),
+        *_notable(reports),
     ]
     return "\n".join(out)
 
 
-def build_meta(providers: list[str]) -> dict[str, Any]:
-    attacks = [c for c in CORPUS if c.expect_injection]
-    benign = [c for c in CORPUS if not c.expect_injection]
+def _corpus_counts(cases: list[Case]) -> dict[str, int]:
+    """Total, attack, benign and category counts of ``cases``."""
+    attacks = sum(1 for c in cases if c.expect_injection)
+    return {
+        "n_total": len(cases),
+        "n_attacks": attacks,
+        "n_benign": len(cases) - attacks,
+        "n_categories": len({c.category for c in cases}),
+    }
+
+
+def by_corpus(cases: list[Case]) -> dict[str, list[Case]]:
+    """The selected cases split by corpus, in CORPORA order, empty ones left out."""
+    split = {name: [c for c in cases if corpus_of(c) == name] for name in CORPORA}
+    return {name: sub for name, sub in split.items() if sub}
+
+
+def build_meta(
+    providers: list[str], cases: list[Case], external_split: str | None = None
+) -> dict[str, Any]:
+    """Run metadata, counted from the cases that actually ran.
+
+    Returns ``timestamp``, ``providers``, ``pricing``, and ``corpora``: per
+    corpus present in ``cases``, ``n_total``/``n_attacks``/``n_benign``/
+    ``n_categories``, and for ``external`` also the dataset, pinned revision,
+    license, and ``split`` (the ``external_split`` argument).
+    """
+    corpora: dict[str, dict[str, Any]] = {
+        name: _corpus_counts(sub) for name, sub in by_corpus(cases).items()
+    }
+    if "external" in corpora:
+        corpora["external"].update(
+            dataset=external_corpus.DATASET,
+            revision=external_corpus.REVISION,
+            license=external_corpus.LICENSE,
+            split=external_split,
+        )
     return {
         "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
-        "n_total": len(CORPUS),
-        "n_attacks": len(attacks),
-        "n_benign": len(benign),
-        "n_categories": len({c.category for c in CORPUS}),
+        "corpora": corpora,
         "providers": providers,
         "pricing": PRICING,
     }
@@ -553,10 +684,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "Default: all with credentials.",
     )
     p.add_argument(
+        "--corpus",
+        choices=("internal", "external", "both"),
+        default="internal",
+        help="internal: the hand-authored L3 corpus. external: the third-party "
+        "jailbreak set (downloaded on first use). both: each, reported separately.",
+    )
+    p.add_argument(
+        "--external-split",
+        choices=external_corpus.SPLITS,
+        default="test",
+        help="Split of the external set: test (262), train (1,044) or all (1,306).",
+    )
+    p.add_argument(
         "--categories",
         help="Comma-separated category filter (e.g. detector_meta,exfil_action).",
     )
-    p.add_argument("--limit", type=int, help="Run only the first N cases (smoke test).")
+    p.add_argument(
+        "--limit", type=int, help="Run only the first N cases of each corpus (smoke test)."
+    )
     p.add_argument("--concurrency", type=int, default=4, help="Max concurrent calls per provider.")
     p.add_argument("--delay", type=float, default=0.0, help="Seconds to sleep after each call.")
     p.add_argument(
@@ -579,36 +725,55 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--dry-run",
         action="store_true",
-        help="List providers and cases that would run, without calling any API.",
+        help="List providers, cases and projected cost, without calling any API.",
     )
     return p.parse_args(argv)
 
 
 def select_cases(args: argparse.Namespace) -> list[Case]:
-    cases = list(CORPUS)
-    if args.categories:
-        wanted = {c.strip() for c in args.categories.split(",")}
-        cases = [c for c in cases if c.category in wanted]
-    if args.limit:
-        cases = cases[: args.limit]
-    return cases
+    """Each chosen corpus, category-filtered, cut to ``--limit`` on its own.
+
+    Internal before external.
+    """
+    corpora: list[list[Case]] = []
+    if args.corpus in ("internal", "both"):
+        corpora.append(list(CORPUS))
+    if args.corpus in ("external", "both"):
+        corpora.append(external_corpus.load(args.external_split))
+    wanted = {c.strip() for c in args.categories.split(",")} if args.categories else None
+    selected: list[Case] = []
+    for corpus in corpora:
+        kept = [c for c in corpus if wanted is None or c.category in wanted]
+        selected += kept[: args.limit] if args.limit else kept
+    return selected
+
+
+def _dry_run(cases: list[Case], providers: list[str], l2_only: bool) -> None:
+    """Print the target, per-corpus counts, projected cost unless ``l2_only``, and each case."""
+    target = "L2 only" if l2_only else (providers or "(none available)")
+    print(f"Would run {len(cases)} cases against: {target}")
+    for name, sub in by_corpus(cases).items():
+        counts = _corpus_counts(sub)
+        print(f"  {name}: {counts['n_attacks']} attacks + {counts['n_benign']} benign")
+    for provider in [] if l2_only else providers:
+        print(f"  projected {provider}: ~${projected_cost(provider, cases):.2f} (estimate)")
+    for c in cases:
+        kind = "ATTACK" if c.expect_injection else "benign"
+        print(f"  {kind:6} {c.category:26} {c.id}")
 
 
 async def main_async(args: argparse.Namespace) -> int:
     requested = [p.strip() for p in args.providers.split(",")] if args.providers else None
     providers = [] if args.l2_only else available_providers(requested)
-    cases = select_cases(args)
+    # The external corpus may download on first use; keep that off the loop.
+    cases = await asyncio.to_thread(select_cases, args)
 
     if not cases:
         print("No cases selected.", file=sys.stderr)
         return 2
 
     if args.dry_run:
-        target = "L2 only" if args.l2_only else (providers or "(none available)")
-        print(f"Would run {len(cases)} cases against: {target}")
-        for c in cases:
-            kind = "ATTACK" if c.expect_injection else "benign"
-            print(f"  {kind:6} {c.category:26} {c.id}")
+        _dry_run(cases, providers, args.l2_only)
         return 0
 
     if not providers and not args.l2_only:
@@ -630,7 +795,8 @@ async def main_async(args: argparse.Namespace) -> int:
             res.l2_malicious_score = scores.get(res.id)
         reports.append(report)
 
-    write_outputs(Path(args.out), build_meta(providers), reports, cases, scores)
+    meta = build_meta(providers, cases, args.external_split)
+    write_outputs(Path(args.out), meta, reports, cases, scores)
     return 0
 
 
@@ -643,39 +809,38 @@ def write_outputs(
 ) -> None:
     """Write ``benchmark-<ts>.json`` and ``.md`` to ``out_dir`` and echo the report.
 
-    ``reports`` is empty under ``--l2-only``; the markdown is then the sweep
-    alone. ``scores`` maps case id to its L2 score, None where unscored.
+    Everything is reported per corpus: a detection rate blended across a
+    semantic L3 corpus and a direct-jailbreak set would mean nothing.
+    ``reports`` is empty under ``--l2-only``; each corpus's markdown is then
+    its sweep alone. ``scores`` maps case id to its L2 score, None where
+    unscored.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = meta["timestamp"].replace(":", "").replace("-", "")
     json_path = out_dir / f"benchmark-{stamp}.json"
     md_path = out_dir / f"benchmark-{stamp}.md"
+    corpora = by_corpus(cases)
 
     payload = {
         "meta": meta,
-        "l2": l2_payload(cases, scores),
+        "l2": {name: l2_payload(sub, scores) for name, sub in corpora.items()},
         "providers": [
             {
                 "provider": r.provider,
                 "model": r.model,
-                "detection_rate": r.detection_rate,
-                "fp_rate": r.fp_rate,
-                "risk_calibration": r.risk_calibration,
-                "median_latency_ms": r.median_latency_ms,
-                "p95_latency_ms": r.p95_latency_ms,
-                "cost_per_1k_calls_usd": r.cost_per_1k_calls_usd,
-                "total_cost_usd": r.total_cost_usd,
-                "errors": r.errors,
-                "detection_by_category": r.detection_by_category(),
-                "fp_by_category": r.fp_by_category(),
+                "corpora": {name: r.subset(name).aggregates() for name in corpora},
                 "cases": [asdict(c) for c in r.results],
             }
             for r in reports
         ],
     }
     json_path.write_text(json.dumps(payload, indent=2))
-    sections = [render_markdown(reports, meta)] if reports else []
-    md = "\n".join([*sections, render_l2_markdown(cases, scores)])
+    sections: list[str] = []
+    for name, sub in corpora.items():
+        if reports:
+            sections.append(render_markdown([r.subset(name) for r in reports], meta, sub, name))
+        sections.append(render_l2_markdown(sub, scores, name))
+    md = "\n".join(sections)
     md_path.write_text(md)
 
     print("\n" + md)

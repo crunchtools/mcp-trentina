@@ -132,9 +132,10 @@ def test_l2_only_run_writes_scores_and_sweep_without_providers(tmp_path: Path) -
     (json_path,) = tmp_path.glob("*.json")
     payload = json.loads(json_path.read_text())
     assert payload["providers"] == []
-    assert len(payload["l2"]["scores"]) == 6
-    assert all(s is not None for s in payload["l2"]["scores"].values())
-    assert len(payload["l2"]["sweep"]) == len(l2_sweep.DEFAULT_GRID)
+    l2 = payload["l2"]["internal"]
+    assert len(l2["scores"]) == 6
+    assert all(s is not None for s in l2["scores"].values())
+    assert len(l2["sweep"]) == len(l2_sweep.DEFAULT_GRID)
     (md_path,) = tmp_path.glob("*.md")
     assert "## L2 threshold sweep" in md_path.read_text()
 
@@ -145,8 +146,8 @@ def test_missing_model_yields_none_scores(tmp_path: Path) -> None:
     assert rc == 0
     (json_path,) = tmp_path.glob("*.json")
     payload = json.loads(json_path.read_text())
-    assert set(payload["l2"]["scores"].values()) == {None}
-    assert payload["l2"]["best_threshold"] is None
+    assert set(payload["l2"]["internal"]["scores"].values()) == {None}
+    assert payload["l2"]["internal"]["best_threshold"] is None
 
 
 async def test_score_l2_takes_the_stronger_of_original_and_normalized() -> None:

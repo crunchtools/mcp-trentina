@@ -16,6 +16,16 @@ under that name.
   `l2_threshold` offline over the stored scores; `--l2-only` runs just that,
   with no provider (#86). Against the current corpus the scores are bimodal,
   so any threshold from 0.10 to 0.90 flags the same cases.
+- `--corpus external|both` benchmarks against `jackhhao/jailbreak-classification`,
+  a third-party labeled set pinned by revision and SHA-256 and downloaded on
+  first use (#85). Each corpus is reported apart, never blended; risk
+  calibration is n/a where the data has no severity label; `--dry-run`
+  projects the cost.
+
+### Fixed
+
+- The benchmark report counted the whole corpus in its header even under
+  `--limit` or `--categories`; it now counts the cases that ran.
 
 ## [0.46.2] - 2026-09-28
 
