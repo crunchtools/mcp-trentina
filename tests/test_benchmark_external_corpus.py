@@ -400,3 +400,9 @@ def test_a_symlinked_cache_is_replaced_not_followed(tmp_path: Path) -> None:
     assert outside.read_bytes() == b"keep me"
     assert not link.is_symlink()
     assert link.read_bytes() == CSV
+
+
+def test_risk_calibration_counts_only_labeled_attacks() -> None:
+    labeled = _result("i", "detector_meta", attack=True, detected=True, min_risk="high")
+    unlabeled = _result("e", external_corpus.CATEGORY_ATTACK, attack=True, detected=True)
+    assert bench.ProviderReport("p", "m", [labeled, unlabeled]).risk_calibration == 1.0
