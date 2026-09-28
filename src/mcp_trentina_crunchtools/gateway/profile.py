@@ -775,7 +775,8 @@ class DefenseConfig(BaseModel):
         le=1.0,
         description=(
             "L2 (Prompt Guard) score at or above which the content is "
-            "flagged, in addition to the model's own MALICIOUS label"
+            "flagged, in addition to the model's own MALICIOUS label. "
+            "Above CLASSIFIER_THRESHOLD (0.5) it changes nothing"
         ),
     )
     audit: bool = Field(default=True, description="Write detection rows to SQLite")

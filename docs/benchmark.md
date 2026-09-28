@@ -143,15 +143,48 @@ just above the highest, which flags nothing; shown from 30 benign cases up).
 uv run python benchmarks/provider_benchmark.py --l2-only
 ```
 
-First run (2026-09-28, 39 attacks, 9 benign): the scores are bimodal.
-Nothing lands between 0.10 and 0.90, so every `l2_threshold` in that band
-flags the same 8 attacks (21%) and the same 1 benign case
-(`trap-quoted-attack-string`, 0.94). The attacks are written for L3, so a
-low detection rate here is the corpus working; 9 benign cases move the FP
-rate in 11-point steps, and below 30 the report withholds the
-best-separation cutoff. Picking a threshold waits on a larger labeled set
-(#85). Recompute a different cut from the stored scores with
+Recompute a different cut from the stored scores with
 `benchmarks/l2_sweep.py`; no rerun needed.
+
+### Result: `l2_threshold` stays 0.5 (2026-09-28)
+
+Internal corpus (39 attacks, 9 benign): the scores are bimodal. Nothing
+lands between 0.10 and 0.90, so every threshold in that band flags the same
+8 attacks and the same benign case (`trap-quoted-attack-string`, 0.94). The
+attacks are written for L3, so that is the corpus working, and 9 benign
+cases cannot choose a threshold.
+
+External corpus, all 1,306 rows (666 jailbreak, 640 benign),
+`--l2-only --corpus external --external-split all`:
+
+| Threshold | Detection | False positives |
+|-----------|-----------|-----------------|
+| 0.0254 (best separation) | 642/666 (96.4%) | 9/640 (1.4%) |
+| 0.20 | 633/666 (95.0%) | 3/640 (0.5%) |
+| **0.50** (default) | 624/666 (93.7%) | 1/640 (0.2%) |
+| 0.90 | 610/666 (91.6%) | 0/640 |
+
+The curve is flat from 0.20 to 0.60: no cliff sits near the default. The
+one false positive at 0.5 is roleplay asking a villain to "reveal your
+nefarious plans" (0.86); the ones added below 0.5 are more roleplay
+personas and a task prompt.
+
+0.5 stays, for three reasons. Production traffic is almost all benign tool
+output, not a balanced set, so a false positive costs far more there than
+here: a warning under `flag`, a refused call under `block`. L3 judges every
+call whatever L2 says, so an attack L2 misses is still read. And the
+cheaper cutoffs buy little: 0.20 gains 1.3 points of detection for three
+times the false positives, the best-separation point 2.7 points for nine
+times.
+
+Raising the threshold above 0.5 changes nothing. `defend()` flags on the
+model's own MALICIOUS label (`CLASSIFIER_THRESHOLD`, default 0.5) or on
+`l2_threshold`, whichever is lower, so the profile setting can only make L2
+more sensitive.
+
+Not measured: false positives on retrieved content (web pages, code,
+mail), which is what L2 actually reads in production. The benign half here
+is prompts.
 
 ## Continuous detection gate (CI)
 

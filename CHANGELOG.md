@@ -22,6 +22,13 @@ under that name.
   calibration is n/a where the data has no severity label; `--dry-run`
   projects the cost.
 
+### Changed
+
+- `l2_threshold` stays 0.5, now on evidence (#86): against 1,306 external
+  cases it flags 93.7% of jailbreaks and 1 of 640 benign prompts, and the
+  curve is flat from 0.2 to 0.6. The docs now say what was always true:
+  above `CLASSIFIER_THRESHOLD` (0.5) the setting has no effect.
+
 ### Fixed
 
 - The benchmark report counted the whole corpus in its header even under
