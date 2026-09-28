@@ -10,6 +10,13 @@ under that name.
 
 ## [Unreleased]
 
+### Added
+
+- The provider benchmark scores every case through L1 and L2 and sweeps
+  `l2_threshold` offline over the stored scores; `--l2-only` runs just that,
+  with no provider (#86). Against the current corpus the scores are bimodal,
+  so any threshold from 0.10 to 0.90 flags the same cases.
+
 ## [0.46.2] - 2026-09-28
 
 ### Fixed
