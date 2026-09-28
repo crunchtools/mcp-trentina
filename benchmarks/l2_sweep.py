@@ -95,7 +95,10 @@ def best(scored: list[tuple[float, bool]]) -> SweepPoint | None:
 def render_markdown(
     scored: list[tuple[float, bool]], current: float, unscored: int = 0, corpus: str = ""
 ) -> str:
-    """The report section: the grid, the current setting, and the best cutoff."""
+    """The report section: the grid, the current setting, and the best cutoff.
+
+    ``corpus`` names the corpus in the heading; empty keeps the plain one.
+    """
     n_attacks = sum(1 for _, a in scored if a)
     n_benign = len(scored) - n_attacks
     out = [

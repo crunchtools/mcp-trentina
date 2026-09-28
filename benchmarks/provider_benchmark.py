@@ -311,7 +311,10 @@ def l2_payload(cases: list[Case], scores: dict[str, float | None]) -> dict[str, 
 def render_l2_markdown(
     cases: list[Case], scores: dict[str, float | None], corpus: str = "internal"
 ) -> str:
-    """The sweep section of the report; unscored cases are counted, not swept."""
+    """The sweep section for one corpus, named in its heading.
+
+    Unscored cases are counted, not swept.
+    """
     pairs, unscored = _scored_pairs(cases, scores)
     return l2_sweep.render_markdown(pairs, L2_DEFAULT_THRESHOLD, unscored, corpus=corpus)
 

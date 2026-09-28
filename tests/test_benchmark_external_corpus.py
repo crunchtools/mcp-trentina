@@ -316,3 +316,16 @@ def test_l2_only_dry_run_projects_no_provider_cost(capsys: pytest.CaptureFixture
     with patch.object(bench, "available_providers", return_value=["gemini"]):
         assert bench.main(["--dry-run", "--l2-only", "--limit", "2"]) == 0
     assert "projected" not in capsys.readouterr().out
+
+
+def test_report_header_counts_the_cases_that_ran() -> None:
+    cases = list(CORPUS[:3])
+    report = bench.ProviderReport(
+        "p",
+        "m",
+        [_result(c.id, c.category, attack=c.expect_injection, detected=True) for c in cases],
+    )
+    meta = bench.build_meta(["p"], cases)
+    md = bench.render_markdown([report], meta, cases, "internal")
+    attacks = sum(c.expect_injection for c in cases)
+    assert f"- Corpus: {attacks} attacks + {3 - attacks} benign = 3 cases" in md
