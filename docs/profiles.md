@@ -278,7 +278,7 @@ Each profile configures its defense **policy** — never the layers' existence. 
 |---------|------|---------|-------------|
 | `enforcement` | string | `flag` | The default mode — what a flagged response becomes when the call does not choose: `flag` (delivered intact + warning) or `block` (refused). Cannot be `redact` |
 | `modes` | list | `[enforcement]` | The modes the agent may choose per call — see [Content modes](#content-modes) |
-| `l2_threshold` | float | `0.5` | L2 score at/above which content is flagged, in addition to the model's own MALICIOUS label. Lower is more sensitive: more content is flagged, whatever the mode then does with a flag. Below 0.5 it flags content the classifier itself labels BENIGN, so lower it knowingly. |
+| `l2_threshold` | float | `0.5` | L2 score at/above which content is flagged, in addition to the model's own MALICIOUS label. Lower is more sensitive: more content is flagged, whatever the mode then does with a flag. Below 0.5 it flags content the classifier itself labels BENIGN, so lower it knowingly. Above `CLASSIFIER_THRESHOLD` (0.5) it changes nothing: the model's own label already flags there. 0.5 is measured, not a midpoint; see `docs/benchmark.md`. |
 | `audit` | bool | `true` | Write detection rows to SQLite |
 | `provider` | string | `null` | LLM provider override (`gemini`, `openai`, `anthropic`, `ollama`, `openrouter`) |
 
