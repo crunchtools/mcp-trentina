@@ -248,7 +248,7 @@ async def score_l2(cases: list[Case]) -> dict[str, float | None]:
         except Exception as exc:
             print(f"warning: L2 failed on {case.id}: {type(exc).__name__}: {exc}", file=sys.stderr)
             return case.id, None
-        return case.id, None if result is None else round(result.score, 6)
+        return case.id, None if result is None else result.score
 
     return dict(await asyncio.gather(*(_one(c) for c in cases)))
 
