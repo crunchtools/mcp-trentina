@@ -41,7 +41,10 @@ SPLIT_SHA256: dict[str, str] = {
 }
 """The balanced splits the dataset card declares (262 and 1,044 rows)."""
 
-SPLITS = (*SPLIT_SHA256, "all")
+ALL_ORDER = ("test", "train")
+"""What ``all`` expands to, in this order: case ids stay stable across runs."""
+
+SPLITS = (*ALL_ORDER, "all")
 
 CATEGORY_ATTACK = "external_jailbreak"
 CATEGORY_BENIGN = "external_benign"
@@ -145,5 +148,5 @@ def load(
     """
     if split not in SPLITS:
         raise ValueError(f"unknown split {split!r}; expected one of {SPLITS}")
-    names = list(SPLIT_SHA256) if split == "all" else [split]
+    names = list(ALL_ORDER) if split == "all" else [split]
     return [c for name in names for c in _cases(name, _split_bytes(name, cache_dir, fetch))]

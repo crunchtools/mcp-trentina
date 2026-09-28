@@ -13,7 +13,7 @@ import pytest
 
 from benchmarks import external_corpus
 from benchmarks import provider_benchmark as bench
-from tests.adversarial_corpus import CORPUS
+from tests.adversarial_corpus import CORPUS, Case
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -285,3 +285,34 @@ def test_l2_only_both_writes_one_sweep_per_corpus_with_its_own_scores(tmp_path: 
     assert "## L2 threshold sweep: internal corpus" in md
     assert "## L2 threshold sweep: external corpus" in md
     assert "Q-Agent provider benchmark" not in md
+
+
+def test_external_only_loads_the_requested_split() -> None:
+    requested: list[str] = []
+
+    def load(split: str) -> list[Case]:
+        requested.append(split)
+        return external_corpus._cases(split, CSV)
+
+    with patch.object(external_corpus, "load", load):
+        cases = bench.select_cases(
+            bench.parse_args(["--corpus", "external", "--external-split", "train"])
+        )
+    assert requested == ["train"]
+    assert [c.id for c in cases] == ["ext-train-0000", "ext-train-0001", "ext-train-0002"]
+
+
+def test_categories_filter_before_each_corpus_limit() -> None:
+    with patch.object(external_corpus, "load", lambda split: external_corpus._cases(split, CSV)):
+        cases = bench.select_cases(
+            bench.parse_args(
+                ["--corpus", "both", "--categories", "external_benign", "--limit", "1"]
+            )
+        )
+    assert [c.id for c in cases] == ["ext-test-0000"]
+
+
+def test_l2_only_dry_run_projects_no_provider_cost(capsys: pytest.CaptureFixture[str]) -> None:
+    with patch.object(bench, "available_providers", return_value=["gemini"]):
+        assert bench.main(["--dry-run", "--l2-only", "--limit", "2"]) == 0
+    assert "projected" not in capsys.readouterr().out

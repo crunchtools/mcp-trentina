@@ -320,6 +320,7 @@ CORPORA = ("internal", "external")
 
 
 def corpus_of(case: Case | CaseResult) -> str:
+    """``external`` for a category under the external prefix, else ``internal``."""
     return "external" if case.category.startswith(external_corpus.CATEGORY_PREFIX) else "internal"
 
 
