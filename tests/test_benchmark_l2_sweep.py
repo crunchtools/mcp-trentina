@@ -89,6 +89,12 @@ def test_markdown_marks_current_and_warns_on_small_benign_set() -> None:
     assert "Best separation" not in md
 
 
+def test_markdown_without_benign_calls_fp_undefined() -> None:
+    md = l2_sweep.render_markdown([(0.9, True), (0.2, True)], 0.5)
+    assert "FP rate is undefined" in md
+    assert "Best separation" not in md
+
+
 def test_markdown_names_best_cutoff_on_enough_benign() -> None:
     scored = [*SCORED, *[(0.05, False)] * l2_sweep.MIN_BENIGN_FOR_FP]
     md = l2_sweep.render_markdown(scored, 0.5)

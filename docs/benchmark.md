@@ -100,12 +100,16 @@ zero marginal cost.
 
 `l2_threshold` (default 0.5) is a cutoff applied to Prompt Guard 2's
 continuous score after inference, so one scoring pass answers it for every
-threshold. Every run scores each case once through L1 and L2 (`defense._stage_one`,
-the recipe `defend()` uses, so the score is the one production thresholds),
-stores it as `l2_malicious_score` per case and under `l2.scores` in the JSON,
-and appends a sweep table: detection, FP rate and precision at 0.05 to 0.95,
-the current default in bold, and the cutoff with the best separation
-(max detection minus FP rate, over the observed scores; shown from 30 benign cases up).
+threshold. Every run passes each case once through `defense._stage_one`, the
+recipe `defend()` uses: L2 scores the original and, when L1 normalized
+anything, L1's copy too, keeping the stronger score, which is the one
+production thresholds.
+
+The score is stored as `l2_malicious_score` per case and under `l2.scores` in
+the JSON. The report gains a sweep table: detection, FP rate and precision at
+0.05 to 0.95 with the current default in bold, and the cutoff with the best
+separation (max detection minus FP rate, over the observed scores plus one
+just above the highest, which flags nothing; shown from 30 benign cases up).
 
 ```bash
 # L2 only: no provider, no tokens. Needs the model at CLASSIFIER_MODEL_PATH.
