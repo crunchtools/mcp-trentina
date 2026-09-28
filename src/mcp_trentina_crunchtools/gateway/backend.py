@@ -18,9 +18,9 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.shared._httpx_utils import create_mcp_http_client
 from mcp.shared.exceptions import MCPError
 from mcp_types import INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND
 
@@ -53,6 +53,13 @@ async def _connect_streamable_http(
     same API -- but it is a type error, and relying on two HTTP stacks
     staying API-identical is not a bet worth carrying.
 
+    The client comes from the SDK's ``create_mcp_http_client`` so a backend
+    with headers gets the same timeouts (30s connect, 300s read) as one
+    without. A bare ``httpx2.AsyncClient`` inherits httpx's 5-second default,
+    which cut every authenticated call off at ~5s regardless of
+    ``timeout_seconds`` -- that deadline is the caller's ``asyncio.wait_for``
+    and cannot lengthen an HTTP timeout underneath it.
+
     Yields ``(read, write)``. The SDK has shipped the stream bundle as both a
     2-tuple and a 3-tuple (trailing session-id callback); that trailing element
     is unused here, so take the first two either way rather than unpacking a
@@ -64,7 +71,7 @@ async def _connect_streamable_http(
         return
 
     async with (
-        httpx2.AsyncClient(headers=headers) as http_client,
+        create_mcp_http_client(headers=headers) as http_client,
         streamable_http_client(url, http_client=http_client) as streams,
     ):
         yield streams[0], streams[1]

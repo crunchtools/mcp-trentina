@@ -10,6 +10,16 @@ under that name.
 
 ## [Unreleased]
 
+## [0.46.2] - 2026-09-28
+
+### Fixed
+
+- A backend with `headers` (an `Authorization` header, say) no longer times
+  out at ~5 seconds regardless of `timeout_seconds`. Its HTTP client was a
+  bare `httpx2.AsyncClient` carrying httpx's 5-second default; it now comes
+  from the SDK's `create_mcp_http_client`, the same 30s-connect/300s-read
+  client a header-less backend already got. Reported against 0.19.0.
+
 ## [0.46.1] - 2026-09-27
 
 ### Added

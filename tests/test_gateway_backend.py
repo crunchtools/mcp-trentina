@@ -8,13 +8,16 @@ timeout wrapping, caching, and success/failure recording.
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from mcp.shared._httpx_utils import MCP_DEFAULT_SSE_READ_TIMEOUT, MCP_DEFAULT_TIMEOUT
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from mcp_trentina_crunchtools.gateway.backend import (
+    _connect_streamable_http,
     _tool_list_cache,
     call_backend_tool,
     list_backend_tools,
@@ -461,3 +464,35 @@ def test_a_rejection_is_found_in_a_nested_group_and_through_a_cause() -> None:
 
     assert _rejection(nested) == "invalid arguments"
     assert _rejection(ExceptionGroup("tg", [MCPError(-32603, "x")])) is None
+
+
+@pytest.mark.asyncio
+class TestHeaderedBackendHttpTimeouts:
+    """A backend with headers must get the SDK's HTTP timeouts, not httpx's 5s.
+
+    The headers branch built a bare ``httpx2.AsyncClient``, so every
+    authenticated call died at ~5s whatever ``timeout_seconds`` said -- the
+    outer ``asyncio.wait_for`` cannot lengthen a timeout beneath it.
+    """
+
+    async def test_headered_client_uses_mcp_default_timeouts(self) -> None:
+        seen: dict[str, Any] = {}
+
+        @asynccontextmanager
+        async def fake_client(_url: str, http_client: Any = None) -> Any:
+            seen["client"] = http_client
+            yield (None, None)
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend.streamable_http_client",
+            fake_client,
+        ):
+            async with _connect_streamable_http(
+                "http://mcp-rotv:8000/mcp", {"Authorization": "Bearer x"}
+            ):
+                pass
+
+        client = seen["client"]
+        assert client.headers["Authorization"] == "Bearer x"
+        assert client.timeout.read == MCP_DEFAULT_SSE_READ_TIMEOUT
+        assert client.timeout.connect == MCP_DEFAULT_TIMEOUT
