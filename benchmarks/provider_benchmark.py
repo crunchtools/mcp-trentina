@@ -648,7 +648,13 @@ def by_corpus(cases: list[Case]) -> dict[str, list[Case]]:
 def build_meta(
     providers: list[str], cases: list[Case], external_split: str | None = None
 ) -> dict[str, Any]:
-    """Run metadata, counted from the cases that actually ran."""
+    """Run metadata, counted from the cases that actually ran.
+
+    Returns ``timestamp``, ``providers``, ``pricing``, and ``corpora``: per
+    corpus present in ``cases``, ``n_total``/``n_attacks``/``n_benign``/
+    ``n_categories``, and for ``external`` also the dataset, pinned revision,
+    license and ``external_split``.
+    """
     corpora: dict[str, dict[str, Any]] = {
         name: _corpus_counts(sub) for name, sub in by_corpus(cases).items()
     }

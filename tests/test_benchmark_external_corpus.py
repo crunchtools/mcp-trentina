@@ -329,3 +329,23 @@ def test_report_header_counts_the_cases_that_ran() -> None:
     md = bench.render_markdown([report], meta, cases, "internal")
     attacks = sum(c.expect_injection for c in cases)
     assert f"- Corpus: {attacks} attacks + {3 - attacks} benign = 3 cases" in md
+
+
+def test_download_follows_the_resolve_redirect() -> None:
+    target = "https://cdn.example/jailbreak.csv"
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if str(request.url) == target:
+            return httpx.Response(200, content=CSV)
+        return httpx.Response(302, headers={"Location": target})
+
+    assert external_corpus._download("test", httpx.MockTransport(handler)) == CSV
+    assert [str(r.url) for r in seen] == [external_corpus.url("test"), target]
+
+
+def test_empty_selection_stops_before_writing(tmp_path: Path) -> None:
+    rc = bench.main(["--categories", "no_such_category", "--l2-only", "--out", str(tmp_path)])
+    assert rc == 2
+    assert not any(tmp_path.iterdir())
