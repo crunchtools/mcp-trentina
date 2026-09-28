@@ -349,3 +349,15 @@ def test_empty_selection_stops_before_writing(tmp_path: Path) -> None:
     rc = bench.main(["--categories", "no_such_category", "--l2-only", "--out", str(tmp_path)])
     assert rc == 2
     assert not any(tmp_path.iterdir())
+
+
+def test_dry_run_helper_skips_cost_under_l2_only(capsys: pytest.CaptureFixture[str]) -> None:
+    bench._dry_run(list(CORPUS[:2]), ["gemini"], l2_only=True)
+    assert "projected" not in capsys.readouterr().out
+
+
+def test_risk_calibration_is_none_when_no_labeled_attack_was_caught() -> None:
+    missed = _result("i", "detector_meta", attack=True, detected=False, min_risk="high")
+    report = bench.ProviderReport("p", "m", [missed])
+    assert report.risk_calibration is None
+    assert "| n/a |" in "\n".join(bench._summary([report]))

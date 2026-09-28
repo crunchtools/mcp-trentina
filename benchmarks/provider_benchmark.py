@@ -653,7 +653,7 @@ def build_meta(
     Returns ``timestamp``, ``providers``, ``pricing``, and ``corpora``: per
     corpus present in ``cases``, ``n_total``/``n_attacks``/``n_benign``/
     ``n_categories``, and for ``external`` also the dataset, pinned revision,
-    license and ``external_split``.
+    license, and ``split`` (the ``external_split`` argument).
     """
     corpora: dict[str, dict[str, Any]] = {
         name: _corpus_counts(sub) for name, sub in by_corpus(cases).items()
@@ -751,7 +751,7 @@ def _dry_run(cases: list[Case], providers: list[str], l2_only: bool) -> None:
     for name, sub in by_corpus(cases).items():
         counts = _corpus_counts(sub)
         print(f"  {name}: {counts['n_attacks']} attacks + {counts['n_benign']} benign")
-    for provider in providers:
+    for provider in [] if l2_only else providers:
         print(f"  projected {provider}: ~${projected_cost(provider, cases):.2f} (estimate)")
     for c in cases:
         kind = "ATTACK" if c.expect_injection else "benign"
