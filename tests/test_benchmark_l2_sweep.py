@@ -28,6 +28,18 @@ def test_point_counts_at_or_above_as_flagged() -> None:
     assert p.precision == pytest.approx(2 / 3)
 
 
+@pytest.mark.parametrize(
+    ("scored", "zeroed"),
+    [
+        ([(0.9, False)], "detection"),
+        ([(0.9, True)], "fp_rate"),
+        ([(0.1, True), (0.1, False)], "precision"),
+    ],
+)
+def test_empty_denominator_reads_zero(scored: list[tuple[float, bool]], zeroed: str) -> None:
+    assert getattr(l2_sweep.point(scored, 0.5), zeroed) == 0.0
+
+
 def test_sweep_is_monotone() -> None:
     points = l2_sweep.sweep(SCORED)
     assert [p.threshold for p in points] == list(l2_sweep.DEFAULT_GRID)
