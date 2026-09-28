@@ -58,7 +58,7 @@ jobs:
 
       - name: Upload RPM as artifact
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cockpit-trentina-rpm
           path: dist/noarch/cockpit-trentina-*.noarch.rpm
