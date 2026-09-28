@@ -16,7 +16,8 @@ can do. Every attack is written to slip past the cheaper layers:
   characters, base64 blobs, markdown-image exfil URLs, and literal delimiter
   tokens. The attacks carry none of those.
 - **Layer 2** (Prompt Guard 2) is trained on instruction-override *syntax*
-  ("ignore previous instructions", "you are now…"). The attacks use none of it.
+  ("ignore previous instructions", "you are now…"). Most attacks use none of
+  it; the structural ones do, and 8 of 39 score above 0.9 (see the sweep below).
 
 What's left is pure semantics — social pretext, action-framed exfiltration,
 second-order instructions, logic bombs, and attacks aimed at the detector
@@ -62,6 +63,7 @@ uv run python benchmarks/provider_benchmark.py --categories detector_meta --limi
 | `--delay S` | 0 | Sleep S seconds after each call (gentler on rate limits). |
 | `--retries N` | 0 | Retry transient failures (503/429/timeouts) up to N times with exponential backoff. Terminal errors (auth, schema) are not retried. Use when a cheap model's endpoint is capacity-throttling — e.g. `gemini-2.5-flash-lite` under load. |
 | `--out DIR` | `benchmarks/results` | Where JSON + markdown land. |
+| `--l2-only` | off | Score through L1+L2 and sweep `l2_threshold`; no provider calls. |
 | `--dry-run` | off | List providers and cases, call nothing. |
 
 ## Output
@@ -93,6 +95,32 @@ zero marginal cost.
   expected minimum severity (`min_risk` in the corpus). Catches the case where a
   model notices something is off but under-rates a critical attack as "low".
 - **Latency** — median and p95 wall-clock per call.
+
+## L2 threshold sweep (issue #86)
+
+`l2_threshold` (default 0.5) is a cutoff applied to Prompt Guard 2's
+continuous score after inference, so one scoring pass answers it for every
+threshold. Every run scores each case once through L1 and L2 (`defense._stage_one`,
+the recipe `defend()` uses, so the score is the one production thresholds),
+stores it as `l2_malicious_score` per case and under `l2.scores` in the JSON,
+and appends a sweep table: detection, FP rate and precision at 0.05 to 0.95,
+the current default in bold, and the cutoff with the best separation
+(max detection minus FP rate, over the observed scores; shown from 30 benign cases up).
+
+```bash
+# L2 only: no provider, no tokens. Needs the model at CLASSIFIER_MODEL_PATH.
+uv run python benchmarks/provider_benchmark.py --l2-only
+```
+
+First run (2026-09-28, 39 attacks, 9 benign): the scores are bimodal.
+Nothing lands between 0.10 and 0.90, so every `l2_threshold` in that band
+flags the same 8 attacks (21%) and the same 1 benign case
+(`trap-quoted-attack-string`, 0.94). The attacks are written for L3, so a
+low detection rate here is the corpus working; 9 benign cases move the FP
+rate in 11-point steps, and below 30 the report withholds the
+best-separation cutoff. Picking a threshold waits on a larger labeled set
+(#85). Recompute a different cut from the stored scores with
+`benchmarks/l2_sweep.py`; no rerun needed.
 
 ## Continuous detection gate (CI)
 

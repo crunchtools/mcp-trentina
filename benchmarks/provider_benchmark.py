@@ -21,6 +21,13 @@ Usage (see docs/benchmark.md for the full option list)
     uv run python benchmarks/provider_benchmark.py --dry-run
         List what would run without spending any tokens.
 
+    uv run python benchmarks/provider_benchmark.py --l2-only
+        Score the corpus through L1 and L2 only and sweep ``l2_threshold``
+        (issue #86). No provider, no tokens; needs the Prompt Guard 2 model.
+
+Every run also scores each case through L2 once (the score does not depend
+on the provider) and appends the threshold sweep to the report.
+
 Credentials are read from the same environment variables the server uses:
 GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY. Ollama is auto-detected by
 probing OLLAMA_BASE_URL (default http://localhost:11434).
@@ -39,6 +46,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -46,8 +54,12 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from benchmarks import l2_sweep
 from mcp_trentina_crunchtools.config import get_config
+from mcp_trentina_crunchtools.defense import _stage_one
+from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
+from mcp_trentina_crunchtools.quarantine.classifier import is_classifier_available
 from tests.adversarial_corpus import CORPUS, RISK_ORDER, Case
 
 TOKENS_PER_MILLION = 1_000_000
@@ -108,6 +120,7 @@ class CaseResult:
     cost_usd: float
     error: bool
     summary: str = ""
+    l2_malicious_score: float | None = None
 
     @property
     def correct(self) -> bool:
@@ -210,6 +223,55 @@ class ProviderReport:
         return (sum(r.cost_usd for r in scored) / len(scored)) * 1000
 
 
+L2_DEFAULT_THRESHOLD: float = DefenseConfig.model_fields["l2_threshold"].default
+
+
+async def score_l2(cases: list[Case]) -> dict[str, float | None]:
+    """Each case's L2 malicious score, exactly as ``defend()`` computes it.
+
+    ``_stage_one`` is the production recipe: L1 and L2 on the arrived bytes,
+    then L2 on L1's normalized copy when L1 changed anything, stronger score
+    wins. Scoring the raw payload alone would sweep a number the gateway
+    never thresholds. None for every case when the model is not loaded.
+    """
+    if not await asyncio.to_thread(is_classifier_available):
+        print("warning: Prompt Guard 2 not loaded; L2 scores omitted", file=sys.stderr)
+        return {c.id: None for c in cases}
+
+    async def _one(case: Case) -> tuple[str, float | None]:
+        _, result, _ = await _stage_one(
+            case.payload, "benchmark", None, scan=True, stop_on_partial=False
+        )
+        return case.id, None if result is None else round(result.score, 6)
+
+    return dict(await asyncio.gather(*(_one(c) for c in cases)))
+
+
+def _scored_pairs(
+    cases: list[Case], scores: dict[str, float | None]
+) -> tuple[list[tuple[float, bool]], int]:
+    """``(score, is_attack)`` pairs for the sweep, and how many had no score."""
+    pairs = [(s, c.expect_injection) for c in cases if (s := scores.get(c.id)) is not None]
+    return pairs, len(cases) - len(pairs)
+
+
+def l2_payload(cases: list[Case], scores: dict[str, float | None]) -> dict[str, Any]:
+    """The JSON block: raw scores plus the sweep, so a later cut needs no rerun."""
+    pairs, _ = _scored_pairs(cases, scores)
+    top = l2_sweep.best(pairs)
+    return {
+        "current_threshold": L2_DEFAULT_THRESHOLD,
+        "scores": scores,
+        "best_threshold": None if top is None else top.threshold,
+        "sweep": [asdict(p) for p in l2_sweep.sweep(pairs)],
+    }
+
+
+def render_l2_markdown(cases: list[Case], scores: dict[str, float | None]) -> str:
+    pairs, unscored = _scored_pairs(cases, scores)
+    return l2_sweep.render_markdown(pairs, L2_DEFAULT_THRESHOLD, unscored)
+
+
 def _cost(provider: str, input_tokens: int, output_tokens: int) -> float:
     in_price, out_price = PRICING.get(provider, (0.0, 0.0))
     return (input_tokens / TOKENS_PER_MILLION) * in_price + (
@@ -243,7 +305,7 @@ async def _run_case(provider: str, case: Case, delay: float, retries: int) -> Ca
     ``CaseResult`` rather than raised, so one bad call never aborts the run.
     """
     loop = asyncio.get_event_loop()
-    result: dict | None = None
+    result: dict[str, Any] | None = None
     summary = ""
     latency_ms = 0.0
     for attempt in range(retries + 1):
@@ -377,7 +439,7 @@ def _category_table(
     return "\n".join(lines)
 
 
-def render_markdown(reports: list[ProviderReport], meta: dict) -> str:
+def render_markdown(reports: list[ProviderReport], meta: dict[str, Any]) -> str:
     attack_cats = sorted({c.category for c in CORPUS if c.expect_injection})
     benign_cats = sorted({c.category for c in CORPUS if not c.expect_injection})
 
@@ -462,7 +524,7 @@ def render_markdown(reports: list[ProviderReport], meta: dict) -> str:
     return "\n".join(out)
 
 
-def build_meta(providers: list[str]) -> dict:
+def build_meta(providers: list[str]) -> dict[str, Any]:
     attacks = [c for c in CORPUS if c.expect_injection]
     benign = [c for c in CORPUS if not c.expect_injection]
     return {
@@ -503,6 +565,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Output directory for JSON + markdown.",
     )
     p.add_argument(
+        "--l2-only",
+        action="store_true",
+        help="Score the corpus through L1+L2 and sweep l2_threshold. No provider calls.",
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="List providers and cases that would run, without calling any API.",
@@ -522,7 +589,7 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
 
 async def main_async(args: argparse.Namespace) -> int:
     requested = [p.strip() for p in args.providers.split(",")] if args.providers else None
-    providers = available_providers(requested)
+    providers = [] if args.l2_only else available_providers(requested)
     cases = select_cases(args)
 
     if not cases:
@@ -530,37 +597,51 @@ async def main_async(args: argparse.Namespace) -> int:
         return 2
 
     if args.dry_run:
-        print(f"Would run {len(cases)} cases against: {providers or '(none available)'}")
+        target = "L2 only" if args.l2_only else (providers or "(none available)")
+        print(f"Would run {len(cases)} cases against: {target}")
         for c in cases:
             kind = "ATTACK" if c.expect_injection else "benign"
             print(f"  {kind:6} {c.category:26} {c.id}")
         return 0
 
-    if not providers:
+    if not providers and not args.l2_only:
         print(
             "No providers available. Set GEMINI_API_KEY / OPENAI_API_KEY / "
-            "ANTHROPIC_API_KEY, or start Ollama.",
+            "ANTHROPIC_API_KEY, or start Ollama. --l2-only needs none.",
             file=sys.stderr,
         )
         return 2
 
+    print(f"Scoring {len(cases)} cases through L2…", file=sys.stderr)
+    scores = await score_l2(cases)
+
     reports: list[ProviderReport] = []
     for provider in providers:
         print(f"Running {len(cases)} cases against {provider}…", file=sys.stderr)
-        reports.append(
-            await run_provider(provider, cases, args.concurrency, args.delay, args.retries)
-        )
+        report = await run_provider(provider, cases, args.concurrency, args.delay, args.retries)
+        for res in report.results:
+            res.l2_malicious_score = scores.get(res.id)
+        reports.append(report)
 
-    meta = build_meta(providers)
-    out_dir = Path(args.out)
+    write_outputs(Path(args.out), build_meta(providers), reports, cases, scores)
+    return 0
+
+
+def write_outputs(
+    out_dir: Path,
+    meta: dict[str, Any],
+    reports: list[ProviderReport],
+    cases: list[Case],
+    scores: dict[str, float | None],
+) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = meta["timestamp"].replace(":", "").replace("-", "")
-
     json_path = out_dir / f"benchmark-{stamp}.json"
     md_path = out_dir / f"benchmark-{stamp}.md"
 
     payload = {
         "meta": meta,
+        "l2": l2_payload(cases, scores),
         "providers": [
             {
                 "provider": r.provider,
@@ -581,13 +662,13 @@ async def main_async(args: argparse.Namespace) -> int:
         ],
     }
     json_path.write_text(json.dumps(payload, indent=2))
-    md = render_markdown(reports, meta)
+    sections = [render_markdown(reports, meta)] if reports else []
+    md = "\n".join([*sections, render_l2_markdown(cases, scores)])
     md_path.write_text(md)
 
     print("\n" + md)
     print(f"\nWrote {json_path}", file=sys.stderr)
     print(f"Wrote {md_path}", file=sys.stderr)
-    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
