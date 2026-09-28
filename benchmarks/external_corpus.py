@@ -21,6 +21,8 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import os
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -92,7 +94,8 @@ def _split_bytes(split: str, cache_dir: Path, fetch: Callable[[str], bytes]) -> 
     """
     expected = SPLIT_SHA256[split]
     cached = cache_dir / f"jailbreak-classification-{split}-{REVISION[:12]}.csv"
-    if cached.is_file() and cached.stat().st_size <= MAX_DOWNLOAD_BYTES:
+    usable = cached.is_file() and not cached.is_symlink()
+    if usable and cached.stat().st_size <= MAX_DOWNLOAD_BYTES:
         cached_csv = cached.read_bytes()
         if hashlib.sha256(cached_csv).hexdigest() == expected:
             return cached_csv
@@ -104,7 +107,12 @@ def _split_bytes(split: str, cache_dir: Path, fetch: Callable[[str], bytes]) -> 
             f"the pinned {expected}"
         )
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cached.write_bytes(fetched_csv)
+    # Written beside the cache and renamed over it: a symlink planted at the
+    # cache path is replaced, never followed.
+    fd, partial = tempfile.mkstemp(dir=cache_dir, suffix=".part")
+    with os.fdopen(fd, "wb") as out:
+        out.write(fetched_csv)
+    Path(partial).replace(cached)
     return fetched_csv
 
 

@@ -92,9 +92,10 @@ Read its results for what they are. It is **direct jailbreak** (user to
 model, DAN-style personas), not indirect injection in retrieved content,
 which is Trentina's threat model. It measures L2, which is trained on exactly
 this syntax, and over-triggering on benign roleplay ("Act as a yoga
-instructor…"), which looks like our `role_reassignment` attacks. It says
-little about L3's semantic gap; high L3 detection here is a sanity floor.
-The internal corpus stays the L3 measurement.
+instructor…"), which looks like our `role_reassignment` attacks. L3 still
+runs on it in a provider pass, and should catch nearly all of these loud
+attacks, but that proves only that it handles the easy case: the semantic
+gap is measured on the internal corpus alone.
 
 The two are never blended: `--corpus both` writes a separate report, sweep
 and JSON block (`providers[].corpora.<name>`, `l2.<name>`) per corpus. The

@@ -385,3 +385,18 @@ def test_an_oversized_cache_is_refetched_unread(
     )
     assert len(external_corpus.load("test", cache_dir=tmp_path, fetch=fetch)) == 3
     assert calls == ["test", "test"]
+
+
+@pytest.mark.usefixtures("pinned")
+def test_a_symlinked_cache_is_replaced_not_followed(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"keep me")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    link = cache_dir / f"jailbreak-classification-test-{external_corpus.REVISION[:12]}.csv"
+    link.symlink_to(outside)
+    _, fetch = _fetch_counting()
+    assert len(external_corpus.load("test", cache_dir=cache_dir, fetch=fetch)) == 3
+    assert outside.read_bytes() == b"keep me"
+    assert not link.is_symlink()
+    assert link.read_bytes() == CSV
