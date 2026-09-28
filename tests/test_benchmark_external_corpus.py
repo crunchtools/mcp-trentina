@@ -361,3 +361,26 @@ def test_risk_calibration_is_none_when_no_labeled_attack_was_caught() -> None:
     report = bench.ProviderReport("p", "m", [missed])
     assert report.risk_calibration is None
     assert "| n/a |" in "\n".join(bench._summary([report]))
+
+
+def test_notable_skips_a_case_every_provider_errored_on() -> None:
+    a = _result("gone", "c", attack=True, detected=False)
+    b = _result("gone", "c", attack=True, detected=False)
+    a.error = b.error = True
+    reports = [bench.ProviderReport("p1", "m", [a]), bench.ProviderReport("p2", "m", [b])]
+    assert "gone" not in "\n".join(bench._notable(reports))
+
+
+@pytest.mark.usefixtures("pinned")
+def test_an_oversized_cache_is_refetched_unread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls, fetch = _fetch_counting()
+    external_corpus.load("test", cache_dir=tmp_path, fetch=fetch)
+    monkeypatch.setattr(external_corpus, "MAX_DOWNLOAD_BYTES", len(CSV) - 1)
+    (cached,) = tmp_path.iterdir()
+    monkeypatch.setattr(
+        type(cached), "read_bytes", lambda _: pytest.fail("read an oversized cache")
+    )
+    assert len(external_corpus.load("test", cache_dir=tmp_path, fetch=fetch)) == 3
+    assert calls == ["test", "test"]

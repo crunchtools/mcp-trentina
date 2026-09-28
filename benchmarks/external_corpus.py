@@ -92,7 +92,7 @@ def _split_bytes(split: str, cache_dir: Path, fetch: Callable[[str], bytes]) -> 
     """
     expected = SPLIT_SHA256[split]
     cached = cache_dir / f"jailbreak-classification-{split}-{REVISION[:12]}.csv"
-    if cached.is_file():
+    if cached.is_file() and cached.stat().st_size <= MAX_DOWNLOAD_BYTES:
         cached_csv = cached.read_bytes()
         if hashlib.sha256(cached_csv).hexdigest() == expected:
             return cached_csv
@@ -143,8 +143,10 @@ def load(
     has no severity label, and the benchmark reports risk calibration as
     n/a rather than inventing one.
 
-    Raises ValueError for an unknown split, or when a fetched file does not
-    match its pinned SHA-256.
+    Raises ValueError for an unknown split, a download over
+    ``MAX_DOWNLOAD_BYTES``, or a fetched file that does not match its pinned
+    SHA-256; ``httpx.HTTPError`` when the download itself fails. A cached
+    file that is oversized or off-hash is fetched again.
     """
     if split not in SPLITS:
         raise ValueError(f"unknown split {split!r}; expected one of {SPLITS}")

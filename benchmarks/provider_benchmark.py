@@ -761,7 +761,8 @@ def _dry_run(cases: list[Case], providers: list[str], l2_only: bool) -> None:
 async def main_async(args: argparse.Namespace) -> int:
     requested = [p.strip() for p in args.providers.split(",")] if args.providers else None
     providers = [] if args.l2_only else available_providers(requested)
-    cases = select_cases(args)
+    # The external corpus may download on first use; keep that off the loop.
+    cases = await asyncio.to_thread(select_cases, args)
 
     if not cases:
         print("No cases selected.", file=sys.stderr)
