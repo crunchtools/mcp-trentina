@@ -21,7 +21,9 @@ under that name.
   each room, and on start leaves and forgets every joined room whose inviter
   is not allowed; a room joined before this change, with no record, stays only
   if everyone else in it is an allowed inviter. The gateway, which knows every
-  bridged profile's `public_user_id`, drops inbound events from another
+  bridged profile's `public_user_id` plus any agent listed in
+  `matrix.other_agent_user_ids` (for agents it does not bridge, validated at
+  load), drops inbound events from another
   bridged agent, refuses a room announced with one in it (the bridge then
   leaves it), and relays nothing into a room holding one or whose members the
   bridge never reported, even when an allowed inviter opened it. Drops are

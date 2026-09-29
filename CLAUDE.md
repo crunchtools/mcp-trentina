@@ -94,8 +94,9 @@ every joined room, #264), and one way in: `BRIDGE_DEVICE_ID` + `BRIDGE_ACCESS_TO
 `BRIDGE_OLD_ACCESS_TOKEN` (`logout-device`), `BRIDGE_RECOVERY_KEY`
 (`sign-device`). Secrets and `BRIDGE_ALLOWED_INVITERS` take `_FILE`. The
 gateway half of #264 (drop another bridged agent's events, relay into no room
-holding one or whose members were never reported) needs no setting: it reads
-every profile's `matrix_bridge.public_user_id`.
+holding one or whose members were never reported) reads every profile's
+`matrix_bridge.public_user_id`, plus `matrix.other_agent_user_ids` in
+`profiles.yaml` for agents it does not bridge (Ashigaru); bound at startup.
 
 ## onnxruntime telemetry
 

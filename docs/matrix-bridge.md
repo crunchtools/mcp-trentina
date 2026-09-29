@@ -106,11 +106,23 @@ audience is the only evidence left for those rooms; a stranger in the room is
 enough to leave it. An allowed inviter gets a left room back by inviting the
 bridge again, which records the inviter. Empty or unset, the list refuses
 every invite and leaves every room, and the bridge logs a warning saying so
-at startup.
+at startup. For a bridge that answers only Scott:
+`BRIDGE_ALLOWED_INVITERS=@fatherlinux:matrix.org`.
 
 **The gateway's rule: who may be on the other end.** Only the gateway knows
-every bridged agent: the `public_user_id` of every profile with a
-`matrix_bridge` block, enabled or not, compared without regard to case. The
+every agent: the `public_user_id` of every profile with a `matrix_bridge`
+block, enabled or not, plus any agent it does not bridge, listed at the top
+level of `profiles.yaml`:
+
+```yaml
+matrix:
+  other_agent_user_ids:
+    - "@ashigaru-crunchtools-bot:matrix.org"
+```
+
+Each entry must be a Matrix user ID or the file does not load; it binds at
+startup, like the rest of `matrix`. An ID listed here is treated exactly like
+another bridged profile's, and matching ignores case. The
 bridge sends a room's members with its announcement, at every start and again
 whenever they change, and the gateway records whether another agent is among
 them (`room_audience` in the mapping store). Then:

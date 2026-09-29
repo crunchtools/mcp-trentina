@@ -71,6 +71,8 @@ SCOTT = "@Scott_M:matrix.org"
 ROOM = "!ops:matrix.org"
 # Another profile's bridge identity (#264).
 OTHER_AGENT = "@agent2-bot:matrix.org"
+# An agent no profile bridges, named in matrix.other_agent_user_ids (#264).
+UNBRIDGED_AGENT = "@ashigaru-crunchtools-bot:matrix.org"
 
 
 def _verdict(*, flagged_by: Layer | None = None, l3: bool = True) -> DefenseVerdict:
@@ -221,7 +223,7 @@ def rig_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
             mapping=mapping,
             appservice=appservice,
             client=httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
-            other_agents=frozenset({REMOTE_AGENT, OTHER_AGENT}),
+            other_agents=frozenset({REMOTE_AGENT, OTHER_AGENT, UNBRIDGED_AGENT}),
         )
         return Rig(bridge, conduit, upstream, verdicts, judged)
 
@@ -1168,6 +1170,22 @@ class TestBridgedAgents:
 # ----------------------------------------------------------- end to end
 
 
+class TestUnbridgedAgents:
+    """``matrix.other_agent_user_ids`` reaches every bridge as one more agent."""
+
+    async def test_build_bridges_adds_them_to_the_bridged_ones(self, tmp_path: Path) -> None:
+        bridges = routes_mod.build_bridges(
+            {"agent1": _profile()}, tmp_path, frozenset({UNBRIDGED_AGENT})
+        )
+        try:
+            bridge = bridges["agent1"]
+            assert await bridge.inbound(_from(UNBRIDGED_AGENT.upper())) == "dropped"
+            assert await bridge.mapping.agent_present(ROOM) is True
+        finally:
+            for b in bridges.values():
+                await b.aclose()
+
+
 class TestBothBotsInOneRoom:
     """kagetora's bridge, restarted in the room it shares with takeda's.
 
@@ -1175,8 +1193,9 @@ class TestBothBotsInOneRoom:
     agent's bot is in it all the same, and only the gateway knows that bot.
     """
 
+    @pytest.mark.parametrize("agent", [OTHER_AGENT, UNBRIDGED_AGENT])
     async def test_it_is_left_at_startup_and_refused_for_relay(
-        self, tmp_path: Path, rig_factory: Any
+        self, tmp_path: Path, rig_factory: Any, agent: str
     ) -> None:
         # The gateway half, the real core, holding the room as 0.47.0 left
         # it: mapped, its members never reported.
@@ -1191,7 +1210,7 @@ class TestBothBotsInOneRoom:
         store.mkdir()
         (store / "inviters.json").write_text(json.dumps({ROOM: SCOTT}))
         nio = _FakeNio()
-        _set_members(nio, ROOM, SCOTT, OTHER_AGENT)
+        _set_members(nio, ROOM, SCOTT, agent)
         bridge = _started(store, nio, gateway)
 
         await bridge.process(_sync(), first=True)
