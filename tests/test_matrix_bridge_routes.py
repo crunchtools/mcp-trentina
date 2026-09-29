@@ -100,7 +100,7 @@ class TestIngress:
         )
         assert resp.status_code == 200
         [event] = stub.inbound_events
-        assert event["room"] == room
+        assert event["room"] == room | {"members": None}
 
     def test_the_bridge_token_hands_over_an_event(
         self, stub: StubBridge, client: TestClient
@@ -118,6 +118,7 @@ class TestIngress:
             "is_direct": False,
             "peer": "",
             "peer_displayname": "",
+            "members": None,
         }
 
     @pytest.mark.parametrize(

@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from mcp_trentina_crunchtools.channels import Channel, Kind
 from mcp_trentina_crunchtools.gateway.drivers import CHANNEL_KIND, build_preprocessors
 from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-from mcp_trentina_crunchtools.gateway.loader import load_profiles
+from mcp_trentina_crunchtools.gateway.loader import load_profiles, matrix_other_agents
 from mcp_trentina_crunchtools.gateway.profile import (
     MatrixBridgeConfig,
     MatrixBridgeLocalConfig,
@@ -225,10 +225,10 @@ class TestChannel:
             )
 
 
-def _write(tmp_path: Path, bridge_yaml: str) -> Path:
+def _write(tmp_path: Path, bridge_yaml: str, prefix: str = "") -> Path:
     path = tmp_path / "profiles.yaml"
     path.write_text(
-        "profiles:\n"
+        prefix + "profiles:\n"
         "  agent1:\n"
         "    auth:\n"
         "      bearer_token_env: TEST_BEARER\n"
@@ -290,6 +290,24 @@ class TestLoader:
         assert bridge.local.as_token is not None
         assert bridge.local.as_token.get_secret_value() == "tok-as-7f3a"
         assert "7f3a" not in bridge.model_dump_json(), "a resolved token must never serialize"
+
+    def test_other_agents_are_read_and_validated_at_load(self, tmp_path: Path) -> None:
+        ashigaru = "@ashigaru-crunchtools-bot:matrix.org"
+        good = f'matrix:\n  other_agent_user_ids: ["{ashigaru}"]\n'
+        cfg = load_profiles(_write(tmp_path, _BRIDGE_YAML, prefix=good))
+        assert matrix_other_agents(cfg.matrix) == {ashigaru}
+        bad = 'matrix:\n  other_agent_user_ids: ["ashigaru-no-at"]\n'
+        with pytest.raises(ProfileConfigError, match="1 entries") as err:
+            load_profiles(_write(tmp_path, _BRIDGE_YAML, prefix=bad))
+        assert "ashigaru-no-at" not in str(err.value)
+
+    @pytest.mark.parametrize("value", ["@a:matrix.org", {"a": 1}, [1]])
+    def test_other_agents_must_be_a_list_of_ids(self, value: Any) -> None:
+        with pytest.raises(ProfileConfigError, match="other_agent_user_ids"):
+            matrix_other_agents({"other_agent_user_ids": value})
+
+    def test_other_agents_default_to_none(self) -> None:
+        assert matrix_other_agents({}) == frozenset()
 
     def test_the_channel_lock_fires_at_load(self, tmp_path: Path) -> None:
         body = _BRIDGE_YAML + "      preprocess:\n        processors: [detect]\n"

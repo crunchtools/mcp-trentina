@@ -14,11 +14,19 @@ Echo suppression is structural. Only events whose sender is the agent's local
 user go outbound, so the stand-ins and the bot this module writes as never
 loop back; and the bridge process drops upstream events whose sender is its
 own account, which is where the agent's replies reappear.
+
+No agent-to-agent channel (#264). Every other bridged profile's public user
+is known here and nowhere else, so this is where the rule lives: an event from
+one is dropped, a room announced with one in it is refused (the bridge leaves
+it), and nothing is relayed into a room unless its members were reported and
+none of them is another agent. That holds for a room an allowed inviter
+opened too: the inviter rule is the bridge's, this one is the gateway's.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import time
@@ -26,9 +34,11 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from ...database import record_gateway_call
 from ...defense import defend_json
 from ...logsafe import redact_source
 from ...modes import gaps_of, refusal_reason
+from ...outcomes import Outcome
 from ...reserved import WARNING_KEY, strip_reserved, with_stripped
 from ...warning import build_warning
 from ..context import profile_context
@@ -47,6 +57,16 @@ _CARRIED = frozenset({"m.room.message", "m.reaction", "m.sticker"})
 _REDACTION = "m.room.redaction"
 # The bridge process announcing a room it is in (bridge/client.py).
 _ROOM_ANNOUNCE = "org.crunchtools.trentina.room"
+
+# The one answer the bridge acts on: leave this room (bridge/client.py).
+ROOM_REFUSED = "refused"
+# Why an event was not carried, by the agent rule (#264). A closed set: these
+# reach the log, the audit row and the agent's notice, and name nobody.
+AGENT_SENDER = "sender is another bridged agent"
+AGENT_IN_ROOM = "room shared with another bridged agent"
+MEMBERS_UNREPORTED = "room members not reported"
+# The audit row's backend for a bridge refusal; its tool is the direction.
+_AUDIT_BACKEND = "matrix_bridge"
 
 _BRIDGE_TIMEOUT = httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0)
 
@@ -98,6 +118,10 @@ class ProfileBridge:
         appservice: the write path into the profile's Conduit.
         client: an HTTP client for calling the bridge process, instead of a
             fresh one. ``aclose`` closes it, the appservice and the mapping.
+        other_agents: the upstream user IDs of every OTHER bridged profile
+            (``routes.bridged_agents``). Their events are dropped and no room
+            holding one is relayed into. This profile's own ID is ignored if
+            present, so one set can be handed to every bridge.
     """
 
     def __init__(
@@ -107,6 +131,7 @@ class ProfileBridge:
         mapping: BridgeMapping,
         appservice: AppService,
         client: httpx.AsyncClient | None = None,
+        other_agents: frozenset[str] = frozenset(),
     ) -> None:
         cfg = profile.matrix_bridge
         if cfg is None or cfg.bridge_token is None:
@@ -119,6 +144,11 @@ class ProfileBridge:
         self._bridge_token = cfg.bridge_token.get_secret_value()
         self._inbound_lock = asyncio.Lock()
         self._outbound_lock = asyncio.Lock()
+        # Case-folded: a Matrix ID that differs only in case is still that
+        # agent as far as this rule goes, and matching more is the safe side.
+        self._other_agents = frozenset(a.casefold() for a in other_agents) - {
+            cfg.public_user_id.casefold()
+        }
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -150,6 +180,45 @@ class ProfileBridge:
         )
         users[agent] = remote_agent
         return IdMap(events=await self.mapping.remote_events(event_ids), users=users)
+
+    # ---------------------------------------------------------- agent rule
+
+    def _is_other_agent(self, user_id: str) -> bool:
+        return user_id.casefold() in self._other_agents
+
+    def _refuse(self, direction: str, reason: str, event_id: str) -> None:
+        """Log and audit one refusal by the agent rule. Names nobody: the
+        reason is from a closed set and the event ID is redacted (#262)."""
+        logger.warning(
+            "matrix_bridge: dropped %s %s for %s: %s",
+            direction,
+            redact_source(event_id),
+            self.profile.name,
+            reason,
+        )
+        # As router._audit does: a failed audit write never fails the event,
+        # and the refusal it would have recorded stands regardless.
+        with contextlib.suppress(Exception):
+            record_gateway_call(
+                self.profile.name,
+                _AUDIT_BACKEND,
+                direction,
+                Outcome.DENIED_GUARD.value,
+                0,
+                reason,
+            )
+
+    async def _relay_refusal(self, remote_room: str) -> str | None:
+        """Why nothing may be relayed into ``remote_room``, or None.
+
+        Fails closed: a room whose members the bridge never reported is
+        refused like one known to hold another agent. The bridge reports
+        every room it is in on each start, so this lasts until then.
+        """
+        present = await self.mapping.agent_present(remote_room)
+        if present is None:
+            return MEMBERS_UNREPORTED
+        return AGENT_IN_ROOM if present else None
 
     # -------------------------------------------------------------- verdict
 
@@ -215,17 +284,10 @@ class ProfileBridge:
                 self.profile.name,
             )
 
-        if event_type == _REDACTION:
-            outcome = await self._inbound_redaction(event, remote_room)
+        uncarried = await self._inbound_uncarried(event, event_type, remote_room)
+        if uncarried is not None:
             await self.mapping.mark(key)
-            return outcome
-        if event_type == _ROOM_ANNOUNCE:
-            outcome = await self._inbound_room(event, remote_room)
-            await self.mapping.mark(key)
-            return outcome
-        if event_type not in _CARRIED:
-            await self.mapping.mark(key)
-            return "skipped"
+            return uncarried
 
         scanned = {
             "sender": str(event.get("sender_displayname") or ""),
@@ -268,6 +330,39 @@ class ProfileBridge:
         await self.mapping.put_event(event_id, local_event)
         await self.mapping.mark(key)
         return "withheld" if reason else "delivered"
+
+    async def _inbound_uncarried(
+        self, event: dict[str, Any], event_type: str, remote_room: str
+    ) -> str | None:
+        """The outcome of an event that is not judged and carried, or None.
+
+        A room announcement first, because it is what reports the members the
+        agent rule reads; then the agent rule, for everything else.
+        """
+        if event_type == _ROOM_ANNOUNCE:
+            return await self._inbound_room(event, remote_room)
+        reason = await self._inbound_agent_refusal(str(event.get("sender") or ""), remote_room)
+        if reason is not None:
+            self._refuse("inbound", reason, str(event["event_id"]))
+            return "dropped"
+        if event_type == _REDACTION:
+            return await self._inbound_redaction(event, remote_room)
+        if event_type not in _CARRIED:
+            return "skipped"
+        return None
+
+    async def _inbound_agent_refusal(self, sender: str, remote_room: str) -> str | None:
+        """Why an upstream event may not be carried by the agent rule, or None.
+
+        An event from another agent also marks its room, so the agent's reply
+        is refused even before the bridge re-announces the room's members.
+        """
+        if self._is_other_agent(sender):
+            await self.mapping.set_agent_present(remote_room, True)
+            return AGENT_SENDER
+        if await self.mapping.agent_present(remote_room):
+            return AGENT_IN_ROOM
+        return None
 
     async def _place(
         self, event: dict[str, Any], scanned: dict[str, str | Any], *, withheld: bool
@@ -316,6 +411,15 @@ class ProfileBridge:
         other before they are written; refused, the room is created unnamed.
         """
         info = event.get("room") or {}
+        members = info.get("members")
+        # None: a bridge from before #264, which reports no members. The
+        # room stays unreported, and outbound refuses it until one does.
+        if members is not None:
+            present = any(self._is_other_agent(str(m)) for m in members)
+            await self.mapping.set_agent_present(remote_room, present)
+            if present:
+                self._refuse("room", AGENT_IN_ROOM, str(event.get("event_id")))
+                return ROOM_REFUSED
         peer = str(info.get("peer") or "")
         scanned = {
             "room_name": str(info.get("name") or ""),
@@ -395,16 +499,10 @@ class ProfileBridge:
         content = event.get("content") or {}
 
         if event_type == _REDACTION:
-            redacts = event.get("redacts") or content.get("redacts")
-            target = await self.mapping.remote_event(str(redacts)) if redacts else None
-            if target is not None:
-                await self._bridge(
-                    "/redact",
-                    {"room_id": remote_room, "event_id": target, "txn_id": _txn("rdo", event_id)},
-                )
+            await self._outbound_redaction(event, room)
             await self.mapping.mark(key)
             return
-        if event_type not in _CARRIED:
+        if event_type not in _CARRIED or await self._refused_outbound(room, event_id):
             await self.mapping.mark(key)
             return
 
@@ -446,6 +544,32 @@ class ProfileBridge:
         await self.mapping.mark(key)
         stages.lap("send")
         stages.report(f"{self.profile.name} outbound {event_id} {event_type} sent")
+
+    async def _outbound_redaction(self, event: dict[str, Any], room: Room) -> None:
+        """Mirror the agent's redaction upstream, unless the room is refused."""
+        event_id = str(event.get("event_id"))
+        redacts = event.get("redacts") or (event.get("content") or {}).get("redacts")
+        target = await self.mapping.remote_event(str(redacts)) if redacts else None
+        if target is None or await self._refused_outbound(room, event_id):
+            return
+        await self._bridge(
+            "/redact",
+            {"room_id": room.remote_id, "event_id": target, "txn_id": _txn("rdo", event_id)},
+        )
+
+    async def _refused_outbound(self, room: Room, event_id: str) -> bool:
+        """Refuse an event by the agent rule, telling the agent; True if so.
+
+        Before the judge, so a refused room costs no model call.
+        """
+        refusal = await self._relay_refusal(room.remote_id)
+        if refusal is None:
+            return False
+        self._refuse("outbound", refusal, event_id)
+        await self.appservice.notice(
+            room, f"[trentina] your message was not sent: {refusal}", _txn("wo", event_id)
+        )
+        return True
 
     async def _bridge(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         try:
