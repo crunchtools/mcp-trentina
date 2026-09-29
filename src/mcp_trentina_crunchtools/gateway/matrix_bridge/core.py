@@ -114,6 +114,7 @@ class ProfileBridge:
         self.cfg: MatrixBridgeConfig = cfg
         self.mapping = mapping
         self.appservice = appservice
+        # nosemgrep: trentina-httpx-client-outside-egress -- operator URL
         self._client = client or httpx.AsyncClient(timeout=_BRIDGE_TIMEOUT)
         self._bridge_token = cfg.bridge_token.get_secret_value()
         self._inbound_lock = asyncio.Lock()

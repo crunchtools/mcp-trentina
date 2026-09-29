@@ -1,0 +1,196 @@
+# Trentina's in-repo Semgrep rules (#269, from the #90 survey).
+#
+# Public rulesets found nothing true in src/; these encode OUR boundary
+# obligations, the structural ones that need no model to check. The
+# trentina-boundary-review skill (.claude/skills/) keeps the judgment calls.
+# Each rule has a --test fixture under .semgrep/tests/:
+#
+#   .semgrep/run-tests.sh   (one fixture per rule, each run against this file)
+#
+# Suppress a true-but-accepted hit inline with
+#   # nosemgrep: <rule-id> -- <why this site discharges the obligation>
+# and never with a bare nosemgrep: the reason is the review record.
+
+rules:
+  - id: trentina-sync-classify-in-async
+    message: >-
+      Synchronous classify() inside a coroutine blocks the event loop for the
+      whole L2 scan, and every profile shares that loop. Use
+      `await classify_async(...)` or `await asyncio.to_thread(classify, ...)`
+      (CLAUDE.md "Layer 2 scanning limits"; obligation O5).
+    severity: ERROR
+    languages: [python]
+    metadata:
+      obligation: O5 LIVENESS
+      references: ["https://github.com/crunchtools/mcp-trentina/issues/90"]
+    patterns:
+      - pattern: classify(...)
+      - pattern-inside: |
+          async def $FUNC(...):
+            ...
+      # A sync helper nested in the coroutine is reported too: whether it is
+      # offloaded is decided where it is called, which this rule cannot see.
+      # Suppress it inline when the helper only ever runs in asyncio.to_thread.
+
+  - id: trentina-except-returns-benign
+    message: >-
+      An except arm that returns a benign verdict turns a failure of the
+      defense into a clean result. Raise a refusal (BlockedSourceError,
+      UnscannableContentError) or return the layer as unavailable, so block
+      and redact refuse (obligation O1; reject pattern R1).
+    severity: ERROR
+    languages: [python]
+    metadata:
+      obligation: O1 FAIL-CLOSED
+    patterns:
+      - pattern-either:
+          - pattern: |
+              try:
+                  ...
+              except $EXC:
+                  ...
+                  return $VERDICT
+          - pattern: |
+              try:
+                  ...
+              except $EXC as $ERR:
+                  ...
+                  return $VERDICT
+          - pattern: |
+              try:
+                  ...
+              except:
+                  ...
+                  return $VERDICT
+      - focus-metavariable: $VERDICT
+      - metavariable-regex:
+          metavariable: $VERDICT
+          regex: >-
+            (?s)^(?!.*unavailable)(True|['"](ok|OK|clean|BENIGN|benign)['"]|Outcome\.OK|[A-Za-z_.]*BENIGN[A-Za-z_]*|.*\blabel\s*=\s*['"]BENIGN['"].*|.*['"](injection_detected|blocked|flagged)['"]\s*:\s*False.*)$
+
+  - id: trentina-httpx-follow-redirects
+    message: >-
+      httpx following redirects on its own never asks where a hop points. A
+      public page that redirects to 127.0.0.1 or 169.254.169.254 is SSRF.
+      Use egress.open_guarded, which checks every hop on the resolved address
+      (obligation O6; #260).
+    severity: ERROR
+    languages: [python]
+    metadata:
+      obligation: O6 EGRESS
+    pattern-either:
+      - pattern: httpx.AsyncClient(..., follow_redirects=True, ...)
+      - pattern: httpx.Client(..., follow_redirects=True, ...)
+      - pattern: httpx.$VERB(..., follow_redirects=True, ...)
+      - pattern: $CLIENT.$VERB(..., follow_redirects=True, ...)
+
+  - id: trentina-httpx-client-outside-egress
+    message: >-
+      A new outbound httpx client outside egress.py. If any part of the URL it
+      reaches can come from an agent, a fetched page or a backend, it must go
+      through egress.open_guarded or egress.check_url (obligation O6). If the
+      URL is fixed or operator-configured, suppress inline and say so.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      obligation: O6 EGRESS
+    paths:
+      exclude:
+        - "**/mcp_trentina_crunchtools/egress.py"
+    pattern-either:
+      - pattern: httpx.AsyncClient(...)
+      - pattern: httpx.Client(...)
+
+  - id: trentina-log-exception-text
+    message: >-
+      This log call prints an exception's message, which may carry a URL,
+      path, header or backend text a caller chose, and agents read the
+      gateway's journal. Log logsafe.exc_kind(exc) and exc_where(exc)
+      (obligation O8; #262). If the text is provably the server's own, mark it
+      `# logsafe: ours -- <why>` and suppress this rule on the same line.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      obligation: O8 LOG-HYGIENE
+    paths:
+      include:
+        - "**/mcp_trentina_crunchtools/gateway/**"
+        - "**/mcp_trentina_crunchtools/tools/**"
+        - "**/.semgrep/tests/**"
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern-inside: |
+                  try:
+                      ...
+                  except $T as $EXC:
+                      ...
+              - pattern-either:
+                  - pattern: $LOG.$LEVEL(..., $EXC, ...)
+                  - pattern: $LOG.$LEVEL(..., str($EXC), ...)
+                  - pattern: $LOG.$LEVEL(..., repr($EXC), ...)
+                  - pattern: $LOG.$LEVEL(..., f"...{$EXC}...", ...)
+                  - pattern: $LOG.$LEVEL(..., $EXC.args, ...)
+              - metavariable-regex:
+                  metavariable: $LEVEL
+                  regex: ^(debug|info|warning|warn|error|exception|critical|log)$
+          - pattern: $LOG.exception(...)
+          - patterns:
+              - pattern: $LOG.$LEVEL(..., exc_info=$ANY, ...)
+              - metavariable-regex:
+                  metavariable: $LEVEL
+                  regex: ^(debug|info|warning|warn|error|exception|critical|log)$
+      - metavariable-regex:
+          metavariable: $LOG
+          regex: ^(log|logger|_log|_logger|LOG|LOGGER|logging)$
+
+  - id: trentina-nested-quantifier-regex
+    message: >-
+      A quantified group that itself contains a quantifier, e.g. (a+)+ or
+      (\w*\s?)*, backtracks exponentially on a crafted near-miss. On
+      attacker-controlled input that is a liveness attack on every agent
+      behind the gateway (obligation O5). Rewrite with a possessive or
+      atomic form, a bounded repeat, or without the nesting.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      obligation: O5 LIVENESS
+      references: ["dlint DUO138"]
+    patterns:
+      - pattern-either:
+          - pattern: re.$FN($PATTERN, ...)
+          - pattern: regex.$FN($PATTERN, ...)
+      - metavariable-regex:
+          metavariable: $FN
+          regex: ^(compile|search|match|fullmatch|findall|finditer|sub|subn|split)$
+      # A group whose body holds + or * (outside a character class and not
+      # escaped), then quantified with +, * or an open-ended {n,}.
+      - metavariable-regex:
+          metavariable: $PATTERN
+          regex: >-
+            (?s).*?\((?:\?:)?(?:[^()\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*[+*](?:[^()\\\[]|\\.|\[(?:[^\]\\]|\\.)*\])*\)(?:[+*]|\{\d+,\})
+
+  - id: trentina-return-before-audit
+    message: >-
+      A tools/call handler returns a JSON-RPC error without writing its audit
+      row first. A refused or unknown call that leaves no row is exactly the
+      probe an operator needs to see (obligation O3; #87).
+    severity: ERROR
+    languages: [python]
+    metadata:
+      obligation: O3 AUDIT-EVERY-EXIT
+    paths:
+      include:
+        - "**/mcp_trentina_crunchtools/gateway/router.py"
+        - "**/.semgrep/tests/**"
+    patterns:
+      - pattern-inside: |
+          async def $HANDLER(...):
+              ...
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^_route_tools_call$
+      - pattern: return _err(...)
+      - pattern-not-inside: |
+          _audit(...)
+          ...

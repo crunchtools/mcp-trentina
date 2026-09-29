@@ -69,6 +69,7 @@ class _L1Counts:
 def _get_alert_client() -> httpx.AsyncClient:
     global _alert_client
     if _alert_client is None:
+        # nosemgrep: trentina-httpx-client-outside-egress -- operator forward_url
         _alert_client = httpx.AsyncClient(timeout=_TIMEOUT)
     return _alert_client
 

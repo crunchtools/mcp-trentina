@@ -127,13 +127,47 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # security-extended plus Trentina's own query pack (#269), which models
+      # MCP tool arguments as remote input and egress/defend/logsafe as
+      # barriers. The config file lists both; a `queries:` input here would
+      # replace it.
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: python
-          queries: security-extended
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:python"
+
+  semgrep:
+    name: Semgrep (in-repo rules)
+    runs-on: ubuntu-latest
+
+    # Trentina's own structural rules (.semgrep/trentina.yml, #269). Run from
+    # the upstream image with docker rather than as a container job, so the
+    # SARIF upload runs on the host. Pinned: a rule-engine upgrade should be
+    # a reviewed change, like any other gate.
+    env:
+      SEMGREP_IMAGE: docker.io/semgrep/semgrep:1.177.0
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Rule tests
+        run: docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" sh .semgrep/run-tests.sh
+
+      - name: Scan src
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" \
+            semgrep scan --config .semgrep/ --error --metrics=off \
+            --sarif --output semgrep.sarif src/
+
+      - name: Upload SARIF
+        if: always() && hashFiles('semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep

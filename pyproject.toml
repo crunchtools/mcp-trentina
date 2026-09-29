@@ -99,6 +99,12 @@ packages = ["src/mcp_trentina_crunchtools"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Known-bad code on purpose: the boundary-review eval (#90) grades a reviewer
+# on catching exactly what lint would flag, and semgrep's --test fixtures
+# carry a rule's true and false positives.
+extend-exclude = ["tests/fixtures/boundary-review", ".semgrep"]
+# The pre-commit hook passes files by name; without this ruff lints them anyway.
+force-exclude = true
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "S", "B", "C4", "C901", "DTZ", "T10", "ISC", "PIE", "PT", "RET", "SIM", "TID", "TCH", "ARG", "PLC", "PLE", "PLR", "PLW", "TRY", "RUF"]

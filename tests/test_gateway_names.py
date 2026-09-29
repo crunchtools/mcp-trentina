@@ -117,8 +117,9 @@ async def _call(profile: Profile, name: str) -> tuple[dict[str, Any], AsyncMock]
         patch(
             f"{ROUTER}.scan_tool_response", AsyncMock(return_value=IngressDecision(warning=None))
         ),
-        patch(f"{ROUTER}._audit", MagicMock()),
+        patch(f"{ROUTER}._audit", MagicMock()) as audit,
     ):
+        backend.audit = audit
         resp = await route_jsonrpc(
             profile,
             {
@@ -160,6 +161,15 @@ class TestTheEdge:
         resp, backend = await _call(_profile(), "no_such_tool")
         assert "Unknown tool" in resp["error"]["message"]
         backend.assert_not_awaited()
+
+    async def test_an_unknown_name_is_audited_by_fingerprint(self) -> None:
+        """A probe for names never served leaves a row (#269), not the caller's text."""
+        _, backend = await _call(_profile(), "no_such_tool")
+        backend.audit.assert_called_once()
+        profile, backend_name, tool, outcome, *_ = backend.audit.call_args.args
+        assert (profile, backend_name, outcome.value) == ("names", "", "denied_allowlist")
+        assert tool.startswith("sha256:")
+        assert "no_such_tool" not in str(backend.audit.call_args)
 
     async def test_names_are_on_by_default(self) -> None:
         p = Profile(

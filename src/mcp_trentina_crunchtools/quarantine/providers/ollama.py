@@ -52,6 +52,7 @@ class OllamaProvider(Provider):
             request_body["format"] = "json"
 
         try:
+            # nosemgrep: trentina-httpx-client-outside-egress -- operator URL
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(OLLAMA_TIMEOUT),
             ) as client:

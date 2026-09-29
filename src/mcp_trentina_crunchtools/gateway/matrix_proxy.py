@@ -171,6 +171,7 @@ _matrix_client: httpx.AsyncClient | None = None
 def _get_matrix_client() -> httpx.AsyncClient:
     global _matrix_client
     if _matrix_client is None:
+        # nosemgrep: trentina-httpx-client-outside-egress -- operator host, no redirects
         _matrix_client = httpx.AsyncClient(timeout=_SYNC_TIMEOUT)
     return _matrix_client
 

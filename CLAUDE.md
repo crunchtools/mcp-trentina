@@ -284,7 +284,16 @@ podman run --rm -v .:/repo:Z quay.io/crunchtools/gourmand:latest check /repo  # 
 # the model-export stage needs a gated HF credential held only in CI. Push and let
 # the pipeline build it.
 uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across providers — see docs/benchmark.md
+podman run --rm -v .:/src:Z docker.io/semgrep/semgrep semgrep --config /src/.semgrep --error /src/src  # in-repo rules
+uv run python -m mcp_trentina_crunchtools.gateway.profile_lint <profiles.yaml>  # posture lint
+uv run python tests/boundary_review_eval.py  # boundary-review skill eval; needs ANTHROPIC_API_KEY
 ```
+
+Boundary review (#90, #269): `.claude/skills/trentina-boundary-review/` is the
+judgment half, `.semgrep/` and `.github/codeql/trentina-queries/` the
+mechanical half. A semgrep hit is fixed or suppressed inline with
+`# nosemgrep: <rule> -- <reason>`; a crossing gets a `# TRUST:` comment in the
+skill's format.
 
 ## Architecture
 

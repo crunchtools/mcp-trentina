@@ -73,6 +73,7 @@ class CircuitBreaker:
                 cb(url, old, new)
             except Exception:
                 # logsafe: ours — the callbacks are the gateway's own
+                # nosemgrep: trentina-log-exception-text -- logsafe: ours
                 logger.warning("circuit: state-change callback failed", exc_info=True)
 
     def _get(self, url: str) -> _CircuitState:

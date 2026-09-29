@@ -210,8 +210,13 @@ class PinnedBackend(httpcore.AsyncNetworkBackend):
     ) -> httpcore.AsyncNetworkStream:
         addresses = self._pins.get((host, port))
         if not addresses:
-            # Only reachable if something sent a request the loop never
-            # checked. Fail closed rather than resolve it here.
+            # TRUST: dialling a (host, port) for an outbound fetch
+            #   untrusted: host and port, from the agent's URL or a redirect Location
+            #   judged-by: egress.check_url, which pins every address it admitted
+            #   on-failure: fail-closed; a request the loop never checked is refused
+            #   owner: egress.open_guarded
+            #   evidence: T3 module docstring; T4 open_guarded pins before every send;
+            #     T2 httpcore sends the URL host as server_hostname, so TLS checks the name
             raise EgressRefusedError("unresolvable")
         options = list(socket_options or ())
         *fallbacks, last = addresses

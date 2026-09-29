@@ -521,6 +521,7 @@ async def reload_profiles() -> dict[str, Any]:
         # traceback goes to the journal because the returned message is
         # load_profiles' own for every expected cause, and an unexpected one
         # is exactly where an operator needs more than its str().
+        # nosemgrep: trentina-log-exception-text -- logsafe: ours
         logger.warning(  # logsafe: ours — the operator's profiles.yaml
             "gateway: profile reload REFUSED from %s: %s",
             path,
