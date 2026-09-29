@@ -139,7 +139,15 @@ async def _resolve(host: str, port: int) -> list[str]:
 
 
 async def check_url(url: str | httpx.URL) -> ResolvedTarget:
-    """Refuse a URL the gateway must not fetch; otherwise the address to pin.
+    """Refuse a URL the gateway must not fetch; otherwise the addresses to pin.
+
+    Args:
+        url: an absolute URL, as the agent sent it or as a redirect built it.
+
+    Returns:
+        The host as httpx will connect to it (IDNA-encoded, IPv6 without
+        brackets), the effective port, and every address it resolved to,
+        all of them checked, for ``PinnedBackend.pin``.
 
     Raises:
         EgressRefusedError: with the reason only, never the host or address.
