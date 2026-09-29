@@ -370,6 +370,10 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
 - `jsonwalk.py` — the ONE JSON walk. There were two hand-maintained copies
   until #167; `tests/test_full_is_defend_json.py` proves they agreed, which is
   what made deleting one safe.
+- `reserved.py` — the keys only the gateway may write (#265): `_trentina_*`
+  at any depth, `RESERVED_ROOT_KEYS` at a document's root. Every path that
+  carries someone else's JSON strips them before the scan and before adding
+  its own marker. A new marker takes the prefix and is covered automatically.
 - `preprocess/` — Payload transformation, OUTSIDE the perimeter. May subtract
   but never absolve: it drops, collapses, normalizes and restructures, and
   everything it emits still crosses `defend()` as untrusted. Reduction is the

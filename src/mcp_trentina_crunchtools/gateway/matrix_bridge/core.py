@@ -39,6 +39,7 @@ from ...defense import defend_json
 from ...logsafe import redact_source
 from ...modes import gaps_of, refusal_reason
 from ...outcomes import Outcome
+from ...reserved import WARNING_KEY, strip_reserved, with_stripped
 from ...warning import build_warning
 from ..context import profile_context
 from .rewrite import IdMap, referenced_ids, rewrite_content
@@ -272,6 +273,16 @@ class ProfileBridge:
         room = event.get("room") or {}
         remote_room = str(event["room_id"])
         content = event.get("content") or {}
+        # A remote sender does not get to write the gateway's markers (#265):
+        # removed before the judge reads the event and before one is added.
+        stripped = await asyncio.to_thread(strip_reserved, content)
+        if stripped:
+            logger.info(
+                "matrix_bridge: stripped %d reserved key(s) from inbound %s for %s",
+                stripped,
+                redact_source(event_id),
+                self.profile.name,
+            )
 
         uncarried = await self._inbound_uncarried(event, event_type, remote_room)
         if uncarried is not None:
@@ -293,9 +304,9 @@ class ProfileBridge:
         if reason is None:
             out_type = event_type
             out = rewrite_content(content, await self._inbound_ids(content))
-            warning = build_warning(verdict)
+            warning = with_stripped(build_warning(verdict), stripped)
             if out is not None and warning is not None:
-                out["_trentina_warning"] = warning
+                out[WARNING_KEY] = warning
         else:
             # Event IDs are opaque; who said it and where stays out of the log.
             logger.warning(
