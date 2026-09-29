@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from ..channels import Channel, Kind
 from ..errors import QuarantineAgentError
+from ..logsafe import exc_kind
 from ..quarantine.agent import llm_available, quarantine_generate
 from ..quarantine.limiter import limited_generate
 from .base import Cost, PreProcessContext, PreProcessResult
@@ -105,7 +106,7 @@ class SummarizeProcessor:
         except QuarantineAgentError as exc:
             # Includes canary leaks: a compromised worker's output is simply
             # never used, and the original payload continues to the perimeter.
-            logger.warning("summarize: worker call failed (%s); declining", exc)
+            logger.warning("summarize: worker call failed (%s); declining", exc_kind(exc))
             return PreProcessResult.declined(self.name, self.cost, payload, reason="worker_error")
 
         summary = str(parsed.get("summary", "")).strip()

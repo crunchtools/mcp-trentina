@@ -117,6 +117,10 @@ ignore = [
     "PLR0913",  # 12 hits: MCP tool signatures mirror the wire API
     "PLR2004",  # 10 hits: HTTP status codes and byte limits
     "PLR0917",  # 6 hits: ditto, positional
+    "TRY400",   # 11 hits: it asks for logger.exception, whose traceback prints
+                #   the exception's message -- a URL, a path, a backend's text.
+                #   #262 forbids exactly that; tests/test_log_hygiene.py
+                #   enforces the opposite rule.
     "UP042",    # 4 hits: `class X(str, Enum)` -> StrEnum. Surfaced by raising
                 #   target-version to py311, not by any code change. Every use
                 #   site goes through .value or .name (checked), so the swap

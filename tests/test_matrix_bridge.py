@@ -924,7 +924,7 @@ class TestTiming:
         [record] = [r for r in caplog.records if " inbound " in r.getMessage()]
         assert record.levelno == logging.INFO
         assert re.search(
-            r"agent1 inbound \$e1 m\.room\.message delivered in \S+s "
+            r"agent1 inbound sha256:[0-9a-f]{12} len=3 m\.room\.message delivered in \S+s "
             r"\(wait=\S+s judge=\S+s deliver=\S+s\)",
             record.getMessage(),
         )
@@ -959,7 +959,7 @@ class TestTiming:
         rig = rig_factory()
         with caplog.at_level(logging.WARNING, logger=core.__name__):
             await rig.bridge.inbound(_message())
-        assert any(" inbound $e1 " in r.getMessage() for r in caplog.records)
+        assert any(" inbound sha256:" in r.getMessage() for r in caplog.records)
 
     async def test_wait_is_the_time_spent_behind_the_previous_event(
         self, rig_factory: Any, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
@@ -980,12 +980,13 @@ class TestTiming:
     async def test_an_upstream_event_id_cannot_forge_a_log_line(
         self, rig_factory: Any, caplog: pytest.LogCaptureFixture
     ) -> None:
+        """The id is the origin server's text in an old room: fingerprinted (#262)."""
         rig = rig_factory()
         with caplog.at_level(logging.INFO, logger=core.__name__):
             await rig.bridge.inbound(_message("$e1\nmatrix_bridge: forged"))
         [record] = [r for r in caplog.records if " inbound " in r.getMessage()]
         assert "\n" not in record.getMessage()
-        assert "$e1\\nmatrix_bridge: forged" in record.getMessage()
+        assert "forged" not in record.getMessage()
 
     async def test_a_duplicate_logs_nothing(
         self, rig_factory: Any, caplog: pytest.LogCaptureFixture

@@ -35,6 +35,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..logsafe import exc_kind, exc_where
+
 logger = logging.getLogger(__name__)
 
 #: Disables both buttons as soon as the form is submitted, and lets the submit
@@ -171,10 +173,12 @@ class ConsentUsability:
 
         try:
             replacement = _patch_html(body, method, int(start.get("status", 0)))
-        except Exception:
+        except Exception as exc:
+            # The page carries the registering client's own name (#262).
             logger.warning(
-                "consent: could not patch page — serving the original",
-                exc_info=True,
+                "consent: could not patch page — serving the original: %s at %s",
+                exc_kind(exc),
+                exc_where(exc),
             )
             await self._passthrough(start, body, send)
             return

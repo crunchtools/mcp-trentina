@@ -13,6 +13,8 @@ from collections import deque
 from collections.abc import Callable
 from typing import Any
 
+from .logsafe import exc_kind, exc_where
+
 logger = logging.getLogger(__name__)
 
 RING_BUFFER_SIZE = 100
@@ -57,8 +59,14 @@ class EventBus:
         for cb in callbacks:
             try:
                 cb(event_name, event_data)
-            except Exception:
-                logger.exception("EventBus callback error for %s", event_name)
+            except Exception as exc:
+                # Event data is detection data: sources and findings (#262).
+                logger.error(
+                    "EventBus callback error for %s: %s at %s",
+                    event_name,
+                    exc_kind(exc),
+                    exc_where(exc),
+                )
 
     def recent_events(self, count: int = RING_BUFFER_SIZE) -> list[dict[str, Any]]:
         """Return the last N events from the ring buffer."""

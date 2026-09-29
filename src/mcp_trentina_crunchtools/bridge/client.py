@@ -46,6 +46,8 @@ from nio.api import Api
 from nio.exceptions import EncryptionError, LocalProtocolError
 from nio.store import SqliteStore
 
+from ..logsafe import redact_source
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -227,7 +229,9 @@ class Bridge:
                 timeout=_SYNC_TIMEOUT_MS, since=token, full_state=not self.ready.is_set()
             )
             if isinstance(resp, SyncError) or not isinstance(resp, SyncResponse):
-                logger.warning("bridge[%s]: sync failed: %s", self.settings.profile, resp)
+                logger.warning(
+                    "bridge[%s]: sync failed: %s", self.settings.profile, type(resp).__name__
+                )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, _MAX_BACKOFF)
                 continue
@@ -306,7 +310,9 @@ class Bridge:
                 logger.warning("bridge[%s]: joined an invited room", self.settings.profile)
             else:
                 logger.warning(
-                    "bridge[%s]: join failed, retried next sync: %s", self.settings.profile, result
+                    "bridge[%s]: join failed, retried next sync: %s",
+                    self.settings.profile,
+                    type(result).__name__,
                 )
 
     async def _forward_batch(self, resp: Any) -> None:
@@ -402,17 +408,17 @@ class Bridge:
                     logger.error(
                         "bridge[%s]: gateway refused %s: %s %s",
                         self.settings.profile,
-                        payload.get("event_id"),
+                        redact_source(str(payload.get("event_id"))),
                         status,
-                        detail,
+                        redact_source(detail),
                     )
                     return
             logger.warning(
                 "bridge[%s]: gateway unavailable for %s (%s %s), retrying",
                 self.settings.profile,
-                payload.get("event_id"),
+                redact_source(str(payload.get("event_id"))),
                 status,
-                detail,
+                redact_source(detail),
             )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, _MAX_BACKOFF)
@@ -436,9 +442,9 @@ class Bridge:
         logger.warning(
             "bridge[%s]: parked %s in %s awaiting key %s",
             self.settings.profile,
-            event.event_id,
-            room_id,
-            event.session_id,
+            redact_source(event.event_id),
+            redact_source(room_id),
+            redact_source(event.session_id),
         )
 
     async def _retry_pending(self) -> None:
@@ -448,7 +454,11 @@ class Bridge:
         for event_id, (room_id, source, first_seen) in list(self._pending.items()):
             parsed = MegolmEvent.from_dict(source)
             if not isinstance(parsed, MegolmEvent):
-                logger.error("bridge[%s]: dropping unparseable %s", self.settings.profile, event_id)
+                logger.error(
+                    "bridge[%s]: dropping unparseable %s",
+                    self.settings.profile,
+                    redact_source(event_id),
+                )
                 del self._pending[event_id]
                 self._pending_dirty = True
                 continue

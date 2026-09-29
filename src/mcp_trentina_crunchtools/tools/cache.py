@@ -22,6 +22,7 @@ from ..gateway.compress import get_profiles
 from ..gateway.errors import ScopeError
 from ..gateway.router import _profile_tools_cache, invalidate_profile_cache
 from ..gateway.scope import CallerScope, require_caller, resolve_backend
+from ..logsafe import exc_kind
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ async def cache_flush(backend: str | None = None) -> dict[str, Any]:
         if not scope.is_operator:
             return _flush_own(scope, backend)
     except ScopeError as exc:
-        logger.warning("cache_flush refused: %s", exc)
+        logger.warning("cache_flush refused: %s", exc_kind(exc))
         return {"flushed": "nothing", "error": str(exc)}
 
     if backend is not None:

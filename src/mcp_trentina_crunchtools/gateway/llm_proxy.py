@@ -27,6 +27,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from starlette.responses import Response, StreamingResponse
 
+from ..logsafe import exc_kind, exc_where, redact_source
 from .auth import resolve_profile_by_token
 from .context import profile_context
 from .errors import ProfileConfigError
@@ -260,7 +261,7 @@ async def _proxy_llm(
         "llm_proxy: profile=%s provider=%s path=%s",
         profile.name,
         provider_name,
-        path,
+        redact_source(path),
     )
 
     upstream_url = f"{provider.upstream}/{path}"
@@ -313,7 +314,7 @@ async def _forward_upstream(
         logger.warning(
             "llm_proxy: connect error provider=%s: %s",
             provider_name,
-            exc,
+            exc_kind(exc),
         )
         return Response(
             content="LLM upstream unreachable",
@@ -418,8 +419,12 @@ def _schedule_completion_scan(
                     verdict.risk_level,
                     verdict.flagged_by.value if verdict.flagged_by else None,
                 )
-        except Exception:
-            logger.exception("llm_proxy: post-hoc completion scan failed")
+        except Exception as exc:
+            logger.error(  # the message may carry the completion (#262)
+                "llm_proxy: post-hoc completion scan failed: %s at %s",
+                exc_kind(exc),
+                exc_where(exc),
+            )
 
     try:
         task = asyncio.get_running_loop().create_task(_scan())

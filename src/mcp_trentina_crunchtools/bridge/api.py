@@ -17,6 +17,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from ..httpbody import TooLargeError, read_capped, where_invalid
+from ..logsafe import exc_kind
 from .client import SendError
 
 if TYPE_CHECKING:
@@ -84,7 +85,9 @@ class _Handlers:
         try:
             event_id = await self._bridge.send(body.room_id, body.type, body.content, body.txn_id)
         except SendError as exc:
-            logger.warning("bridge[%s]: send failed: %s", self._bridge.settings.profile, exc)
+            logger.warning(
+                "bridge[%s]: send failed: %s", self._bridge.settings.profile, exc_kind(exc)
+            )
             return JSONResponse({"error": "send failed"}, status_code=502)
         return JSONResponse({"event_id": event_id})
 
@@ -95,7 +98,9 @@ class _Handlers:
         try:
             await self._bridge.redact(body.room_id, body.event_id, body.txn_id)
         except SendError as exc:
-            logger.warning("bridge[%s]: redact failed: %s", self._bridge.settings.profile, exc)
+            logger.warning(
+                "bridge[%s]: redact failed: %s", self._bridge.settings.profile, exc_kind(exc)
+            )
             return JSONResponse({"error": "redact failed"}, status_code=502)
         return JSONResponse({"event_id": body.event_id})
 

@@ -50,6 +50,7 @@ from starlette.responses import Response, StreamingResponse
 
 from ..channels import Channel
 from ..defense import defend, defend_selection
+from ..logsafe import exc_kind, exc_where, redact_source
 from ..matrix.keybackup import KeyBackupProvider
 from ..modes import gaps_of
 from ..preprocess import SelectionContext
@@ -295,7 +296,7 @@ async def _proxy_matrix(
             media_type=PLAIN_TEXT,
         )
     except httpx.ConnectError as exc:
-        logger.warning("matrix_proxy: connect error: %s", exc)
+        logger.warning("matrix_proxy: connect error: %s", exc_kind(exc))
         return Response(
             content="Matrix upstream unreachable",
             status_code=502,
@@ -376,11 +377,13 @@ async def _provider_for(profile: Profile) -> Any:
             )
             await provider.start()
             logger.warning("matrix_proxy: key backup ready for profile=%s", profile.name)
-        except Exception:
-            logger.exception(
+        except Exception as exc:
+            logger.error(  # the homeserver's text is not ours to log (#262)
                 "matrix_proxy: key backup unavailable for profile=%s — "
-                "encrypted events will be reported as undecryptable",
+                "encrypted events will be reported as undecryptable: %s at %s",
                 profile.name,
+                exc_kind(exc),
+                exc_where(exc),
             )
             provider = None
         _PROVIDERS[profile.name] = provider
@@ -447,7 +450,7 @@ async def _buffer(
             if _withholds(profile):
                 logger.warning(
                     "matrix_proxy: %s response exceeds %d bytes — refused, too large to judge",
-                    path,
+                    redact_source(path),
                     _MAX_SCAN_BYTES,
                 )
                 await resp.aclose()
@@ -458,7 +461,7 @@ async def _buffer(
                 )
             logger.warning(
                 "matrix_proxy: %s response exceeds %d bytes — forwarded unscanned",
-                path,
+                redact_source(path),
                 _MAX_SCAN_BYTES,
             )
 
@@ -555,7 +558,7 @@ async def _scan_and_forward(
             "matrix_proxy: scan deadline %.1fs exceeded for %s profile=%s — "
             "forwarding UNSCANNED with a warning",
             deadline,
-            path,
+            redact_source(path),
             profile.name,
         )
         return _respond(
@@ -566,15 +569,17 @@ async def _scan_and_forward(
             {"risk_level": "unknown", "scan_timeout": True},
             withhold=_withholds(profile),
         )
-    except Exception:
+    except Exception as exc:
         # A parse failure here is attacker-reachable (any room member can
         # ship pathological JSON), so "scan failed" must not mean "clean":
         # fall back to judging the raw bytes as TEXT — L1/L2 still read a
         # plaintext payload buried beside the poison — and forward with the
         # failure on the record.
-        logger.exception(
-            "matrix_proxy: structured scan failed for %s — text-mode fallback",
-            path,
+        logger.error(  # the message may carry the payload (#262)
+            "matrix_proxy: structured scan failed for %s — text-mode fallback: %s at %s",
+            redact_source(path),
+            exc_kind(exc),
+            exc_where(exc),
         )
         await _text_fallback_scan(body, profile, path)
         # No events to withhold, and no client can parse it either.
@@ -586,7 +591,7 @@ async def _scan_and_forward(
     if verdict.flagged:
         logger.warning(
             "matrix_proxy: flagged %s for profile=%s risk=%s flagged_by=%s",
-            path,
+            redact_source(path),
             profile.name,
             verdict.risk_level,
             verdict.flagged_by.value if verdict.flagged_by else None,
@@ -599,7 +604,7 @@ async def _scan_and_forward(
         # read as a steady stream of truncated scans (#227).
         logger.warning(
             "matrix_proxy: incomplete scan of %s for profile=%s — %s",
-            path,
+            redact_source(path),
             profile.name,
             ",".join(gaps.names()),
         )
@@ -773,8 +778,13 @@ async def _text_fallback_scan(body: bytes, profile: Profile, path: str) -> None:
                 "path=%s risk=%s — forwarded (no annotation channel); "
                 "investigate the sender",
                 profile.name,
-                path,
+                redact_source(path),
                 verdict.risk_level,
             )
-    except Exception:
-        logger.exception("matrix_proxy: text-mode fallback scan failed for %s", path)
+    except Exception as exc:
+        logger.error(  # the message may carry the payload (#262)
+            "matrix_proxy: text-mode fallback scan failed for %s: %s at %s",
+            redact_source(path),
+            exc_kind(exc),
+            exc_where(exc),
+        )

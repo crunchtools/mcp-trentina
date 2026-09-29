@@ -54,8 +54,8 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..defense import Provenance, defend
-from ..errors import scrub_credentials
 from ..l1.pipeline import run_l1
+from ..logsafe import exc_kind, exc_where
 from ..modes import (
     Gaps,
     Mode,
@@ -251,7 +251,7 @@ def _cache_put(key: str, value: dict[str, Any] | None, *, persist: bool = False)
         # answer, and must never cost the request in front of us. Stop
         # trying: whatever broke the write breaks the next two hundred.
         _persist_broken = True
-        logger.warning(
+        logger.warning(  # logsafe: ours — a sqlite write of the gateway's own rows
             "perimeter: cannot write the verdict store; verdicts will not survive this restart",
             exc_info=True,
         )
@@ -619,13 +619,13 @@ def _settle(key: str, task: asyncio.Task[dict[str, Any] | None]) -> None:
     if _inflight.get(key) is task:
         del _inflight[key]
     if not task.cancelled() and (exc := task.exception()) is not None:
-        # Scrubbed: an exception from a provider call can carry the request,
-        # and the request can carry a key.
+        # The kind only: an exception from a provider call can carry the
+        # request, which carries a key and a backend's description (#262).
         logger.warning(
-            "perimeter: judgement failed for key=%s: %s: %s",
+            "perimeter: judgement failed for key=%s: %s at %s",
             key[:12],
-            type(exc).__name__,
-            scrub_credentials(str(exc)),
+            exc_kind(exc),
+            exc_where(exc),
         )
 
 

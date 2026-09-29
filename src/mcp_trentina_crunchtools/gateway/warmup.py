@@ -20,7 +20,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from ..errors import scrub_credentials
+from ..logsafe import exc_kind, exc_where
 from ..quarantine.limiter import Priority, all_limiters, l3_priority, l3_throttle_budget
 from .ingress_defense import perimeter_counts
 from .loader import get_active_config
@@ -69,13 +69,13 @@ async def _warm(profiles: list[Profile]) -> None:
     tools = 0
     for profile, outcome in zip(profiles, results, strict=True):
         if isinstance(outcome, BaseException):
-            # Scrubbed: a provider error can carry the request, and the
-            # request can carry a key.
+            # The kind only: a provider or backend error can carry the
+            # request, a key, or a backend's own text (#262).
             logger.warning(
-                "warm-up: profile=%s failed: %s: %s",
+                "warm-up: profile=%s failed: %s at %s",
                 profile.name,
-                type(outcome).__name__,
-                scrub_credentials(str(outcome)),
+                exc_kind(outcome),
+                exc_where(outcome),
             )
         else:
             tools += len(outcome)

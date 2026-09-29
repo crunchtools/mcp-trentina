@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.responses import JSONResponse, Response
 
 from ...httpbody import TooLargeError, read_capped, where_invalid
+from ...logsafe import exc_kind
 from .appservice import AppService, ConduitError
 from .core import BridgeUnavailableError, ProfileBridge
 from .mapping import BridgeMapping
@@ -206,11 +207,13 @@ class BridgeRoutes:
             logger.warning(
                 "matrix_bridge: event for %s refused by the bridge core: %s",
                 bridge.profile.name,
-                type(exc).__name__,
+                exc_kind(exc),
             )
             return _refused(400, "M_BAD_JSON", "malformed event")
         except (ConduitError, OSError) as exc:
-            logger.warning("matrix_bridge: could not deliver for %s: %s", bridge.profile.name, exc)
+            logger.warning(
+                "matrix_bridge: could not deliver for %s: %s", bridge.profile.name, exc_kind(exc)
+            )
             return _refused(503, "M_UNKNOWN", "delivery failed, retry")
         return JSONResponse({"outcome": outcome})
 
@@ -236,7 +239,9 @@ class BridgeRoutes:
                 str(request.path_params["txn"]), [e.model_dump() for e in txn.events]
             )
         except (BridgeUnavailableError, ConduitError, OSError) as exc:
-            logger.warning("matrix_bridge: outbound failed for %s: %s", bridge.profile.name, exc)
+            logger.warning(
+                "matrix_bridge: outbound failed for %s: %s", bridge.profile.name, exc_kind(exc)
+            )
             return _refused(503, "M_UNKNOWN", "bridge unavailable, retry")
         return JSONResponse({})
 

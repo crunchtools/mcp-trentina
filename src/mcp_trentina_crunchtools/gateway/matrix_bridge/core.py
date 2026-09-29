@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from ...defense import defend_json
+from ...logsafe import redact_source
 from ...modes import gaps_of, refusal_reason
 from ...warning import build_warning
 from ..context import profile_context
@@ -185,8 +186,11 @@ class ProfileBridge:
             outcome = await self._inbound(event, stages)
         if outcome in {"delivered", "withheld"}:
             stages.lap("deliver")
+            # The sender chose the type and, in an old room, the id (#262).
+            kind = event.get("type")
             stages.report(
-                f"{self.profile.name} inbound {event.get('event_id')} {event.get('type')} {outcome}"
+                f"{self.profile.name} inbound {redact_source(str(event.get('event_id')))} "
+                f"{kind if isinstance(kind, str) and kind in _CARRIED else 'other'} {outcome}"
             )
         return outcome
 
@@ -233,8 +237,8 @@ class ProfileBridge:
         else:
             # Event IDs are opaque; who said it and where stays out of the log.
             logger.warning(
-                "matrix_bridge: withheld inbound %r for %s: %s",
-                event_id,
+                "matrix_bridge: withheld inbound %s for %s: %s",
+                redact_source(event_id),
                 self.profile.name,
                 reason,
             )

@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from ..database import get_all_compressions, save_compression
 from ..errors import QuarantineAgentError
+from ..logsafe import exc_kind
 from ..preprocess.summarize import summarize_descriptions
 from ..quarantine.agent import resolve_profile_llm
 from ..quarantine.limiter import THROTTLE_STATUS
@@ -157,11 +158,11 @@ async def maybe_trigger_compression() -> None:
     global _compress_triggered, _compress_task
     if _profiles is None:
         return
-    if _compress_task is not None and _compress_task.done() and _compress_task.exception():
-        logger.warning(
-            "compress: previous task failed: %s — allowing retry",
-            _compress_task.exception(),
-        )
+    failed = (
+        _compress_task.exception() if _compress_task is not None and _compress_task.done() else None
+    )
+    if failed is not None:
+        logger.warning("compress: previous task failed: %s — allowing retry", exc_kind(failed))
         _compress_triggered = False
     if _compress_triggered:
         return
@@ -260,11 +261,11 @@ async def precompress_all(
             try:
                 count = await _precompress_backend(backend_name, backend)
                 stats[backend_name] = count
-            except Exception:
+            except Exception as exc:
                 logger.warning(
-                    "compress: backend %s failed, skipping",
+                    "compress: backend %s failed, skipping: %s",
                     backend_name,
-                    exc_info=True,
+                    exc_kind(exc),
                 )
             await asyncio.sleep(DELAY_BETWEEN_BACKENDS)
 
@@ -449,11 +450,13 @@ async def _call_compress_model(
                     attempt + 1,
                     MAX_RETRIES,
                     delay,
-                    exc,
+                    exc_kind(exc),
                 )
                 await asyncio.sleep(delay)
                 continue
-            logger.warning("compress: provider call failed for %d items: %s", len(items), exc)
+            logger.warning(
+                "compress: provider call failed for %d items: %s", len(items), exc_kind(exc)
+            )
             return []
 
     return []

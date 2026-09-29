@@ -61,7 +61,7 @@ async def start_dbus() -> None:
         logger.info("D-Bus interface registered: com.crunchtools.Trentina1")
 
     except Exception:
-        logger.warning("D-Bus unavailable — interface disabled", exc_info=True)
+        logger.warning("D-Bus unavailable — interface disabled", exc_info=True)  # logsafe: ours
 
 
 def l3_status(config: Any) -> dict[str, Any]:

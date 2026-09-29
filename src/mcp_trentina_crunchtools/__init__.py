@@ -11,6 +11,8 @@ import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from . import logsafe
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -78,6 +80,9 @@ def _configure_logging() -> str:
     # A new upstream that takes a secret in the query string would re-open the
     # leak here, so it belongs in a header — not behind a clamped logger.
     logging.getLogger("httpx").setLevel(level)
+    # uvicorn's access log, httpx and the SDKs' DEBUG write request data
+    # verbatim; logsafe holds them to the #262 rule at every level.
+    logsafe.install(level)
     return level_name
 
 
@@ -710,7 +715,7 @@ def _clear_known_resource(params: Any, allowed: frozenset[str]) -> None:
     }:
         logger.warning(
             "gateway: refusing /authorize — resource %s is not a profile on this gateway",
-            requested,
+            logsafe.redact_source(requested),
         )
         raise AuthorizeError(
             error="invalid_target",

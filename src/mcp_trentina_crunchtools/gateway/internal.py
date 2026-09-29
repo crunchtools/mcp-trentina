@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..logsafe import exc_kind, redact_source
 from .backend import (
     BackendCall,
     _field,
@@ -93,7 +94,7 @@ async def list_internal_tools() -> list[dict[str, Any]]:
     try:
         tools = await _walk_server_tools(_server)
     except Exception as exc:
-        logger.warning("gateway: internal list_tools failed err=%s", exc)
+        logger.warning("gateway: internal list_tools failed err=%s", exc_kind(exc))
         raise BackendCallError(f"internal list_tools failed: {type(exc).__name__}") from exc
 
     return [_serialize_tool(tool.to_mcp_tool()) for tool in tools]
@@ -118,6 +119,7 @@ async def call_internal_tool(
     """
     if _server is None:
         raise BackendCallError("internal tool backend not registered")
+    tool = None
     try:
         tool = await _server.get_tool(tool_name)
         declared = (getattr(tool, "parameters", None) or {}).get("properties") or {}
@@ -126,7 +128,12 @@ async def call_internal_tool(
         }
         result = await tool.run({**arguments, **extra})
     except Exception as exc:
-        logger.warning("gateway: internal call_tool failed tool=%s err=%s", tool_name, exc)
+        # A tool that did not resolve is a name the caller typed (#262).
+        logger.warning(
+            "gateway: internal call_tool failed tool=%s err=%s",
+            tool_name if tool is not None else redact_source(tool_name),
+            exc_kind(exc),
+        )
         raise BackendCallError(
             f"internal tool {tool_name!r} call failed: {type(exc).__name__}"
         ) from exc

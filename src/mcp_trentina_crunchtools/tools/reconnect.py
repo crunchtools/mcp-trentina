@@ -43,6 +43,7 @@ from ..gateway.scope import (
     require_caller,
     resolve_backend,
 )
+from ..logsafe import exc_kind
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ async def reconnect_backend(backend: str) -> dict[str, Any]:
         # correction. Listing the gateway's, which is what this used to do,
         # turned every typo into a directory of every other agent's backends.
         refused = current_scope()
-        logger.warning("reconnect_backend refused: %s", exc)
+        logger.warning("reconnect_backend refused: %s", exc_kind(exc))
         return {
             "backend": backend,
             "reconnected": False,
@@ -163,9 +164,7 @@ async def reconnect_backend(backend: str) -> dict[str, Any]:
             "backend": backend,
             "reconnected": False,
             "error": "backend not found in any profile",
-            "available": sorted(
-                name for p in profiles.values() for name in p.backends
-            ),
+            "available": sorted(name for p in profiles.values() for name in p.backends),
         }
 
     results = []
@@ -182,4 +181,3 @@ async def reconnect_backend(backend: str) -> dict[str, Any]:
         "reconnected": all(r["reconnected"] for r in results),
         "targets": results,
     }
-

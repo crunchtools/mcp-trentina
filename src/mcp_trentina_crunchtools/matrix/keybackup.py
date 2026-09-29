@@ -36,6 +36,7 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from ..logsafe import exc_kind, redact_source
 from .megolm import (
     backup_decryptor,
     backup_public_key,
@@ -186,7 +187,11 @@ class KeyBackupProvider:
             if not future.done():
                 future.set_result(None)
             self._stats["fetch_errors"] += 1
-            logger.warning("matrix keybackup: fetch failed for room %s: %s", room_id, exc)
+            logger.warning(
+                "matrix keybackup: fetch failed for room %s: %s",
+                redact_source(room_id),
+                exc_kind(exc),
+            )
         finally:
             self._inflight.pop(room_id, None)
             self._room_fetched_at[room_id] = time.monotonic()
@@ -207,9 +212,9 @@ class KeyBackupProvider:
                 self._stats["unwrap_errors"] += 1
                 logger.warning(
                     "matrix keybackup: cannot import session %s in room %s: %s",
-                    session_id,
-                    room_id,
-                    type(exc).__name__,
+                    redact_source(session_id),
+                    redact_source(room_id),
+                    exc_kind(exc),
                 )
                 continue
             self._sessions[(room_id, session_id)] = _Entry(session, now)
@@ -219,7 +224,7 @@ class KeyBackupProvider:
             self._sessions.popitem(last=False)
         logger.warning(
             "matrix keybackup: room %s — imported %d of %d session(s)",
-            room_id,
+            redact_source(room_id),
             imported,
             len(sessions),
         )
