@@ -10,6 +10,17 @@ under that name.
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-09-29
+
+The rest of the #90 audit: cross-agent channels (blocklist, `cache_flush`,
+the Matrix bridge), forged trust markers, call destinations in the audit,
+resource caps, and backend credentials in the journal.
+
+**Upgrade:** set `BRIDGE_ALLOWED_INVITERS` on every bridge before it restarts
+(unset, a bridge leaves every room), and upgrade the gateway and bridges
+together (the gateway refuses outbound into a room whose membership an old
+bridge never reported).
+
 ### Security
 
 - Request bodies on the MCP routes are capped while they stream (#267).
