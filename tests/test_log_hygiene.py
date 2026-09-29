@@ -38,7 +38,12 @@ from mcp_trentina_crunchtools.gateway import backend as backend_mod
 from mcp_trentina_crunchtools.gateway import internal
 from mcp_trentina_crunchtools.gateway.app import gateway_app
 from mcp_trentina_crunchtools.gateway.errors import BackendCallError, BackendNotInProfileError
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+from mcp_trentina_crunchtools.gateway.profile import (
+    AuthConfig,
+    Backend,
+    ParameterConstraint,
+    Profile,
+)
 from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
 from mcp_trentina_crunchtools.tools import cache as cache_tool
 from mcp_trentina_crunchtools.tools import reconnect as reconnect_tool
@@ -279,6 +284,54 @@ class TestProxiedTools:
                     },
                 },
             )
+
+    async def test_destination_reaches_the_audit_and_not_the_log(
+        self, env: Path, captured: _Capture
+    ) -> None:
+        """The destination is recorded (#266); the canary in it is never logged."""
+        from mcp_trentina_crunchtools import database
+
+        profile = _profile()
+        profile.backends["mcp-slack"] = Backend(
+            url="http://mcp-slack:8000/mcp",
+            destination_params={"send_message": "channel"},
+            parameter_guards={"send_message": {"text": ParameterConstraint(deny=["*"])}},
+        )
+        profile.backends["web"] = Backend(url="internal://web")
+        backend_mod._tool_list_cache["http://mcp-slack:8000/mcp"] = [
+            {"name": "send_message", "inputSchema": {}}
+        ]
+        with patch.object(
+            backend_mod, "_do_call_tool", side_effect=RuntimeError(f"backend said {CANARY}")
+        ):
+            for arguments in ({"channel": CANARY}, {"channel": CANARY, "text": CANARY}):
+                await route_jsonrpc(
+                    profile,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": f"mcp-slack{NAMESPACE_SEP}send_message",
+                            "arguments": arguments,
+                        },
+                    },
+                )
+        # No internal server bound: the call fails, and is audited all the same.
+        with patch.object(internal, "_server", None):
+            await route_jsonrpc(
+                profile,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": f"web{NAMESPACE_SEP}fetch_tool", "arguments": {"url": URL}},
+                },
+            )
+        rows = database.get_db().execute("SELECT destination FROM gateway_calls").fetchall()
+        recorded = [r["destination"] for r in rows]
+        assert recorded[:2] == [CANARY, CANARY]
+        assert recorded[2].startswith(f"{CANARY}.example.com#")
 
     async def test_unknown_tool(self, captured: _Capture) -> None:
         with pytest.raises(BackendNotInProfileError):

@@ -18,7 +18,6 @@ forwards. Only a name tools/list serves resolves: since 0.43.0 the
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import functools
 import json
 import logging
@@ -54,6 +53,7 @@ from .compress import (
     set_on_compressed,
 )
 from .context import profile_context
+from .destination import Destination, destination_of
 from .errors import BackendCallError, BackendNotInProfileError, BackendResponseTooLargeError
 from .filter import filter_tools
 from .guards import check_parameter_guards, check_response_guards
@@ -204,8 +204,14 @@ def _audit(
     bytes_arrived: int | None = None,
     bytes_delivered: int | None = None,
     normalized: dict[str, str] | None = None,
+    destination: Destination | None = None,
 ) -> None:
-    with contextlib.suppress(Exception):
+    # The audit must never fail the call it records, and sqlite3.Error is not
+    # all a write can raise (a closed connection, a thread-affinity
+    # ProgrammingError, a full disk surfacing as OSError). A lost row is
+    # still a finding, so it is logged: the profile and the class, nothing
+    # the caller chose (#262).
+    try:
         record_gateway_call(
             profile,
             backend,
@@ -216,7 +222,11 @@ def _audit(
             bytes_arrived=bytes_arrived,
             bytes_delivered=bytes_delivered,
             normalized=normalized,
+            destination=destination.value if destination else None,
+            destination_kind=destination.kind.value if destination else None,
         )
+    except Exception as exc:
+        logger.warning("gateway: audit row lost profile=%s err=%s", profile, exc_kind(exc))
 
 
 @dataclass
@@ -551,9 +561,21 @@ async def _route_tools_call(
     if backend is None:
         raise BackendNotInProfileError(f"backend {backend_name!r} not in profile {profile.name!r}")
 
+    # From the arguments as sent, so a call refused below still records where
+    # it was pointed (#266): an agent probing destinations is the signal.
+    dest = destination_of(backend, tool_name, arguments) if isinstance(arguments, dict) else None
+
     if not filter_tools([{"name": tool_name}], backend):
         message = f"Tool {tool_name!r} not permitted on backend {backend_name!r}"
-        _audit(profile.name, backend_name, tool_name, Outcome.DENIED_ALLOWLIST, 0, message)
+        _audit(
+            profile.name,
+            backend_name,
+            tool_name,
+            Outcome.DENIED_ALLOWLIST,
+            0,
+            message,
+            destination=dest,
+        )
         return _err(req_id, JSONRPC_INVALID_PARAMS, message)
 
     # The mode resolves BEFORE any guard reads it: an omitted mode becomes
@@ -562,7 +584,15 @@ async def _route_tools_call(
         policy, mode, prompt, forwarded = resolve_call(profile, backend, tool_name, arguments)
         preprocess, requested, minify = resolve_preprocess(profile, backend, tool_name, arguments)
     except (ModeNotPermittedError, PreProcessNotPermittedError) as exc:
-        _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, str(exc))
+        _audit(
+            profile.name,
+            backend_name,
+            tool_name,
+            Outcome.DENIED_GUARD,
+            0,
+            str(exc),
+            destination=dest,
+        )
         return _err(req_id, JSONRPC_INVALID_PARAMS, str(exc))
 
     # Before the guards, so they judge exactly what is forwarded.
@@ -585,6 +615,7 @@ async def _route_tools_call(
             0,
             message,
             normalized=normalized.dropped or None,
+            destination=dest,
         )
         return _err(req_id, JSONRPC_INVALID_PARAMS, message)
 
@@ -605,7 +636,15 @@ async def _route_tools_call(
     except BackendCallError as exc:
         duration_ms = int((time.monotonic() - t0) * 1000)
         outcome = classify_exception(exc)
-        _audit(profile.name, backend_name, tool_name, outcome, duration_ms, str(exc))
+        _audit(
+            profile.name,
+            backend_name,
+            tool_name,
+            outcome,
+            duration_ms,
+            str(exc),
+            destination=dest,
+        )
         refusal = _call_refusal(exc, mode, policy)
         if refusal is not None:
             return _err(req_id, JSONRPC_INTERNAL_ERROR, _refusal_text(refusal), refusal)
@@ -631,6 +670,7 @@ async def _route_tools_call(
             Outcome.DENIED_RESPONSE_GUARD,
             duration_ms,
             response_err,
+            destination=dest,
         )
         return _err(req_id, JSONRPC_INVALID_PARAMS, response_err)
 
@@ -646,6 +686,7 @@ async def _route_tools_call(
         policy=policy,
         minify=minify,
         normalized=normalized.dropped,
+        destination=dest,
     )
     return _ok(req_id, result)
 
@@ -734,6 +775,7 @@ async def _deliver(
     policy: ModePolicy,
     minify: bool | None,
     normalized: dict[str, str] | None = None,
+    destination: Destination | None = None,
 ) -> dict[str, Any]:
     """Assemble the result, then write the call's one audit row, sizes included.
 
@@ -762,6 +804,7 @@ async def _deliver(
             Outcome.GATEWAY_ERROR,
             int((time.monotonic() - t0) * 1000),
             f"assembly failed: {exc}",
+            destination=destination,
         )
         raise
     if normalized:
@@ -790,6 +833,7 @@ async def _deliver(
         bytes_arrived=arrived,
         bytes_delivered=await asyncio.to_thread(wire_bytes, assembled.result),
         normalized=normalized or None,
+        destination=destination,
     )
     return assembled.result
 

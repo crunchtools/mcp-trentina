@@ -91,6 +91,22 @@ under that name.
   with the confinement checks, the open and the read in one call (#267). The
   stdlib-shadow scan stops at the same 501 entries as the listing instead of
   walking the whole directory.
+### Added
+
+- Call destinations in the audit (#266). `gateway_calls` gains `destination`
+  and `destination_kind`, migrated in place: `fetch` records the URL's host
+  and `sha256[:16]` of the URL, `search` records `q#` and the query's hash,
+  and a proxied tool records the argument its backend names in the new
+  `destination_params` map (tool to parameter, truncated to 256 characters).
+  Refused calls record where they were pointed too. The value is never
+  logged. `quarantine_stats` shows an agent its own recent destinations and
+  the operator every profile's as fingerprints only; the operator also
+  gets `fanout`, per profile distinct fetch hosts and declared outbound calls
+  over ten minutes. `contrib/nagios/check_trentina_fanout` (stdlib, read-only)
+  raises WARNING/CRITICAL on the same numbers. An agent reload that would
+  leave its profile with fewer `destination_params` rules is refused. A lost
+  audit row is now logged (profile and exception class) instead of dropped
+  silently.
 
 ## [0.47.0] - 2026-09-29
 

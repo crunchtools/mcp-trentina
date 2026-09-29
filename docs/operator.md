@@ -19,7 +19,7 @@ seat:
 
 | Tool | As the operator |
 |---|---|
-| `quarantine_stats` | Every profile's calls and detections, plus compression savings |
+| `quarantine_stats` | Every profile's calls, detections, destinations and fan-out, plus compression savings |
 | `cache_flush` | Every cache, by exact name |
 | `reconnect_backend` | Any backend, wherever it is configured, and which profiles share it |
 | `reload_profiles` | Applies the whole `profiles.yaml`, gateway-wide settings included |
