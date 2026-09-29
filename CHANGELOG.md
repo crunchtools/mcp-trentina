@@ -25,6 +25,11 @@ under that name.
   inbound events. The router builds `_trentina_warning` from gateway parts
   only. A new `reserved_stripped` count in the warning reports what was
   removed; the log records the count, never the key.
+- Backend URLs are logged as `scheme://host[:port]` only (`logsafe.safe_url`).
+  The circuit-breaker and cache-evict lines printed the whole URL, and a
+  token-in-URL backend's credential reached the agent-readable journal.
+- A backend `url` expands `${VAR}` like a header does, so a token-in-URL
+  credential lives in the environment instead of profiles.yaml (#268).
 
 ## [0.47.0] - 2026-09-29
 
