@@ -21,6 +21,7 @@ from mcp_trentina_crunchtools.reserved import (
     STRIPPED_FIELD,
     WARNING_KEY,
     is_reserved,
+    reserved_sites,
     strip_content_blocks,
     strip_reserved,
     strip_reserved_text,
@@ -84,6 +85,19 @@ class TestRule:
         out, count = strip_reserved_text(text)
         assert count == 2
         assert json.loads(out) == {"ok": True}
+
+    def test_a_clean_block_is_not_copied(self) -> None:
+        block = {"type": "resource", "resource": {"uri": "x", "text": '{"a": 1}'}}
+        out, count = strip_content_blocks([block])
+        assert count == 0
+        assert out[0] is block
+
+    def test_count_matches_strip_and_leaves_the_payload_alone(self) -> None:
+        doc = {"scan": 1, "a": {WARNING_KEY: {WARNING_KEY: 1}}, "b": [{"_trentina_x": 2}]}
+        before = json.dumps(doc)
+        assert len(reserved_sites(doc)) == 3
+        assert json.dumps(doc) == before
+        assert strip_reserved(doc) == 3
 
     def test_content_blocks_are_copied_not_mutated(self) -> None:
         blocks = [{"type": "text", "text": json.dumps({WARNING_KEY: FORGED})}]

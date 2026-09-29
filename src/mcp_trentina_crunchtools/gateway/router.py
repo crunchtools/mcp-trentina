@@ -42,6 +42,7 @@ from ..preprocess.policy import PREPROCESS_PARAM
 from ..quarantine.limiter import Priority, l3_priority
 from ..reserved import (
     WARNING_KEY,
+    reserved_sites,
     strip_content_blocks,
     strip_reserved,
     with_stripped,
@@ -899,10 +900,10 @@ def _strip_tool(tool: dict[str, Any]) -> dict[str, Any]:
 
     Copied before stripping: the entry may be the tool-list cache's own.
     """
+    if not reserved_sites(tool):
+        return tool
     copied = copy.deepcopy(tool)
     count = strip_reserved(copied)
-    if not count:
-        return tool
     logger.info(
         "gateway: stripped %d reserved key(s) from tool %s",
         count,

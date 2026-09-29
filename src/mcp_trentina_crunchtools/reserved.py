@@ -60,28 +60,38 @@ def is_reserved(key: Any, *, root: bool = False) -> bool:
     return canonical.startswith(RESERVED_PREFIX) or (root and canonical in RESERVED_ROOT_KEYS)
 
 
-def strip_reserved(payload: Any, *, root_keys: bool = True) -> int:
-    """Remove every reserved key from ``payload`` IN PLACE; return how many.
+def reserved_sites(payload: Any, *, root_keys: bool = True) -> list[tuple[dict[str, Any], str]]:
+    """Every (object, key) pair the rule reserves, without touching ``payload``.
 
-    ``payload`` is a parsed JSON document the caller owns. Root keys are
-    checked only on the top-level object, and not at all when ``root_keys``
-    is false (an MCP content block is a wrapper, not a document).
+    Root keys are checked only on the top-level object, and not at all when
+    ``root_keys`` is false (an MCP content block is a wrapper, not a
+    document). A reserved key's value is not searched: it goes whole. A
+    caller that does not own ``payload`` asks this first and copies only
+    when the answer is not empty.
     """
-    count = 0
+    sites: list[tuple[dict[str, Any], str]] = []
     stack: list[Any] = [payload]
     root = root_keys
     while stack:
         node = stack.pop()
         if isinstance(node, dict):
-            doomed = [k for k in node if is_reserved(k, root=root)]
-            for key in doomed:
-                del node[key]
-            count += len(doomed)
-            stack.extend(v for v in node.values() if isinstance(v, (dict, list)))
+            for key, value in node.items():
+                if is_reserved(key, root=root):
+                    sites.append((node, key))
+                elif isinstance(value, (dict, list)):
+                    stack.append(value)
         elif isinstance(node, list):
             stack.extend(v for v in node if isinstance(v, (dict, list)))
         root = False
-    return count
+    return sites
+
+
+def strip_reserved(payload: Any, *, root_keys: bool = True) -> int:
+    """Remove every reserved key from ``payload`` IN PLACE; return how many."""
+    sites = reserved_sites(payload, root_keys=root_keys)
+    for node, key in sites:
+        del node[key]
+    return len(sites)
 
 
 def strip_reserved_text(text: str) -> tuple[str, int]:
@@ -126,12 +136,23 @@ def strip_content_blocks(blocks: list[Any] | None) -> tuple[list[Any], int]:
         if not isinstance(block, dict):
             out.append(block)
             continue
+        texts = {}
+        for name, holder in (("block", block), ("resource", block.get("resource"))):
+            if isinstance(holder, dict) and isinstance(holder.get("text"), str):
+                text, n = strip_reserved_text(holder["text"])
+                if n:
+                    texts[name] = text
+                    count += n
+        if not texts and not reserved_sites(block, root_keys=False):
+            # Copy-on-write: a clean block is passed on as it came.
+            out.append(block)
+            continue
         copied = copy.deepcopy(block)
         count += strip_reserved(copied, root_keys=False)
-        for holder in (copied, copied.get("resource")):
-            if isinstance(holder, dict) and isinstance(holder.get("text"), str):
-                holder["text"], n = strip_reserved_text(holder["text"])
-                count += n
+        if "block" in texts:
+            copied["text"] = texts["block"]
+        if "resource" in texts:
+            copied["resource"]["text"] = texts["resource"]
         out.append(copied)
     return out, count
 
