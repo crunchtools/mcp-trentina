@@ -81,6 +81,7 @@ def declared_length_over(scope: Any, cap: int) -> bool:
             try:
                 return int(value) > cap
             except ValueError:
+                # nosemgrep: trentina-except-returns-benign -- True means refuse here
                 return True
     return False
 

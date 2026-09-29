@@ -975,6 +975,7 @@ async def _search_openrouter(query: str, num_results: int, api_key: str) -> dict
 
     try:
         async with (
+            # nosemgrep: trentina-httpx-client-outside-egress -- fixed API URL
             httpx.AsyncClient(timeout=httpx.Timeout(L0_SEARCH_TIMEOUT)) as http_client,
             http_client.stream(
                 "POST",
@@ -1038,6 +1039,7 @@ async def search_grounded(
     url = f"{GEMINI_API_BASE}/{model}:generateContent"
 
     try:
+        # nosemgrep: trentina-httpx-client-outside-egress -- fixed API URL
         async with httpx.AsyncClient(timeout=httpx.Timeout(GEMINI_TIMEOUT)) as http_client:
             resp = await http_client.post(
                 url,

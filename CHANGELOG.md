@@ -10,6 +10,60 @@ under that name.
 
 ## [Unreleased]
 
+Review tooling for the trust boundary (#90, #269). The #90 audit found every
+real bug by hand while Bandit, public Semgrep rules and CodeQL
+`security-extended` found none; this makes the checks that found them
+repeatable.
+
+### Added
+
+- `trentina-boundary-review` skill (`.claude/skills/`): a strict reviewer of
+  fail-closed correctness and the trust boundary, after google/rust-skills'
+  `unsafe_rust_review`. Activation criteria (#90's list plus the five channels
+  the audit found), a four-tier authority hierarchy with mandatory premise
+  classification, obligations O1-O13, the `# TRUST:` comment convention, 16
+  reject patterns, a JSON finding format and a precision section. The first
+  two `# TRUST:` comments are in `defense.py` and `egress.py`.
+- Its eval suite: `EVAL.yml` with eight known-bad fixtures reduced from real
+  defects (the pre-#87 audit boolean, sync `classify()` in a coroutine,
+  `except` returning BENIGN, a guard denial before `_audit`, a truncated scan
+  reported clean, the #263 blocklist, the pre-#260 fetch, the pre-#262 log)
+  and three controls a reviewer must leave alone.
+  `tests/boundary_review_eval.py` runs it against the Messages API (httpx, no
+  SDK) and grades with a keyword/obligation match plus a judge model. CI runs
+  it only when `ANTHROPIC_API_KEY` is set and `src/`, the skill or the
+  fixtures changed.
+- `.semgrep/trentina.yml`: seven in-repo rules (sync `classify` in `async def`,
+  `except` returning a benign verdict, `follow_redirects=True`, an httpx client
+  outside `egress.py`, exception text in a `gateway/`/`tools/` log call,
+  nested-quantifier regexes, `return _err` before `_audit` in
+  `_route_tools_call`), each with a `--test` fixture, and a CI job that uploads
+  SARIF. Every accepted hit in `src/` carries an inline justification.
+- A CodeQL query pack (`.github/codeql/trentina-queries/`) that makes MCP tool
+  arguments remote input and `egress.check_url`/`open_guarded`, `defend()` and
+  the `logsafe` helpers barriers: tool-arg-to-http-client-without-egress-check,
+  tool-arg-to-log, untrusted-returned-without-defend. Run against the pre-#260
+  tree it reports the SSRF and the #262 log lines; against this tree, nothing.
+  Wired in through `.github/codeql/codeql-config.yml`.
+- `gateway/profile_lint.py` (`python -m mcp_trentina_crunchtools.gateway.profile_lint <file>`):
+  fails on two profiles holding write tools on one backend URL without a
+  `shared_backends` allowance, on a seat with open fetch, a public inbox and an
+  unguarded outbound tool, and on any `TRENTINA_REQUIRE_*` default that is not
+  fail-closed.
+- `tests/test_incident_replay.py`: the incident's techniques as tests (a
+  metadata-IP fetch, a redirect to loopback, a canary absent from the log).
+  The cross-profile blocklist probe and the forged `_trentina_warning` run
+  against the #263 and #265 fixes.
+
+### Fixed
+
+- A `tools/call` for a name the profile was never served returned before
+  writing its audit row, so a consumer probing for tool names left no trace.
+  It is now audited as `denied_allowlist`, with the name's fingerprint rather
+  than its text. Found by the new semgrep rule.
+- `reconnect_backend` handed the caller's argument to a log line; it now
+  passes the configured backend name it resolved to. Found by the CodeQL pack.
+
 ### Security
 
 - `llm_providers` keys take the `_FILE` form like every other secret, so a

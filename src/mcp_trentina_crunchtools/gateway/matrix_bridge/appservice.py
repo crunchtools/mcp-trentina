@@ -99,6 +99,7 @@ class AppService:
         self._token = as_token
         self._prefix = user_prefix
         self._mapping = mapping
+        # nosemgrep: trentina-httpx-client-outside-egress -- operator URL
         self._client = client or httpx.AsyncClient(timeout=_TIMEOUT)
         self.bot_id = f"@{sender_localpart}:{server_name}"
         self._sender_localpart = sender_localpart

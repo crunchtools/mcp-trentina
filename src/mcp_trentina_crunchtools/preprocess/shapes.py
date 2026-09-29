@@ -65,6 +65,7 @@ _VOWELS = frozenset("aeiouAEIOU")
 _NUMERIC_RE = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
 _MXID_RE = re.compile(r"^[@!#+][\x21-\x7e]+:[A-Za-z0-9.\-]+(?::\d+)?$")
 _EVENT_ID_RE = re.compile(r"^\$[A-Za-z0-9_\-+/=]{20,}$")
+# nosemgrep: trentina-nested-quantifier-regex -- each repeat opens with '.', one split
 _ENUM_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$")
 _BASE64ISH_RE = re.compile(r"^[A-Za-z0-9_\-+/=]+$")
 

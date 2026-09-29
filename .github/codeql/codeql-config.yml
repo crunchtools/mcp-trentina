@@ -1,0 +1,13 @@
+name: trentina-codeql
+
+# security-extended plus Trentina's own sources, sinks and barriers (#269).
+# The pack also adds MCP tool arguments to RemoteFlowSource, so the standard
+# SSRF, path-injection and log-injection queries see agent input too.
+queries:
+  - uses: security-extended
+  - uses: ./.github/codeql/trentina-queries
+
+paths-ignore:
+  - tests/fixtures/boundary-review
+  - .semgrep/tests
+  - demo

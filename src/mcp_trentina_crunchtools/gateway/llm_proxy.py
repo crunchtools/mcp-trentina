@@ -62,6 +62,7 @@ _llm_client: httpx.AsyncClient | None = None
 def _get_llm_client() -> httpx.AsyncClient:
     global _llm_client
     if _llm_client is None:
+        # nosemgrep: trentina-httpx-client-outside-egress -- operator host, no redirects
         _llm_client = httpx.AsyncClient(timeout=_LLM_TIMEOUT)
     return _llm_client
 

@@ -251,6 +251,7 @@ def _cache_put(key: str, value: dict[str, Any] | None, *, persist: bool = False)
         # answer, and must never cost the request in front of us. Stop
         # trying: whatever broke the write breaks the next two hundred.
         _persist_broken = True
+        # nosemgrep: trentina-log-exception-text -- logsafe: ours
         logger.warning(  # logsafe: ours — a sqlite write of the gateway's own rows
             "perimeter: cannot write the verdict store; verdicts will not survive this restart",
             exc_info=True,

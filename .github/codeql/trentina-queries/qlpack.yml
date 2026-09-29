@@ -1,0 +1,11 @@
+name: crunchtools/trentina-queries
+version: 0.1.0
+description: >-
+  Trentina's own sources, sinks and barriers for CodeQL (#269). MCP tool
+  arguments are remote input; egress.check_url/open_guarded, defend() and the
+  logsafe helpers are the barriers. security-extended found neither the SSRF
+  (#260) nor the path traversal (#261) because it did not know either.
+library: false
+dependencies:
+  codeql/python-all: "*"
+extractor: python

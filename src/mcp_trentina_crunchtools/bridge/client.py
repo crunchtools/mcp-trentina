@@ -123,6 +123,7 @@ class Bridge:
                 store_sync_tokens=False,
             ),
         )
+        # nosemgrep: trentina-httpx-client-outside-egress -- operator env URL
         self._gateway = gateway or httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=5.0))
         self._send_lock = asyncio.Lock()
         # Sync and send both drive nio's crypto state (key upload, query and

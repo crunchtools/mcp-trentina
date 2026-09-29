@@ -136,6 +136,7 @@ async def promote_registration(client_store: Any, client_id: str) -> None:
             ttl=promoted_ttl_seconds(),
         )
     except Exception:
+        # nosemgrep: trentina-log-exception-text -- logsafe: ours
         logger.warning(  # logsafe: ours — the store's error; client_id is server-issued
             "oauth-store: could not promote registration %s — it keeps its "
             "provisional lifetime and the client will re-register",
@@ -168,6 +169,7 @@ async def mark_provisional(client_store: Any, client_id: str) -> None:
             ttl=PROVISIONAL_TTL_SECONDS,
         )
     except Exception:
+        # nosemgrep: trentina-log-exception-text -- logsafe: ours
         logger.warning(  # logsafe: ours — the store's error; client_id is server-issued
             "oauth-store: could not set a provisional lifetime on "
             "registration %s — it will not expire on its own",
@@ -256,6 +258,7 @@ async def cull_once(storage: Any) -> bool:
     try:
         await store.cull()
     except Exception:
+        # nosemgrep: trentina-log-exception-text -- logsafe: ours
         logger.warning("oauth-store: sweep failed", exc_info=True)  # logsafe: ours
         return False
     return True

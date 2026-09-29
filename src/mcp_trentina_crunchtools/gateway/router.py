@@ -567,6 +567,17 @@ async def _route_tools_call(
             f"backend {served_name.partition(NAMESPACE_SEP)[0]!r} not in profile {profile.name!r}"
         )
     if resolved is None or not resolved[1]:
+        # Audited like a denial (#269): a consumer probing for names it was
+        # never served is the signal the #87 denial rows exist for. The name
+        # is the caller's, so the row carries its fingerprint, not its text.
+        _audit(
+            profile.name,
+            "",
+            redact_source(served_name),
+            Outcome.DENIED_ALLOWLIST,
+            0,
+            "unknown tool",
+        )
         return _err(req_id, JSONRPC_INVALID_PARAMS, f"Unknown tool {served_name!r}")
     backend_name, tool_name = resolved
 

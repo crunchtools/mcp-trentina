@@ -56,6 +56,7 @@ class AnthropicProvider(Provider):
         }
 
         try:
+            # nosemgrep: trentina-httpx-client-outside-egress -- fixed or operator URL
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(ANTHROPIC_TIMEOUT),
             ) as client:
