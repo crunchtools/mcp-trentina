@@ -10,6 +10,22 @@ under that name.
 
 ## [Unreleased]
 
+### Security
+
+- Gateway trust markers could be forged in-band (#265). A backend's
+  `structuredContent`, JSON in its text content, an alert body or a Matrix
+  event could carry `_trentina_warning: {"risk_level": "low"}` (or
+  `_trentina_refusal`, or `scan`), and it reached the agent as if the
+  gateway had written it. The router also merged its own `normalized` note
+  into whatever warning the result already held. `reserved.py` now defines
+  the reserved keys: any `_trentina_*` key at any depth, plus `scan` and
+  `l1` at a document's root. Every backend response path strips them before
+  the scan and before the gateway adds its own marker. So do tool-list
+  entries, the alert ingress, the Matrix proxy and the Matrix bridge's
+  inbound events. The router builds `_trentina_warning` from gateway parts
+  only. A new `reserved_stripped` count in the warning reports what was
+  removed; the log records the count, never the key.
+
 ## [0.47.0] - 2026-09-29
 
 Hardening from the #90 audit, which uses the OpenAI–Hugging Face incident as its threat model.

@@ -32,6 +32,7 @@ operator who wants a stricter ingress can now say so.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -45,6 +46,7 @@ from starlette.responses import Response
 from ..defense import defend, defend_json
 from ..l1.pipeline import risk_level_for_count
 from ..logsafe import exc_kind
+from ..reserved import WARNING_KEY, strip_reserved, with_stripped
 from .context import profile_context
 
 if TYPE_CHECKING:
@@ -257,7 +259,10 @@ async def _defend_alert(
     plain text has nowhere to carry an annotation, so its warning lives in
     the log line and the D-Bus event) — plus the L1 risk level, whether any
     layer flagged, and the raw L1 detection counts. Content is never
-    modified on the way through: L1 detects and the sidecar warns.
+    modified on the way through: L1 detects and the sidecar warns. The one
+    exception is gateway-reserved keys (``reserved.py``, #265), which the
+    sender may not write: they are removed before the scan and counted in
+    the warning as ``reserved_stripped``.
 
     This function does not decide disposition and never did — an earlier
     revision claimed "the enforcement mode (not this function) decides
@@ -286,6 +291,17 @@ async def _defend_alert(
 
     defense = profile.defense
     source = f"alert:{profile.name}"
+
+    # The sender does not get to write the gateway's markers (#265): stripped
+    # before the scan, so what is judged is what is forwarded, and before the
+    # gateway adds its own below.
+    stripped = await asyncio.to_thread(strip_reserved, payload) if payload is not None else 0
+    if stripped:
+        logger.info(
+            "alert_ingress: stripped %d reserved key(s) from an alert for profile=%s",
+            stripped,
+            profile.name,
+        )
 
     if payload is not None:
         # L1 per leaf so the JSON survives; L2/L3 read the joined document, so
@@ -332,8 +348,9 @@ async def _defend_alert(
     # it in means reconciling those two risk models, which is a behaviour
     # change to the alert path and does not belong in the commit that fixes
     # the Matrix one. Tracked separately.
-    if flagged and isinstance(forward_payload, dict):
-        forward_payload["_trentina_warning"] = {
+    warning: dict[str, Any] | None = None
+    if flagged:
+        warning = {
             "risk_level": risk_level,
             "l1_detections": counts.detections,
             "l2_label": classification.label if classification is not None else None,
@@ -345,6 +362,9 @@ async def _defend_alert(
                 else None
             ),
         }
+    warning = with_stripped(warning, stripped)
+    if warning is not None and isinstance(forward_payload, dict):
+        forward_payload[WARNING_KEY] = warning
 
     forward_body = (
         json.dumps(forward_payload).encode("utf-8")
