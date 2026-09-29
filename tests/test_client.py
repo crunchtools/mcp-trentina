@@ -8,17 +8,17 @@ prose.
 
 from __future__ import annotations
 
-import functools
-
 import httpx
 import pytest
 
 from mcp_trentina_crunchtools.client import (
+    MAX_ERROR_BODY,
     MAX_RESPONSE_SIZE,
     _is_text_content_type,
     fetch_url,
 )
 from mcp_trentina_crunchtools.errors import FetchError, UnsupportedContentTypeError
+from tests.egress_harness import route
 
 
 def mock_http(
@@ -48,11 +48,7 @@ def mock_http(
 
         return httpx.Response(200, headers=headers, content=stream())
 
-    real_client = httpx.AsyncClient
-    monkeypatch.setattr(
-        "mcp_trentina_crunchtools.client.httpx.AsyncClient",
-        functools.partial(real_client, transport=httpx.MockTransport(handler)),
-    )
+    route(monkeypatch, handler)
     return state
 
 
@@ -114,9 +110,7 @@ class TestContentTypeAllowlist:
         assert returned_type == content_type
 
     @pytest.mark.asyncio
-    async def test_missing_content_type_is_allowed(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_missing_content_type_is_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An absent header is common on plain files; don't break those."""
         mock_http(monkeypatch, content_type=None, body=b"plain")
 
@@ -164,9 +158,7 @@ class TestSizeCap:
             await fetch_url("https://example.com/big")
 
     @pytest.mark.asyncio
-    async def test_body_at_the_limit_is_accepted(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_body_at_the_limit_is_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_http(monkeypatch, content_type="text/plain", body=b"y" * 1000)
 
         content, _ = await fetch_url("https://example.com/ok")
@@ -195,11 +187,7 @@ class TestRedirectChainDiagnostics:
                 headers={"location": "https://archive.example.com/catalogue.ZIP"},
             )
 
-        real_client = httpx.AsyncClient
-        monkeypatch.setattr(
-            "mcp_trentina_crunchtools.client.httpx.AsyncClient",
-            functools.partial(real_client, transport=httpx.MockTransport(handler)),
-        )
+        route(monkeypatch, handler)
 
         with pytest.raises(UnsupportedContentTypeError) as exc:
             await fetch_url("https://archive.example.com/")
@@ -221,3 +209,58 @@ class TestRedirectChainDiagnostics:
             await fetch_url("https://example.com/archive.zip")
 
         assert exc.value.redirect_chain is None
+
+
+class TestErrorBody:
+    """A 4xx body is read while the stream is open, so the advisory scan sees it."""
+
+    @pytest.mark.asyncio
+    async def test_streamed_4xx_body_is_captured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def stream() -> object:
+            yield b"Use curl instead"
+
+        route(monkeypatch, lambda _r: httpx.Response(415, content=stream()))
+
+        with pytest.raises(FetchError) as exc:
+            await fetch_url("https://example.com/")
+
+        assert exc.value.status_code == 415
+        assert exc.value.error_body == "Use curl instead"
+
+    @pytest.mark.asyncio
+    async def test_error_body_is_capped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        route(monkeypatch, lambda _r: httpx.Response(404, content=b"x" * (MAX_ERROR_BODY * 3)))
+
+        with pytest.raises(FetchError) as exc:
+            await fetch_url("https://example.com/")
+
+        assert exc.value.error_body == "x" * MAX_ERROR_BODY
+
+    @pytest.mark.asyncio
+    async def test_a_body_that_breaks_off_keeps_the_status(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def broken() -> object:
+            yield b"partial"
+            raise httpx.ReadError("connection reset")
+
+        route(monkeypatch, lambda _r: httpx.Response(403, content=broken()))
+
+        with pytest.raises(FetchError) as exc:
+            await fetch_url("https://example.com/")
+
+        assert exc.value.status_code == 403
+        assert exc.value.error_body is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", [304, 300])
+    async def test_an_unfollowed_3xx_is_not_a_page(
+        self, monkeypatch: pytest.MonkeyPatch, status: int
+    ) -> None:
+        route(monkeypatch, lambda _r: httpx.Response(status, text="not the page"))
+
+        with pytest.raises(FetchError) as exc:
+            await fetch_url("https://example.com/")
+
+        assert exc.value.status_code == status
+        assert exc.value.error_body is None

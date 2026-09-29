@@ -50,6 +50,9 @@ uv run mcp-trentina-crunchtools
   `/data`, `/proc`, `/sys`, `/run`, `/dev` and the directories of the two
   databases, the trust config and the live `profiles.yaml`. Refusals are a
   closed reason code, never the path.
+- `TRENTINA_FETCH_ALLOW_PRIVATE` — default false. Lifts the egress guard's
+  address rule so fetch can reach non-global addresses; scheme, port and
+  redirect rules still hold. Warns at startup. See `egress.py` (#260).
 - `TRENTINA_RATE_LIMIT` — "off" disables limiting on the unauthenticated OAuth
   write paths (default on). An incident escape hatch, not a setting.
 - `TRENTINA_FORWARDED_ALLOW_IPS` — peer addresses whose `X-Forwarded-For` is
@@ -313,6 +316,12 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
   matches neither: `classifier.py` is L2 (Prompt Guard 2, local ONNX) and
   `agent.py` is L3 (Gemini REST via httpx, NO SDK, NO tools). CLAUDE.md called
   this "Layer 2: Q-Agent" until 0.29.0, which was simply wrong.
+- `egress.py` — the ONE egress guard (#260) for every gateway-side fetch
+  (`client.fetch_url`, grounding redirects). Refuses on the RESOLVED address,
+  pins the connection to it (`PinnedBackend` under httpx's pool; TLS still
+  verifies the hostname), and follows redirects by hand, checking each hop.
+  Refusal reasons are a closed set and never name the address. Never give an
+  outbound `httpx.AsyncClient` an agent-chosen URL without it.
 - `tools/` — Tool implementations called by server.py wrappers
 - `database.py` — SQLite blocklist for cumulative detection memory
 - `perimeter_db.py` — the perimeter's own store, deliberately a second database:

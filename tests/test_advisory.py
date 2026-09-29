@@ -7,7 +7,6 @@ to less-secure tools like curl/wget.
 
 from __future__ import annotations
 
-import functools
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -22,6 +21,7 @@ from mcp_trentina_crunchtools.tools.fetch import (
     _scan_error_body,
     block_fetch,
 )
+from tests.egress_harness import route
 
 
 def _mock_http_status(
@@ -40,11 +40,7 @@ def _mock_http_status(
             content=body,
         )
 
-    real_client = httpx.AsyncClient
-    monkeypatch.setattr(
-        "mcp_trentina_crunchtools.client.httpx.AsyncClient",
-        functools.partial(real_client, transport=httpx.MockTransport(handler)),
-    )
+    route(monkeypatch, handler)
 
 
 class TestFetchErrorAttributes:

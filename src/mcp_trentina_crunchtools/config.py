@@ -199,6 +199,15 @@ class Config:
         # never excuses a partial scan and never stops a layer that can run.
         self.require_l2: bool = bool_env("TRENTINA_REQUIRE_L2", True)
         self.require_l3: bool = bool_env("TRENTINA_REQUIRE_L3", True)
+        # The egress guard's one escape hatch (#260): lets fetch reach a
+        # non-global address. Scheme, port and redirect rules still hold.
+        self.fetch_allow_private: bool = bool_env("TRENTINA_FETCH_ALLOW_PRIVATE", False)
+        if self.fetch_allow_private:
+            logger.warning(
+                "[WARNING] TRENTINA_FETCH_ALLOW_PRIVATE is on: fetch can reach loopback, "
+                "private and link-local addresses, including this host's other services. "
+                "Unset it unless a trusted internal site must be fetched."
+            )
         # The mode policy when no gateway profile is bound (#193): the agent of
         # a standalone server may pass trentina_mode, but only from this set,
         # and an omitted one is TRENTINA_MODE. Both default to block, so an

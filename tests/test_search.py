@@ -24,6 +24,7 @@ from mcp_trentina_crunchtools.tools.search import (
     redact_search,
 )
 
+from .egress_harness import route
 from .mode_harness import layers
 
 
@@ -251,81 +252,88 @@ class TestGroundingExtraction:
 
 
 class TestRedirectResolution:
-    """Tests for resolve_grounding_urls()."""
+    """Tests for resolve_grounding_urls(). Every hop passes the egress guard (#260)."""
+
+    REDIRECT = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc"
 
     @pytest.mark.asyncio
-    async def test_resolve_redirect_url(self) -> None:
-        """Mocked redirect resolves to final URL."""
-        sources = [
+    async def test_resolve_redirect_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A grounding redirect resolves to its final URL, hop by hop."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.method == "HEAD"
+            if request.url.host == "vertexaisearch.cloud.google.com":
+                return httpx.Response(302, headers={"location": "https://example.com/final"})
+            return httpx.Response(200)
+
+        route(monkeypatch, handler)
+        resolved = await resolve_grounding_urls([{"uri": self.REDIRECT, "title": "Test Page"}])
+
+        assert resolved == [
             {
-                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc",
+                "uri": "https://example.com/final",
                 "title": "Test Page",
+                "original_redirect": self.REDIRECT,
             }
         ]
 
-        with patch(
-            "mcp_trentina_crunchtools.quarantine.agent.httpx.AsyncClient",
-        ) as mock_client_cls:
-            mock_resp = MagicMock()
-            mock_resp.url = httpx.URL("https://example.com/final")
-
-            mock_http = AsyncMock()
-            mock_http.head.return_value = mock_resp
-            mock_http.__aenter__ = AsyncMock(return_value=mock_http)
-            mock_http.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_http
-
-            resolved = await resolve_grounding_urls(sources)
-
-            assert len(resolved) == 1
-            assert resolved[0]["uri"] == "https://example.com/final"
-            assert resolved[0]["title"] == "Test Page"
-            assert "original_redirect" in resolved[0]
-
     @pytest.mark.asyncio
-    async def test_resolve_non_redirect(self) -> None:
-        """Non-redirect URL returned as-is."""
+    async def test_resolve_non_redirect(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Non-redirect URL returned as-is, and never requested."""
+        route(monkeypatch, _never_requested)
         sources = [{"uri": "https://example.com/page", "title": "Direct Page"}]
-
-        with patch(
-            "mcp_trentina_crunchtools.quarantine.agent.httpx.AsyncClient",
-        ) as mock_client_cls:
-            mock_http = AsyncMock()
-            mock_http.__aenter__ = AsyncMock(return_value=mock_http)
-            mock_http.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_http
-
-            resolved = await resolve_grounding_urls(sources)
-
-            assert len(resolved) == 1
-            assert resolved[0]["uri"] == "https://example.com/page"
-            assert resolved[0]["title"] == "Direct Page"
-            mock_http.head.assert_not_called()
+        assert await resolve_grounding_urls(sources) == sources
 
     @pytest.mark.asyncio
-    async def test_resolve_timeout(self) -> None:
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "http://10.89.0.1/?vertexaisearch.cloud.google.com",
+            "http://10.89.0.1/grounding-api-redirect/x",
+            "https://vertexaisearch.cloud.google.com.evil.example/x",
+            "https://evil.example/#vertexaisearch.cloud.google.com",
+        ],
+    )
+    async def test_only_the_exact_host_is_resolved(
+        self, monkeypatch: pytest.MonkeyPatch, uri: str
+    ) -> None:
+        """The substring test let any URI naming the host get a HEAD."""
+        route(monkeypatch, _never_requested)
+        sources = [{"uri": uri, "title": "t"}]
+        assert await resolve_grounding_urls(sources) == sources
+
+    @pytest.mark.asyncio
+    async def test_a_redirect_inward_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        requested: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requested.append(request.url.host)
+            return httpx.Response(302, headers={"location": "https://metadata.internal/"})
+
+        route(monkeypatch, handler, {"metadata.internal": ["169.254.169.254"]})
+        resolved = await resolve_grounding_urls([{"uri": self.REDIRECT, "title": "t"}])
+
+        assert resolved[0]["redirect_failed"] == "true"
+        assert resolved[0]["uri"] == self.REDIRECT
+        assert requested == ["vertexaisearch.cloud.google.com"]
+
+    @pytest.mark.asyncio
+    async def test_resolve_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Failed resolution flagged but not dropped."""
-        sources = [
-            {
-                "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz",
-                "title": "Timeout Page",
-            }
-        ]
 
-        with patch(
-            "mcp_trentina_crunchtools.quarantine.agent.httpx.AsyncClient",
-        ) as mock_client_cls:
-            mock_http = AsyncMock()
-            mock_http.head.side_effect = httpx.TimeoutException("timeout")
-            mock_http.__aenter__ = AsyncMock(return_value=mock_http)
-            mock_http.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_http
+        def handler(_request: httpx.Request) -> httpx.Response:
+            raise httpx.TimeoutException("timeout")
 
-            resolved = await resolve_grounding_urls(sources)
+        route(monkeypatch, handler)
+        resolved = await resolve_grounding_urls([{"uri": self.REDIRECT, "title": "Timeout Page"}])
 
-            assert len(resolved) == 1
-            assert resolved[0]["redirect_failed"] == "true"
-            assert resolved[0]["title"] == "Timeout Page"
+        assert len(resolved) == 1
+        assert resolved[0]["redirect_failed"] == "true"
+        assert resolved[0]["title"] == "Timeout Page"
+
+
+def _never_requested(_request: httpx.Request) -> httpx.Response:
+    raise AssertionError("this URI must not be requested")
 
 
 class TestSearchThroughTheOneJudgingPath:
