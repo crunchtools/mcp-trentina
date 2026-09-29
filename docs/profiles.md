@@ -319,6 +319,17 @@ Environment variables in header values are expanded once, when the file is
 loaded — so rotating one means reloading the profiles (below), not just
 restarting the backend.
 
+A backend `url` expands `${VAR}` the same way, for a server that takes its
+token in the path or query. Keep that token in the environment, never inline:
+the gateway logs a backend only as `scheme://host[:port]`. A reference is
+allowed only after the host, and its value must be URL-safe
+(`[A-Za-z0-9._~%-]`): percent-encode anything else (`&` as `%26`, `#` as
+`%23`) before putting it in the environment, or the load fails.
+
+```yaml
+    url: "http://rotv:8080/mcp?token=${ROTV_TOKEN}"
+```
+
 ## Applying a Change
 
 Editing `profiles.yaml` does not change the running gateway. The router filters

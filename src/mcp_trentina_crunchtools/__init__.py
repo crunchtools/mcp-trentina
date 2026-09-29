@@ -1289,7 +1289,7 @@ def _wire_circuit_notifications(
             except RuntimeError:
                 logger.debug(
                     "gateway: no event loop for notification broadcast (url=%s profile=%s)",
-                    url,
+                    logsafe.safe_url(url),
                     profile_name,
                 )
 

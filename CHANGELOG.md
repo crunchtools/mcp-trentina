@@ -30,6 +30,11 @@ under that name.
   audited as `denied_guard` under backend `matrix_bridge` and logged without
   Matrix IDs. Deploy the gateway and bridges together, and set
   `BRIDGE_ALLOWED_INVITERS` before the bridge restarts.
+- Backend URLs are logged as `scheme://host[:port]` only (`logsafe.safe_url`).
+  The circuit-breaker and cache-evict lines printed the whole URL, and a
+  token-in-URL backend's credential reached the agent-readable journal.
+- A backend `url` expands `${VAR}` like a header does, so a token-in-URL
+  credential lives in the environment instead of profiles.yaml (#268).
 
 ## [0.47.0] - 2026-09-29
 

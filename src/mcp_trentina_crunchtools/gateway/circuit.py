@@ -16,6 +16,8 @@ import time
 from collections.abc import Callable
 from enum import Enum
 
+from ..logsafe import safe_url
+
 logger = logging.getLogger(__name__)
 
 StateChangeCallback = Callable[[str, "State", "State"], None]
@@ -101,7 +103,7 @@ class CircuitBreaker:
                 return False
             circuit.state = State.HALF_OPEN
             circuit.probe_in_flight = True
-            logger.info("circuit: %s half-open, allowing probe", url)
+            logger.info("circuit: %s half-open, allowing probe", safe_url(url))
             self._notify(url, State.OPEN, State.HALF_OPEN)
             return True
 
@@ -118,7 +120,7 @@ class CircuitBreaker:
         circuit.probe_in_flight = False
         circuit.state = State.CLOSED
         if old_state is not State.CLOSED:
-            logger.info("circuit: %s closed after successful probe", url)
+            logger.info("circuit: %s closed after successful probe", safe_url(url))
             self._notify(url, old_state, State.CLOSED)
 
     def record_failure(self, url: str) -> None:
@@ -131,7 +133,7 @@ class CircuitBreaker:
         if old_state is State.HALF_OPEN:
             circuit.state = State.OPEN
             circuit.opened_at = time.monotonic()
-            logger.warning("circuit: %s re-opened after failed probe", url)
+            logger.warning("circuit: %s re-opened after failed probe", safe_url(url))
             self._notify(url, old_state, State.OPEN)
             return
 
@@ -140,7 +142,7 @@ class CircuitBreaker:
             circuit.opened_at = time.monotonic()
             logger.warning(
                 "circuit: %s opened after %d consecutive failures",
-                url,
+                safe_url(url),
                 circuit.consecutive_failures,
             )
             if old_state is not State.OPEN:
