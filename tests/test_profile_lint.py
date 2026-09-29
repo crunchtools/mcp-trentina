@@ -76,12 +76,18 @@ class TestFixtures:
 
     def test_shared_write_backends(self) -> None:
         messages = [str(f) for f in lint_file(FIXTURES / "shared_write.yaml")]
-        shared = [m for m in messages if m.startswith("shared-write-backend")]
-        # memory: kagetora/takeda declared; josui pairs with each of them are not.
-        # rt: kagetora/josui declared with an empty reason, which does not count.
-        assert len(shared) == 3, messages
-        assert not any("'kagetora'" in m and "'takeda'" in m for m in shared)
-        assert any("mcp-rt" in m and "'josui'" in m and "'kagetora'" in m for m in shared)
+        shared = sorted(m for m in messages if m.startswith("shared-write-backend"))
+        # One finding per URL. memory: kagetora/takeda are declared, but josui
+        # shares it with both undeclared, so all three are named. rt: the pair
+        # is declared with an empty reason, which does not count.
+        assert len(shared) == 2, messages
+        (memory,) = [m for m in shared if "mcp-memory" in m]
+        (rt,) = [m for m in shared if "mcp-rt" in m]
+        assert "mcp-memory" in memory
+        assert all(f"'{p}'" in memory for p in ("josui", "kagetora", "takeda"))
+        assert "mcp-rt" in rt
+        assert "'josui'" in rt
+        assert "'kagetora'" in rt
 
     def test_toxic_flow(self) -> None:
         findings = [str(f) for f in lint_file(FIXTURES / "toxic.yaml")]
@@ -92,6 +98,19 @@ class TestFixtures:
         assert "'toxic'" in toxic[0]
         assert "personal_send_gmail_message" in toxic[0]
         assert "postiz:*" in toxic[0]
+
+    def test_a_declared_group_is_clean_and_output_is_per_url(self) -> None:
+        backend = {"url": "http://mcp-m:1/mcp", "tools_allow": ["memory_store"]}
+        names = [f"agent-{n}" for n in range(200)]
+        profiles_file: dict[str, object] = {
+            "profiles": {n: {"backends": {"m": backend}} for n in names}
+        }
+        (finding,) = profile_lint.check_shared_write_backends(profiles_file)
+        assert "200 profiles" in str(finding)
+        profiles_file["shared_backends"] = [
+            {"url": "http://mcp-m:1/mcp/", "profiles": names, "reason": "one shared memory"}
+        ]
+        assert profile_lint.check_shared_write_backends(profiles_file) == []
 
     def test_a_finding_never_prints_a_url_credential(self) -> None:
         backend = {"url": "http://u:pw@mcp-x:8000/api/mcp/KEY?token=TOK", "tools_allow": ["*"]}

@@ -37,7 +37,6 @@ import re
 import sys
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
-from itertools import combinations
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -199,27 +198,37 @@ def _allowances(profiles_file: dict[str, Any]) -> list[tuple[str, frozenset[str]
 
 
 def check_shared_write_backends(profiles_file: dict[str, Any]) -> list[Finding]:
-    """Two profiles holding write tools on one backend URL, with no allowance."""
-    writers: dict[str, dict[str, str]] = {}
+    """Profiles holding write tools on one backend URL with no allowance: one finding per URL.
+
+    Linear in profiles, not pairs: a profile is covered when the allowances it
+    is in, for this URL, name every other writer. The finding lists the
+    profiles that are not, so 1,200 agents on one backend is one line.
+    """
+    writers: dict[str, set[str]] = {}
     for profile, body in _profiles(profiles_file).items():
-        for backend_name, backend in (body.get("backends") or {}).items():
+        for backend in (body.get("backends") or {}).values():
             url = str(backend.get("url", "")).rstrip("/")
             if url.startswith(INTERNAL_SCHEME):
                 continue  # in-process, per profile; the shared state inside is #263's
             if any("write" in kinds for kinds in held_tools(backend).values()):
-                writers.setdefault(url, {})[profile] = str(backend_name)
+                writers.setdefault(url, set()).add(profile)
     allowed = _allowances(profiles_file)
     findings = []
     for url, holders in sorted(writers.items()):
-        for a, b in combinations(sorted(holders), 2):
-            if any(u.rstrip("/") == url and {a, b} <= ps for u, ps in allowed):
-                continue
+        if len(holders) < 2:
+            continue
+        groups = [ps for u, ps in allowed if u.rstrip("/") == url]
+        uncovered = sorted(
+            p for p in holders if not holders <= set().union(*(g for g in groups if p in g), {p})
+        )
+        if uncovered:
             findings.append(
                 Finding(
                     "shared-write-backend",
-                    f"profiles {a!r} ({holders[a]}) and {b!r} ({holders[b]}) both hold write "
-                    f"tools on {_endpoint(url)}; declare the pair under shared_backends "
-                    "with a reason, or cut the write tools from one of them",
+                    f"{len(holders)} profiles hold write tools on {_endpoint(url)} and "
+                    f"{', '.join(repr(p) for p in uncovered)} share it with a profile no "
+                    "allowance pairs them with; declare them under shared_backends with a "
+                    "reason, or cut the write tools",
                 )
             )
     return findings
@@ -340,6 +349,11 @@ def lint_file(path: Path | str) -> list[Finding]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Lint the profiles file named in ``argv`` (default ``sys.argv[1:]``).
+
+    Returns 0 when clean, 1 with one printed line per finding, 2 when the
+    file cannot be read or no single path was given.
+    """
     args = sys.argv[1:] if argv is None else argv
     if len(args) != 1:
         print("usage: python -m mcp_trentina_crunchtools.gateway.profile_lint <profiles.yaml>")

@@ -194,7 +194,11 @@ class Client:
                 raise EvalSetupError(f"{model}: {type(exc).__name__}") from exc
             if resp.status_code not in RETRYABLE or attempt == MAX_ATTEMPTS:
                 break
-            delay = float(resp.headers.get("retry-after") or 2**attempt)
+            # Retry-After may be seconds or an HTTP date; a date falls back to backoff.
+            try:
+                delay = float(resp.headers.get("retry-after") or 2**attempt)
+            except ValueError:
+                delay = float(2**attempt)
             await asyncio.sleep(min(delay, 60.0))
         if resp.status_code != httpx.codes.OK:
             raise EvalSetupError(f"{model}: HTTP {resp.status_code}: {resp.text[:500]}")
