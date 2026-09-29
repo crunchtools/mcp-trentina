@@ -22,9 +22,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from ..httpbody import RequestBodyCap
 from ..logsafe import exc_kind, exc_where, redact_source, safe_address
 from ..quarantine.classifier import classifier_status
 from .auth import verify_bearer, verify_oauth
@@ -310,7 +312,8 @@ def gateway_app(
 
     Used by tests with Starlette's ``TestClient``.  Production deployment
     wires the same handler via ``register_with_fastmcp`` to avoid
-    mount-composition issues with FastMCP's own internal routing.
+    mount-composition issues with FastMCP's own internal routing, and adds
+    the same ``RequestBodyCap`` at ``mcp_server.run`` (#267).
     """
     sr = sessions or session_registry
 
@@ -340,7 +343,15 @@ def gateway_app(
         Route("/{profile}/mcp", endpoint=handle_get, methods=["GET"]),
         Route("/{profile}/mcp", endpoint=handle_delete, methods=["DELETE"]),
     ]
-    return Starlette(routes=routes)
+    return Starlette(
+        routes=routes, middleware=[Middleware(RequestBodyCap, applies=_is_profile_mcp_path)]
+    )
+
+
+def _is_profile_mcp_path(path: str) -> bool:
+    """``/<profile>/mcp``: this sub-app's MCP route, which has no ``/gateway`` prefix."""
+    parts = (path.rstrip("/") or "/").split("/")
+    return len(parts) == 3 and parts[2] == "mcp" and bool(parts[1])
 
 
 def _resource_metadata(
@@ -603,6 +614,7 @@ async def _handle_post(
         return auth_response
 
     try:
+        # Bounded by RequestBodyCap before this handler runs (#267).
         body_bytes = await request.body()
     except Exception as exc:
         # Same reasoning as alert_ingress: 400 is correct for every cause, but

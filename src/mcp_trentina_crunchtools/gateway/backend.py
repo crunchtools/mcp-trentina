@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared._httpx_utils import create_mcp_http_client
@@ -28,7 +29,7 @@ from mcp_types import INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND
 from ..database import delete_all_tool_lists, delete_tool_list, save_tool_list
 from ..logsafe import exc_kind, redact_source
 from .circuit import breaker
-from .errors import BackendCallError, BackendRejectedCallError
+from .errors import BackendCallError, BackendRejectedCallError, BackendResponseTooLargeError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -36,10 +37,109 @@ if TYPE_CHECKING:
     from .profile import Backend
 
 
+BYTES_PER_TOKEN = 32
+"""Wire bytes allowed per admitted token when capping a backend response (#267).
+
+``Config.admission_tokens`` counts L2 tokens in the text ``defend()`` reads;
+this cap counts bytes on the wire before any of that text exists. English
+runs about 4 bytes a token. The factor has to cover the worst case, not the
+usual one, because a cap tighter than admission would refuse content
+admission would have judged: a token that is one CJK character JSON-escaped
+as ``\\uXXXX`` is 6 bytes, the same text can arrive twice (``content`` and
+``structuredContent``, deduplicated only after the read), and SSE and
+JSON-RPC framing add more. 32 is that worst case with headroom; the cap's job
+is bounding memory, and admission still decides what is judged."""
+
+MIN_RESPONSE_BYTES = 1_048_576
+"""The cap never drops below 1 MiB, so a tiny ``CLASSIFIER_MAX_TOKENS`` cannot
+make a backend's ``tools/list`` unreadable."""
+
+
+def response_byte_cap() -> int:
+    """The most bytes one backend response may stream before the read stops."""
+    from ..config import get_config
+
+    return max(MIN_RESPONSE_BYTES, get_config().admission_tokens * BYTES_PER_TOKEN)
+
+
+class _ResponseRefused(httpx2.StreamError):
+    """Raised inside the SDK's read. A ``StreamError`` because that is what
+    the SDK catches there, so the pending request resolves at once as an error
+    instead of waiting out ``timeout_seconds``."""
+
+
+class _CappedStream(httpx2.AsyncByteStream):
+    """The transport's raw byte stream, counted as it arrives and cut at the cap."""
+
+    def __init__(self, inner: Any, cap: ResponseCap) -> None:
+        self._inner = inner
+        self._cap = cap
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        total = 0
+        async for chunk in self._inner:
+            total += len(chunk)
+            if total > self._cap.limit:
+                self._cap.overflowed = True
+                raise _ResponseRefused(f"backend response over {self._cap.limit} bytes")
+            yield chunk
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+
+@dataclass
+class ResponseCap:
+    """A byte cap on every response one backend session receives (#267).
+
+    The MCP SDK reads a JSON reply with ``response.aread()`` and an SSE reply
+    through ``EventSource``, both unbounded, and gives no hook between the
+    socket and either. So the cap sits under them, on the transport's RAW
+    stream: an httpx response hook swaps ``response.stream`` for a counting
+    wrapper before the SDK reads a byte. Raw, because httpx decompresses
+    after that stream, and a count taken after decompression is the #276 bug.
+    For the same reason the client asks for ``identity`` and an encoded reply
+    is refused outright rather than inflated.
+
+    One per call. ``overflowed`` is how ``call_backend_tool`` tells a cut
+    read from any other failure, whatever shape the SDK gave the error.
+    """
+
+    limit: int
+    overflowed: bool = False
+    encoded: bool = False
+
+    async def hook(self, response: httpx2.Response) -> None:
+        encoding = response.headers.get("content-encoding", "")
+        if any(part.strip().lower() not in ("", "identity") for part in encoding.split(",")):
+            self.encoded = True
+            await self._refuse(response, "backend response is content-encoded")
+        declared = response.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > self.limit:
+            self.overflowed = True
+            await self._refuse(response, f"backend response over {self.limit} bytes")
+        response.stream = _CappedStream(response.stream, self)
+
+    @staticmethod
+    async def _refuse(response: httpx2.Response, reason: str) -> None:
+        """Close the unread response and raise. httpx2 closes a response whose
+        hook raised as well; closing here does not depend on that."""
+        await response.aclose()
+        raise _ResponseRefused(reason)
+
+
+def _identity_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    """The backend's headers, with ``Accept-Encoding: identity`` in place of any other."""
+    kept = {k: v for k, v in (headers or {}).items() if k.lower() != "accept-encoding"}
+    kept["Accept-Encoding"] = "identity"
+    return kept
+
+
 @asynccontextmanager
 async def _connect_streamable_http(
     url: str,
     headers: dict[str, str] | None,
+    cap: ResponseCap | None = None,
 ) -> AsyncIterator[Any]:
     """Adapt this module's ``headers`` dict onto mcp's ``http_client=`` API.
 
@@ -66,14 +166,15 @@ async def _connect_streamable_http(
     2-tuple and a 3-tuple (trailing session-id callback); that trailing element
     is unused here, so take the first two either way rather than unpacking a
     fixed width at the call sites.
-    """
-    if not headers:
-        async with streamable_http_client(url) as streams:
-            yield streams[0], streams[1]
-        return
 
+    Every session gets its own client now, headers or not, because every
+    response is read under ``cap`` (#267); one is made if the caller has none.
+    """
+    cap = cap or ResponseCap(response_byte_cap())
+    http_client = create_mcp_http_client(headers=_identity_headers(headers))
+    http_client.event_hooks = {"request": [], "response": [cap.hook]}
     async with (
-        create_mcp_http_client(headers=headers) as http_client,
+        http_client,
         streamable_http_client(url, http_client=http_client) as streams,
     ):
         yield streams[0], streams[1]
@@ -337,6 +438,7 @@ async def call_backend_tool(
         raise BackendCallError(f"backend {backend_name!r} circuit open — skipped")
 
     headers = backend.headers or None
+    cap = ResponseCap(response_byte_cap())
     try:
         result = await asyncio.wait_for(
             _do_call_tool(
@@ -345,10 +447,27 @@ async def call_backend_tool(
                 tool_name,
                 arguments,
                 validate_output=backend.validate_output_schema,
+                cap=cap,
             ),
             timeout=backend.timeout_seconds,
         )
     except Exception as exc:
+        if cap.overflowed:
+            # The backend answered, at length: reachable, so not a breaker
+            # failure. The read stopped at the cap, so nothing was judged and
+            # nothing is delivered (#267).
+            breaker.record_success(backend.url)
+            logger.warning(
+                "gateway: call_tool response over %d bytes backend=%s tool=%s — refused",
+                cap.limit,
+                backend_name,
+                loggable_tool(backend.url, tool_name),
+            )
+            raise BackendResponseTooLargeError(
+                f"backend {backend_name!r} response to {tool_name!r} exceeded "
+                f"{cap.limit} bytes; the read was stopped there",
+                cap_bytes=cap.limit,
+            ) from exc
         rejected = _rejection(exc)
         if rejected is not None:
             # The backend answered: it is reachable, whatever it thought of
@@ -414,6 +533,7 @@ async def _do_call_tool(
     arguments: dict[str, Any],
     *,
     validate_output: bool = True,
+    cap: ResponseCap | None = None,
 ) -> Any:
     """Open a fresh session and call_tool.
 
@@ -429,7 +549,7 @@ async def _do_call_tool(
     backend failure. So the override asserts it actually patched something.
     """
     async with (
-        _connect_streamable_http(url, headers) as (read, write),
+        _connect_streamable_http(url, headers, cap) as (read, write),
         ClientSession(read, write) as session,
     ):
         await session.initialize()

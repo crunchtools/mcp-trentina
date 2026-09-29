@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import stat
 from typing import Any
@@ -37,6 +38,10 @@ def _read_confined(path: str) -> tuple[str, str]:
 
     Every check after the open reads the descriptor, never the path again,
     so what is checked is what is read.
+
+    Blocking, and whole: ``read_file`` runs it in ONE worker thread, so the
+    confinement checks, the open and the read all happen in the same call and
+    nothing is split across threads or back onto the event loop (#267).
     """
     fd, st, resolved = open_confined(path)
     with os.fdopen(fd, "rb") as fh:
@@ -69,7 +74,7 @@ async def read_file(
     runs but the policy's floor: an agent that reads a file usually means to
     edit it, and needs the bytes on disk. ``true`` minifies it by format.
     """
-    content, resolved = _read_confined(path)
+    content, resolved = await asyncio.to_thread(_read_confined, path)
 
     blocked = is_blocked(resolved)
     if blocked and mode is not Mode.REDACT:

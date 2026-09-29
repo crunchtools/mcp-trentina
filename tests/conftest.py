@@ -70,6 +70,20 @@ def _isolated_perimeter_store(tmp_path: pathlib.Path, monkeypatch: pytest.Monkey
 
 
 @pytest.fixture(autouse=True)
+def _no_startup_scrub(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test that boots the gateway must not pop the test process's own env (#268).
+
+    ``_run_with_gateway`` ends by removing startup-only secrets from
+    ``os.environ``. Under pytest that is the developer's shell environment,
+    for every test after it. ``tests/test_envscrub.py`` imports the real
+    function directly and exercises it under ``monkeypatch``.
+    """
+    from mcp_trentina_crunchtools.gateway import envscrub
+
+    monkeypatch.setattr(envscrub, "scrub_startup_secrets", lambda _extra=(): [])
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_gemini_key(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Unit tests must not inherit the shell's GEMINI_API_KEY.
 

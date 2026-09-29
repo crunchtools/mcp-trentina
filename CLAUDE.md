@@ -60,6 +60,19 @@ uv run mcp-trentina-crunchtools
   one rate-limit bucket** — the limiter keys on `scope["client"]`, which
   uvicorn only rewrites for a trusted peer. Startup logs which is in effect.
 - `TRENTINA_MAX_REGISTRATION_BYTES` — `POST /register` body cap (default 8192)
+- `TRENTINA_MAX_REQUEST_BYTES` — request body cap on every MCP route
+  (`/gateway/<profile>/mcp`, FastMCP's own mount) and the alert ingress
+  (default 1 MiB, floor 1 KiB). Over it: 413, the rest unread, chunked or
+  not (`httpbody.RequestBodyCap`, #267). A backend's RESPONSE has its own
+  cap, derived rather than set: `admission_tokens * 32` bytes, floor 1 MiB
+  (`gateway/backend.py` `BYTES_PER_TOKEN`); over it, admission's oversize
+  refusal with no alternatives, audited `blocked_defense`.
+- `TRENTINA_OAUTH_JWT_SIGNING_KEY` / `TRENTINA_OAUTH_JWT_SIGNING_KEY_FILE` and
+  `TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET[_FILE]` — read once at startup; `_FILE`
+  wins. After startup `gateway/envscrub.py` pops these, the `Config` LLM keys
+  and `llm_providers` keys from `os.environ` unless a profile references the
+  name (`reload_profiles` re-reads those). `/proc/self/environ` still holds
+  every value: only `_FILE` keeps a secret out (#268).
 - `TRENTINA_REGISTRATION_TTL_DAYS` — lifetime of a PROMOTED registration
   (default 90). A new one is provisional for an hour; a token exchange
   promotes it and every later exchange re-stamps it. See `gateway/oauth_store.py`.

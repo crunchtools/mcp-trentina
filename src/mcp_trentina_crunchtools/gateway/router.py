@@ -54,7 +54,7 @@ from .compress import (
     set_on_compressed,
 )
 from .context import profile_context
-from .errors import BackendCallError, BackendNotInProfileError
+from .errors import BackendCallError, BackendNotInProfileError, BackendResponseTooLargeError
 from .filter import filter_tools
 from .guards import check_parameter_guards, check_response_guards
 from .ingress_defense import scan_tool_list, scan_tool_response
@@ -606,7 +606,7 @@ async def _route_tools_call(
         duration_ms = int((time.monotonic() - t0) * 1000)
         outcome = classify_exception(exc)
         _audit(profile.name, backend_name, tool_name, outcome, duration_ms, str(exc))
-        refusal = refusal_of(exc)
+        refusal = _call_refusal(exc, mode, policy)
         if refusal is not None:
             return _err(req_id, JSONRPC_INTERNAL_ERROR, _refusal_text(refusal), refusal)
         return _err(req_id, JSONRPC_INTERNAL_ERROR, str(exc))
@@ -648,6 +648,30 @@ async def _route_tools_call(
         normalized=normalized.dropped,
     )
     return _ok(req_id, result)
+
+
+def _call_refusal(exc: BackendCallError, mode: Mode, policy: ModePolicy) -> dict[str, Any] | None:
+    """The structured refusal a failed call carries, if it is a refusal at all."""
+    refusal = refusal_of(exc)
+    if refusal is None and isinstance(exc, BackendResponseTooLargeError):
+        return _oversize_refusal(mode, policy)
+    return refusal
+
+
+def _oversize_refusal(mode: Mode, policy: ModePolicy) -> dict[str, Any]:
+    """The refusal for a backend response cut at the byte cap (#267).
+
+    Admission's own oversize refusal (``Gaps(oversize=True)``), with one
+    difference: no alternatives. Admission offers flag for an unfinished
+    read because flag would read the head; here the bytes were never read,
+    so no mode would deliver anything.
+    """
+    from ..modes import Gaps, refusal_body, refusal_reason
+
+    gaps = Gaps(oversize=True)
+    body = refusal_body(refusal_reason(None, gaps) or "oversize", mode, gaps=gaps, policy=policy)
+    body["alternatives"] = []
+    return body
 
 
 def _refuse_arguments(

@@ -167,9 +167,12 @@ def test_main_streamable_http_forwards_log_level(monkeypatch: pytest.MonkeyPatch
     ):
         main()
 
-    mock_mcp.run.assert_called_once_with(
-        transport="streamable-http", host="127.0.0.1", port=DEFAULT_PORT, log_level="DEBUG"
-    )
+    mock_mcp.run.assert_called_once()
+    kwargs = mock_mcp.run.call_args.kwargs
+    assert kwargs["log_level"] == "DEBUG"
+    assert kwargs["transport"] == "streamable-http"
+    # The request body cap rides along as middleware (#267).
+    assert len(kwargs["middleware"]) == 1
 
 
 class TestStartupCacheVisibility:

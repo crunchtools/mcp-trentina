@@ -87,3 +87,19 @@ class BackendRejectedCallError(BackendCallError):
     """
 
     outcome_hint = "tool_error"
+
+
+class BackendResponseTooLargeError(BackendCallError):
+    """The backend's response passed the byte cap while it streamed (#267).
+
+    The read stopped there, so nothing was judged and nothing is delivered:
+    the router answers with the oversize refusal admission gives, and it
+    audits as a defense block. The backend answered, so the breaker counts a
+    success.
+    """
+
+    outcome_hint = "blocked_defense"
+
+    def __init__(self, message: str, *, cap_bytes: int) -> None:
+        super().__init__(message)
+        self.cap_bytes = cap_bytes
