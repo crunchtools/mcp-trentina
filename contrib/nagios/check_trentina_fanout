@@ -17,6 +17,7 @@ Exit codes are Nagios's: 0 OK, 1 WARNING, 2 CRITICAL, 3 UNKNOWN.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import pathlib
 import sqlite3
 import sys
@@ -51,7 +52,9 @@ def _args(argv: list[str] | None) -> argparse.Namespace:
 def fanout(db_path: str, window: int) -> list[tuple[str, int, int]]:
     """(profile, fetch_hosts, comms_calls) over the last *window* seconds."""
     uri = pathlib.Path(db_path).resolve().as_uri() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=5) as db:
+    # closing(): a connection's own context manager ends the transaction
+    # but leaves the connection open.
+    with contextlib.closing(sqlite3.connect(uri, uri=True, timeout=5)) as db:
         rows = db.execute(FANOUT_QUERY, (time.time() - window,)).fetchall()
     return [(str(p), int(h), int(c)) for p, h, c in rows]
 
@@ -73,17 +76,18 @@ def check(argv: list[str] | None = None) -> tuple[int, str]:
         rows = [r for r in rows if r[0] == a.profile]
 
     status, problems, perf = OK, [], []
-    for profile, hosts, comms in rows:
+    for profile, fetch_hosts, comms_calls in rows:
         level = max(
-            _level(hosts, a.hosts_warn, a.hosts_crit),
-            _level(comms, a.comms_warn, a.comms_crit),
+            _level(fetch_hosts, a.hosts_warn, a.hosts_crit),
+            _level(comms_calls, a.comms_warn, a.comms_crit),
         )
         status = max(status, level)
         if level != OK:
-            problems.append(f"{profile} hosts={hosts} comms={comms}")
+            # The names quarantine_stats' fanout uses, so the two read alike.
+            problems.append(f"{profile} fetch_hosts={fetch_hosts} comms_calls={comms_calls}")
         perf.append(
-            f"{profile}_hosts={hosts};{a.hosts_warn};{a.hosts_crit};0 "
-            f"{profile}_comms={comms};{a.comms_warn};{a.comms_crit};0"
+            f"{profile}_fetch_hosts={fetch_hosts};{a.hosts_warn};{a.hosts_crit};0 "
+            f"{profile}_comms_calls={comms_calls};{a.comms_warn};{a.comms_crit};0"
         )
     summary = ", ".join(problems) or f"{len(rows)} profile(s) active in {a.window}s"
     line = f"TRENTINA FANOUT {LABELS[status]} - {summary}"

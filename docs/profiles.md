@@ -326,9 +326,10 @@ backends:
 The value is truncated to 256 characters; a list (several recipients) is
 stored as JSON. A tool name is exact, not a glob, and one the backend's
 allowlist drops is a load error. `internal://` backends take none: fetch and
-search are always recorded. An agent's own reload may add entries but never
-drop or change one, and the rules follow the backend's URL, so renaming the
-backend does not shed them.
+search are always recorded. A list argument keeps its first 16 items, and any
+other non-scalar is recorded as `<non-scalar>`. An agent's own reload may add
+entries. A reload that would leave the profile with fewer (tool, parameter)
+pairs is refused, however its backends are renamed or repointed.
 
 The value is text an agent chose. It lives in the audit database and nowhere
 else: it is never logged. `quarantine_stats` shows an agent its own recent
@@ -348,7 +349,8 @@ The operator's `quarantine_stats` also carries `fanout`: per profile, the
 distinct hosts fetched and the calls to declared tools in the last ten
 minutes, attempts refused by policy included. Each call can pass judging on
 its own; a swarm shows only as a rate. `contrib/nagios/check_trentina_fanout`
-reads the same numbers from the database, read-only:
+reads the same numbers from the database, read-only, and reports them under
+the same names (`<profile>_fetch_hosts`, `<profile>_comms_calls` in perfdata):
 
 ```
 check_trentina_fanout --db /data/trentina.db \

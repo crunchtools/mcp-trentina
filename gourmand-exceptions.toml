@@ -648,3 +648,10 @@ path = "src/mcp_trentina_crunchtools/gateway/matrix_proxy.py"
 pattern = "_text_fallback_scan"
 justification = "The text-mode fallback is the last scan of an unparseable response the proxy forwards anyway (there is no annotation channel); its failure is recorded by kind and frames (#262) and must not break the forward it follows."
 classification = "by_design"
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/gateway/router.py"
+pattern = "_audit"
+justification = "The audit row must never fail the tools/call it records, and a write can raise more than sqlite3.Error (thread-affinity ProgrammingError, OSError on a full disk). Logging profile and exception class is the handling: a silently lost audit row was itself a finding on #281."
+classification = "by_design"

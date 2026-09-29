@@ -29,8 +29,10 @@ under that name.
   the operator every profile's as fingerprints only; the operator also
   gets `fanout`, per profile distinct fetch hosts and declared outbound calls
   over ten minutes. `contrib/nagios/check_trentina_fanout` (stdlib, read-only)
-  raises WARNING/CRITICAL on the same numbers. An agent's own reload cannot
-  drop a `destination_params` entry.
+  raises WARNING/CRITICAL on the same numbers. An agent reload that would
+  leave its profile with fewer `destination_params` rules is refused. A lost
+  audit row is now logged (profile and exception class) instead of dropped
+  silently.
 
 ## [0.47.0] - 2026-09-29
 

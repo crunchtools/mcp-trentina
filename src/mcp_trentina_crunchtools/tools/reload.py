@@ -50,6 +50,7 @@ worse shape than one that costs an operator reload or a restart.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -319,7 +320,7 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
     The held values are reported back, so an operator whose edit did not take
     effect is told rather than left to discover it.
     """
-    held = _hold_preprocess_floor(before, after) + _hold_destination_params(before, after)
+    held = _hold_preprocess_floor(before, after)
     # The bridge block is perimeter end to end: where the plaintext side
     # lives, who may write to it, what a flagged message becomes. None of it
     # is an agent's performance knob, so the whole block is held.
@@ -340,31 +341,36 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
     return held
 
 
-def _hold_destination_params(before: Profile, after: Profile) -> list[str]:
-    """An agent may add audit rules to its own backends, never drop or move one.
+def _lost_destination_rules(before: Profile, after: Profile) -> list[str]:
+    """The ``destination_params`` rules an agent reload would remove, as ``tool:param``.
 
     ``destination_params`` is what records who a comms tool was pointed at
-    (#266). An agent able to unset it could message unaudited, so every
-    entry it had is kept as it was; new entries apply. Rules follow both
-    the backend's name and its URL: renaming a backend reaches the same
-    service, and so does repointing the name at a new URL. Where two old
-    backends shared a URL, the name's own rule wins.
+    (#266). Two checks, both needed:
+
+    - Profile-wide, as a multiset: whatever the backends are renamed or
+      repointed to, every (tool, param) pair must still be there, as many
+      times as before.
+    - Per backend: one that keeps its name or its URL is the same service,
+      so its own rules must stay on it. Without this, moving a rule onto a
+      dummy backend passes the count and leaves the real one unaudited.
+
+    A backend renamed AND repointed has no identity left to check, so it is
+    held by the count alone. New rules are free to add.
     """
-    by_url: dict[str, dict[str, str]] = {}
-    for old in before.backends.values():
-        by_url.setdefault(old.url, {}).update(old.destination_params)
-    held: list[str] = []
+
+    def rules(profile: Profile) -> Counter[tuple[str, str]]:
+        return Counter(
+            pair for b in profile.backends.values() for pair in b.destination_params.items()
+        )
+
+    lost = {f"{tool}:{param}" for tool, param in rules(before) - rules(after)}
+    by_url = {b.url: b for b in before.backends.values()}
     for name, backend in after.backends.items():
-        old_backend = before.backends.get(name)
-        rules = {
-            **by_url.get(backend.url, {}),
-            **(old_backend.destination_params if old_backend else {}),
-        }
-        for tool, param in rules.items():
+        old = before.backends.get(name) or by_url.get(backend.url)
+        for tool, param in (old.destination_params if old else {}).items():
             if backend.destination_params.get(tool) != param:
-                backend.destination_params[tool] = param
-                held.append(f"backends.{name}.destination_params.{tool}")
-    return held
+                lost.add(f"{tool}:{param}")
+    return sorted(lost)
 
 
 def _hold_floor(
@@ -460,6 +466,18 @@ async def _apply_own_profile(
             ),
         }
 
+    lost = _lost_destination_rules(before, after)
+    if lost:
+        # Refused, not held: a hold must pick which backend a rule lands on,
+        # and a rename plus a repoint leaves no right answer (#266).
+        return {
+            "reloaded": False,
+            "scope": name,
+            "error": (
+                "this reload removes destination_params rules "
+                f"({', '.join(lost)}); an operator reload or a restart applies that"
+            ),
+        }
     held = _hold_perimeter_fields(before, after)
     delta = _profile_delta(before, after)
     registry[name] = after

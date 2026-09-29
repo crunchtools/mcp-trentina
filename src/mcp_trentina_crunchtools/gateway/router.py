@@ -18,7 +18,6 @@ forwards. Only a name tools/list serves resolves: since 0.43.0 the
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import functools
 import json
 import logging
@@ -207,7 +206,12 @@ def _audit(
     normalized: dict[str, str] | None = None,
     destination: Destination | None = None,
 ) -> None:
-    with contextlib.suppress(Exception):
+    # The audit must never fail the call it records, and sqlite3.Error is not
+    # all a write can raise (a closed connection, a thread-affinity
+    # ProgrammingError, a full disk surfacing as OSError). A lost row is
+    # still a finding, so it is logged: the profile and the class, nothing
+    # the caller chose (#262).
+    try:
         record_gateway_call(
             profile,
             backend,
@@ -221,6 +225,8 @@ def _audit(
             destination=destination.value if destination else None,
             destination_kind=destination.kind.value if destination else None,
         )
+    except Exception as exc:
+        logger.warning("gateway: audit row lost profile=%s err=%s", profile, exc_kind(exc))
 
 
 @dataclass

@@ -70,11 +70,28 @@ def _fetch(url: str) -> str:
     return f"{host[:_MAX_HOST_CHARS]}#{fingerprint(url)}"
 
 
+#: Recipients kept from a list argument; with each capped, the JSON is bounded.
+_MAX_ITEMS = 16
+#: Recorded in place of a value that is neither a scalar nor a list of them.
+NON_SCALAR = "<non-scalar>"
+
+_Scalar = str | int | float | bool
+
+
 def _param(value: Any) -> str | None:
+    """The argument as recorded, built from a bounded slice of it.
+
+    The input is capped BEFORE it is serialized: an agent-sized argument
+    must not cost an agent-sized ``json.dumps`` on every call.
+    """
     if value is None or value == "":
         return None
-    text = value if isinstance(value, str) else json.dumps(value, sort_keys=True, default=str)
-    return text[:MAX_DESTINATION_CHARS]
+    if isinstance(value, _Scalar):
+        return str(value)[:MAX_DESTINATION_CHARS]
+    if isinstance(value, list | tuple) and all(isinstance(v, _Scalar) for v in value[:_MAX_ITEMS]):
+        head = [str(v)[:MAX_DESTINATION_CHARS] for v in value[:_MAX_ITEMS]]
+        return json.dumps(head)[:MAX_DESTINATION_CHARS]
+    return NON_SCALAR
 
 
 def destination_of(backend: Backend, tool: str, arguments: dict[str, Any]) -> Destination | None:

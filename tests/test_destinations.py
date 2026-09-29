@@ -24,6 +24,7 @@ from mcp_trentina_crunchtools.gateway.compress import set_profiles
 from mcp_trentina_crunchtools.gateway.context import profile_context
 from mcp_trentina_crunchtools.gateway.destination import (
     MAX_DESTINATION_CHARS,
+    NON_SCALAR,
     DestinationKind,
     destination_of,
 )
@@ -37,7 +38,7 @@ from mcp_trentina_crunchtools.gateway.profile import (
 )
 from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
 from mcp_trentina_crunchtools.outcomes import Outcome
-from mcp_trentina_crunchtools.tools.reload import _hold_destination_params
+from mcp_trentina_crunchtools.tools.reload import _lost_destination_rules
 from mcp_trentina_crunchtools.tools.stats import get_trentina_stats
 
 CHECK = Path(__file__).resolve().parents[1] / "contrib" / "nagios" / "check_trentina_fanout"
@@ -94,6 +95,15 @@ class TestDestinationOf:
         assert dest is not None
         assert dest.value == '["a@x.io", "b@x.io"]'
 
+    def test_a_huge_or_nested_value_is_bounded(self) -> None:
+        backend = Backend(url="http://mail:1/mcp", destination_params={"send": "to"})
+        many = destination_of(backend, "send", {"to": ["x" * 10_000] * 10_000})
+        assert many is not None
+        assert len(many.value) == MAX_DESTINATION_CHARS
+        nested = destination_of(backend, "send", {"to": {"a": ["b"] * 10_000}})
+        assert nested is not None
+        assert nested.value == NON_SCALAR
+
     def test_undeclared_or_absent_names_nothing(self) -> None:
         assert destination_of(SLACK, "list_channels", {"channel": "C1"}) is None
         assert destination_of(SLACK, "send_message", {"text": "no channel"}) is None
@@ -138,60 +148,54 @@ class TestConfig:
         with pytest.raises(ProfileConfigError, match="not allowed"):
             load_profiles(path)
 
-    def test_agent_reload_cannot_drop_one(self) -> None:
-        def profile(params: dict[str, str]) -> Profile:
-            return Profile(
-                name="a",
-                auth=AuthConfig(bearer_token_env="T"),
-                backends={"slack": Backend(url="http://s:1/mcp", destination_params=params)},
-            )
-
-        before = profile({"send_message": "channel"})
-        after = profile({"send_dm": "user"})
-        held = _hold_destination_params(before, after)
-        assert held == ["backends.slack.destination_params.send_message"]
-        assert after.backends["slack"].destination_params == {
-            "send_dm": "user",
-            "send_message": "channel",
-        }
-
-    def test_renaming_the_backend_keeps_its_rules(self) -> None:
-        before = Profile(
+    @staticmethod
+    def _profile(backends: dict[str, tuple[str, dict[str, str]]]) -> Profile:
+        return Profile(
             name="a",
             auth=AuthConfig(bearer_token_env="T"),
             backends={
-                "slack": Backend(
-                    url="http://s:1/mcp", destination_params={"send_message": "channel"}
-                )
+                name: Backend(url=url, destination_params=params)
+                for name, (url, params) in backends.items()
             },
         )
-        after = Profile(
-            name="a",
-            auth=AuthConfig(bearer_token_env="T"),
-            backends={"chat": Backend(url="http://s:1/mcp")},
-        )
-        assert _hold_destination_params(before, after) == [
-            "backends.chat.destination_params.send_message"
-        ]
 
-    def test_repointing_the_backend_keeps_its_rules(self) -> None:
-        before = Profile(
-            name="a",
-            auth=AuthConfig(bearer_token_env="T"),
-            backends={
-                "slack": Backend(
-                    url="http://s:1/mcp", destination_params={"send_message": "channel"}
-                )
-            },
+    @pytest.mark.parametrize(
+        "after",
+        [
+            {"slack": ("http://s:1/mcp", {"send_dm": "user"})},  # dropped
+            {"slack": ("http://s:1/mcp", {"send_message": "text"})},  # moved
+            {"chat": ("http://relay:1/mcp", {})},  # renamed and repointed
+            {},  # backend removed
+        ],
+    )
+    def test_agent_reload_cannot_lose_a_rule(
+        self, after: dict[str, tuple[str, dict[str, str]]]
+    ) -> None:
+        before = self._profile({"slack": ("http://s:1/mcp", {"send_message": "channel"})})
+        assert _lost_destination_rules(before, self._profile(after)) == ["send_message:channel"]
+
+    def test_moving_a_rule_onto_a_dummy_backend_is_caught(self) -> None:
+        before = self._profile({"slack": ("http://s:1/mcp", {"send_message": "channel"})})
+        after = self._profile(
+            {
+                "slack": ("http://s:1/mcp", {}),
+                "dummy": ("http://dummy:1/mcp", {"send_message": "channel"}),
+            }
         )
-        after = Profile(
-            name="a",
-            auth=AuthConfig(bearer_token_env="T"),
-            backends={"slack": Backend(url="http://relay:1/mcp")},
+        assert _lost_destination_rules(before, after) == ["send_message:channel"]
+
+    def test_renaming_with_the_rule_intact_is_allowed(self) -> None:
+        before = self._profile({"slack": ("http://s:1/mcp", {"send_message": "channel"})})
+        after = self._profile(
+            {"chat": ("http://relay:1/mcp", {"send_message": "channel", "send_dm": "user"})}
         )
-        assert _hold_destination_params(before, after) == [
-            "backends.slack.destination_params.send_message"
-        ]
+        assert _lost_destination_rules(before, after) == []
+
+    def test_two_copies_need_two_copies(self) -> None:
+        rule = {"send_message": "channel"}
+        before = self._profile({"a": ("http://a:1/mcp", rule), "b": ("http://b:1/mcp", rule)})
+        after = self._profile({"a": ("http://a:1/mcp", rule)})
+        assert _lost_destination_rules(before, after) == ["send_message:channel"]
 
 
 # ------------------------------------------------------------ the audit row
@@ -433,7 +437,7 @@ class TestFanoutCheck:
         _row("calm", "web", "fetch_tool", "one.example#0000000000000000", "fetch")
         status, line = self._check(audit_db)
         assert status == 2
-        assert "swarm hosts=40" in line
+        assert "swarm fetch_hosts=40" in line
         assert "calm" not in line.split("|")[0]
         assert "h1.example" not in line
 
@@ -447,7 +451,7 @@ class TestFanoutCheck:
             _row("kage", "slack", "send_message", f"C{i}", "param")
         status, line = self._check(audit_db)
         assert status == 1
-        assert "comms=6" in line
+        assert "comms_calls=6" in line
 
     def test_old_rows_fall_out_of_the_window(self, audit_db: Path) -> None:
         for i in range(40):
