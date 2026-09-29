@@ -40,6 +40,7 @@ from fnmatch import fnmatchcase
 from itertools import combinations
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -171,6 +172,18 @@ def _guarded(backend: dict[str, Any], pattern: str) -> bool:
     return _constrains((backend.get("parameter_guards") or {}).get(pattern) or {})
 
 
+def _endpoint(url: str) -> str:
+    """``scheme://host:port`` of a backend URL, for a finding's text.
+
+    Backend URLs carry credentials in userinfo, path or query (postiz's key is
+    a path segment, rotv's a query parameter), and this output lands in CI and
+    deploy logs. Findings group on the full URL; they print only this.
+    """
+    parts = urlsplit(url)
+    host = parts.hostname or "?"
+    return f"{parts.scheme}://{host}" + (f":{parts.port}" if parts.port else "")
+
+
 def _profiles(profiles_file: dict[str, Any]) -> dict[str, dict[str, Any]]:
     profiles = profiles_file.get("profiles") or {}
     return {str(name): body or {} for name, body in profiles.items()}
@@ -205,8 +218,8 @@ def check_shared_write_backends(profiles_file: dict[str, Any]) -> list[Finding]:
                 Finding(
                     "shared-write-backend",
                     f"profiles {a!r} ({holders[a]}) and {b!r} ({holders[b]}) both hold write "
-                    f"tools on {url}; declare the pair under shared_backends with a reason, "
-                    "or cut the write tools from one of them",
+                    f"tools on {_endpoint(url)}; declare the pair under shared_backends "
+                    "with a reason, or cut the write tools from one of them",
                 )
             )
     return findings

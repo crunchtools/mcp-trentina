@@ -93,6 +93,15 @@ class TestFixtures:
         assert "personal_send_gmail_message" in toxic[0]
         assert "postiz:*" in toxic[0]
 
+    def test_a_finding_never_prints_a_url_credential(self) -> None:
+        backend = {"url": "http://u:pw@mcp-x:8000/api/mcp/KEY?token=TOK", "tools_allow": ["*"]}
+        profiles_file = {
+            "profiles": {"a": {"backends": {"x": backend}}, "b": {"backends": {"x": backend}}}
+        }
+        (finding,) = profile_lint.check_shared_write_backends(profiles_file)
+        assert "http://mcp-x:8000" in str(finding)
+        assert not any(secret in str(finding) for secret in ("pw", "KEY", "TOK", "u:"))
+
     def test_the_shipped_example_is_clean(self) -> None:
         assert lint_file(REPO / "examples" / "profiles-agent1.yaml") == []
 
