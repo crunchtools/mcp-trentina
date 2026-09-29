@@ -167,6 +167,7 @@ FILE_READ_REASONS = frozenset(
         "outside_read_roots",
         "denied_path",
         "changed_during_read",
+        "not_found_or_denied",
     }
 )
 

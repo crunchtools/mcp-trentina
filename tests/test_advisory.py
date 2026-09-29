@@ -340,8 +340,8 @@ class TestSafeFetchAdvisory:
                 "mcp_trentina_crunchtools.tools.fetch.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.is_blocked",
-                return_value=None,
+                "mcp_trentina_crunchtools.tools.fetch.check_blocklist",
+                return_value=False,
             ),
             patch(
                 "mcp_trentina_crunchtools.defense.classify_async",
@@ -366,8 +366,8 @@ class TestSafeFetchAdvisory:
                 "mcp_trentina_crunchtools.tools.fetch.get_config",
             ),
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.is_blocked",
-                return_value=None,
+                "mcp_trentina_crunchtools.tools.fetch.check_blocklist",
+                return_value=False,
             ),
             pytest.raises(FetchError, match="HTTP 404"),
         ):
