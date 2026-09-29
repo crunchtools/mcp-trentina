@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 
 from ..gateway.errors import ProfileConfigError
 from ..gateway.loader import read_secret_env
-from ..gateway.profile import private_url
+from ..gateway.profile import is_matrix_user_id, private_url
 
 DEFAULT_HOMESERVER = "https://matrix-client.matrix.org"
 DEFAULT_PORT = 8471
@@ -71,6 +71,20 @@ def _required(name: str) -> str:
     return value
 
 
+def _inviters() -> frozenset[str]:
+    """``BRIDGE_ALLOWED_INVITERS``: comma-separated Matrix user IDs whose
+    invites the bridge accepts (#264). Not a secret, but it takes the
+    ``_FILE`` form like one so a unit can mount it. Empty is legal and means
+    no invite is accepted; a malformed entry is fatal rather than skipped,
+    because a typo would otherwise shut out the one person meant to get in."""
+    raw = _secret("BRIDGE_ALLOWED_INVITERS")
+    ids = {part.strip() for part in raw.split(",") if part.strip()}
+    bad = sum(1 for user in ids if not is_matrix_user_id(user, historical=True))
+    if bad:
+        raise SettingsError(f"BRIDGE_ALLOWED_INVITERS: {bad} entries are not Matrix user IDs")
+    return frozenset(ids)
+
+
 @dataclass(frozen=True)
 class BridgeSettings:
     """Everything the bridge needs to run."""
@@ -90,6 +104,8 @@ class BridgeSettings:
     device_id: str
     access_token: str
     password: str
+    # Whose invites are accepted; empty accepts none (#264).
+    allowed_inviters: frozenset[str] = frozenset()
 
     @classmethod
     def from_env(cls) -> BridgeSettings:
@@ -110,4 +126,5 @@ class BridgeSettings:
             device_id=os.environ.get("BRIDGE_DEVICE_ID", ""),
             access_token=_secret("BRIDGE_ACCESS_TOKEN"),
             password=_secret("BRIDGE_PASSWORD"),
+            allowed_inviters=_inviters(),
         )

@@ -367,6 +367,18 @@ classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
+path = "tests/test_bridge_agent_rule.py"
+justification = "Not single-use: _started is called from seven tests in TestStartupVetting and from TestBothBotsInOneRoom in test_matrix_bridge.py, verified by grep. Same single_use_helpers undercount as the test_content.py exception (gourmand_bug)."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/bridge/client.py"
+justification = "Not single-use: Bridge._payload is called from _announce_rooms and _forward_event, verified by grep. It is the one place the bridge's wire format for an event is built, so an announcement and a message cannot drift apart. Linter undercount (gourmand_bug)."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/client.py"
 justification = "_build_redirect_chain is 17 lines of redirect-following bookkeeping. Keeping it out of the request path is what makes that path readable; it is called once because there is one place redirects are followed."
 classification = "by_design"

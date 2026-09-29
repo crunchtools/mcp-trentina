@@ -10,6 +10,25 @@ under that name.
 
 ## [Unreleased]
 
+### Security
+
+- The Matrix bridge joined any invite, so anyone on matrix.org could open a
+  chat with a bridged agent, and kagetora's and takeda's bridges shared a
+  room: a direct agent-to-agent channel (#264). The bridge now accepts an
+  invite only from `BRIDGE_ALLOWED_INVITERS` (comma-separated Matrix IDs,
+  `_FILE` supported; empty or unset refuses every invite, with a startup
+  warning), rejecting and forgetting the rest. It records who invited it into
+  each room, and on start leaves and forgets every joined room whose inviter
+  is not allowed; a room joined before this change, with no record, stays only
+  if everyone else in it is an allowed inviter. The gateway, which knows every
+  bridged profile's `public_user_id`, drops inbound events from another
+  bridged agent, refuses a room announced with one in it (the bridge then
+  leaves it), and relays nothing into a room holding one or whose members the
+  bridge never reported, even when an allowed inviter opened it. Drops are
+  audited as `denied_guard` under backend `matrix_bridge` and logged without
+  Matrix IDs. Deploy the gateway and bridges together, and set
+  `BRIDGE_ALLOWED_INVITERS` before the bridge restarts.
+
 ## [0.47.0] - 2026-09-29
 
 Hardening from the #90 audit, which uses the OpenAI–Hugging Face incident as its threat model.

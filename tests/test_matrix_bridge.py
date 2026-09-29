@@ -22,6 +22,8 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
+from mcp_trentina_crunchtools import database
+from mcp_trentina_crunchtools.bridge.client import ROOM_ANNOUNCE
 from mcp_trentina_crunchtools.defense import DefenseVerdict, Layer
 from mcp_trentina_crunchtools.gateway.matrix_bridge import appservice as appservice_mod
 from mcp_trentina_crunchtools.gateway.matrix_bridge import core
@@ -32,6 +34,9 @@ from mcp_trentina_crunchtools.gateway.matrix_bridge.appservice import (
     _Recent,
 )
 from mcp_trentina_crunchtools.gateway.matrix_bridge.core import (
+    AGENT_IN_ROOM,
+    AGENT_SENDER,
+    MEMBERS_UNREPORTED,
     BridgeUnavailableError,
     ProfileBridge,
 )
@@ -43,12 +48,18 @@ from mcp_trentina_crunchtools.gateway.matrix_bridge.rewrite import (
     user_ids_in,
 )
 from mcp_trentina_crunchtools.gateway.matrix_bridge.routes import (
+    BridgeEvent,
+    bridged_agents,
     close_bridges,
     register_bridge_routes,
 )
 from mcp_trentina_crunchtools.gateway.profile import Profile
 from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, PipelineStats
 from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
+
+from .test_bridge_agent_rule import _set_members, _started
+from .test_bridge_process import FakeNio as _FakeNio
+from .test_bridge_process import _sync
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,6 +69,8 @@ AGENT = "@agent1:agent1.local"
 BOT = "@trentina:agent1.local"
 SCOTT = "@Scott_M:matrix.org"
 ROOM = "!ops:matrix.org"
+# Another profile's bridge identity (#264).
+OTHER_AGENT = "@agent2-bot:matrix.org"
 
 
 def _verdict(*, flagged_by: Layer | None = None, l3: bool = True) -> DefenseVerdict:
@@ -171,7 +184,9 @@ class Rig:
 
 @pytest.fixture
 def rig_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
-    def make(enforcement: str = "block") -> Rig:
+    def make(enforcement: str = "block", *, reported: bool = True) -> Rig:
+        """``reported``: ROOM's members were announced, with no other agent
+        among them, as a bridge does on every start (#264)."""
         conduit, upstream = FakeConduit(), FakeBridge()
         verdicts: list[DefenseVerdict] = []
         judged: list[dict[str, Any]] = []
@@ -184,6 +199,13 @@ def rig_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         monkeypatch.setattr(core, "defend_json", fake_defend_json)
         profile = _profile(enforcement)
         mapping = BridgeMapping(tmp_path / f"bridge-{enforcement}.db")
+        if reported:
+            mapping._write_now(
+                "INSERT OR IGNORE INTO room_audience (remote_id, agent_present, reported) "
+                "VALUES (?, 0, 0)",
+                (ROOM,),
+                False,
+            )
         appservice = AppService(
             homeserver="http://10.0.10.3:6167",
             server_name="agent1.local",
@@ -199,6 +221,7 @@ def rig_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
             mapping=mapping,
             appservice=appservice,
             client=httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
+            other_agents=frozenset({REMOTE_AGENT, OTHER_AGENT}),
         )
         return Rig(bridge, conduit, upstream, verdicts, judged)
 
@@ -996,3 +1019,187 @@ class TestTiming:
         with caplog.at_level(logging.INFO, logger=core.__name__):
             assert await rig.bridge.inbound(_message()) == "duplicate"
         assert not [r for r in caplog.records if " inbound " in r.getMessage()]
+
+
+# ------------------------------------------------ the agent rule (#264)
+
+
+class TestAgentRule:
+    """The gateway's half of #264: no agent-to-agent channel."""
+
+    async def test_an_event_from_another_agents_bot_is_dropped(
+        self, rig_factory: Any, env: Path
+    ) -> None:
+        rig = rig_factory()
+        outcome = await rig.bridge.inbound(_from(OTHER_AGENT))
+        assert outcome == "dropped"
+        assert rig.conduit.sent == []
+        assert rig.judged == [], "dropped before any model sees it"
+        assert await rig.bridge.mapping.agent_present(ROOM) is True
+        rows = (
+            database.get_db()
+            .execute("SELECT profile, backend, tool, outcome, error_message FROM gateway_calls")
+            .fetchall()
+        )
+        assert [tuple(r) for r in rows] == [
+            ("agent1", "matrix_bridge", "inbound", "denied_guard", AGENT_SENDER)
+        ]
+
+    async def test_the_match_ignores_case(self, rig_factory: Any) -> None:
+        rig = rig_factory()
+        assert await rig.bridge.inbound(_from(OTHER_AGENT.upper())) == "dropped"
+
+    async def test_its_room_is_then_refused_both_ways(self, rig_factory: Any) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(_message("$e1"))  # maps the room
+        await rig.bridge.inbound(_from(OTHER_AGENT, "$e2"))
+        assert await rig.bridge.inbound(_message("$e3")) == "dropped"
+        await rig.bridge.outbound("t1", [_agent_event()])
+        assert rig.upstream.sent == []
+        notices = [s for s in rig.conduit.sent if AGENT_IN_ROOM in s["content"].get("body", "")]
+        assert len(notices) == 1
+
+    async def test_a_redaction_into_a_refused_room_is_not_sent(self, rig_factory: Any) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(_message())
+        await rig.bridge.outbound("t1", [_agent_event()])
+        await rig.bridge.inbound(_from(OTHER_AGENT, "$e2"))
+        await rig.bridge.outbound(
+            "t2",
+            [_agent_event("$x") | {"type": "m.room.redaction", "redacts": "$a1", "content": {}}],
+        )
+        assert [s["path"] for s in rig.upstream.sent] == ["/send"]
+        assert AGENT_IN_ROOM in rig.conduit.sent[-1]["content"]["body"]
+
+    async def test_a_room_announced_with_another_agent_is_refused(self, rig_factory: Any) -> None:
+        rig = rig_factory(reported=False)
+        announce = _announce([SCOTT, OTHER_AGENT])
+        assert await rig.bridge.inbound(announce) == "refused"
+        assert rig.conduit.created == [], "no local room for a refused one"
+        assert await rig.bridge.mapping.agent_present(ROOM) is True
+
+    async def test_an_allowed_room_is_refused_once_another_agent_joins(
+        self, rig_factory: Any
+    ) -> None:
+        rig = rig_factory(reported=False)
+        assert await rig.bridge.inbound(_announce([SCOTT], "a")) == "mapped"
+        await rig.bridge.outbound("t1", [_agent_event("$a1")])
+        assert len(rig.upstream.sent) == 1
+        assert await rig.bridge.inbound(_announce([SCOTT, OTHER_AGENT], "b")) == "refused"
+        await rig.bridge.outbound("t2", [_agent_event("$a2")])
+        assert len(rig.upstream.sent) == 1
+
+    async def test_a_room_whose_members_were_never_reported_is_not_relayed_into(
+        self, rig_factory: Any
+    ) -> None:
+        rig = rig_factory(reported=False)
+        await rig.bridge.inbound(_message())  # delivered: inbound needs no report
+        assert len(rig.conduit.sent) == 1
+        await rig.bridge.outbound("t1", [_agent_event()])
+        assert rig.upstream.sent == []
+        assert MEMBERS_UNREPORTED in rig.conduit.sent[-1]["content"]["body"]
+
+    async def test_an_old_bridges_announcement_reports_nothing(self, rig_factory: Any) -> None:
+        rig = rig_factory(reported=False)
+        announce = _announce([])
+        del announce["room"]["members"]
+        assert await rig.bridge.inbound(announce) == "mapped"
+        assert await rig.bridge.mapping.agent_present(ROOM) is None
+
+    async def test_its_own_identity_is_not_another_agent(self, rig_factory: Any) -> None:
+        rig = rig_factory(reported=False)
+        assert await rig.bridge.inbound(_announce([SCOTT, REMOTE_AGENT])) == "mapped"
+
+    async def test_no_matrix_id_reaches_the_log(
+        self, rig_factory: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(_message("$e0"))  # maps the room
+        with caplog.at_level(logging.DEBUG):
+            await rig.bridge.inbound(_from(OTHER_AGENT, "$secret-event"))
+            await rig.bridge.inbound(_announce([OTHER_AGENT], "c"))
+            await rig.bridge.outbound("t1", [_agent_event()])
+        for secret in (OTHER_AGENT, "agent2-bot", ROOM, "$secret-event"):
+            assert secret not in caplog.text
+
+
+def _from(sender: str, event_id: str = "$e1") -> dict[str, Any]:
+    """An upstream message from ``sender``."""
+    return _message(event_id) | {"sender": sender, "sender_displayname": "Bot"}
+
+
+def _announce(members: list[str], tag: str = "x") -> dict[str, Any]:
+    return BridgeEvent.model_validate(
+        {
+            "room_id": ROOM,
+            "event_id": f"room:{ROOM}:{tag}",
+            "sender": REMOTE_AGENT,
+            "type": ROOM_ANNOUNCE,
+            "room": {"name": "Ops", "members": members},
+        }
+    ).model_dump()
+
+
+class TestBridgedAgents:
+    def test_every_profile_with_a_bridge_block_counts(self) -> None:
+        one = _profile()
+        block = {
+            "public_user_id": OTHER_AGENT,
+            "bridge_url": "http://bridge-agent2:8471",
+            "bridge_token_env": "B2",
+            "ingress_token_env": "I2",
+            "local": {
+                "homeserver": "http://10.0.10.4:6167",
+                "server_name": "agent2.local",
+                "agent_localpart": "agent2",
+                "as_token_env": "A2",
+                "hs_token_env": "H2",
+            },
+        }
+        # Switched off still counts: it still names an agent's identity.
+        two = Profile.model_validate(
+            {"name": "agent2", "auth": {"bearer_token_env": "X"}, "matrix_bridge": block}
+        )
+        plain = Profile.model_validate({"name": "plain", "auth": {"bearer_token_env": "X"}})
+        agents = bridged_agents({"agent1": one, "agent2": two, "plain": plain})
+        assert agents == {REMOTE_AGENT, OTHER_AGENT}
+
+
+# ----------------------------------------------------------- end to end
+
+
+class TestBothBotsInOneRoom:
+    """kagetora's bridge, restarted in the room it shares with takeda's.
+
+    Scott opened the room, so the bridge's inviter rule passes it; the other
+    agent's bot is in it all the same, and only the gateway knows that bot.
+    """
+
+    async def test_it_is_left_at_startup_and_refused_for_relay(
+        self, tmp_path: Path, rig_factory: Any
+    ) -> None:
+        # The gateway half, the real core, holding the room as 0.47.0 left
+        # it: mapped, its members never reported.
+        rig = rig_factory(reported=False)
+        await rig.bridge.inbound(_message())
+
+        async def gateway(request: httpx.Request) -> httpx.Response:
+            event = BridgeEvent.model_validate_json(request.content).model_dump()
+            return httpx.Response(200, json={"outcome": await rig.bridge.inbound(event)})
+
+        store = tmp_path / "bridge"
+        store.mkdir()
+        (store / "inviters.json").write_text(json.dumps({ROOM: SCOTT}))
+        nio = _FakeNio()
+        _set_members(nio, ROOM, SCOTT, OTHER_AGENT)
+        bridge = _started(store, nio, gateway)
+
+        await bridge.process(_sync(), first=True)
+
+        assert nio.left == [ROOM]
+        assert nio.forgotten == [ROOM]
+        assert await rig.bridge.mapping.agent_present(ROOM) is True
+        # The agent's reply, should one come before the leave lands upstream.
+        await rig.bridge.outbound("t1", [_agent_event()])
+        assert rig.upstream.sent == []
+        assert AGENT_IN_ROOM in rig.conduit.sent[-1]["content"]["body"]
