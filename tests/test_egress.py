@@ -7,6 +7,7 @@ reason, and no refusal names the address it refused.
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import httpcore
@@ -84,6 +85,31 @@ class TestRefusedAddresses:
         err = await _refusal("https://mixed.example/")
         assert err.reason == "non_global_address"
 
+    async def test_resolver_error_is_unresolvable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def fails(_host: str, _port: int) -> list[str]:
+            raise OSError("Name or service not known")
+
+        route(monkeypatch, _unreachable)
+        monkeypatch.setattr(egress, "_lookup", fails)
+        err = await _refusal("https://nowhere.example/")
+        assert err.reason == "unresolvable"
+
+    async def test_resolver_timeout_is_unresolvable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        release = threading.Event()
+
+        def stalls(_host: str, _port: int) -> list[str]:
+            release.wait(5)
+            return [PUBLIC_ADDRESS]
+
+        route(monkeypatch, _unreachable)
+        monkeypatch.setattr(egress, "_lookup", stalls)
+        monkeypatch.setattr(egress, "RESOLVE_TIMEOUT", 0.05)
+        try:
+            err = await _refusal("https://slow.example/")
+        finally:
+            release.set()
+        assert err.reason == "unresolvable"
+
     async def test_unresolvable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         route(monkeypatch, _unreachable, {"nowhere.example": []})
         err = await _refusal("https://nowhere.example/")
@@ -95,6 +121,7 @@ class TestRefusedShapes:
         ("url", "reason"),
         [
             ("http://example.com:8019/health", "port"),
+            ("http://example.com:0/", "port"),
             ("https://example.com:9090/", "port"),
             ("file:///etc/passwd", "scheme"),
             ("gopher://example.com/", "scheme"),

@@ -38,7 +38,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-ALLOWED_SCHEMES = frozenset({"http", "https"})
+DEFAULT_PORTS = {"http": 80, "https": 443}
+ALLOWED_SCHEMES = frozenset(DEFAULT_PORTS)
 ALLOWED_PORTS = frozenset({80, 443})
 MAX_REDIRECTS = 5
 RESOLVE_TIMEOUT = 10.0
@@ -116,7 +117,7 @@ async def check_url(url: str | httpx.URL) -> ResolvedTarget:
         raise EgressRefusedError("unresolvable") from exc
     if parsed.scheme not in ALLOWED_SCHEMES:
         raise EgressRefusedError("scheme")
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    port = DEFAULT_PORTS[parsed.scheme] if parsed.port is None else parsed.port
     if port not in ALLOWED_PORTS:
         raise EgressRefusedError("port")
     host = parsed.raw_host.decode("ascii")
@@ -207,8 +208,15 @@ async def open_guarded(
 ) -> AsyncIterator[httpx.Response]:
     """Send ``method`` to ``url`` and follow up to five redirects, checking every hop.
 
-    Yields the final response, still streaming, with ``history`` holding the
-    redirects that led to it, as httpx's own redirect handling would.
+    Args:
+        method: HTTP method, sent unchanged except where a 303 makes it GET.
+        url: the URL to fetch; checked like every hop after it.
+        timeout: seconds for each connect, read and write, per hop.
+        headers: sent on every hop, as httpx sends a client's headers.
+
+    Yields the final ``httpx.Response``, still streaming, with ``history``
+    holding the redirects that led to it, as httpx's own redirect handling
+    would. It is closed, with its client, when the context exits.
     ``trust_env`` is off: an environment proxy is mounted beside the
     transport, not through it, and would route round the pin.
 
