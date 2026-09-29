@@ -9,15 +9,16 @@ between the check and the read.
 
 from __future__ import annotations
 
+import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools.errors import ConfigError, FileReadError
+from mcp_trentina_crunchtools.errors import BlockedSourceError, ConfigError, FileReadError
 from mcp_trentina_crunchtools.gateway.loader import load_profiles, register_active_config
 from mcp_trentina_crunchtools.modes import Mode
 from mcp_trentina_crunchtools.tools import confine
@@ -142,7 +143,7 @@ class TestDenylist:
         self, tmp_path: Path, live_gateway: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _set_roots(monkeypatch, tmp_path)
-        assert _refusal(live_gateway).reason == "denied_path"
+        assert _refusal(live_gateway).reason == confine.GATEWAY_REASON
 
     def test_refusal_names_no_path(self, root: Path) -> None:
         err = _refusal(root / ".." / "outside.txt")
@@ -158,7 +159,7 @@ class TestGatewayMode:
         _set_roots(monkeypatch)
         target = tmp_path / "plain.txt"
         target.write_text("anything\n", encoding="utf-8")
-        assert _refusal(target).reason == "outside_read_roots"
+        assert _refusal(target).reason == confine.GATEWAY_REASON
 
     def test_live_gateway_with_roots_reads_inside_them(
         self, root: Path, live_gateway: Path
@@ -169,9 +170,9 @@ class TestGatewayMode:
         self, tmp_path: Path, live_gateway: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _set_roots(monkeypatch)
-        with pytest.raises(FileReadError) as caught:
+        with pytest.raises(BlockedSourceError) as caught:
             await list_dir(str(tmp_path), Mode.FLAG)
-        assert caught.value.reason == "outside_read_roots"
+        assert caught.value.refusal["reason"] == f"confinement refused ({confine.GATEWAY_REASON})"
 
 
 class TestStandalone:
@@ -251,6 +252,44 @@ class TestSwapAfterCheck:
         assert _refusal(root / "notes.txt").reason == "denied_path"
 
 
+class TestSwapIsARefusal:
+    """#278: a swap caught mid-read is a refusal too, not a read failure."""
+
+    async def test_changed_during_read_reaches_the_caller_as_a_refusal(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = root / "notes.txt"
+
+        def swap() -> None:
+            target.unlink()
+            target.symlink_to("/proc/self/environ")
+
+        _swap_before_open(monkeypatch, swap)
+        with pytest.raises(BlockedSourceError) as caught:
+            await read_mod.read_file(str(target), Mode.BLOCK)
+        assert caught.value.refusal == {
+            "reason": "confinement refused (changed_during_read)",
+            "mode": "block",
+            "flagged_by": "confinement",
+            "alternatives": [],
+        }
+
+    def test_it_audits_as_blocked_defense(self) -> None:
+        from mcp_trentina_crunchtools.gateway.errors import BackendCallError
+        from mcp_trentina_crunchtools.outcomes import Outcome, classify_exception
+
+        refusal = confine.refused(FileReadError("changed_during_read"), Mode.BLOCK)
+        wrapped = BackendCallError("internal tool 'read_tool' call failed")
+        wrapped.__cause__ = refusal
+        assert classify_exception(wrapped) is Outcome.BLOCKED_DEFENSE
+
+    async def test_other_read_failures_stay_read_failures(self, root: Path) -> None:
+        (root / "blob.txt").write_bytes(b"\x00binary")
+        with pytest.raises(FileReadError) as caught:
+            await read_mod.read_file(str(root / "blob.txt"), Mode.BLOCK)
+        assert caught.value.reason == "binary"
+
+
 class TestFileGrowth:
     def test_file_grown_past_cap_after_fstat_is_refused(
         self, root: Path, monkeypatch: pytest.MonkeyPatch
@@ -280,11 +319,174 @@ class TestDirListing:
 
     async def test_dir_symlink_out_of_root_is_refused(self, root: Path) -> None:
         (root / "out").symlink_to(root.parent)
-        with pytest.raises(FileReadError) as caught:
+        with pytest.raises(BlockedSourceError) as caught:
             await list_dir(str(root / "out"), Mode.FLAG)
-        assert caught.value.reason == "outside_read_roots"
+        assert caught.value.refusal["reason"] == "confinement refused (outside_read_roots)"
 
     async def test_file_is_not_a_directory(self, root: Path) -> None:
         with pytest.raises(FileReadError) as caught:
             await list_dir(str(root / "notes.txt"), Mode.FLAG)
         assert caught.value.reason == "not_a_directory"
+
+
+class TestLexicalBeforeResolve:
+    """#263: the path as written is judged before the filesystem is asked anything."""
+
+    def test_a_missing_denied_path_is_denied_not_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _set_roots(monkeypatch, "/")
+        assert _refusal("/proc/no-such-entry/at-all").reason == "denied_path"
+
+    def test_a_missing_path_outside_the_roots_is_outside_not_missing(self, root: Path) -> None:
+        assert _refusal(root.parent / "no-such-file.txt").reason == "outside_read_roots"
+
+    def test_nothing_is_resolved_for_a_lexically_denied_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _set_roots(monkeypatch, "/")
+        resolved: list[str] = []
+        real_resolve = Path.resolve
+
+        def recording_resolve(self: Path, *a: Any, **k: Any) -> Path:
+            resolved.append(str(self))
+            return real_resolve(self, *a, **k)
+
+        monkeypatch.setattr(confine.Path, "resolve", recording_resolve)
+        with pytest.raises(FileReadError):
+            confine.confine("/config/../config/profiles.yaml")
+        assert not [p for p in resolved if p.endswith("profiles.yaml")]
+
+    def test_a_root_spelled_through_a_symlink_still_admits(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """/home on a host where it is /var/home: the written root must admit."""
+        real = tmp_path / "real"
+        real.mkdir()
+        (real / "notes.txt").write_text("via the link\n", encoding="utf-8")
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        _set_roots(monkeypatch, link)
+        assert _read_confined(str(link / "notes.txt"))[0] == "via the link\n"
+
+    def test_dotdot_through_a_symlink_is_checked_again_once_resolved(self, root: Path) -> None:
+        """Lexically ``root/sub/../x`` is inside; really it is wherever sub points."""
+        elsewhere = root.parent / "elsewhere"
+        (elsewhere / "deep").mkdir(parents=True)
+        (elsewhere / "secret.txt").write_text("outside\n", encoding="utf-8")
+        (root / "sub").symlink_to(elsewhere / "deep")
+        path = f"{root}/sub/../secret.txt"
+        assert Path(os.path.normpath(path)).is_relative_to(root)
+        assert _refusal(path).reason == "outside_read_roots"
+
+
+async def _read_refusal(path: str | Path) -> str:
+    """read_tool's refusal as the caller receives it, byte for byte."""
+    with pytest.raises(BlockedSourceError) as caught:
+        await read_mod.read_file(str(path), Mode.BLOCK)
+    return json.dumps({"message": str(caught.value), "refusal": caught.value.refusal})
+
+
+class TestNoExistenceOracle:
+    """#263: behind a gateway, a missing path and a denied one read the same."""
+
+    async def test_missing_and_denied_are_identical(
+        self, root: Path, live_gateway: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        state = tmp_path / "state"
+        state.mkdir()
+        (state / "trentina.db").write_text("x", encoding="utf-8")
+        monkeypatch.setenv("QUARANTINE_DB", str(state / "trentina.db"))
+        config_mod._config = None
+        # Inside the root: one link to a denied file that exists, one to one
+        # that does not, one plain missing file. Only resolving tells them apart.
+        (root / "exists").symlink_to(state / "trentina.db")
+        (root / "absent").symlink_to(state / "no-such.db")
+        refusals = {
+            await _read_refusal(root / "exists"),
+            await _read_refusal(root / "absent"),
+            await _read_refusal(root / "missing.txt"),
+            await _read_refusal("/config/profiles.yaml"),
+            await _read_refusal("/no/such/place.txt"),
+        }
+        assert len(refusals) == 1
+        assert confine.GATEWAY_REASON in refusals.pop()
+
+    async def test_standalone_keeps_the_reasons_apart(self, root: Path) -> None:
+        missing = await _read_refusal(root / "missing.txt")
+        outside = await _read_refusal(root.parent / "outside.txt")
+        assert "not_found" in missing
+        assert "outside_read_roots" in outside
+
+    async def test_the_refusal_names_no_path_and_offers_nothing(
+        self, root: Path, live_gateway: Path
+    ) -> None:
+        refusal = await _read_refusal(root / "missing.txt")
+        assert str(root) not in refusal
+        assert json.loads(refusal)["refusal"] == {
+            "reason": f"confinement refused ({confine.GATEWAY_REASON})",
+            "mode": "block",
+            "flagged_by": "confinement",
+            "alternatives": [],
+        }
+
+
+@pytest.fixture
+def real_server() -> Iterator[None]:
+    from mcp_trentina_crunchtools.gateway import internal
+    from mcp_trentina_crunchtools.server import mcp
+
+    saved = internal._server
+    internal.register_internal_server(mcp)
+    try:
+        yield
+    finally:
+        internal._server = saved
+
+
+@pytest.mark.usefixtures("env", "real_server")
+class TestAudit:
+    """#278: a confinement refusal is the defense working, and is audited as one."""
+
+    @pytest.mark.parametrize(
+        ("tool", "path"),
+        [
+            ("read_tool", "/config/profiles.yaml"),
+            ("read_tool", "/no/such/file.txt"),
+            ("dir_tool", "/config"),
+        ],
+    )
+    async def test_it_audits_as_blocked_defense(
+        self, tool: str, path: str, live_gateway: Path
+    ) -> None:
+        from pydantic import SecretStr
+
+        from mcp_trentina_crunchtools.database import get_db
+        from mcp_trentina_crunchtools.gateway.names import NAMESPACE_SEP
+        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+        from mcp_trentina_crunchtools.gateway.router import route_jsonrpc
+
+        profile = Profile(
+            short_names=False,
+            name="alpha",
+            auth=AuthConfig(bearer_token_env="TEST"),
+            backends={"web": Backend(url="internal://web", tools_allow=["*"])},
+        )
+        assert profile.auth is not None
+        profile.auth.bearer_token = SecretStr("x")
+
+        resp = await route_jsonrpc(
+            profile,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": f"web{NAMESPACE_SEP}{tool}", "arguments": {"path": path}},
+            },
+        )
+        row = get_db().execute("SELECT outcome, error_message FROM gateway_calls").fetchone()
+
+        assert row["outcome"] == "blocked_defense"
+        assert path not in (row["error_message"] or "")
+        assert resp["error"]["data"]["flagged_by"] == "confinement"
+        assert resp["error"]["data"]["alternatives"] == []

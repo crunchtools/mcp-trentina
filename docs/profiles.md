@@ -196,7 +196,7 @@ through the gateway's own admin tools — `cache_flush`, `reconnect_backend`,
 | | `role: agent` (default) | `role: operator` |
 |---|---|---|
 | `quarantine_stats` | its own audit rows, detections and destinations, and the defense settings it runs under | the whole gateway, every profile's destinations and fan-out, plus compression savings |
-| `cache_flush` | its own backends and its own aggregate | every cache |
+| `cache_flush` | its own aggregate only; the same answer every time | every cache |
 | `reconnect_backend` | a backend in its own profile, with the tool count it would see | the name wherever it is configured, and who shares it |
 | `reload_profiles` | validates the whole file, applies its own section | applies the whole file and the gateway-wide settings |
 
@@ -212,6 +212,12 @@ names, allowlist deltas, guarded parameter names, call volumes and blocked URLs
 are the shape of its permissions, and a routine flush or reload is not an
 occasion to hand that over — so the refusals name nothing either, and a backend
 in someone else's profile is refused exactly like one that does not exist.
+
+Nor may one agent's actions change what another is told (#263). The
+blocklist is keyed on the calling profile, and an agent's `cache_flush` leaves
+the per-URL tool-list cache, which profiles share, alone and returns a
+constant body. It used to report which of the caller's backends were still
+cached, and one profile could set that pattern for another to read.
 
 Two things a role does not change. Evicting a cache or resetting a circuit is
 keyed by backend URL, so doing it to a backend you do hold is felt by every
@@ -375,7 +381,10 @@ restarting the backend.
 
 A backend `url` expands `${VAR}` the same way, for a server that takes its
 token in the path or query. Keep that token in the environment, never inline:
-the gateway logs a backend only as `scheme://host[:port]`.
+the gateway logs a backend only as `scheme://host[:port]`. A reference is
+allowed only after the host, and its value must be URL-safe
+(`[A-Za-z0-9._~%-]`): percent-encode anything else (`&` as `%26`, `#` as
+`%23`) before putting it in the environment, or the load fails.
 
 ```yaml
     url: "http://rotv:8080/mcp?token=${ROTV_TOKEN}"
