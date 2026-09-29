@@ -98,7 +98,8 @@ class Layers:
 
 def allowlist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Allowlist every source the harness produces, then reload config."""
-    trust = tmp_path / "trust.json"
+    trust = tmp_path / "state" / "trust.json"
+    trust.parent.mkdir(exist_ok=True)
     trust.write_text(
         '{"trusted_domains": ["example.com"], "trusted_paths": ["*"]}',
         encoding="utf-8",

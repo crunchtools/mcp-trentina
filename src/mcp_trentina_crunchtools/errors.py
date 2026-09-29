@@ -135,11 +135,40 @@ class PreProcessFailedError(TrentinaError):
         self.processor = name
 
 
-class FileReadError(TrentinaError):
-    """Raised when reading a local file fails."""
+FILE_READ_REASONS = frozenset(
+    {
+        "not_found",
+        "not_a_file",
+        "not_a_directory",
+        "too_large",
+        "unsupported_type",
+        "binary",
+        "too_many_entries",
+        "outside_read_roots",
+        "denied_path",
+        "changed_during_read",
+    }
+)
 
-    def __init__(self, path: str, reason: str) -> None:
-        super().__init__(f"Cannot read {path}: {reason}")
+
+class FileReadError(TrentinaError):
+    """Raised when read_tool or dir_tool refuses or fails a local path (#261).
+
+    ``reason`` is one of ``FILE_READ_REASONS``, and the message carries that
+    code plus an optional number, NEVER the path: the caller already knows
+    the path it sent, and the message reaches logs and audit rows that other
+    agents can read (#262). A refusal that echoed ``/config/profiles.yaml``
+    would confirm the file's existence to whoever reads the log.
+
+    ``detail`` is an optional non-path qualifier, such as the size cap. An
+    unknown ``reason`` raises ``ValueError``: the set is closed on purpose.
+    """
+
+    def __init__(self, reason: str, detail: str = "") -> None:
+        if reason not in FILE_READ_REASONS:
+            raise ValueError(f"unknown file read reason {reason!r}")
+        self.reason = reason
+        super().__init__(f"Cannot read: {reason}" + (f" ({detail})" if detail else ""))
 
 
 class ContentSizeError(TrentinaError):
