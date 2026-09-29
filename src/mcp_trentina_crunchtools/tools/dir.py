@@ -21,13 +21,12 @@ from itertools import islice
 from typing import Any
 
 from ..config import get_config
-from ..database import is_blocked
 from ..errors import FileReadError
 from ..l1.pipeline import run_l1
 from ..l1.shadows import ShadowStats, detect_module_shadows
 from ..modes import Mode
-from .confine import open_confined
-from .judged import blocklisted, judge_and_deliver
+from .confine import REFUSAL_REASONS, open_confined, refused
+from .judged import check_blocklist, judge_and_deliver
 
 MAX_DIR_ENTRIES = 500
 
@@ -46,7 +45,12 @@ def _entry(entry: os.DirEntry[str]) -> dict[str, Any]:
 
 
 async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
-    fd, _, confined = open_confined(path, os.O_DIRECTORY)
+    try:
+        fd, _, confined = open_confined(path, os.O_DIRECTORY)
+    except FileReadError as exc:
+        if exc.reason not in REFUSAL_REASONS:
+            raise
+        raise refused(exc, mode) from exc
     resolved = str(confined)
     try:
         # Listed through the checked descriptor, and lazily: a directory of a
@@ -59,9 +63,7 @@ async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str
     finally:
         os.close(fd)
 
-    blocked = is_blocked(resolved)
-    if blocked and mode is not Mode.REDACT:
-        raise blocklisted(resolved, mode, blocked["detected_at"])
+    blocked = check_blocklist(resolved, mode)
 
     listing = "\n".join(
         f"{e['name']}\t{e['type']}\t{e['size'] if e['size'] is not None else '-'}" for e in entries
@@ -98,7 +100,7 @@ async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str
         ref=resolved,
         prompt=prompt,
         allowlisted=get_config().is_trusted_path(resolved),
-        blocklisted_at=blocked["detected_at"] if blocked else None,
+        blocklisted=blocked,
         precomputed_l1=pipeline,
         l3_context=briefing,
         extras={"entries": entries, "shadows": shadow_fields},
