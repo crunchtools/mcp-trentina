@@ -260,3 +260,32 @@ class TestBackendUrlSecrets:
         monkeypatch.setenv("ROTV_TOKEN", "zqx7canary")
         with pytest.raises(ProfileConfigError, match="path or query"):
             load_profiles(cfg)
+
+    def test_url_ref_before_the_authority_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cfg = tmp_path / "profiles.yaml"
+        cfg.write_text(
+            URL_PROFILE_YAML.replace("rotv.example:8080", "u:${ROTV_TOKEN}@rotv.example")
+        )
+        monkeypatch.setenv("TEST_BEARER", "b")
+        monkeypatch.setenv("ROTV_TOKEN", "zqx7canary")
+        with pytest.raises(ProfileConfigError, match="path or query"):
+            load_profiles(cfg)
+
+    def test_url_value_that_restructures_the_url_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cfg = tmp_path / "profiles.yaml"
+        cfg.write_text(URL_PROFILE_YAML)
+        monkeypatch.setenv("TEST_BEARER", "b")
+        monkeypatch.setenv("ROTV_TOKEN", "abc&admin=1#x")
+        with pytest.raises(ProfileConfigError, match="percent-encode"):
+            load_profiles(cfg)
+
+    def test_safe_url_on_a_malformed_port_is_a_fingerprint(self) -> None:
+        from mcp_trentina_crunchtools.logsafe import safe_url
+
+        out = safe_url("http://h:zqx7canary/x")
+        assert "zqx7canary" not in out
+        assert out.startswith("sha256:")
