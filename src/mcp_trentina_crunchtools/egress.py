@@ -69,11 +69,16 @@ _REFUSED_V6 = (ipaddress.IPv6Network("::/96"), ipaddress.IPv6Network("64:ff9b:1:
 
 @dataclass(frozen=True)
 class ResolvedTarget:
-    """A host that passed the check, and the address its connection is pinned to."""
+    """A host that passed the check, and the addresses its connection is pinned to.
+
+    Every answer, in the resolver's order: each one was checked, and trying
+    the next when one will not connect is what a client dialling the name
+    would do (an IPv6 answer on a host with no IPv6 route, say).
+    """
 
     host: str
     port: int
-    address: str
+    addresses: tuple[str, ...]
 
 
 def _embedded_v4(ip: ipaddress.IPv6Address) -> list[ipaddress.IPv4Address]:
@@ -113,6 +118,12 @@ def _lookup(host: str, port: int) -> list[str]:
 
 
 async def _resolve(host: str, port: int) -> list[str]:
+    """Every address ``host`` resolves to, or ``unresolvable``.
+
+    A lookup takes one of ``MAX_LOOKUPS`` slots and never queues: with none
+    free, or after ``RESOLVE_TIMEOUT``, or on a resolver error, the fetch is
+    refused as ``unresolvable``. The slot comes back when the thread ends.
+    """
     slots = _lookup_slots
     if not slots.acquire(blocking=False):
         log.warning("egress: every resolver slot is busy; refusing")
@@ -159,7 +170,7 @@ async def check_url(url: str | httpx.URL) -> ResolvedTarget:
             if not is_global_address(ip):
                 log.warning("egress: refused a non-global address")
                 raise EgressRefusedError("non_global_address")
-    return ResolvedTarget(host=host, port=port, address=addresses[0])
+    return ResolvedTarget(host=host, port=port, addresses=tuple(dict.fromkeys(addresses)))
 
 
 def _socket_backend() -> httpcore.AsyncNetworkBackend:
@@ -168,7 +179,7 @@ def _socket_backend() -> httpcore.AsyncNetworkBackend:
 
 
 class PinnedBackend(httpcore.AsyncNetworkBackend):
-    """Dials the checked address for each (host, port), and nothing unchecked.
+    """Dials only checked addresses for each (host, port), and nothing unchecked.
 
     ``connect_unix_socket`` is left as the base class's NotImplementedError:
     the pool is never given a socket path.
@@ -176,10 +187,10 @@ class PinnedBackend(httpcore.AsyncNetworkBackend):
 
     def __init__(self) -> None:
         self._inner = _socket_backend()
-        self._pins: dict[tuple[str, int], str] = {}
+        self._pins: dict[tuple[str, int], tuple[str, ...]] = {}
 
     def pin(self, target: ResolvedTarget) -> None:
-        self._pins[(target.host, target.port)] = target.address
+        self._pins[(target.host, target.port)] = target.addresses
 
     async def connect_tcp(
         self,
@@ -189,17 +200,26 @@ class PinnedBackend(httpcore.AsyncNetworkBackend):
         local_address: str | None = None,
         socket_options: Iterable[Any] | None = None,
     ) -> httpcore.AsyncNetworkStream:
-        address = self._pins.get((host, port))
-        if address is None:
+        addresses = self._pins.get((host, port))
+        if not addresses:
             # Only reachable if something sent a request the loop never
             # checked. Fail closed rather than resolve it here.
             raise EgressRefusedError("unresolvable")
+        options = list(socket_options or ())
+        *fallbacks, last = addresses
+        for address in fallbacks:
+            try:
+                return await self._inner.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout):
+                continue
         return await self._inner.connect_tcp(
-            address,
-            port,
-            timeout=timeout,
-            local_address=local_address,
-            socket_options=socket_options,
+            last, port, timeout=timeout, local_address=local_address, socket_options=options
         )
 
     async def sleep(self, seconds: float) -> None:

@@ -269,14 +269,17 @@ class _RecordingStream(httpcore.AsyncMockStream):
 class _RecordingBackend(httpcore.AsyncNetworkBackend):
     """Records the address dialled and the name TLS was started for."""
 
-    def __init__(self) -> None:
+    def __init__(self, unreachable: frozenset[str] = frozenset()) -> None:
         self.dialled: list[str] = []
         self.server_hostnames: list[str | None] = []
+        self._unreachable = unreachable
 
     async def connect_tcp(
         self, host: str, port: int, **_kwargs: Any
     ) -> httpcore.AsyncNetworkStream:
         self.dialled.append(host)
+        if host in self._unreachable:
+            raise httpcore.ConnectError("Network is unreachable")
         return _RecordingStream(self.server_hostnames)
 
     async def sleep(self, seconds: float) -> None:
@@ -307,6 +310,20 @@ class TestPinning:
         assert recorder.dialled == [PUBLIC_ADDRESS]
         # SNI and certificate verification stay on the name, not the IP.
         assert recorder.server_hostnames == ["rebind.example"]
+
+    async def test_the_next_checked_answer_is_tried_when_one_will_not_connect(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An IPv6 answer on a host with no IPv6 route must not fail the fetch."""
+        v6, v4 = "2606:2800:21f:cb07:6820:80da:af6b:8b2c", PUBLIC_ADDRESS
+        recorder = _RecordingBackend(unreachable=frozenset({v6}))
+        monkeypatch.setattr(egress, "_lookup", lambda _h, _p: [v6, v4])
+        monkeypatch.setattr(egress, "_socket_backend", lambda: recorder)
+
+        content, _ = await fetch_url("https://dual.example/")
+
+        assert content == "ok"
+        assert recorder.dialled == [v6, v4]
 
     async def test_an_unchecked_host_is_never_dialled(
         self, monkeypatch: pytest.MonkeyPatch
