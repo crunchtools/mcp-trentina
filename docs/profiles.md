@@ -195,7 +195,7 @@ through the gateway's own admin tools — `cache_flush`, `reconnect_backend`,
 
 | | `role: agent` (default) | `role: operator` |
 |---|---|---|
-| `quarantine_stats` | its own audit rows and detections, and the defense settings it runs under | the whole gateway, plus compression savings |
+| `quarantine_stats` | its own audit rows, detections and destinations, and the defense settings it runs under | the whole gateway, every profile's destinations and fan-out, plus compression savings |
 | `cache_flush` | its own aggregate only; the same answer every time | every cache |
 | `reconnect_backend` | a backend in its own profile, with the tool count it would see | the name wherever it is configured, and who shares it |
 | `reload_profiles` | validates the whole file, applies its own section | applies the whole file and the gateway-wide settings |
@@ -308,6 +308,60 @@ Some backends return output that reads like an attack and isn't one. A container
 ```
 
 The text is appended to L3's standard briefing for this backend's responses, and it is part of the verdict-cache key. It narrows what L3 reads as an instruction. It cannot skip a layer, L1 and L2 never see it, and a flag from any layer still stands. It is operator configuration, so it is trusted. Keep it to what the backend *is*, never a verdict ("this output is safe").
+
+## Call Destinations
+
+Every call's audit row records where it was pointed (#266), so an incident can
+be reconstructed from the database instead of guessed at:
+
+- `fetch`: the URL's host, then `#` and the first 16 hex of the URL's SHA-256
+  (`docs.example.org#1a2b3c4d5e6f7a8b`). A path or query that carries a token
+  is never stored.
+- `search`: `q#` and the query's hash. Repeats show; the words do not.
+- A proxied tool records the value of the one parameter its backend declares:
+
+```yaml
+backends:
+  slack:
+    url: "http://mcp-slack:8000/mcp"
+    destination_params:
+      send_message: channel          # tool name: parameter name
+      post_thread_reply: channel
+```
+
+The value is truncated to 256 characters; a list (several recipients) is
+stored as JSON. A tool name is exact, not a glob, and one the backend's
+allowlist drops is a load error. `internal://` backends take none: fetch and
+search are always recorded. A list argument keeps its first 16 items, and any
+other non-scalar is recorded as `<non-scalar>`. An agent's own reload may add
+entries. A reload that would leave the profile with fewer (tool, parameter)
+pairs is refused, however its backends are renamed or repointed.
+
+The value is text an agent chose. It lives in the audit database and nowhere
+else: it is never logged. `quarantine_stats` shows an agent its own recent
+destinations as written. The operator gets every profile's as fingerprints
+(`sha256:<12> len=<n>`), because the operator's agent reads that output
+unjudged and no character allowlist stops `SYSTEM:ignore_previous_instructions`.
+The same destination has the same fingerprint in every profile. A human
+reads the values in the database:
+
+```
+sqlite3 -readonly /data/trentina.db "SELECT datetime(timestamp,'unixepoch'),
+  profile, tool, destination FROM gateway_calls WHERE destination IS NOT NULL
+  ORDER BY timestamp DESC LIMIT 50"
+```
+
+The operator's `quarantine_stats` also carries `fanout`: per profile, the
+distinct hosts fetched and the calls to declared tools in the last ten
+minutes, attempts refused by policy included. Each call can pass judging on
+its own; a swarm shows only as a rate. `contrib/nagios/check_trentina_fanout`
+reads the same numbers from the database, read-only, and reports them under
+the same names (`<profile>_fetch_hosts`, `<profile>_comms_calls` in perfdata):
+
+```
+check_trentina_fanout --db /data/trentina.db \
+    --hosts-warn 20 --hosts-crit 50 --comms-warn 30 --comms-crit 100
+```
 
 ## Backend Headers
 

@@ -61,6 +61,23 @@ under that name.
 - A backend `url` expands `${VAR}` like a header does, so a token-in-URL
   credential lives in the environment instead of profiles.yaml (#268).
 
+### Added
+
+- Call destinations in the audit (#266). `gateway_calls` gains `destination`
+  and `destination_kind`, migrated in place: `fetch` records the URL's host
+  and `sha256[:16]` of the URL, `search` records `q#` and the query's hash,
+  and a proxied tool records the argument its backend names in the new
+  `destination_params` map (tool to parameter, truncated to 256 characters).
+  Refused calls record where they were pointed too. The value is never
+  logged. `quarantine_stats` shows an agent its own recent destinations and
+  the operator every profile's as fingerprints only; the operator also
+  gets `fanout`, per profile distinct fetch hosts and declared outbound calls
+  over ten minutes. `contrib/nagios/check_trentina_fanout` (stdlib, read-only)
+  raises WARNING/CRITICAL on the same numbers. An agent reload that would
+  leave its profile with fewer `destination_params` rules is refused. A lost
+  audit row is now logged (profile and exception class) instead of dropped
+  silently.
+
 ## [0.47.0] - 2026-09-29
 
 Hardening from the #90 audit, which uses the OpenAI–Hugging Face incident as its threat model.
