@@ -170,6 +170,23 @@ class TestMiddleware:
         assert send.status == 401
         assert receive.pulled == 0
 
+    async def test_overflow_after_the_response_started_propagates(self) -> None:
+        """Too late for a 413: a second response start would be a protocol error."""
+
+        async def starts_then_reads(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await Request(scope, receive).body()
+
+        receive = _Receive([b"x" * 1024] * 5)
+        send = _Send()
+
+        with pytest.raises(TooLargeError):
+            await RequestBodyCap(starts_then_reads, cap=CAP)(
+                _scope("/gateway/a/mcp"), receive, send
+            )
+        starts = [m for m in send.messages if m["type"] == "http.response.start"]
+        assert [m["status"] for m in starts] == [200]
+
     async def test_a_disconnect_mid_body_is_not_a_request(self) -> None:
         """The partial body never reaches the handler as if it were complete."""
         inner = _Echo()
