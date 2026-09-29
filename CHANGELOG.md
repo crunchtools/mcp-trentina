@@ -69,6 +69,13 @@ repeatable.
 - `llm_providers` keys take the `_FILE` form like every other secret, so a
   provider key no longer has to sit in the process environment (#268).
 
+### Changed
+
+- The profile lint exempts profiles declared under a top-level `assistants:`
+  list (with a reason) from the toxic-flow check, and from shared-write
+  findings among themselves. Its posture checks are for unattended seats;
+  every profile not listed is still linted.
+
 ## [0.48.0] - 2026-09-29
 
 The rest of the #90 audit: cross-agent channels (blocklist, `cache_flush`,
