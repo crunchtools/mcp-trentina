@@ -21,6 +21,7 @@ from pydantic import SecretStr
 from mcp_trentina_crunchtools import database
 from mcp_trentina_crunchtools.errors import BlockedSourceError
 from mcp_trentina_crunchtools.gateway.context import profile_context
+from mcp_trentina_crunchtools.gateway.loader import load_profiles, register_active_config
 from mcp_trentina_crunchtools.gateway.profile import AuthConfig, DefenseConfig, Profile
 from mcp_trentina_crunchtools.modes import Mode
 from mcp_trentina_crunchtools.tools.fetch import fetch_page
@@ -128,3 +129,25 @@ async def test_the_operator_reads_every_profiles_rows(env: Path) -> None:
     operator = _agent("root")
     operator.role = "operator"
     assert "on the blocklist" in await _fetch(env, operator, Mode.BLOCK, hostile=False)
+
+
+async def test_an_unbound_caller_on_a_live_gateway_reads_nothing_and_writes_null(
+    env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A path nobody designed neither reads a profile's blocklist nor writes to one."""
+    await _fetch(env, ALPHA, Mode.BLOCK, hostile=True)
+    monkeypatch.setenv("TEST_ALPHA_TOKEN", "x")
+    config = env / "profiles.yaml"
+    config.write_text(
+        "profiles:\n  alpha:\n    auth:\n      bearer_token_env: TEST_ALPHA_TOKEN\n"
+        "    backends: {}\n",
+        encoding="utf-8",
+    )
+    register_active_config(config, load_profiles(config), {})
+
+    assert isinstance(await _fetch_standalone(env, hostile=False), dict)
+    await _fetch_standalone(env, hostile=True)
+    rows = database.get_db().execute("SELECT profile FROM detections ORDER BY id").fetchall()
+    assert [r["profile"] for r in rows] == ["alpha", None]
+    assert not database.is_blocked(URL, "beta")
+    assert database.is_blocked(URL, None, gateway_wide=True)

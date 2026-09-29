@@ -162,6 +162,28 @@ def _age(conn: sqlite3.Connection, days: int) -> None:
     conn.commit()
 
 
+class TestStatsScope:
+    def test_each_view_counts_what_it_may_see(self, db: sqlite3.Connection) -> None:
+        _block("https://a.test/", "alpha")
+        _block("https://b.test/", "beta")
+        _block("https://legacy.test/", None)
+        _block("https://old.test/", "alpha")
+        db.execute(
+            "UPDATE detections SET detected_at = ? WHERE source = 'https://old.test/'",
+            ((datetime.now(UTC) - timedelta(days=31)).isoformat(),),
+        )
+        db.commit()
+
+        def sources(profile: str | None) -> set[str]:
+            stats = database.get_blocklist_stats(profile)
+            assert stats["total_blocked"] == len(stats["recent_detections"])
+            return {r["source"] for r in stats["recent_detections"]}
+
+        assert sources("alpha") == {"https://a.test/"}
+        assert sources("beta") == {"https://b.test/"}
+        assert sources(None) == {"https://a.test/", "https://b.test/", "https://legacy.test/"}
+
+
 class TestTTL:
     def test_an_expired_row_does_not_count(
         self, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
