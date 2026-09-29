@@ -20,6 +20,7 @@ from pydantic import SecretStr, ValidationError
 from ..channels import Channel
 from .drivers import build_preprocessors
 from .errors import ProfileConfigError
+from .filter import filter_tools
 from .profile import AlertIngressConfig, MatrixIngressConfig, Profile
 from .transform import resolve
 
@@ -89,6 +90,7 @@ def _build_profile(name: str, body: Any) -> Profile:
     _resolve_llm_key_secrets(name, profile)
     _expand_backend_headers(name, profile)
     _check_drivers(name, profile)
+    _check_destination_params(name, profile)
     _resolve_matrix_bridge_secrets(name, profile)
     if profile.alert_ingress is not None:
         _resolve_alert_ingress_secrets(name, profile.alert_ingress)
@@ -97,6 +99,22 @@ def _build_profile(name: str, body: Any) -> Profile:
         _resolve_matrix_ingress_secrets(name, profile.matrix_ingress)
 
     return profile
+
+
+def _check_destination_params(name: str, profile: Profile) -> None:
+    """Refuse a ``destination_params`` entry for a tool the backend never serves.
+
+    The allowlist is known at load; the backend's tool list is not. An entry
+    the allowlist filters out is an audit rule that can never fire, which is
+    a typo the operator should hear about now, not after an incident.
+    """
+    for backend_name, backend in profile.backends.items():
+        for tool in backend.destination_params:
+            if not filter_tools([{"name": tool}], backend):
+                raise ProfileConfigError(
+                    f"Profile {name!r}: backends.{backend_name}.destination_params."
+                    f"{tool}: the tool is not allowed on this backend"
+                )
 
 
 def _check_drivers(name: str, profile: Profile) -> None:

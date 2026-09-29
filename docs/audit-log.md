@@ -22,6 +22,8 @@ Each gateway call writes one row to the `gateway_calls` table:
 | `outcome` | text | `ok`, `blocked_defense`, … (see below) |
 | `bytes_arrived` / `bytes_delivered` | integer | response size before and after minifying |
 | `normalized` | text (JSON) | `{"feed_id": "dropped: below minimum 1"}`: arguments dropped before forwarding ([normalization](gateway.md#argument-normalization)) |
+| `destination` | text | `docs.example.org#1a2b3c4d5e6f7a8b`, `q#…`, `C0OPS`: where the call was pointed ([call destinations](profiles.md#call-destinations)). Never logged |
+| `destination_kind` | text | `fetch`, `search` or `param`; NULL when the tool names no destination |
 
 ### Outcomes
 

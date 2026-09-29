@@ -36,6 +36,8 @@ PROFILE_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 BACKEND_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 PROVIDER_NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 GLOB_PATTERN_RE = re.compile(r"^[a-zA-Z0-9_*][a-zA-Z0-9_*-]*$")
+# A tool or parameter name in destination_params: exact, never a glob (#266).
+DESTINATION_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,127}")
 GUARD_VALUE_RE = re.compile(r"^[a-zA-Z0-9_*@.\-+/ ]+$")
 ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
@@ -479,6 +481,15 @@ class Backend(BaseModel):
             "rejects the whole response — nothing partial is delivered."
         ),
     )
+    destination_params: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Tool name -> the parameter naming where the call goes (a channel, "
+            "recipient, repo or queue). Its value, truncated to 256 characters, "
+            "is recorded on the call's audit row and counted in the per-profile "
+            "fan-out signal (#266). Never logged."
+        ),
+    )
     validate_output_schema: bool = Field(
         default=True,
         description=(
@@ -564,6 +575,39 @@ class Backend(BaseModel):
                         f"use {', '.join(MODE_NAMES)} or a glob over them"
                     )
         return v
+
+    @field_validator("destination_params")
+    @classmethod
+    def destination_params_well_formed(cls, v: dict[str, str]) -> dict[str, str]:
+        """Each entry names one tool and one of its parameters, exactly.
+
+        No globs: a destination is one argument of one tool, and a pattern
+        that silently matched nothing would leave a comms tool unaudited.
+        The gateway's own ``trentina_*`` arguments are stripped before
+        forwarding and name no destination.
+        """
+        for tool, param in v.items():
+            for label, name in (("tool", tool), ("parameter", param)):
+                if not DESTINATION_NAME_RE.fullmatch(name):
+                    raise ValueError(
+                        f"destination_params: {label} name {name!r} must match "
+                        f"{DESTINATION_NAME_RE.pattern}"
+                    )
+            if param.startswith("trentina_"):
+                raise ValueError(
+                    f"destination_params.{tool}: {param!r} is a gateway argument, not the backend's"
+                )
+        return v
+
+    @model_validator(mode="after")
+    def destination_params_not_internal(self) -> Backend:
+        """The internal backend records fetch and search destinations itself."""
+        if self.destination_params and self.is_internal:
+            raise ValueError(
+                "destination_params does not apply to an internal:// backend: "
+                "fetch_tool and search_tool destinations are always recorded"
+            )
+        return self
 
     @field_validator("url")
     @classmethod

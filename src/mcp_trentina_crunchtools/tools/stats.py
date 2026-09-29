@@ -16,10 +16,17 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import get_config
-from ..database import get_blocklist_stats, get_compression_stats, get_gateway_call_stats
+from ..database import (
+    get_blocklist_stats,
+    get_compression_stats,
+    get_fanout,
+    get_gateway_call_stats,
+    get_recent_destinations,
+)
 from ..gateway.errors import ScopeError
 from ..gateway.scope import CallerScope, require_caller
 from ..gateway.surface import TOKEN_NOTE, surface_profiles, surface_report
+from ..logsafe import redact_source
 from ..quarantine.classifier import is_classifier_available
 
 GATEWAY_AUDIT_LOOKBACK_DAYS = 30
@@ -40,6 +47,9 @@ COLUMN_MEANINGS = {
     ),
     "unknown": "Row predates the outcome taxonomy.",
 }
+
+#: Destinations shown per profile.
+RECENT_DESTINATIONS = 20
 
 NOT_BUILT = {"error": "tool list not built yet; it is measured on the first tools/list"}
 
@@ -67,6 +77,12 @@ def _agent_stats(scope: CallerScope) -> dict[str, Any]:
             **get_gateway_call_stats(profile=scope.name, days=GATEWAY_AUDIT_LOOKBACK_DAYS),
             "column_meanings": COLUMN_MEANINGS,
         },
+        # Its own, as written: text it chose, shown back to it (#266).
+        "destinations": get_recent_destinations(
+            scope.name, RECENT_DESTINATIONS, GATEWAY_AUDIT_LOOKBACK_DAYS
+        ).get(scope.label, [])
+        if scope.name
+        else [],
         "surface": (surface_report(scope.name) if scope.name else None) or NOT_BUILT,
         "token_note": TOKEN_NOTE,
     }
@@ -80,7 +96,8 @@ async def get_trentina_stats() -> dict[str, Any]:
         under ``scope: "<profile>"``, with its tool ``surface`` (offered, allowed,
         served) and the response ``delivery`` sizes; or, for an operator, the gateway-wide
         view under ``scope: "gateway"``, including compression savings and the
-        classifier's configured path. A caller the gateway cannot identify
+        classifier's configured path, every profile's recent ``destinations``
+        and the ``fanout`` signal (#266). A caller the gateway cannot identify
         gets ``{"scope": "none", "error": ...}`` and no numbers at all.
     """
     try:
@@ -113,6 +130,17 @@ async def get_trentina_stats() -> dict[str, Any]:
             **get_gateway_call_stats(days=GATEWAY_AUDIT_LOOKBACK_DAYS),
             "column_meanings": COLUMN_MEANINGS,
         },
+        # Another agent's text, so fingerprints only: the operator's agent
+        # reads this unjudged, and no character allowlist stops
+        # SYSTEM:ignore_previous_instructions. One destination has one
+        # fingerprint in every profile; the database keeps the value.
+        "destinations": {
+            name: [{**row, "destination": redact_source(row["destination"])} for row in rows]
+            for name, rows in get_recent_destinations(
+                None, RECENT_DESTINATIONS, GATEWAY_AUDIT_LOOKBACK_DAYS
+            ).items()
+        },
+        "fanout": get_fanout(),
         "compression": get_compression_stats(),
         "surface": {name: surface_report(name) for name in surface_profiles()},
         "token_note": TOKEN_NOTE,

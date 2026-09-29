@@ -319,7 +319,7 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
     The held values are reported back, so an operator whose edit did not take
     effect is told rather than left to discover it.
     """
-    held = _hold_preprocess_floor(before, after)
+    held = _hold_preprocess_floor(before, after) + _hold_destination_params(before, after)
     # The bridge block is perimeter end to end: where the plaintext side
     # lives, who may write to it, what a flagged message becomes. None of it
     # is an agent's performance knob, so the whole block is held.
@@ -337,6 +337,33 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
         if old != getattr(a.preprocess, field_name):
             setattr(a.preprocess, field_name, old)
             held.append(f"matrix_ingress.preprocess.{field_name}")
+    return held
+
+
+def _hold_destination_params(before: Profile, after: Profile) -> list[str]:
+    """An agent may add audit rules to its own backends, never drop or move one.
+
+    ``destination_params`` is what records who a comms tool was pointed at
+    (#266). An agent able to unset it could message unaudited, so every
+    entry it had is kept as it was; new entries apply. Rules follow both
+    the backend's name and its URL: renaming a backend reaches the same
+    service, and so does repointing the name at a new URL. Where two old
+    backends shared a URL, the name's own rule wins.
+    """
+    by_url: dict[str, dict[str, str]] = {}
+    for old in before.backends.values():
+        by_url.setdefault(old.url, {}).update(old.destination_params)
+    held: list[str] = []
+    for name, backend in after.backends.items():
+        old_backend = before.backends.get(name)
+        rules = {
+            **by_url.get(backend.url, {}),
+            **(old_backend.destination_params if old_backend else {}),
+        }
+        for tool, param in rules.items():
+            if backend.destination_params.get(tool) != param:
+                backend.destination_params[tool] = param
+                held.append(f"backends.{name}.destination_params.{tool}")
     return held
 
 

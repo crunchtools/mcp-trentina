@@ -56,7 +56,9 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     outcome TEXT,
     bytes_arrived INTEGER,
     bytes_delivered INTEGER,
-    normalized TEXT
+    normalized TEXT,
+    destination TEXT,
+    destination_kind TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_gateway_calls_timestamp ON gateway_calls(timestamp);
@@ -114,6 +116,24 @@ _VERDICT_COLUMNS = (
 )
 
 
+# gateway_calls columns added after the table first shipped, in order.
+_CALL_COLUMNS = (
+    ("outcome", "TEXT"),
+    # Response sizes as they arrived and as they were delivered. Nullable:
+    # older rows, denials that never reached a backend, and internal tools
+    # (which minify inside the tool) have no arrived size.
+    ("bytes_arrived", "INTEGER"),
+    ("bytes_delivered", "INTEGER"),
+    # Arguments the gateway dropped before forwarding, as JSON (#241).
+    ("normalized", "TEXT"),
+    # Where the call was pointed, and which kind of destination that is
+    # (#266, gateway/destination.py). NULL for older rows and for tools
+    # that name no destination.
+    ("destination", "TEXT"),
+    ("destination_kind", "TEXT"),
+)
+
+
 def _migrate(db: sqlite3.Connection) -> None:
     """Apply additive schema migrations to a database created by an older build.
 
@@ -122,17 +142,15 @@ def _migrate(db: sqlite3.Connection) -> None:
     Additive only — no column is dropped and no row is rewritten.
     """
     columns = {row["name"] for row in db.execute("PRAGMA table_info(gateway_calls)")}
-    if "outcome" not in columns:
-        db.execute("ALTER TABLE gateway_calls ADD COLUMN outcome TEXT")
-    # Response sizes as they arrived and as they were delivered. Nullable:
-    # older rows, denials that never reached a backend, and internal tools
-    # (which minify inside the tool) have no arrived size.
-    for column in ("bytes_arrived", "bytes_delivered"):
+    for column, sql_type in _CALL_COLUMNS:
         if column not in columns:
-            db.execute(f"ALTER TABLE gateway_calls ADD COLUMN {column} INTEGER")
-    # Arguments the gateway dropped before forwarding, as JSON (#241).
-    if "normalized" not in columns:
-        db.execute("ALTER TABLE gateway_calls ADD COLUMN normalized TEXT")
+            db.execute(f"ALTER TABLE gateway_calls ADD COLUMN {column} {sql_type}")
+    # After the columns exist: an old database runs SCHEMA before them. The
+    # per-profile recent-destinations read walks this, newest first.
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_gateway_calls_destination "
+        "ON gateway_calls(profile, timestamp) WHERE destination IS NOT NULL"
+    )
     db.commit()
 
     detection_columns = {row["name"] for row in db.execute("PRAGMA table_info(detections)")}
@@ -289,8 +307,13 @@ def record_gateway_call(
     bytes_arrived: int | None = None,
     bytes_delivered: int | None = None,
     normalized: dict[str, str] | None = None,
+    destination: str | None = None,
+    destination_kind: str | None = None,
 ) -> None:
     """Record a gateway tools/call invocation.
+
+    ``destination`` is caller-chosen text (``gateway/destination.py``). It is
+    stored here and nowhere else: never logged, never in an error message.
 
     ``success`` is derived from *outcome* rather than passed in, so the legacy
     boolean can never disagree with the taxonomy. It keeps its original
@@ -302,8 +325,9 @@ def record_gateway_call(
     db.execute(
         "INSERT INTO gateway_calls "
         "(timestamp, profile, backend, tool, success, duration_ms, error_message, "
-        "outcome, bytes_arrived, bytes_delivered, normalized) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "outcome, bytes_arrived, bytes_delivered, normalized, "
+        "destination, destination_kind) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             time.time(),
             profile,
@@ -316,6 +340,8 @@ def record_gateway_call(
             bytes_arrived,
             bytes_delivered,
             json.dumps(normalized) if normalized else None,
+            destination,
+            destination_kind,
         ),
     )
     db.commit()
@@ -441,6 +467,110 @@ def _delivery_stats(db: sqlite3.Connection, cutoff: float, profile: str | None) 
             for r in by_saving[:10]
         ],
     }
+
+
+#: The fan-out window: long enough to see a swarm, short enough to page on it.
+FANOUT_WINDOW_SECONDS = 600
+
+# Shared, word for word, with contrib/nagios/check_trentina_fanout, which
+# cannot import this package; test_destinations pins the two together.
+# A fetch destination is "<host>#<hash>" and a hostname never holds '#', so
+# the host is everything before the first one. Every attempt counts, a
+# denied one included: a swarm probing its allowlist is fanning out too.
+FANOUT_QUERY = (
+    "SELECT profile, "
+    "COUNT(DISTINCT CASE WHEN destination_kind = 'fetch' "
+    "THEN substr(destination, 1, instr(destination, '#') - 1) END) AS fetch_hosts, "
+    "SUM(CASE WHEN destination_kind = 'param' THEN 1 ELSE 0 END) AS comms_calls "
+    "FROM gateway_calls WHERE timestamp > ? AND destination_kind IS NOT NULL "
+    "GROUP BY profile ORDER BY profile"
+)
+
+
+def get_fanout(window_seconds: int = FANOUT_WINDOW_SECONDS) -> dict[str, Any]:
+    """Per profile, distinct fetch hosts and declared outbound calls in the window.
+
+    Per-call judging cannot see a swarm: each call is fine alone. Twenty agents
+    each fetching one new host, or one agent messaging forty channels in ten
+    minutes, is visible only as a rate.
+
+    Args:
+        window_seconds: How far back to count, from now.
+
+    Returns:
+        ``window_seconds``, and ``profiles``: profile name to ``fetch_hosts``
+        (distinct hosts fetched) and ``comms_calls`` (calls to tools a
+        backend declares in ``destination_params``). A profile with no
+        destination-bearing call in the window is absent.
+    """
+    rows = get_db().execute(FANOUT_QUERY, (time.time() - window_seconds,)).fetchall()
+    return {
+        "window_seconds": window_seconds,
+        "profiles": {
+            row["profile"]: {
+                "fetch_hosts": int(row["fetch_hosts"]),
+                "comms_calls": int(row["comms_calls"]),
+            }
+            for row in rows
+        },
+    }
+
+
+def get_recent_destinations(
+    profile: str | None = None,
+    limit: int = 20,
+    days: int = 30,
+) -> dict[str, list[dict[str, Any]]]:
+    """The latest *limit* destinations per profile, newest first.
+
+    One bounded read per profile on ``idx_gateway_calls_destination``, so the
+    cost is profiles x limit rows, not the month's traffic. A single
+    ``ROW_NUMBER()`` query instead ranks every row in the window first.
+
+    Args:
+        profile: One profile's rows, or None for every profile's.
+        limit: Rows per profile.
+        days: How far back to look.
+
+    Returns:
+        Profile name to its rows: ``at`` (ISO time), ``backend``, ``tool``,
+        ``outcome``, ``kind`` (``fetch``, ``search`` or ``param``) and the
+        raw ``destination``. The caller decides who may read the value.
+    """
+    db = get_db()
+    cutoff = time.time() - days * 86400
+    if profile:
+        profiles = [profile]
+    else:
+        profiles = [
+            row["profile"]
+            for row in db.execute(
+                "SELECT DISTINCT profile FROM gateway_calls "
+                "WHERE destination IS NOT NULL AND timestamp > ?",
+                (cutoff,),
+            )
+        ]
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for name in profiles:
+        rows = db.execute(
+            "SELECT timestamp, backend, tool, outcome, destination, destination_kind "
+            "FROM gateway_calls WHERE profile = ? AND destination IS NOT NULL "
+            "AND timestamp > ? ORDER BY timestamp DESC, id DESC LIMIT ?",
+            (name, cutoff, limit),
+        ).fetchall()
+        if rows:
+            grouped[name] = [
+                {
+                    "at": datetime.fromtimestamp(r["timestamp"], UTC).isoformat(timespec="seconds"),
+                    "backend": r["backend"],
+                    "tool": r["tool"],
+                    "outcome": r["outcome"],
+                    "kind": r["destination_kind"],
+                    "destination": r["destination"],
+                }
+                for r in rows
+            ]
+    return grouped
 
 
 def get_all_compressions() -> dict[str, str]:

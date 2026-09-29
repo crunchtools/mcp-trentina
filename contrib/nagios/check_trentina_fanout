@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Nagios check: per-profile fan-out from the Trentina audit database (#266).
+
+Counts, per profile over a rolling window, the distinct hosts fetch_tool
+reached and the calls to tools a backend declares in destination_params.
+Per-call judging cannot see a swarm; this can.
+
+Stdlib only. Opens the database read-only; it never writes, and it prints
+profile names and counts, never a destination.
+
+    check_trentina_fanout --db /data/trentina.db \\
+        --hosts-warn 20 --hosts-crit 50 --comms-warn 30 --comms-crit 100
+
+Exit codes are Nagios's: 0 OK, 1 WARNING, 2 CRITICAL, 3 UNKNOWN.
+"""
+
+from __future__ import annotations
+
+import argparse
+import pathlib
+import sqlite3
+import sys
+import time
+
+OK, WARNING, CRITICAL, UNKNOWN = 0, 1, 2, 3
+LABELS = {OK: "OK", WARNING: "WARNING", CRITICAL: "CRITICAL", UNKNOWN: "UNKNOWN"}
+
+# Word for word database.FANOUT_QUERY; tests/test_destinations.py pins them.
+FANOUT_QUERY = (
+    "SELECT profile, "
+    "COUNT(DISTINCT CASE WHEN destination_kind = 'fetch' "
+    "THEN substr(destination, 1, instr(destination, '#') - 1) END) AS fetch_hosts, "
+    "SUM(CASE WHEN destination_kind = 'param' THEN 1 ELSE 0 END) AS comms_calls "
+    "FROM gateway_calls WHERE timestamp > ? AND destination_kind IS NOT NULL "
+    "GROUP BY profile ORDER BY profile"
+)
+
+
+def _args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--db", required=True, help="path to trentina.db (QUARANTINE_DB)")
+    parser.add_argument("--window", type=int, default=600, help="seconds (default 600)")
+    parser.add_argument("--hosts-warn", type=int, required=True)
+    parser.add_argument("--hosts-crit", type=int, required=True)
+    parser.add_argument("--comms-warn", type=int, required=True)
+    parser.add_argument("--comms-crit", type=int, required=True)
+    parser.add_argument("--profile", help="check one profile only")
+    return parser.parse_args(argv)
+
+
+def fanout(db_path: str, window: int) -> list[tuple[str, int, int]]:
+    """(profile, fetch_hosts, comms_calls) over the last *window* seconds."""
+    uri = pathlib.Path(db_path).resolve().as_uri() + "?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=5) as db:
+        rows = db.execute(FANOUT_QUERY, (time.time() - window,)).fetchall()
+    return [(str(p), int(h), int(c)) for p, h, c in rows]
+
+
+def _level(value: int, warn: int, crit: int) -> int:
+    return CRITICAL if value >= crit else WARNING if value >= warn else OK
+
+
+def check(argv: list[str] | None = None) -> tuple[int, str]:
+    """The exit code and the one status line."""
+    a = _args(argv)
+    try:
+        rows = fanout(a.db, a.window)
+    except sqlite3.Error as exc:
+        # SQLite's own message (locked, no such table, unable to open);
+        # it names nothing an agent chose.
+        return UNKNOWN, f"TRENTINA FANOUT UNKNOWN - cannot read audit db: {exc}"
+    if a.profile:
+        rows = [r for r in rows if r[0] == a.profile]
+
+    status, problems, perf = OK, [], []
+    for profile, hosts, comms in rows:
+        level = max(
+            _level(hosts, a.hosts_warn, a.hosts_crit),
+            _level(comms, a.comms_warn, a.comms_crit),
+        )
+        status = max(status, level)
+        if level != OK:
+            problems.append(f"{profile} hosts={hosts} comms={comms}")
+        perf.append(
+            f"{profile}_hosts={hosts};{a.hosts_warn};{a.hosts_crit};0 "
+            f"{profile}_comms={comms};{a.comms_warn};{a.comms_crit};0"
+        )
+    summary = ", ".join(problems) or f"{len(rows)} profile(s) active in {a.window}s"
+    line = f"TRENTINA FANOUT {LABELS[status]} - {summary}"
+    return status, f"{line} | {' '.join(perf)}" if perf else line
+
+
+def main() -> None:
+    status, line = check()
+    print(line)
+    sys.exit(status)
+
+
+if __name__ == "__main__":
+    main()
