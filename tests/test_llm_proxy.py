@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -117,7 +118,8 @@ class TestLoadLlmProviders:
         assert load_llm_providers(section) == {}
 
     def test_missing_api_key_env_fails_closed(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.delenv("MISSING_KEY_FOR_TEST", raising=False)
         section: dict[str, Any] = {
@@ -131,8 +133,31 @@ class TestLoadLlmProviders:
         with pytest.raises(ProfileConfigError, match="not set or empty"):
             load_llm_providers(section)
 
+    def test_key_from_file_variant(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A provider key mounted as a file never enters the environment (#268)."""
+        secret = tmp_path / "key"
+        secret.write_text("sk-from-file\n")
+        monkeypatch.delenv("TEST_LLM_KEY", raising=False)
+        monkeypatch.setenv("TEST_LLM_KEY_FILE", str(secret))
+        section: dict[str, Any] = {
+            "openai": {
+                "enabled": True,
+                "upstream": "https://api.openai.com",
+                "auth_header": "Authorization",
+                "api_key_env": "TEST_LLM_KEY",
+            }
+        }
+        provider = load_llm_providers(section)["openai"]
+        assert provider.api_key is not None
+        assert provider.api_key.get_secret_value() == "sk-from-file"
+
     def test_valid_provider_loaded(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("TEST_LLM_KEY", "sk-test")
         section: dict[str, Any] = {
@@ -313,9 +338,7 @@ class TestProxyLlm:
         assert fake.captured_headers.get("x-goog-api-key") == "agent1-key"
         assert not any(k.lower() == "authorization" for k in fake.captured_headers)
 
-    def test_success_selects_correct_profile_key(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_success_selects_correct_profile_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         providers, profiles = self._fixtures()
         fake = _FakeClient()
         monkeypatch.setattr(llm_proxy, "_get_llm_client", lambda: fake)

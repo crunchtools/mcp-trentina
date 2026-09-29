@@ -64,6 +64,11 @@ repeatable.
 - `reconnect_backend` handed the caller's argument to a log line; it now
   passes the configured backend name it resolved to. Found by the CodeQL pack.
 
+### Security
+
+- `llm_providers` keys take the `_FILE` form like every other secret, so a
+  provider key no longer has to sit in the process environment (#268).
+
 ## [0.48.0] - 2026-09-29
 
 The rest of the #90 audit: cross-agent channels (blocklist, `cache_flush`,
