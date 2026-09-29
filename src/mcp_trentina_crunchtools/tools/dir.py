@@ -22,13 +22,12 @@ from itertools import islice
 from typing import Any
 
 from ..config import get_config
-from ..database import is_blocked
 from ..errors import FileReadError
 from ..l1.pipeline import run_l1
 from ..l1.shadows import ShadowScanResult, ShadowStats, detect_module_shadows
 from ..modes import Mode
-from .confine import open_confined
-from .judged import blocklisted, judge_and_deliver
+from .confine import REFUSAL_REASONS, open_confined, refused
+from .judged import check_blocklist, judge_and_deliver
 
 MAX_DIR_ENTRIES = 500
 
@@ -78,11 +77,16 @@ def _list_confined(path: str) -> tuple[list[dict[str, Any]], str, ShadowScanResu
 
 
 async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
-    entries, resolved, shadows = await asyncio.to_thread(_list_confined, path)
+    try:
+        entries, resolved, shadows = await asyncio.to_thread(_list_confined, path)
+    except FileReadError as exc:
+        # A confinement refusal (#278), or a directory that changed under the
+        # listing or the shadow scan: both are refusals, never a read error.
+        if exc.reason not in REFUSAL_REASONS:
+            raise
+        raise refused(exc, mode) from exc
 
-    blocked = is_blocked(resolved)
-    if blocked and mode is not Mode.REDACT:
-        raise blocklisted(resolved, mode, blocked["detected_at"])
+    blocked = check_blocklist(resolved, mode)
 
     listing = "\n".join(
         f"{e['name']}\t{e['type']}\t{e['size'] if e['size'] is not None else '-'}" for e in entries
@@ -118,7 +122,7 @@ async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str
         ref=resolved,
         prompt=prompt,
         allowlisted=get_config().is_trusted_path(resolved),
-        blocklisted_at=blocked["detected_at"] if blocked else None,
+        blocklisted=blocked,
         precomputed_l1=pipeline,
         l3_context=briefing,
         extras={"entries": entries, "shadows": shadow_fields},

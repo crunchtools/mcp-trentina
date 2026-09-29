@@ -38,6 +38,9 @@ uv run mcp-trentina-crunchtools
   1000000). With `CLASSIFIER_MAX_TOKENS` it sets `Config.admission_tokens`.
   `QUARANTINE_MAX_CONTENT` was removed in 0.43.0 (#225); setting it fails startup.
 - `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-trentina/trentina.db)
+- `TRENTINA_BLOCKLIST_TTL_DAYS` — days a block refusal stays on the blocklist
+  (default 30, floor 1). Expired rows stop counting at once and are swept
+  hourly by `is_blocked` (#263).
 - `TRENTINA_PERIMETER_DB` — perimeter verdict store, a SEPARATE database from the
   blocklist (default: `perimeter.db` beside `QUARANTINE_DB`). See `perimeter_db.py`
   for why it is its own file. Deleting it costs one slow restart and nothing else.
@@ -49,7 +52,12 @@ uv run mcp-trentina-crunchtools
   standalone keeps full reach. Either way `tools/confine.py` refuses `/config`,
   `/data`, `/proc`, `/sys`, `/run`, `/dev` and the directories of the two
   databases, the trust config and the live `profiles.yaml`. Refusals are a
-  closed reason code, never the path.
+  closed reason code, never the path. The path is checked as written
+  (normalized) BEFORE it is resolved, then again resolved; behind a gateway
+  `not_found`/`denied_path`/`outside_read_roots` are one reason,
+  `not_found_or_denied`, so a refusal is no existence oracle (#263). A
+  confinement refusal is a `BlockedSourceError` with no alternatives
+  (`confine.refused`), audited `blocked_defense` like egress's (#278).
 - `TRENTINA_FETCH_ALLOW_PRIVATE` — default false. Lifts the egress guard's
   address rule so fetch can reach non-global addresses; scheme, port and
   redirect rules still hold. Warns at startup. See `egress.py` (#260).
@@ -267,7 +275,9 @@ nothing, so a backend in another profile is refused exactly like one that does
 not exist. Standalone (no gateway registered) is single-tenant and therefore
 operator; a live gateway with no bound caller is refused.
 
-- cache_flush — flush tool-list caches. Agent: its own backends and aggregate.
+- cache_flush — flush tool-list caches. Agent: its own aggregate ONLY, with a
+  constant body; the per-URL cache is shared, so an agent flushing it and
+  reporting what was warm was a channel between profiles (#263).
   Operator: every cache. A name is resolved by EXACT name, never by substring
   over cached URLs — that is how `gw` used to reach `gw-work` and
   `gw-personal` both.
@@ -352,7 +362,11 @@ uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across 
   Refusal reasons are a closed set and never name the address. Never give an
   outbound `httpx.AsyncClient` an agent-chosen URL without it.
 - `tools/` — Tool implementations called by server.py wrappers
-- `database.py` — SQLite blocklist for cumulative detection memory
+- `database.py` — SQLite blocklist for cumulative detection memory, keyed on
+  (profile, source) since #263: `is_blocked(source, profile)` sees the
+  caller's own rows, `gateway_wide=True` (operator, standalone) every row,
+  and NULL-profile rows are operator-only. It answers a bool; a refusal
+  (`judged.blocklisted`) is constant and carries no timestamp.
 - `perimeter_db.py` — the perimeter's own store, deliberately a second database:
   verdicts `defend()` reached, so a restart does not re-judge ~210 tool
   descriptions through all three layers before the first `tools/list` answers

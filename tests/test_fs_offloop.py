@@ -72,7 +72,7 @@ class TestOffTheLoop:
 
         monkeypatch.setattr(read_mod, "prepare", prepare)
         monkeypatch.setattr(read_mod, "judge_and_deliver", _delivered)
-        monkeypatch.setattr(read_mod, "is_blocked", lambda _p: None)
+        monkeypatch.setattr(read_mod, "check_blocklist", lambda _p, _m: False)
 
         result = await read_mod.read_file(str(root / "notes.txt"), Mode.FLAG)
 
@@ -85,7 +85,7 @@ class TestOffTheLoop:
         self, root: Path, threads: dict[str, int], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(dir_mod, "judge_and_deliver", _delivered)
-        monkeypatch.setattr(dir_mod, "is_blocked", lambda _p: None)
+        monkeypatch.setattr(dir_mod, "check_blocklist", lambda _p, _m: False)
         scanned: dict[str, Any] = {}
         real_detect = dir_mod.detect_module_shadows
 
@@ -110,16 +110,18 @@ class TestShadowScanIsBounded:
         self, root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The listing saw few entries but the re-scan by path hit the bound:
-        the directory changed, and a partial scan could have missed a shadow."""
-        from mcp_trentina_crunchtools.errors import FileReadError
+        the directory changed, and a partial scan could have missed a shadow.
+        Delivered as a confinement refusal (#278), with no alternatives."""
+        from mcp_trentina_crunchtools.errors import BlockedSourceError
         from mcp_trentina_crunchtools.l1.shadows import ShadowScanResult
 
         swapped = ShadowScanResult(directory=str(root), entries_read=dir_mod.MAX_DIR_ENTRIES + 1)
         monkeypatch.setattr(dir_mod, "detect_module_shadows", lambda _d, **_k: swapped)
 
-        with pytest.raises(FileReadError) as caught:
+        with pytest.raises(BlockedSourceError) as caught:
             await dir_mod.list_dir(str(root), Mode.FLAG)
-        assert caught.value.reason == "changed_during_read"
+        assert caught.value.refusal["reason"] == "confinement refused (changed_during_read)"
+        assert caught.value.refusal["alternatives"] == []
 
     def test_it_stops_at_max_entries(self, tmp_path: Path) -> None:
         for name in ("json", "struct", "socket", "ssl", "types", "abc", "enum", "re"):

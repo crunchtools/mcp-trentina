@@ -22,6 +22,25 @@ and the kernel's own name for the opened descriptor is checked again, which
 catches a swapped INTERMEDIATE directory that the other two follow.
 
 Refusals carry a reason code and never the path (see ``FileReadError``).
+
+Two more rules since #263 and #278:
+
+- The denylist and roots are checked on the path as written, lexically
+  normalized, BEFORE anything is resolved, and again on the resolved path.
+  Resolving first answered ``not_found`` for a missing path and
+  ``denied_path`` for an existing denied one: a file-existence oracle over
+  the container, one bit per call.
+- Behind a live gateway, ``not_found``, ``denied_path`` and
+  ``outside_read_roots`` are one reason, ``not_found_or_denied``. A symlink
+  inside a root that points somewhere denied still has to be resolved to be
+  refused, and only the merge keeps that from telling a caller whether its
+  target exists. Standalone keeps the three apart: one operator, their own
+  files.
+
+A refusal reaches the caller the way the egress guard's does (``refused``):
+a ``BlockedSourceError`` with no alternatives, which the router audits as
+``blocked_defense``. It was a ``FileReadError`` until #278, audited as
+``backend_error``, which filed a hijacked agent's probing as breakage.
 """
 
 from __future__ import annotations
@@ -29,47 +48,118 @@ from __future__ import annotations
 import errno
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..config import get_config
-from ..errors import FileReadError
+from ..errors import BlockedSourceError, FileReadError
 from ..gateway.loader import get_active_config
+
+if TYPE_CHECKING:
+    from ..modes import Mode
 
 HARD_DENIED = ("/config", "/data", "/proc", "/sys", "/run", "/dev")
 _FD_DIR = Path("/proc/self/fd")
 
 
-def denied_dirs() -> list[Path]:
-    """Directories no root can admit: the kernel's, and Trentina's own state and config."""
+_ADMISSION_REASONS = frozenset({"not_found", "denied_path", "outside_read_roots"})
+GATEWAY_REASON = "not_found_or_denied"
+
+REFUSAL_REASONS = frozenset(_ADMISSION_REASONS | {GATEWAY_REASON, "changed_during_read"})
+"""Reasons delivered as a refusal (``refused``) rather than a read failure."""
+
+
+def _refuse(reason: str) -> FileReadError:
+    """The refusal for ``reason``, merged behind a live gateway (see the module doc)."""
+    if reason in _ADMISSION_REASONS and get_active_config() is not None:
+        return FileReadError(GATEWAY_REASON)
+    return FileReadError(reason)
+
+
+def _own_paths() -> list[str]:
     config = get_config()
     own = [config.db_path, config.perimeter_db_path, config.trust_config_path]
     active = get_active_config()
     if active is not None:
         own.append(str(active.path))
+    return own
+
+
+def denied_dirs() -> list[Path]:
+    """Directories no root can admit: the kernel's, and Trentina's own state and config."""
     dirs = [Path(d).resolve() for d in HARD_DENIED]
-    dirs += [Path(p).resolve().parent for p in own]
+    dirs += [Path(p).resolve().parent for p in _own_paths()]
     return dirs
+
+
+def _denied_dirs_written() -> list[Path]:
+    """``denied_dirs`` as configured, unresolved, for the lexical check."""
+    dirs = [Path(d) for d in HARD_DENIED]
+    dirs += [Path(os.path.abspath(p)).parent for p in _own_paths()]
+    return dirs
+
+
+def _admit(path: Path, denied: list[Path], roots: tuple[Path, ...]) -> None:
+    if any(path.is_relative_to(d) for d in denied):
+        raise _refuse("denied_path")
+    if roots:
+        if not any(path.is_relative_to(r) for r in roots):
+            raise _refuse("outside_read_roots")
+    elif get_active_config() is not None:
+        raise _refuse("outside_read_roots")
 
 
 def check(resolved: Path) -> None:
     """Refuse a fully resolved path that is denied or outside every root."""
-    if any(resolved.is_relative_to(d) for d in denied_dirs()):
-        raise FileReadError("denied_path")
-    roots = get_config().read_roots
-    if roots:
-        if not any(resolved.is_relative_to(r) for r in roots):
-            raise FileReadError("outside_read_roots")
-    elif get_active_config() is not None:
-        raise FileReadError("outside_read_roots")
+    _admit(resolved, denied_dirs(), get_config().read_roots)
+
+
+def check_lexical(path: str) -> None:
+    """Refuse ``path`` as written, normalized but not resolved, touching no filesystem.
+
+    Compared against the denylist and roots both as configured and resolved,
+    so a root spelled through a symlinked directory (a home directory that is
+    a link on an image-based host) admits paths spelled the same way. Denying
+    on either spelling can only refuse more; ``check`` still runs on the
+    resolved path, which is the one that decides what is opened.
+    """
+    lexical = Path(os.path.abspath(path))
+    config = get_config()
+    _admit(
+        lexical,
+        _denied_dirs_written() + denied_dirs(),
+        config.read_roots + config.read_roots_written,
+    )
 
 
 def confine(path: str) -> Path:
-    """Resolve ``path`` (it must exist) and refuse it unless ``check`` admits it."""
+    """Refuse ``path`` unless admitted as written and again once resolved (it must exist)."""
+    check_lexical(path)
     try:
         resolved = Path(path).resolve(strict=True)
     except (OSError, RuntimeError):
-        raise FileReadError("not_found") from None
+        raise _refuse("not_found") from None
     check(resolved)
     return resolved
+
+
+def refused(exc: FileReadError, mode: Mode) -> BlockedSourceError:
+    """A confinement refusal, delivered like the egress guard's (#278).
+
+    No alternatives: no mode reads a path confinement refused. The source is
+    a constant, not the path: the caller knows what it sent, and the message
+    must not carry a string the caller chose (#262).
+    """
+    reason = f"confinement refused ({exc.reason})"
+    return BlockedSourceError(
+        "path",
+        reason,
+        refusal={
+            "reason": reason,
+            "mode": mode.value,
+            "flagged_by": "confinement",
+            "alternatives": [],
+        },
+    )
 
 
 def _opened_path(fd: int) -> Path | None:
@@ -102,7 +192,7 @@ def open_confined(path: str, extra_flags: int = 0) -> tuple[int, os.stat_result,
     try:
         checked = os.stat(resolved)
     except OSError:
-        raise FileReadError("not_found") from None
+        raise _refuse("not_found") from None
     flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC | extra_flags
     try:
         fd = os.open(resolved, flags)
@@ -111,7 +201,7 @@ def open_confined(path: str, extra_flags: int = 0) -> tuple[int, os.stat_result,
     except OSError as exc:
         # ELOOP is O_NOFOLLOW meeting a symlink that was not there at check time.
         swapped = exc.errno == errno.ELOOP
-        raise FileReadError("changed_during_read" if swapped else "not_found") from None
+        raise (FileReadError("changed_during_read") if swapped else _refuse("not_found")) from None
     try:
         opened = _verify_opened(fd, checked)
     except BaseException:

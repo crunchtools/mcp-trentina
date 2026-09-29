@@ -64,6 +64,13 @@ classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/tools/judged.py"
+pattern = "_caller"
+justification = "Not single-use: called from check_blocklist (the blocklist read) and from judge_and_deliver (the detection row's profile attribution), verified by grep. The second call sits inside a dict literal passed to an awaited call, which the check appears not to count. Both sites must answer 'whose blocklist is this' the same way (#263), which is why it is one function."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "single_use_helpers"
 path = "tests/test_reload.py"
 pattern = "_registry"
 justification = "Not single-use: called from 10 distinct locations in the file, verified by grep. Same undercount as the tests/test_gateway_router.py `_profile` entry below -- the check appears to attribute callers per test class and stops counting once a module-level helper is also used by another module-level helper."

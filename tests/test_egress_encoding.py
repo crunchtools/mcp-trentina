@@ -177,7 +177,9 @@ class TestDeliveredAsARefusal:
     ) -> None:
         from mcp_trentina_crunchtools.tools.fetch import fetch_page
 
-        monkeypatch.setattr("mcp_trentina_crunchtools.tools.fetch.is_blocked", lambda _u: None)
+        monkeypatch.setattr(
+            "mcp_trentina_crunchtools.tools.fetch.check_blocklist", lambda _u, _m: False
+        )
         headers = {"Content-Type": "text/html", "Content-Encoding": "gzip"}
         async with _BombServer("200 OK", headers, BOMB) as server:
             _route_to(monkeypatch, server)

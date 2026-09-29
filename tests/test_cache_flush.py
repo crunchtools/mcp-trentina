@@ -7,6 +7,7 @@ gw-work and gw-personal together, in whatever profile they lived.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -50,6 +51,14 @@ profiles:
         url: {PERSONAL_URL}
       wiki:
         url: {WIKI_URL}
+  gamma:
+    auth:
+      bearer_token_env: TEST_GAMMA_TOKEN
+    backends:
+      gw-personal:
+        url: {PERSONAL_URL}
+      wiki:
+        url: {WIKI_URL}
 """
 
 
@@ -58,6 +67,7 @@ def gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
     """Two profiles, all three backends cached, both aggregates warm."""
     monkeypatch.setenv("TEST_ALPHA_TOKEN", "a")
     monkeypatch.setenv("TEST_BETA_TOKEN", "b")
+    monkeypatch.setenv("TEST_GAMMA_TOKEN", "c")
     path = tmp_path / "profiles.yaml"
     path.write_text(YAML, encoding="utf-8")
     config = load_profiles(path)
@@ -72,14 +82,22 @@ def gateway(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
 
 
 class TestAgentScope:
-    async def test_no_argument_flushes_only_the_callers_backends(self, gateway: dict) -> None:
+    async def test_no_argument_drops_only_the_callers_aggregate(self, gateway: dict) -> None:
+        """#263: the shared per-URL cache is left alone."""
         with profile_context(gateway["beta"]):
             result = await cache_flush()
 
-        assert result["backends_flushed"] == ["gw-personal", "wiki"]
-        assert PERSONAL_URL not in _tool_list_cache
-        assert WORK_URL in _tool_list_cache
+        assert result == {"flushed": "profile", "scope": "beta", "profile_cache_cleared": True}
+        assert set(_tool_list_cache) == {WORK_URL, PERSONAL_URL, WIKI_URL}
         assert "beta" not in _profile_tools_cache
+        assert "alpha" in _profile_tools_cache
+
+    async def test_a_named_backend_evicts_nothing_shared(self, gateway: dict) -> None:
+        with profile_context(gateway["beta"]):
+            result = await cache_flush("wiki")
+
+        assert result == {"flushed": "profile", "scope": "beta", "profile_cache_cleared": True}
+        assert WIKI_URL in _tool_list_cache
 
     async def test_a_backend_in_another_profile_is_refused(self, gateway: dict) -> None:
         """The substring bug, as the caller would have hit it."""
@@ -113,6 +131,41 @@ class TestAgentScope:
 
         assert "beta" not in _profile_tools_cache
         assert "alpha" in _profile_tools_cache
+
+
+def _bytes(result: dict) -> str:
+    return json.dumps(result, sort_keys=True)
+
+
+class TestNoChannelBetweenAgents:
+    """#263's done-when: nothing gamma does changes a byte of beta's result."""
+
+    async def test_beta_reads_the_same_bytes_whatever_gamma_did(self, gateway: dict) -> None:
+        with profile_context(gateway["beta"]):
+            baseline = _bytes(await cache_flush())
+            named = _bytes(await cache_flush("wiki"))
+
+        # Every move gamma has, each followed by beta's read, with the shared
+        # cache entries warm and cold and gamma's own aggregate warm.
+        for target in (None, "wiki", "gw-personal"):
+            for warm in (True, False):
+                for url in (PERSONAL_URL, WIKI_URL):
+                    if warm:
+                        _tool_list_cache[url] = [{"name": "a_tool"}]
+                    else:
+                        _tool_list_cache.pop(url, None)
+                _profile_tools_cache["gamma"] = [{"name": "z"}]
+                with profile_context(gateway["gamma"]):
+                    await cache_flush(target)
+                with profile_context(gateway["beta"]):
+                    assert _bytes(await cache_flush()) == baseline
+                    assert _bytes(await cache_flush("wiki")) == named
+
+    async def test_betas_own_aggregate_state_is_not_reported(self, gateway: dict) -> None:
+        with profile_context(gateway["beta"]):
+            warm = _bytes(await cache_flush())
+            cold = _bytes(await cache_flush())
+        assert warm == cold
 
 
 class TestOperatorScope:

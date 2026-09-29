@@ -135,12 +135,14 @@ Both take a path from the agent, so both are confined (#261). `TRENTINA_READ_ROO
 
 | Setting | Behind a gateway | Standalone |
 |---|---|---|
-| unset | every path refused (`outside_read_roots`) | any path, minus the denylist |
+| unset | every path refused | any path, minus the denylist |
 | `/srv/work:/home/agent/src` | inside those roots, minus the denylist | the same |
 
 The denylist no root overrides: `/config`, `/data`, `/proc`, `/sys`, `/run`, `/dev`, and the directories holding `QUARANTINE_DB`, `TRENTINA_PERIMETER_DB`, `QUARANTINE_TRUST_CONFIG` and the live `profiles.yaml` (`denied_path`). Production leaves `TRENTINA_READ_ROOTS` unset: the gateway container has no agent workspace, so there is nothing an agent should read there.
 
-The file is opened with `O_NOFOLLOW`, its inode compared with the one checked, and the kernel's name for the open descriptor checked again, so a path swapped for a symlink between the check and the read is refused (`changed_during_read`). A refusal is `Cannot read: <reason>`, sometimes with a numeric detail such as the size cap, and never repeats the path, because error text reaches logs other agents read.
+The path is checked as written, lexically normalized, before anything is resolved, and again once resolved (#263). The file is opened with `O_NOFOLLOW`, its inode compared with the one checked, and the kernel's name for the open descriptor checked again, so a path swapped for a symlink between the check and the read is refused (`changed_during_read`).
+
+A confinement refusal is delivered like the egress guard's (#278): `confinement refused (<reason>)` with `flagged_by: confinement` and no alternatives, audited as `blocked_defense`. Behind a gateway, a missing path, a denied one and one outside the roots all give the same reason, `not_found_or_denied`: a symlink inside a root that points somewhere denied still has to be resolved to be refused, and distinct reasons would tell the caller whether its target exists. Standalone keeps `not_found`, `denied_path` and `outside_read_roots` apart. Other failures (`too_large`, `binary`, `unsupported_type`, ...) are `Cannot read: <reason>`. Neither repeats the path, because error text reaches logs other agents read.
 
 **content** — inline text is never allowlisted (it has no provenance), is refused over the admission cap before anything else runs, and is blocklisted by SHA-256.
 
