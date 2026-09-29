@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
+import yaml
 
 from mcp_trentina_crunchtools.gateway import profile_lint
 from mcp_trentina_crunchtools.gateway.profile_lint import (
@@ -111,6 +113,33 @@ class TestFixtures:
             {"url": "http://mcp-m:1/mcp/", "profiles": names, "reason": "one shared memory"}
         ]
         assert profile_lint.check_shared_write_backends(profiles_file) == []
+
+    def test_assistants_are_exempt_and_swarm_seats_are_not(self) -> None:
+        """Interactive assistants hold broad tools on purpose; an unattended seat
+        writing where they read is still the channel the check is for."""
+        memory = {"url": "http://mcp-m:1/mcp", "tools_allow": ["memory_store"]}
+        profiles: dict[str, Any] = {
+            name: {"backends": {"m": memory}} for name in ("josui", "kagetora")
+        }
+        profiles_file: dict[str, Any] = {
+            "profiles": profiles,
+            "assistants": {"profiles": ["josui", "kagetora"], "reason": "used interactively"},
+        }
+        assert profile_lint.check_shared_write_backends(profiles_file) == []
+        profiles["swarm-1"] = {"backends": {"m": memory}}
+        (finding,) = profile_lint.check_shared_write_backends(profiles_file)
+        assert "'swarm-1'" in str(finding)
+
+    def test_an_assistant_declaration_needs_a_reason(self) -> None:
+        assert profile_lint.assistants({"assistants": {"profiles": ["josui"]}}) == frozenset()
+        assert profile_lint.assistants(
+            {"assistants": {"profiles": ["josui"], "reason": "interactive"}}
+        ) == frozenset({"josui"})
+
+    def test_an_assistant_is_exempt_from_toxic_flow(self) -> None:
+        profiles_file = yaml.safe_load((FIXTURES / "toxic.yaml").read_text())
+        profiles_file["assistants"] = {"profiles": ["toxic", "catch-all"], "reason": "interactive"}
+        assert profile_lint.check_toxic_flows(profiles_file) == []
 
     def test_a_finding_never_prints_a_url_credential(self) -> None:
         backend = {"url": "http://u:pw@mcp-x:8000/api/mcp/KEY?token=TOK", "tools_allow": ["*"]}

@@ -21,6 +21,20 @@ is SAFE, in three ways the #90 audit found live:
 - ``require-default-open``: a ``TRENTINA_REQUIRE_*`` switch whose default is
   not fail-closed.
 
+Both posture checks are for seats that run unattended, such as swarm or
+coding agents. A personal assistant that a person talks to directly holds
+broad tools on purpose, so declare it, with a reason, in an optional top-level
+``assistants`` list, which the loader also ignores::
+
+      assistants:
+        profiles: [josui, kagetora]
+        reason: "personal assistants, used interactively; broad tools intended"
+
+An assistant is exempt from ``toxic-flow``. A shared write backend is still
+flagged when any profile on it is not an assistant, because an unattended
+seat writing where an assistant reads is the channel this check is for.
+Every profile not listed is linted, so a new seat is checked by default.
+
 Tool names are judged from the allowlist alone, because the lint runs without
 the backends. A wildcard counts as holding whatever it could admit: a glob that
 admits a write tool the backend adds next month holds it already.
@@ -188,6 +202,15 @@ def _profiles(profiles_file: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(name): body or {} for name, body in profiles.items()}
 
 
+def assistants(profiles_file: dict[str, Any]) -> frozenset[str]:
+    """Profiles declared interactive assistants. A declaration without a reason
+    is not a decision, so it exempts nothing."""
+    entry = profiles_file.get("assistants") or {}
+    if not isinstance(entry, dict) or not str(entry.get("reason", "")).strip():
+        return frozenset()
+    return frozenset(map(str, entry.get("profiles") or []))
+
+
 def _allowances(profiles_file: dict[str, Any]) -> list[tuple[str, frozenset[str]]]:
     found: list[tuple[str, frozenset[str]]] = []
     for entry in profiles_file.get("shared_backends") or []:
@@ -225,9 +248,10 @@ def check_shared_write_backends(profiles_file: dict[str, Any]) -> list[Finding]:
             if any("write" in kinds for kinds in held_tools(backend).values()):
                 writers.setdefault(url, set()).add(profile)
     allowed = _allowances(profiles_file)
+    exempt = assistants(profiles_file)
     findings = []
     for url, holders in sorted(writers.items()):
-        if len(holders) < 2:
+        if len(holders) < 2 or holders <= exempt:
             continue
         groups = [ps for u, ps in allowed if u.rstrip("/") == url]
         uncovered = _uncovered_writers(holders, groups)
@@ -277,7 +301,10 @@ def _unguarded_outbound(body: dict[str, Any]) -> list[str]:
 def check_toxic_flows(profiles_file: dict[str, Any]) -> list[Finding]:
     """A seat with open fetch, a public inbox and an unguarded outbound tool together."""
     findings = []
+    exempt = assistants(profiles_file)
     for profile, body in _profiles(profiles_file).items():
+        if profile in exempt:
+            continue
         fetch, inbox, outbound = _open_fetch(body), _public_inbox(body), _unguarded_outbound(body)
         if fetch and inbox and outbound:
             findings.append(
