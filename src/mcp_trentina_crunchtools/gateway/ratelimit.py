@@ -266,6 +266,8 @@ class UnauthenticatedWriteGuard:
                     },
                 )
                 return
+            if body is None:
+                return  # the client left mid-body; there is no request to serve
             receive = BufferedReceive(body, receive)
 
         address = client_address(scope)
@@ -287,7 +289,7 @@ class UnauthenticatedWriteGuard:
 
         await self._inner(scope, receive, send)
 
-    async def _read_capped(self, scope: Any, receive: Any) -> tuple[bytes, bool]:
+    async def _read_capped(self, scope: Any, receive: Any) -> tuple[bytes | None, bool]:
         """Drain the request body, stopping one byte past the cap.
 
         See ``httpbody.drain_capped``: a declared ``content-length`` refuses

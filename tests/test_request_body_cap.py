@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 from starlette.applications import Starlette
-from starlette.requests import Request
+from starlette.requests import ClientDisconnect, Request
 from starlette.responses import Response
 from starlette.routing import Route
 from starlette.testclient import TestClient
@@ -27,6 +27,7 @@ from mcp_trentina_crunchtools.httpbody import (
     MIN_REQUEST_BYTES,
     RequestBodyCap,
     TooLargeError,
+    drain_capped,
     max_request_bytes,
     mcp_path_matcher,
     read_capped,
@@ -97,7 +98,7 @@ class TestMiddleware:
         await RequestBodyCap(inner, cap=CAP)(_scope("/gateway/alice/mcp"), receive, send)
 
         assert send.status == 413
-        assert not inner.called
+        assert inner.body == b""  # the handler's read was stopped, not fed
         # Three 1 KiB chunks pass 2 KiB; the other 47 are never pulled.
         assert receive.pulled == 3
 
@@ -125,7 +126,7 @@ class TestMiddleware:
         )
 
         assert send.status == 413
-        assert not inner.called
+        assert inner.body == b""
 
     async def test_body_under_the_cap_reaches_the_handler_whole(self) -> None:
         inner = _Echo()
@@ -154,6 +155,48 @@ class TestMiddleware:
         assert inner.called
         assert len(inner.body) == 5 * 1024
 
+    async def test_nothing_is_read_ahead_of_the_handler(self) -> None:
+        """A handler that refuses before reading (the gateway authenticates
+        first) costs no body memory: the middleware buffers nothing itself."""
+
+        async def refuses_unread(scope: Any, receive: Any, send: Any) -> None:
+            await Response("no", status_code=401)(scope, receive, send)
+
+        receive = _Receive([b"x" * 1024] * 50)
+        send = _Send()
+
+        await RequestBodyCap(refuses_unread, cap=CAP)(_scope("/gateway/a/mcp"), receive, send)
+
+        assert send.status == 401
+        assert receive.pulled == 0
+
+    async def test_a_disconnect_mid_body_is_not_a_request(self) -> None:
+        """The partial body never reaches the handler as if it were complete."""
+        inner = _Echo()
+
+        class _Leaves(_Receive):
+            async def __call__(self) -> dict[str, Any]:
+                if self.pulled == 1:
+                    return {"type": "http.disconnect"}
+                return await super().__call__()
+
+        receive = _Leaves([b'{"jsonrpc": "2.0"', b"}"])
+
+        with pytest.raises(ClientDisconnect):
+            await RequestBodyCap(inner, cap=CAP)(_scope("/gateway/a/mcp"), receive, _Send())
+        assert inner.body == b""
+
+    async def test_drain_capped_reports_a_disconnect(self) -> None:
+        class _Leaves(_Receive):
+            async def __call__(self) -> dict[str, Any]:
+                if self.pulled == 1:
+                    return {"type": "http.disconnect"}
+                return await super().__call__()
+
+        body, overflowed = await drain_capped(_scope("/register"), _Leaves([b"{", b"}"]), CAP)
+        assert body is None
+        assert not overflowed
+
     def test_the_matcher(self) -> None:
         applies = mcp_path_matcher("/mcp-internal-abc", "/mcp")
         assert applies("/gateway/alice/mcp")
@@ -177,6 +220,38 @@ class TestGatewayApp:
             "/alice/mcp",
             content=b"{" + b" " * (CAP * 4) + b"}",
             headers={"Authorization": "Bearer alice-token", "Content-Type": "application/json"},
+        )
+
+        assert resp.status_code == 413
+
+    def test_unauthenticated_oversize_is_refused_by_auth_unread(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TRENTINA_MAX_REQUEST_BYTES", str(CAP))
+        profile = Profile(name="alice", auth=AuthConfig(bearer_token_env="A"))
+        profile.auth.bearer_token = SecretStr("alice-token")
+        client = TestClient(gateway_app({"alice": profile}))
+
+        def chunked() -> Any:
+            for _ in range(10):
+                yield b"x" * 1024
+
+        resp = client.post("/alice/mcp", content=chunked(), headers={"Authorization": "Bearer no"})
+
+        assert resp.status_code == 401
+
+    def test_authenticated_chunked_oversize_is_413(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TRENTINA_MAX_REQUEST_BYTES", str(CAP))
+        profile = Profile(name="alice", auth=AuthConfig(bearer_token_env="A"))
+        profile.auth.bearer_token = SecretStr("alice-token")
+        client = TestClient(gateway_app({"alice": profile}))
+
+        def chunked() -> Any:
+            for _ in range(10):
+                yield b"x" * 1024
+
+        resp = client.post(
+            "/alice/mcp", content=chunked(), headers={"Authorization": "Bearer alice-token"}
         )
 
         assert resp.status_code == 413

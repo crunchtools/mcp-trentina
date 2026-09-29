@@ -85,11 +85,13 @@ def declared_length_over(scope: Any, cap: int) -> bool:
     return False
 
 
-async def drain_capped(scope: Any, receive: Any, cap: int) -> tuple[bytes, bool]:
+async def drain_capped(scope: Any, receive: Any, cap: int) -> tuple[bytes | None, bool]:
     """Drain an ASGI request body, stopping as soon as it passes ``cap``.
 
     Returns ``(body, overflowed)``. On overflow the body is empty and the rest
-    of it is never read.
+    of it is never read. ``body`` is None when the client disconnected before
+    the body ended: a partial body is not a request, and must not be handed on
+    as if it were one.
     """
     if declared_length_over(scope, cap):
         return b"", True
@@ -98,7 +100,7 @@ async def drain_capped(scope: Any, receive: Any, cap: int) -> tuple[bytes, bool]
     while True:
         message = await receive()
         if message["type"] == "http.disconnect":
-            break
+            return None, False
         chunk = message.get("body", b"")
         total += len(chunk)
         if total > cap:
@@ -107,6 +109,31 @@ async def drain_capped(scope: Any, receive: Any, cap: int) -> tuple[bytes, bool]
         if not message.get("more_body"):
             break
     return b"".join(chunks), False
+
+
+class CappedReceive:
+    """An ASGI ``receive`` that counts body bytes as the handler pulls them.
+
+    Raises ``TooLargeError`` from the handler's own read once the total passes
+    ``cap``, so nothing is buffered on the handler's behalf and a handler that
+    refuses before reading (the gateway authenticates first) reads nothing.
+    Every other message passes through untouched, disconnects included.
+    """
+
+    __slots__ = ("_cap", "_receive", "_total")
+
+    def __init__(self, receive: Any, cap: int) -> None:
+        self._receive = receive
+        self._cap = cap
+        self._total = 0
+
+    async def __call__(self) -> dict[str, Any]:
+        message: dict[str, Any] = await self._receive()
+        if message["type"] == "http.request":
+            self._total += len(message.get("body", b""))
+            if self._total > self._cap:
+                raise TooLargeError(f"body over {self._cap} bytes")
+        return message
 
 
 class BufferedReceive:
@@ -154,9 +181,14 @@ class RequestBodyCap:
 
     Wraps the whole app but acts only where ``applies(path)`` holds, so the
     LLM and Matrix proxies, which stream bodies they never hold, keep their
-    own behaviour. Buffering up to the cap is cheap at 1 MiB, and it is what
-    makes a refusal a clean 413 instead of a connection torn down under a
-    handler halfway through ``request.body()``.
+    own behaviour.
+
+    Nothing is buffered here. A declared ``Content-Length`` over the cap is
+    refused before the app runs; otherwise the app reads through
+    ``CappedReceive``, which stops the read at the cap. The gateway handler
+    authenticates before it reads, so an unauthenticated caller costs no body
+    memory at all, and a refusal from a handler that has not started its
+    response still becomes a 413 here.
     """
 
     __slots__ = ("_app", "_applies", "_cap")
@@ -180,14 +212,28 @@ class RequestBodyCap:
         ):
             await self._app(scope, receive, send)
             return
-        body, overflowed = await drain_capped(scope, receive, self._cap)
-        if overflowed:
-            # The cap, never the path: the path carries a caller-chosen
-            # profile name, and the journal is readable by agents (#262).
-            logger.warning("http: refused a request body over %d bytes", self._cap)
-            await send_text(send, STATUS_TOO_LARGE, f"Request body exceeds {self._cap} bytes.\n")
+        if declared_length_over(scope, self._cap):
+            await self._refuse(send)
             return
-        await self._app(scope, BufferedReceive(body, receive), send)
+        started = False
+
+        async def tracked_send(message: dict[str, Any]) -> None:
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self._app(scope, CappedReceive(receive, self._cap), tracked_send)
+        except TooLargeError:
+            if started:
+                raise
+            await self._refuse(send)
+
+    async def _refuse(self, send: Any) -> None:
+        # The cap, never the path: the path carries a caller-chosen profile
+        # name, and the journal is readable by agents (#262).
+        logger.warning("http: refused a request body over %d bytes", self._cap)
+        await send_text(send, STATUS_TOO_LARGE, f"Request body exceeds {self._cap} bytes.\n")
 
 
 async def send_text(

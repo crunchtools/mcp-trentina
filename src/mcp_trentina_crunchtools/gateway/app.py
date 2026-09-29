@@ -26,7 +26,7 @@ from starlette.middleware import Middleware
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
-from ..httpbody import RequestBodyCap
+from ..httpbody import STATUS_TOO_LARGE, RequestBodyCap, TooLargeError
 from ..logsafe import exc_kind, exc_where, redact_source, safe_address
 from ..quarantine.classifier import classifier_status
 from .auth import verify_bearer, verify_oauth
@@ -614,8 +614,11 @@ async def _handle_post(
         return auth_response
 
     try:
-        # Bounded by RequestBodyCap before this handler runs (#267).
+        # Read through RequestBodyCap's counting receive, AFTER authentication,
+        # so an unauthenticated caller costs no body memory (#267).
         body_bytes = await request.body()
+    except TooLargeError:
+        return _plain(STATUS_TOO_LARGE, "Request body too large")
     except Exception as exc:
         # Same reasoning as alert_ingress: 400 is correct for every cause, but
         # discarding the cause loses the only signal that separates a flaky
