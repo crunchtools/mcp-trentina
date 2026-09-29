@@ -63,7 +63,9 @@ def _isolated_perimeter_store(tmp_path: pathlib.Path, monkeypatch: pytest.Monkey
     a verdict cached from a mocked pipeline is exactly the kind of row that
     should not outlive the test that invented it.
     """
-    monkeypatch.setenv("TRENTINA_PERIMETER_DB", str(tmp_path / "perimeter.db"))
+    # In a subdirectory, not tmp_path itself: read_tool refuses Trentina's own
+    # state directories (#261), and tests read files they wrote to tmp_path.
+    monkeypatch.setenv("TRENTINA_PERIMETER_DB", str(tmp_path / "state" / "perimeter.db"))
     config_mod._config = None
 
 
@@ -93,11 +95,11 @@ def _no_ambient_gemini_key(request: pytest.FixtureRequest, monkeypatch: pytest.M
 def env(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[pathlib.Path]:
     """For tests/mode_harness.py: an L3 key, a private blocklist, fresh config."""
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    monkeypatch.setenv("QUARANTINE_DB", str(tmp_path / "trentina.db"))
+    monkeypatch.setenv("QUARANTINE_DB", str(tmp_path / "state" / "trentina.db"))
     monkeypatch.delenv("QUARANTINE_FALLBACK", raising=False)
     monkeypatch.delenv("TRENTINA_REQUIRE_L2", raising=False)
     monkeypatch.delenv("TRENTINA_REQUIRE_L3", raising=False)
-    monkeypatch.setenv("QUARANTINE_TRUST_CONFIG", str(tmp_path / "no-such-trust.json"))
+    monkeypatch.setenv("QUARANTINE_TRUST_CONFIG", str(tmp_path / "state" / "no-such-trust.json"))
     config_mod._config = None
     database_mod._db = None
     yield tmp_path

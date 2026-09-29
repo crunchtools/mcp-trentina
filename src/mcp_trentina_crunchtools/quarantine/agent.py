@@ -24,7 +24,8 @@ import httpx
 
 from ..client import MAX_RESPONSE_SIZE
 from ..config import DEFAULT_SEARCH_MODEL, get_config
-from ..errors import MalformedResponseError, QuarantineAgentError
+from ..egress import open_guarded
+from ..errors import EgressRefusedError, MalformedResponseError, QuarantineAgentError
 from ..l1.pipeline import run_l1
 from ..logsafe import exc_kind
 from .limiter import THROTTLE_STATUS, limited_generate, throttle_budget
@@ -703,10 +704,11 @@ async def quarantine_generate(
 SEARCH_GROUNDING_TOOL: dict[str, Any] = {"google_search": {}}
 
 REDIRECT_TIMEOUT = 5.0
-GROUNDING_REDIRECT_PATTERNS = [
-    "grounding-api-redirect",
-    "vertexaisearch.cloud.google.com",
-]
+GROUNDING_REDIRECT_HOSTS = frozenset({"vertexaisearch.cloud.google.com"})
+"""Where grounding citations redirect from, matched on the exact hostname.
+
+It was a substring test over the whole URI, so
+``http://10.89.0.1/?vertexaisearch.cloud.google.com`` qualified (#260)."""
 
 
 def _enforce_search_quarantine(request_body: dict[str, Any]) -> None:
@@ -1087,41 +1089,38 @@ async def search_grounded(
         raise QuarantineAgentError(str(exc)) from exc
 
 
+def _is_grounding_redirect(uri: str) -> bool:
+    try:
+        return httpx.URL(uri).host in GROUNDING_REDIRECT_HOSTS
+    except (httpx.InvalidURL, TypeError):
+        return False
+
+
 async def resolve_grounding_urls(
     sources: list[dict[str, str]],
 ) -> list[dict[str, str]]:
-    """Resolve grounding redirect URLs to final destinations."""
+    """Resolve grounding redirect URLs to final destinations.
+
+    Each source is ``{"uri", "title"}``. One whose host is not exactly a
+    grounding redirect host is returned unchanged and never requested. A
+    redirect that resolves becomes ``{"uri": <final URL>, "title",
+    "original_redirect": <the redirect URI>}``. One that fails keeps its
+    fields and gains ``"redirect_failed": "true"``, whether it timed out or
+    the egress guard refused a hop. Order is preserved.
+    """
     resolved: list[dict[str, str]] = []
-
-    async with httpx.AsyncClient(
-        timeout=httpx.Timeout(REDIRECT_TIMEOUT),
-        follow_redirects=True,
-        max_redirects=5,
-    ) as client:
-        for source in sources:
-            uri = source.get("uri", "")
-            is_redirect = any(p in uri for p in GROUNDING_REDIRECT_PATTERNS)
-
-            if not is_redirect:
-                resolved.append(source)
-                continue
-
-            try:
-                resp = await client.head(uri)
+    for source in sources:
+        uri = source.get("uri", "")
+        if not _is_grounding_redirect(uri):
+            resolved.append(source)
+            continue
+        try:
+            async with open_guarded("HEAD", uri, timeout=REDIRECT_TIMEOUT) as resp:
                 final_url = str(resp.url)
-                resolved.append(
-                    {
-                        "uri": final_url,
-                        "title": source.get("title", ""),
-                        "original_redirect": uri,
-                    }
-                )
-            except (httpx.RequestError, httpx.TimeoutException):
-                resolved.append(
-                    {
-                        **source,
-                        "redirect_failed": "true",
-                    }
-                )
-
+        except (httpx.HTTPError, EgressRefusedError):
+            resolved.append({**source, "redirect_failed": "true"})
+            continue
+        resolved.append(
+            {"uri": final_url, "title": source.get("title", ""), "original_redirect": uri}
+        )
     return resolved

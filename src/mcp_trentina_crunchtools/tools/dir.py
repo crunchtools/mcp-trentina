@@ -17,7 +17,7 @@ time, all three layers.
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from itertools import islice
 from typing import Any
 
 from ..config import get_config
@@ -26,6 +26,7 @@ from ..errors import FileReadError
 from ..l1.pipeline import run_l1
 from ..l1.shadows import ShadowStats, detect_module_shadows
 from ..modes import Mode
+from .confine import open_confined
 from .judged import blocklisted, judge_and_deliver
 
 MAX_DIR_ENTRIES = 500
@@ -45,14 +46,18 @@ def _entry(entry: os.DirEntry[str]) -> dict[str, Any]:
 
 
 async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
-    resolved = str(Path(path).resolve())
-    if not os.path.isdir(resolved):
-        raise FileReadError(path, "Not a directory")
-    with os.scandir(resolved) as it:
-        found = list(it)
-    if len(found) > MAX_DIR_ENTRIES:
-        raise FileReadError(path, f"Too many entries ({len(found)}, max {MAX_DIR_ENTRIES})")
-    entries = sorted((_entry(e) for e in found), key=lambda e: e["name"])
+    fd, _, confined = open_confined(path, os.O_DIRECTORY)
+    resolved = str(confined)
+    try:
+        # Listed through the checked descriptor, and lazily: a directory of a
+        # million entries costs MAX_DIR_ENTRIES + 1 reads, not a million.
+        with os.scandir(fd) as it:
+            found = list(islice(it, MAX_DIR_ENTRIES + 1))
+            if len(found) > MAX_DIR_ENTRIES:
+                raise FileReadError("too_many_entries", f"max {MAX_DIR_ENTRIES}")
+            entries = sorted((_entry(e) for e in found), key=lambda e: e["name"])
+    finally:
+        os.close(fd)
 
     blocked = is_blocked(resolved)
     if blocked and mode is not Mode.REDACT:

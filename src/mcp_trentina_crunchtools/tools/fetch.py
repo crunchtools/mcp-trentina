@@ -10,7 +10,12 @@ from ..client import fetch_url
 from ..config import get_config
 from ..database import is_blocked
 from ..defense import defend
-from ..errors import FetchError, UnsupportedContentTypeError
+from ..errors import (
+    BlockedSourceError,
+    EgressRefusedError,
+    FetchError,
+    UnsupportedContentTypeError,
+)
 from ..logsafe import exc_kind, redact_source
 from ..modes import Mode
 from ..quarantine.prompts import finding_types
@@ -174,6 +179,25 @@ def _handle_content_type_error(url: str, exc: UnsupportedContentTypeError) -> di
     )
 
 
+def _egress_refused(url: str, mode: Mode, exc: EgressRefusedError) -> BlockedSourceError:
+    """The egress guard's refusal, delivered like every other one (#260).
+
+    No alternatives: no mode reaches an address the guard refused. The
+    source is the URL the agent sent, never a redirect target or an address.
+    """
+    reason = f"egress refused ({exc.reason})"
+    return BlockedSourceError(
+        url,
+        reason,
+        refusal={
+            "reason": reason,
+            "mode": mode.value,
+            "flagged_by": "egress",
+            "alternatives": [],
+        },
+    )
+
+
 async def fetch_page(
     url: str, mode: Mode, prompt: str | None = None, preprocess: Any = None
 ) -> dict[str, Any]:
@@ -201,6 +225,8 @@ async def fetch_page(
             log.warning("security advisory for %s: %s", redact_source(url), exc_kind(exc))
             return advisory
         raise
+    except EgressRefusedError as exc:
+        raise _egress_refused(url, mode, exc) from exc
     except UnsupportedContentTypeError as exc:
         log.warning("redirect-to-binary advisory for %s: %s", redact_source(url), exc_kind(exc))
         return _handle_content_type_error(url, exc)

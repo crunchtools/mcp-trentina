@@ -136,6 +136,26 @@ def _mode_policy_env() -> tuple[str, tuple[str, ...]]:
     return default, allowed
 
 
+def _read_roots_env() -> tuple[Path, ...]:
+    """``TRENTINA_READ_ROOTS``: the directories read_tool and dir_tool may reach (#261).
+
+    ``os.pathsep``-separated, each resolved so a root reached through a
+    symlinked directory compares against resolved targets.
+    A relative entry is refused at startup: it would be relative to whatever
+    directory the process happened to start in.
+    """
+    from .errors import ConfigError
+
+    roots = []
+    for entry in os.environ.get("TRENTINA_READ_ROOTS", "").split(os.pathsep):
+        if not entry.strip():
+            continue
+        if not os.path.isabs(entry.strip()):
+            raise ConfigError(f"TRENTINA_READ_ROOTS entry {entry!r} is not an absolute path")
+        roots.append(Path(entry.strip()).resolve())
+    return tuple(roots)
+
+
 class Config:
     """Trentina configuration from environment variables.
 
@@ -179,6 +199,15 @@ class Config:
         # never excuses a partial scan and never stops a layer that can run.
         self.require_l2: bool = bool_env("TRENTINA_REQUIRE_L2", True)
         self.require_l3: bool = bool_env("TRENTINA_REQUIRE_L3", True)
+        # The egress guard's one escape hatch (#260): lets fetch reach a
+        # non-global address. Scheme, port and redirect rules still hold.
+        self.fetch_allow_private: bool = bool_env("TRENTINA_FETCH_ALLOW_PRIVATE", False)
+        if self.fetch_allow_private:
+            logger.warning(
+                "[WARNING] TRENTINA_FETCH_ALLOW_PRIVATE is on: fetch can reach loopback, "
+                "private and link-local addresses, including this host's other services. "
+                "Unset it unless a trusted internal site must be fetched."
+            )
         # The mode policy when no gateway profile is bound (#193): the agent of
         # a standalone server may pass trentina_mode, but only from this set,
         # and an omitted one is TRENTINA_MODE. Both default to block, so an
@@ -238,10 +267,13 @@ class Config:
             str(Path(self.db_path).parent / "perimeter.db"),
         )
 
+        self.read_roots: tuple[Path, ...] = _read_roots_env()
+
         trust_config_path = os.environ.get(
             "QUARANTINE_TRUST_CONFIG",
             str(Path.home() / ".config" / "mcp-env" / "mcp-trentina-trust.json"),
         )
+        self.trust_config_path: str = trust_config_path
         try:
             with open(trust_config_path) as fh:
                 self._trust_config: dict[str, list[str] | str] = json.load(fh)

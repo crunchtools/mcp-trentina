@@ -6,13 +6,14 @@ import logging
 
 import httpx
 
+from .egress import open_guarded
 from .errors import FetchError, UnsupportedContentTypeError
-from .logsafe import redact_source
 
 log = logging.getLogger(__name__)
 
 FETCH_TIMEOUT = 30.0
 MAX_RESPONSE_SIZE = 5_000_000  # 5 MB
+MAX_ERROR_BODY = 2048
 USER_AGENT = "mcp-trentina-crunchtools/0.1.0 (security-scanner)"
 
 TEXT_CONTENT_TYPES = frozenset(
@@ -79,33 +80,53 @@ def _build_redirect_chain(resp: httpx.Response) -> list[dict[str, object]] | Non
     return chain
 
 
+async def _error_body(resp: httpx.Response) -> str | None:
+    """The first ``MAX_ERROR_BODY`` bytes of a 4xx body, read while the stream is open.
+
+    Reading it after the ``stream`` block closed, as this used to, always
+    failed, so no 4xx body ever reached the advisory scan. A body that breaks
+    off mid-read still leaves the status to report.
+    """
+    buf = bytearray()
+    try:
+        async for chunk in resp.aiter_bytes():
+            buf += chunk
+            if len(buf) >= MAX_ERROR_BODY:
+                break
+    except httpx.HTTPError as exc:
+        log.debug("could not read a %d error body: %s", resp.status_code, type(exc).__name__)
+        return None
+    return bytes(buf[:MAX_ERROR_BODY]).decode("utf-8", errors="replace")
+
+
 async def fetch_url(url: str) -> tuple[str, str]:
     """Fetch a URL and return (content, content_type).
 
-    The response is streamed so the content-type and size can be rejected
-    from headers alone, before a large or binary body is pulled over the
-    wire and decoded.  Servers lie about or omit content-length, so the cap
-    is re-checked against bytes actually received; those bytes accumulate
-    here because resp.text is unavailable on a streamed response.
+    Every hop passes the egress guard (``egress.open_guarded``). The response
+    is streamed so the content-type and size can be rejected from headers
+    alone, before a large or binary body is pulled over the wire and decoded.
+    Servers lie about or omit content-length, so the cap is re-checked
+    against bytes actually received.
 
-    Raises FetchError on failure, UnsupportedContentTypeError on non-text.
+    Raises FetchError on failure, UnsupportedContentTypeError on non-text,
+    EgressRefusedError when the guard refuses a hop.
     """
     try:
-        async with (
-            httpx.AsyncClient(
-                timeout=httpx.Timeout(FETCH_TIMEOUT),
-                follow_redirects=True,
-                max_redirects=5,
-                headers={"User-Agent": USER_AGENT},
-            ) as http_client,
-            http_client.stream("GET", url) as resp,
-        ):
-            resp.raise_for_status()
+        async with open_guarded(
+            "GET", url, timeout=FETCH_TIMEOUT, headers={"User-Agent": USER_AGENT}
+        ) as resp:
+            status = resp.status_code
+            # Not only >= 400: a 3xx the guard did not follow (304, a 300
+            # with no Location) is no page either, as raise_for_status held.
+            if not resp.is_success:
+                error_body = await _error_body(resp) if 400 <= status < 500 else None
+                raise FetchError(url, f"HTTP {status}", status_code=status, error_body=error_body)
 
             content_type = resp.headers.get("content-type", "text/html")
             if not _is_text_content_type(content_type):
-                redirect_chain = _build_redirect_chain(resp)
-                raise UnsupportedContentTypeError(url, content_type, redirect_chain=redirect_chain)
+                raise UnsupportedContentTypeError(
+                    url, content_type, redirect_chain=_build_redirect_chain(resp)
+                )
 
             declared = resp.headers.get("content-length")
             if declared is not None and declared.isdigit() and int(declared) > MAX_RESPONSE_SIZE:
@@ -119,21 +140,6 @@ async def fetch_url(url: str) -> tuple[str, str]:
 
             return bytes(buf).decode(resp.encoding or "utf-8", errors="replace"), content_type
 
-    except httpx.HTTPStatusError as exc:
-        status = exc.response.status_code
-        error_body = None
-        if 400 <= status < 500:
-            try:
-                raw = exc.response.read()
-                error_body = raw[:2048].decode("utf-8", errors="replace")
-            except Exception:
-                log.debug("Could not read error body for %s", redact_source(url))
-        raise FetchError(
-            url,
-            f"HTTP {status}",
-            status_code=status,
-            error_body=error_body,
-        ) from exc
     except httpx.TimeoutException as exc:
         raise FetchError(url, "Request timed out") from exc
     except httpx.RequestError as exc:
