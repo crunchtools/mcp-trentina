@@ -39,6 +39,7 @@ class GatewayConfig:
 logger = logging.getLogger(__name__)
 
 _ENV_REF_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
+_URL_SAFE_VALUE_RE = re.compile(r"[A-Za-z0-9._~%-]+")
 
 
 def _expand_env_refs(value: str, *, context: str) -> str:
@@ -247,12 +248,27 @@ def _expand_backend_url(name: str, backend_name: str, url: str) -> str:
     secret: refuse it there.
     """
     context = f"Profile {name!r} backend {backend_name!r} url"
-    if not _ENV_REF_RE.search(url):
+    first_ref = _ENV_REF_RE.search(url)
+    if first_ref is None:
         return url
     parts = urlsplit(url)
-    if _ENV_REF_RE.search(f"{parts.scheme}://{parts.netloc}"):
+    authority_end = len(f"{parts.scheme}://{parts.netloc}")
+    if (
+        not parts.scheme
+        or not url.startswith(f"{parts.scheme}://")
+        or (first_ref.start() < authority_end)
+    ):
         raise ProfileConfigError(f"{context}: ${{VAR}} is allowed only in the path or query")
-    return _expand_env_refs(url, context=context)
+    expanded = _expand_env_refs(url, context=context)
+    # Inserted verbatim, so a value must not restructure the URL: `&`, `#`,
+    # `/` or `?` in a token would move it into another component.
+    for match in _ENV_REF_RE.finditer(url):
+        if not _URL_SAFE_VALUE_RE.fullmatch(read_secret_env(match.group(1))):
+            raise ProfileConfigError(
+                f"{context}: env var {match.group(1)} holds characters outside "
+                "[A-Za-z0-9._~%-]; percent-encode it"
+            )
+    return expanded
 
 
 def _expand_backend_env_refs(name: str, profile: Profile) -> None:

@@ -321,7 +321,10 @@ restarting the backend.
 
 A backend `url` expands `${VAR}` the same way, for a server that takes its
 token in the path or query. Keep that token in the environment, never inline:
-the gateway logs a backend only as `scheme://host[:port]`.
+the gateway logs a backend only as `scheme://host[:port]`. A reference is
+allowed only after the host, and its value must be URL-safe
+(`[A-Za-z0-9._~%-]`): percent-encode anything else (`&` as `%26`, `#` as
+`%23`) before putting it in the environment, or the load fails.
 
 ```yaml
     url: "http://rotv:8080/mcp?token=${ROTV_TOKEN}"
