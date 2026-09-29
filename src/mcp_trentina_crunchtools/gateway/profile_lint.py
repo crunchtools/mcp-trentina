@@ -197,6 +197,18 @@ def _allowances(profiles_file: dict[str, Any]) -> list[tuple[str, frozenset[str]
     return found
 
 
+def _uncovered_writers(holders: set[str], groups: list[frozenset[str]]) -> list[str]:
+    """Writers some allowance for this URL does not pair with every other writer."""
+    if any(holders <= group for group in groups):
+        return []  # one allowance names every writer
+    uncovered = []
+    for profile in sorted(holders):
+        allowed_with_profile = {profile}.union(*(g for g in groups if profile in g))
+        if not holders <= allowed_with_profile:
+            uncovered.append(profile)
+    return uncovered
+
+
 def check_shared_write_backends(profiles_file: dict[str, Any]) -> list[Finding]:
     """Profiles holding write tools on one backend URL with no allowance: one finding per URL.
 
@@ -218,9 +230,7 @@ def check_shared_write_backends(profiles_file: dict[str, Any]) -> list[Finding]:
         if len(holders) < 2:
             continue
         groups = [ps for u, ps in allowed if u.rstrip("/") == url]
-        uncovered = sorted(
-            p for p in holders if not holders <= set().union(*(g for g in groups if p in g), {p})
-        )
+        uncovered = _uncovered_writers(holders, groups)
         if uncovered:
             findings.append(
                 Finding(
