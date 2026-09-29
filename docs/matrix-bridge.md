@@ -86,6 +86,62 @@ where the escape is the spec's mapping (`@Scott_M:matrix.org` →
 rewritten to its local ID inbound and back outbound, so mention detection still
 works. The agent's allowlists must name the stand-ins and the appservice bot.
 
+### No agent-to-agent channel (#264)
+
+Anyone on matrix.org can invite a bridged account, and two bridged agents in
+one room are a direct channel that only injection judging filters. Two rules
+close it, one per process.
+
+**The bridge's rule: who may open a room.** An invite is accepted only from a
+user listed in `BRIDGE_ALLOWED_INVITERS`; any other invite is rejected and
+forgotten. The inviter is the sender of the bridge's own `invite` membership
+in the invite's stripped state; an invite that does not say who sent it is
+rejected. The bridge records who invited it into each room it joins
+(`BRIDGE_STORE_DIR/inviters.json`). On every start, once the first sync has
+filled in room state, it leaves and forgets each joined room that fails the
+rule: one whose recorded inviter is not allowed, and one with no record (a
+room joined before #264) unless everyone else in it, joined or invited, is an
+allowed inviter. nio keeps no trace of an inviter after the join, so the
+audience is the only evidence left for those rooms; a stranger in the room is
+enough to leave it. An allowed inviter gets a left room back by inviting the
+bridge again, which records the inviter. Empty or unset, the list refuses
+every invite and leaves every room, and the bridge logs a warning saying so
+at startup. For a bridge that answers only Scott:
+`BRIDGE_ALLOWED_INVITERS=@fatherlinux:matrix.org`.
+
+**The gateway's rule: who may be on the other end.** Only the gateway knows
+every agent: the `public_user_id` of every profile with a `matrix_bridge`
+block, enabled or not, plus any agent it does not bridge, listed at the top
+level of `profiles.yaml`:
+
+```yaml
+matrix:
+  other_agent_user_ids:
+    - "@ashigaru-crunchtools-bot:matrix.org"
+```
+
+Each entry must be a Matrix user ID or the file does not load; it binds at
+startup, like the rest of `matrix`. An ID listed here is treated exactly like
+another bridged profile's, and matching ignores case. The
+bridge sends a room's members with its announcement, at every start and again
+whenever they change, and the gateway records whether another agent is among
+them (`room_audience` in the mapping store). Then:
+
+- an inbound event whose sender is another agent is dropped before it is
+  judged, and marks its room;
+- a room announced with another agent in it is refused: no local room is
+  made, the bridge is answered `refused`, and it leaves and forgets the room;
+- every inbound event in a marked room is dropped;
+- nothing is relayed upstream into a room that is marked, or whose members
+  the bridge has never reported. The agent gets a
+  `[trentina] your message was not sent: <reason>` notice instead.
+
+This holds for a room an allowed inviter opened too: the inviter rule is the
+bridge's, the agent rule the gateway's. Every drop is logged with the profile,
+a redacted event ID and a fixed reason, never a Matrix ID, and audited in
+`gateway_calls` as backend `matrix_bridge`, tool `inbound`, `outbound` or
+`room`, outcome `denied_guard`, with the reason in `error_message`.
+
 Endpoints, on the gateway's port:
 
 | path | caller | auth |
@@ -121,9 +177,11 @@ python -m mcp_trentina_crunchtools.bridge.main run
 | `BRIDGE_OLD_ACCESS_TOKEN` | `logout-device` only: the token of the device to prune |
 | `BRIDGE_RECOVERY_KEY` | `sign-device` only: the account's secret-storage recovery key |
 | `BRIDGE_DEVICE_NAME` | name for a new device (default `Trentina bridge`) |
+| `BRIDGE_ALLOWED_INVITERS` | comma-separated Matrix user IDs whose invites are accepted; empty or unset accepts none and leaves every room (see above) |
 | `BRIDGE_LOG_LEVEL` | default `WARNING` |
 
-Every secret also reads from `<NAME>_FILE`. After the first start the session
+Every secret, and `BRIDGE_ALLOWED_INVITERS`, also reads from `<NAME>_FILE`.
+A malformed entry in the list is fatal at startup. After the first start the session
 in `BRIDGE_STORE_DIR/session.json` wins over the environment.
 
 The first sync only establishes position; history is not replayed. The sync
