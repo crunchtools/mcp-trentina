@@ -42,6 +42,14 @@ uv run mcp-trentina-crunchtools
   blocklist (default: `perimeter.db` beside `QUARANTINE_DB`). See `perimeter_db.py`
   for why it is its own file. Deleting it costs one slow restart and nothing else.
 - `QUARANTINE_TRUST_CONFIG` — Trust allowlist JSON path
+- `TRENTINA_READ_ROOTS` — `os.pathsep`-separated absolute directories that
+  `read_tool` and `dir_tool` may reach (#261); a relative entry fails startup.
+  Unset behind a live gateway refuses EVERY path, and production leaves it
+  unset on purpose: the gateway container has no agent workspace. Unset
+  standalone keeps full reach. Either way `tools/confine.py` refuses `/config`,
+  `/data`, `/proc`, `/sys`, `/run`, `/dev` and the directories of the two
+  databases, the trust config and the live `profiles.yaml`. Refusals are a
+  closed reason code, never the path.
 - `TRENTINA_RATE_LIMIT` — "off" disables limiting on the unauthenticated OAuth
   write paths (default on). An incident escape hatch, not a setting.
 - `TRENTINA_FORWARDED_ALLOW_IPS` — peer addresses whose `X-Forwarded-For` is

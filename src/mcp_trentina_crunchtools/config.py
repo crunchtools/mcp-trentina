@@ -136,6 +136,26 @@ def _mode_policy_env() -> tuple[str, tuple[str, ...]]:
     return default, allowed
 
 
+def _read_roots_env() -> tuple[Path, ...]:
+    """``TRENTINA_READ_ROOTS``: the directories read_tool and dir_tool may reach (#261).
+
+    ``os.pathsep``-separated, each resolved so a root reached through a
+    symlinked directory compares against resolved targets.
+    A relative entry is refused at startup: it would be relative to whatever
+    directory the process happened to start in.
+    """
+    from .errors import ConfigError
+
+    roots = []
+    for entry in os.environ.get("TRENTINA_READ_ROOTS", "").split(os.pathsep):
+        if not entry.strip():
+            continue
+        if not os.path.isabs(entry.strip()):
+            raise ConfigError(f"TRENTINA_READ_ROOTS entry {entry!r} is not an absolute path")
+        roots.append(Path(entry.strip()).resolve())
+    return tuple(roots)
+
+
 class Config:
     """Trentina configuration from environment variables.
 
@@ -238,10 +258,13 @@ class Config:
             str(Path(self.db_path).parent / "perimeter.db"),
         )
 
+        self.read_roots: tuple[Path, ...] = _read_roots_env()
+
         trust_config_path = os.environ.get(
             "QUARANTINE_TRUST_CONFIG",
             str(Path.home() / ".config" / "mcp-env" / "mcp-trentina-trust.json"),
         )
+        self.trust_config_path: str = trust_config_path
         try:
             with open(trust_config_path) as fh:
                 self._trust_config: dict[str, list[str] | str] = json.load(fh)

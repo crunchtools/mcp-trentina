@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+import stat
 from typing import Any
 
 from ..config import get_config
@@ -11,6 +11,7 @@ from ..database import is_blocked
 from ..errors import FileReadError
 from ..models import ALLOWED_TEXT_EXTENSIONS
 from ..modes import Mode
+from .confine import open_confined
 from .judged import blocklisted, judge_and_deliver
 from .preprocess import prepare
 
@@ -31,32 +32,32 @@ _EXTENSIONLESS_ALLOWED = frozenset(
 )
 
 
-def _validate_file(path: str) -> str:
-    """Validate file path and return resolved absolute path."""
-    resolved = str(Path(path).resolve())
+def _read_confined(path: str) -> tuple[str, str]:
+    """Open ``path`` through confinement (#261) and return (text, resolved path).
 
-    if not os.path.isfile(resolved):
-        raise FileReadError(path, "File does not exist")
+    Every check after the open reads the descriptor, never the path again,
+    so what is checked is what is read.
+    """
+    fd, st, resolved = open_confined(path)
+    with os.fdopen(fd, "rb") as fh:
+        if not stat.S_ISREG(st.st_mode):
+            raise FileReadError("not_a_file")
+        if st.st_size > MAX_FILE_SIZE:
+            raise FileReadError("too_large", f"{st.st_size} bytes, max {MAX_FILE_SIZE}")
 
-    file_size = os.path.getsize(resolved)
-    if file_size > MAX_FILE_SIZE:
-        raise FileReadError(path, f"File too large: {file_size} bytes (max {MAX_FILE_SIZE})")
+        suffix = resolved.suffix.lower()
+        if suffix and suffix not in ALLOWED_TEXT_EXTENSIONS:
+            raise FileReadError("unsupported_type")
+        if not suffix and resolved.name.lower() not in _EXTENSIONLESS_ALLOWED:
+            raise FileReadError("unsupported_type", "no extension")
 
-    suffix = Path(resolved).suffix.lower()
-    name_lower = Path(resolved).name.lower()
-
-    if suffix and suffix not in ALLOWED_TEXT_EXTENSIONS:
-        raise FileReadError(path, f"Binary or unsupported file type: {suffix}")
-
-    if not suffix and name_lower not in _EXTENSIONLESS_ALLOWED:
-        raise FileReadError(path, "Unknown file type (no extension)")
-
-    with open(resolved, "rb") as fh:
-        chunk = fh.read(BINARY_CHECK_BYTES)
-        if b"\x00" in chunk:
-            raise FileReadError(path, "Binary file detected")
-
-    return resolved
+        # One byte past the cap, so a file that grew after fstat is caught too.
+        raw = fh.read(MAX_FILE_SIZE + 1)
+    if len(raw) > MAX_FILE_SIZE:
+        raise FileReadError("too_large", f"max {MAX_FILE_SIZE} bytes")
+    if b"\x00" in raw[:BINARY_CHECK_BYTES]:
+        raise FileReadError("binary")
+    return raw.decode("utf-8", errors="replace"), str(resolved)
 
 
 async def read_file(
@@ -68,14 +69,11 @@ async def read_file(
     runs but the policy's floor: an agent that reads a file usually means to
     edit it, and needs the bytes on disk. ``true`` minifies it by format.
     """
-    resolved = _validate_file(path)
+    content, resolved = _read_confined(path)
 
     blocked = is_blocked(resolved)
     if blocked and mode is not Mode.REDACT:
         raise blocklisted(resolved, mode, blocked["detected_at"])
-
-    with open(resolved, encoding="utf-8", errors="replace") as fh:
-        content = fh.read()
 
     page = await prepare(content, requested=preprocess, tool="read_tool", source=resolved)
     return await judge_and_deliver(

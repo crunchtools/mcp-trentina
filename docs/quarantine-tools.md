@@ -129,6 +129,19 @@ An allowlisted source runs all three layers and its flags stand. What changes is
 
 **dir** — the listing (name, type, size per entry, at most 500) is the payload, because file names are attacker-chosen text. A `.py` file that shadows a Python standard-library module (`struct.py`, `os.py`) is an L1 detection with critical risk: run Python in that directory and it imports the attacker's module. `block` refuses it; `flag` names it under `shadows`. File contents are not read — that is `read_tool`, one file at a time.
 
+### Where read and dir may look
+
+Both take a path from the agent, so both are confined (#261). `TRENTINA_READ_ROOTS` lists absolute directories, separated by `os.pathsep` (`:` on Linux); a path must resolve into one of them. A relative entry fails startup.
+
+| Setting | Behind a gateway | Standalone |
+|---|---|---|
+| unset | every path refused (`outside_read_roots`) | any path, minus the denylist |
+| `/srv/work:/home/agent/src` | inside those roots, minus the denylist | the same |
+
+The denylist no root overrides: `/config`, `/data`, `/proc`, `/sys`, `/run`, `/dev`, and the directories holding `QUARANTINE_DB`, `TRENTINA_PERIMETER_DB`, `QUARANTINE_TRUST_CONFIG` and the live `profiles.yaml` (`denied_path`). Production leaves `TRENTINA_READ_ROOTS` unset: the gateway container has no agent workspace, so there is nothing an agent should read there.
+
+The file is opened with `O_NOFOLLOW`, its inode compared with the one checked, and the kernel's name for the open descriptor checked again, so a path swapped for a symlink between the check and the read is refused (`changed_during_read`). A refusal is `Cannot read: <reason>`, sometimes with a numeric detail such as the size cap, and never repeats the path, because error text reaches logs other agents read.
+
 **content** — inline text is never allowlisted (it has no provenance), is refused over the admission cap before anything else runs, and is blocklisted by SHA-256.
 
 **fetch** — a suspicious HTTP status (415, 406, or a 4xx whose body the pipeline flags) or a redirect to a binary download returns a `security_advisory` instead of content. Advisories carry structured findings only.

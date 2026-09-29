@@ -10,6 +10,17 @@ under that name.
 
 ## [Unreleased]
 
+### Security
+
+- `read_tool` and `dir_tool` are confined (#261). `TRENTINA_READ_ROOTS` lists the
+  directories they may reach; behind a live gateway, unset means every path is
+  refused, and production leaves it unset. `/config`, `/data`, `/proc`, `/sys`,
+  `/run`, `/dev` and Trentina's own database, trust-config and `profiles.yaml`
+  directories are refused even inside a root. The file is opened with
+  `O_NOFOLLOW` and checked again by inode and by the kernel's name for the
+  descriptor, so a path swapped after the check is refused. Refusals carry a
+  reason code (`outside_read_roots`, `denied_path`, ...) and never the path.
+
 ### Added
 
 - The provider benchmark scores every case through L1 and L2 and sweeps
