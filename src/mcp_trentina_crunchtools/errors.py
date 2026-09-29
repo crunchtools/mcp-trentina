@@ -159,6 +159,9 @@ class FileReadError(TrentinaError):
     the path it sent, and the message reaches logs and audit rows that other
     agents can read (#262). A refusal that echoed ``/config/profiles.yaml``
     would confirm the file's existence to whoever reads the log.
+
+    ``detail`` is an optional non-path qualifier, such as the size cap. An
+    unknown ``reason`` raises ``ValueError``: the set is closed on purpose.
     """
 
     def __init__(self, reason: str, detail: str = "") -> None:

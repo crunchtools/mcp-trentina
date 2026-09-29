@@ -21,8 +21,9 @@ from mcp_trentina_crunchtools.errors import ConfigError, FileReadError
 from mcp_trentina_crunchtools.gateway.loader import load_profiles, register_active_config
 from mcp_trentina_crunchtools.modes import Mode
 from mcp_trentina_crunchtools.tools import confine
+from mcp_trentina_crunchtools.tools import read as read_mod
 from mcp_trentina_crunchtools.tools.dir import MAX_DIR_ENTRIES, list_dir
-from mcp_trentina_crunchtools.tools.read import _read_confined
+from mcp_trentina_crunchtools.tools.read import MAX_FILE_SIZE, _read_confined
 
 GATEWAY_YAML = """\
 profiles:
@@ -123,6 +124,20 @@ class TestDenylist:
         _set_roots(monkeypatch, tmp_path)
         assert _refusal(state / "profiles.yaml").reason == "denied_path"
 
+    @pytest.mark.parametrize(
+        ("env_name", "filename"),
+        [("TRENTINA_PERIMETER_DB", "perimeter.db"), ("QUARANTINE_TRUST_CONFIG", "trust.json")],
+    )
+    def test_each_state_path_denies_its_own_dir(
+        self, env_name: str, filename: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        own = tmp_path / env_name.lower()
+        own.mkdir()
+        (own / "secret.txt").write_text("secret\n", encoding="utf-8")
+        monkeypatch.setenv(env_name, str(own / filename))
+        _set_roots(monkeypatch, tmp_path)
+        assert _refusal(own / "secret.txt").reason == "denied_path"
+
     def test_live_profiles_dir_is_denied_inside_a_root(
         self, tmp_path: Path, live_gateway: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -202,8 +217,11 @@ class TestSwapAfterCheck:
         target = root / "notes.txt"
 
         def swap() -> None:
-            target.unlink()
-            target.write_text("a different inode\n", encoding="utf-8")
+            # Created while the original still holds its inode, then renamed
+            # over it: unlink-then-create can reuse the same inode number.
+            replacement = root / "replacement.txt"
+            replacement.write_text("a different inode\n", encoding="utf-8")
+            os.replace(replacement, target)
 
         _swap_before_open(monkeypatch, swap)
         assert _refusal(target).reason == "changed_during_read"
@@ -231,6 +249,23 @@ class TestSwapAfterCheck:
         """The post-open check stands on its own, whatever the inode compare saw."""
         monkeypatch.setattr(confine, "_opened_path", lambda fd: Path("/proc/self/environ"))
         assert _refusal(root / "notes.txt").reason == "denied_path"
+
+
+class TestFileGrowth:
+    def test_file_grown_past_cap_after_fstat_is_refused(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = root / "notes.txt"
+        real_open_confined = read_mod.open_confined
+
+        def open_then_grow(path: str) -> Any:
+            opened = real_open_confined(path)
+            with target.open("ab") as fh:
+                fh.write(b"x" * (MAX_FILE_SIZE + 1))
+            return opened
+
+        monkeypatch.setattr(read_mod, "open_confined", open_then_grow)
+        assert _refusal(target).reason == "too_large"
 
 
 class TestDirListing:
