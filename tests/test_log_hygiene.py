@@ -8,14 +8,15 @@ the URL, a backend's error text — with every logger at DEBUG after
 ``logsafe.install``, the way production runs when an operator lowers the
 level. The canary must appear in no record's message, exception or stack.
 
-Not driven here: the Matrix proxy and the LLM proxy. Standing either up needs
-an upstream homeserver or provider; their lines go through the same
-``redact_source`` and ``exc_kind``, and the static check below covers them.
+The Matrix and LLM proxies are driven at their failure paths only; a full
+round trip needs an upstream homeserver or provider. The static check below
+covers every call either way.
 """
 
 from __future__ import annotations
 
 import ast
+import asyncio
 import contextlib
 import functools
 import logging
@@ -324,6 +325,40 @@ class TestBridgeProcess:
         )
         await _bridge(tmp_path, FakeNio(), gateway).handle(ROOM, event)
         assert any("gateway refused" in r.getMessage() for r in captured.records)
+
+
+class TestProxies:
+    async def test_matrix_unparseable_response_and_failed_fallback(
+        self, captured: _Capture
+    ) -> None:
+        from mcp_trentina_crunchtools.gateway import matrix_proxy
+
+        from .test_matrix_proxy import _matrix_profile
+
+        resp = httpx.Response(200, content=f"{{not json {CANARY}".encode())
+        with patch.object(matrix_proxy, "defend", side_effect=RuntimeError(f"said {CANARY}")):
+            await matrix_proxy._scan_and_forward(
+                resp,
+                {"content-type": "application/json"},
+                "application/json",
+                _matrix_profile(),
+                f"_matrix/client/v3/rooms/!{CANARY}:x/messages",
+            )
+        assert any("structured scan failed" in r.getMessage() for r in captured.records)
+        assert any("fallback scan failed" in r.getMessage() for r in captured.records)
+
+    async def test_llm_post_hoc_scan_failure(self, captured: _Capture) -> None:
+        from mcp_trentina_crunchtools.gateway import llm_proxy
+
+        completion = f"completion {CANARY}".encode()
+        with patch(
+            "mcp_trentina_crunchtools.defense.defend", side_effect=RuntimeError(f"said {CANARY}")
+        ):
+            llm_proxy._schedule_completion_scan(
+                completion, len(completion), "openrouter", _profile()
+            )
+            await asyncio.gather(*llm_proxy._scan_tasks)
+        assert any("post-hoc completion scan failed" in r.getMessage() for r in captured.records)
 
 
 # ------------------------------------------------------------ HTTP edge

@@ -207,7 +207,7 @@ class BridgeRoutes:
             logger.warning(
                 "matrix_bridge: event for %s refused by the bridge core: %s",
                 bridge.profile.name,
-                type(exc).__name__,
+                exc_kind(exc),
             )
             return _refused(400, "M_BAD_JSON", "malformed event")
         except (ConduitError, OSError) as exc:

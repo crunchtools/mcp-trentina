@@ -48,7 +48,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..channels import Channel, Kind
 from ..jsonwalk import iter_leaves
-from ..logsafe import redact_source
+from ..logsafe import exc_kind, redact_source
 from .view import Selection, SelectionContext, SkipReason, UndecryptableEvent
 
 if TYPE_CHECKING:
@@ -153,7 +153,7 @@ class MatrixProcessor:
                 "matrix select: decrypt failed for session %s in room %s: %s",
                 redact_source(session_id),
                 redact_source(room_id),
-                type(exc).__name__,
+                exc_kind(exc),
             )
             return None
 

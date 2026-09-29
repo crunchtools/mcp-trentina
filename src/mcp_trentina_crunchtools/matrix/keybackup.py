@@ -214,7 +214,7 @@ class KeyBackupProvider:
                     "matrix keybackup: cannot import session %s in room %s: %s",
                     redact_source(session_id),
                     redact_source(room_id),
-                    type(exc).__name__,
+                    exc_kind(exc),
                 )
                 continue
             self._sessions[(room_id, session_id)] = _Entry(session, now)
