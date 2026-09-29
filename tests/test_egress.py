@@ -7,6 +7,8 @@ reason, and no refusal names the address it refused.
 
 from __future__ import annotations
 
+import asyncio
+import ssl
 import threading
 from typing import Any
 
@@ -110,6 +112,37 @@ class TestRefusedAddresses:
             release.set()
         assert err.reason == "unresolvable"
 
+    async def test_a_saturated_resolver_refuses_instead_of_queueing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        busy = threading.BoundedSemaphore(1)
+        busy.acquire()
+        route(monkeypatch, _unreachable)
+        monkeypatch.setattr(egress, "_lookup_slots", busy)
+        err = await _refusal("https://example.com/")
+        assert err.reason == "unresolvable"
+
+    async def test_a_timed_out_lookup_gives_its_slot_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        release = threading.Event()
+        slots = threading.BoundedSemaphore(1)
+
+        def stalls(_host: str, _port: int) -> list[str]:
+            release.wait(5)
+            return [PUBLIC_ADDRESS]
+
+        route(monkeypatch, lambda _r: httpx.Response(200, text="ok"))
+        monkeypatch.setattr(egress, "_lookup_slots", slots)
+        monkeypatch.setattr(egress, "_lookup", stalls)
+        monkeypatch.setattr(egress, "RESOLVE_TIMEOUT", 0.05)
+        assert (await _refusal("https://slow.example/")).reason == "unresolvable"
+        release.set()
+
+        await asyncio.to_thread(lambda: slots.acquire(timeout=5) and slots.release())
+        content, _ = await fetch_url("https://slow.example/")
+        assert content == "ok"
+
     async def test_unresolvable(self, monkeypatch: pytest.MonkeyPatch) -> None:
         route(monkeypatch, _unreachable, {"nowhere.example": []})
         err = await _refusal("https://nowhere.example/")
@@ -146,6 +179,21 @@ class TestRefusedShapes:
     def test_an_unknown_reason_is_a_bug(self) -> None:
         with pytest.raises(ValueError, match="unknown egress reason"):
             EgressRefusedError("because 10.0.0.1 said so")
+
+
+class TestTLS:
+    def test_the_pinned_pool_verifies_the_hostname(self) -> None:
+        """Pinning swaps the address, never the verification.
+
+        httpcore hands ``start_tls`` the URL's host (TestPinning asserts it);
+        this is the other half: the context it is handed refuses a
+        certificate that does not name that host.
+        """
+        transport = egress.PinnedTransport(egress.PinnedBackend())
+        context = transport._pool._ssl_context
+        assert context is not None
+        assert context.check_hostname is True
+        assert context.verify_mode is ssl.CERT_REQUIRED
 
 
 class TestRedirects:

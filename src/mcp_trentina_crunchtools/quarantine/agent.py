@@ -1100,8 +1100,12 @@ async def resolve_grounding_urls(
 ) -> list[dict[str, str]]:
     """Resolve grounding redirect URLs to final destinations.
 
-    Every hop passes the egress guard; one it refuses is reported as
-    ``redirect_failed``, the same as one that timed out.
+    Each source is ``{"uri", "title"}``. One whose host is not exactly a
+    grounding redirect host is returned unchanged and never requested. A
+    redirect that resolves becomes ``{"uri": <final URL>, "title",
+    "original_redirect": <the redirect URI>}``. One that fails keeps its
+    fields and gains ``"redirect_failed": "true"``, whether it timed out or
+    the egress guard refused a hop. Order is preserved.
     """
     resolved: list[dict[str, str]] = []
     for source in sources:

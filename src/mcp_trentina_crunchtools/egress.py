@@ -23,6 +23,8 @@ import asyncio
 import ipaddress
 import logging
 import socket
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -43,6 +45,16 @@ ALLOWED_SCHEMES = frozenset(DEFAULT_PORTS)
 ALLOWED_PORTS = frozenset({80, 443})
 MAX_REDIRECTS = 5
 RESOLVE_TIMEOUT = 10.0
+MAX_LOOKUPS = 16
+"""Lookups in flight at once, counting ones whose caller already timed out.
+
+``getaddrinfo`` cannot be cancelled, so a stalled resolver keeps its thread
+after ``RESOLVE_TIMEOUT``. The executor has exactly this many workers and a
+lookup takes a slot before it is submitted, so nothing ever queues behind a
+stalled one; past the limit a fetch is refused as ``unresolvable``."""
+
+_RESOLVER = ThreadPoolExecutor(max_workers=MAX_LOOKUPS, thread_name_prefix="egress-dns")
+_lookup_slots = threading.BoundedSemaphore(MAX_LOOKUPS)
 
 _IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
@@ -98,8 +110,16 @@ def _lookup(host: str, port: int) -> list[str]:
 
 
 async def _resolve(host: str, port: int) -> list[str]:
+    slots = _lookup_slots
+    if not slots.acquire(blocking=False):
+        log.warning("egress: every resolver slot is busy; refusing")
+        raise EgressRefusedError("unresolvable")
+    job = _RESOLVER.submit(_lookup, host, port)
+    # On the executor's future, not asyncio's: it fires when the thread
+    # finishes, however long after the caller timed out.
+    job.add_done_callback(lambda _job: slots.release())
     try:
-        return await asyncio.wait_for(asyncio.to_thread(_lookup, host, port), RESOLVE_TIMEOUT)
+        return await asyncio.wait_for(asyncio.wrap_future(job), RESOLVE_TIMEOUT)
     except (OSError, UnicodeError, TimeoutError) as exc:
         raise EgressRefusedError("unresolvable") from exc
 
