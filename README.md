@@ -169,7 +169,10 @@ these variables control the process itself. Profile tokens
 | `TRENTINA_FETCH_ALLOW_PRIVATE` | `false` | Lets `fetch` reach loopback, private, link-local and other non-global addresses. Scheme, port (80/443) and redirect rules still apply. Logs a warning at startup. See [Quarantine Tools](docs/quarantine-tools.md). |
 | `TRENTINA_RATE_LIMIT` | on | Set to `off`/`0`/`false` to disable rate limiting on the unauthenticated OAuth write paths. An escape hatch for an operator locked out during an incident — not a normal setting. |
 | `TRENTINA_MAX_REGISTRATION_BYTES` | `8192` | Largest `POST /register` body accepted, rejected before it is parsed. `0` or negative disables the cap. |
+| `TRENTINA_MAX_REQUEST_BYTES` | `1048576` | Largest request body accepted on an MCP route (`/gateway/<profile>/mcp`) and the alert ingress. Over it the request gets 413 and the rest is never read, chunked or not. Floored at 1024. |
+| `TRENTINA_OAUTH_JWT_SIGNING_KEY_FILE` | unset | A file holding `TRENTINA_OAUTH_JWT_SIGNING_KEY`; wins when both are set. The preferred form: an env var stays readable in `/proc/<pid>/environ` even after startup removes it from `os.environ`. `TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET_FILE` works the same way. |
 | `TRENTINA_FORWARDED_ALLOW_IPS` | unset (uvicorn's default of `127.0.0.1`) | Peer addresses whose `X-Forwarded-For` is trusted. **Set this to your reverse proxy's address**, or every caller behind it shares one rate-limit bucket. See [Authentication](docs/authentication.md). |
+| `TRENTINA_BLOCKLIST_TTL_DAYS` | `30` | Days a block refusal keeps its source on the calling profile's blocklist. Expired rows stop counting and are swept hourly. See [Blocklist](docs/blocklist.md). |
 | `TRENTINA_REGISTRATION_TTL_DAYS` | `90` | How long a DCR registration lives once a token exchange has promoted it. Each later exchange re-stamps it. |
 | `TRENTINA_OAUTH_CULL_INTERVAL` | `3600` | Seconds between sweeps that unlink expired registrations, transactions and CSRF records from the OAuth store. Floored at 60. |
 

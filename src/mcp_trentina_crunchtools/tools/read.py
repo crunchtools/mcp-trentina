@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import stat
 from typing import Any
 
 from ..config import get_config
-from ..database import is_blocked
 from ..errors import FileReadError
 from ..models import ALLOWED_TEXT_EXTENSIONS
 from ..modes import Mode
-from .confine import open_confined
-from .judged import blocklisted, judge_and_deliver
+from .confine import REFUSAL_REASONS, open_confined, refused
+from .judged import check_blocklist, judge_and_deliver
 from .preprocess import prepare
 
 MAX_FILE_SIZE = 2_000_000
@@ -37,6 +37,10 @@ def _read_confined(path: str) -> tuple[str, str]:
 
     Every check after the open reads the descriptor, never the path again,
     so what is checked is what is read.
+
+    Blocking, and whole: ``read_file`` runs it in ONE worker thread, so the
+    confinement checks, the open and the read all happen in the same call and
+    nothing is split across threads or back onto the event loop (#267).
     """
     fd, st, resolved = open_confined(path)
     with os.fdopen(fd, "rb") as fh:
@@ -69,11 +73,14 @@ async def read_file(
     runs but the policy's floor: an agent that reads a file usually means to
     edit it, and needs the bytes on disk. ``true`` minifies it by format.
     """
-    content, resolved = _read_confined(path)
+    try:
+        content, resolved = await asyncio.to_thread(_read_confined, path)
+    except FileReadError as exc:
+        if exc.reason not in REFUSAL_REASONS:
+            raise
+        raise refused(exc, mode) from exc
 
-    blocked = is_blocked(resolved)
-    if blocked and mode is not Mode.REDACT:
-        raise blocklisted(resolved, mode, blocked["detected_at"])
+    blocked = check_blocklist(resolved, mode)
 
     page = await prepare(content, requested=preprocess, tool="read_tool", source=resolved)
     return await judge_and_deliver(
@@ -86,7 +93,7 @@ async def read_file(
         ref=resolved,
         prompt=prompt,
         allowlisted=get_config().is_trusted_path(resolved),
-        blocklisted_at=blocked["detected_at"] if blocked else None,
+        blocklisted=blocked,
         provenance=page.provenance,
         precomputed_l1=page.pipeline,
         l3_context=page.briefing,

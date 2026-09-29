@@ -465,3 +465,26 @@ class TestAlertIngressEnforcement:
 
         assert resp.status_code == 200
         assert json.loads(calls["content"])["output"] == "disk ok"
+
+
+class TestBodyCap:
+    """The alert body is read under a cap, not with a bare ``request.body()`` (#267)."""
+
+    def test_oversized_alert_is_413_and_never_forwarded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = _mock_forward_http(monkeypatch)
+        monkeypatch.setattr(alert_ingress, "max_request_bytes", lambda: 2048)
+        profile = _make_profile("alpha", alert_token="tok")
+        client = TestClient(_alert_app({"alpha": profile}))
+
+        def chunked() -> Iterator[bytes]:
+            yield b'{"output": "'
+            for _ in range(10):
+                yield b"x" * 1024
+            yield b'"}'
+
+        resp = client.post("/alert/tok", content=chunked())
+
+        assert resp.status_code == 413
+        assert not calls

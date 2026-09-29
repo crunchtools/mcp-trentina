@@ -13,6 +13,9 @@ Three rules, each closing a way round the one before:
   httpcore passes the URL's host as ``server_hostname``, not the pinned IP.
 - ``open_guarded`` follows redirects itself and checks every hop, because a
   public page that redirects inward is the same attack by other means.
+- It asks for ``identity`` and refuses a body that arrives encoded anyway
+  (#276). httpx decompresses before any caller can count, so a size cap on
+  a gzip or brotli body is checked after the bomb has gone off.
 
 ``TRENTINA_FETCH_ALLOW_PRIVATE`` lifts the address rule only.
 """
@@ -44,6 +47,7 @@ DEFAULT_PORTS = {"http": 80, "https": 443}
 ALLOWED_SCHEMES = frozenset(DEFAULT_PORTS)
 ALLOWED_PORTS = frozenset({80, 443})
 MAX_REDIRECTS = 5
+IDENTITY = "identity"
 RESOLVE_TIMEOUT = 10.0
 MAX_LOOKUPS = 16
 """Lookups in flight at once, counting ones whose caller already timed out.
@@ -181,6 +185,12 @@ async def check_url(url: str | httpx.URL) -> ResolvedTarget:
     return ResolvedTarget(host=host, port=port, addresses=tuple(dict.fromkeys(addresses)))
 
 
+def is_encoded(response: httpx.Response) -> bool:
+    """True when the body carries any ``Content-Encoding`` but identity."""
+    encoding = response.headers.get("content-encoding", "")
+    return any(part.strip().lower() not in ("", IDENTITY) for part in encoding.split(","))
+
+
 def _socket_backend() -> httpcore.AsyncNetworkBackend:
     """The real network backend. Tests replace it to watch what is dialled."""
     return httpcore.AnyIOBackend()
@@ -276,16 +286,23 @@ async def open_guarded(
     ``trust_env`` is off: an environment proxy is mounted beside the
     transport, not through it, and would route round the pin.
 
+    ``Accept-Encoding: identity`` goes on every hop, and a final response
+    with a body that is encoded anyway is refused before a byte of it is
+    read (#276), whatever its status. A HEAD response has no body to inflate,
+    so it passes.
+
     Raises:
-        EgressRefusedError: a hop failed the check, dropped to http, or there
-            were more than five.
+        EgressRefusedError: a hop failed the check, dropped to http, there
+            were more than five, or the body arrived encoded.
     """
     backend = PinnedBackend()
     transport = PinnedTransport(backend)
+    sent = {k: v for k, v in (headers or {}).items() if k.lower() != "accept-encoding"}
+    sent["Accept-Encoding"] = IDENTITY
     async with httpx.AsyncClient(
         transport=transport,
         timeout=httpx.Timeout(timeout),
-        headers=headers,
+        headers=sent,
         follow_redirects=False,
         trust_env=False,
     ) as client:
@@ -308,6 +325,9 @@ async def open_guarded(
             request = hop
         resp.history = history
         try:
+            if request.method != "HEAD" and is_encoded(resp):
+                log.warning("egress: refused a content-encoded response")
+                raise EgressRefusedError("encoded")
             yield resp
         finally:
             await resp.aclose()

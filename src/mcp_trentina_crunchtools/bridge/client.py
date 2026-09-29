@@ -18,12 +18,18 @@ Three properties the rest of the design leans on:
   ``room_send`` sends ``m.reaction`` unencrypted ("reactions don't support
   encryption"), which would hand the homeserver every reaction in the clear.
   ``send`` encrypts every type itself.
+* **Only an allowed inviter opens a room** (#264). An invite from anyone not
+  in ``BRIDGE_ALLOWED_INVITERS`` is rejected and forgotten, and a joined room
+  that fails the rule is left and forgotten. The gateway holds the other half
+  of the rule, because only it knows every bridged agent: each room's members
+  go with its announcement, and a room it refuses is left the same way.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -37,6 +43,8 @@ from nio import (
     JoinResponse,
     LoginResponse,
     MegolmEvent,
+    RoomForgetResponse,
+    RoomLeaveResponse,
     RoomSendResponse,
     ShareGroupSessionError,
     SyncError,
@@ -62,6 +70,8 @@ REDACTION = "m.room.redaction"
 ROOM_ANNOUNCE = "org.crunchtools.trentina.room"
 FORWARDED = frozenset({"m.room.message", "m.reaction", "m.sticker", REDACTION})
 UNDECRYPTABLE_AFTER = 600.0
+# The gateway's answer to a room announcement it will not relay (#264).
+ROOM_REFUSED = "refused"
 # Parked events held at once; past it an event is reported undecryptable at
 # once. Each is one encrypted event's JSON, so this bounds memory and the
 # pending file to a few megabytes.
@@ -72,6 +82,11 @@ _MAX_BACKOFF = 60.0
 
 class SendError(RuntimeError):
     """The homeserver refused an outbound event."""
+
+
+def membership_digest(members: list[str]) -> str:
+    """A short digest of a room's sorted members, for its announcement ID."""
+    return hashlib.sha256("\n".join(members).encode()).hexdigest()[:16]
 
 
 class Bridge:
@@ -116,9 +131,25 @@ class Bridge:
         # interleave across awaits. Every such operation holds this lock.
         self._crypto_lock = asyncio.Lock()
         self._pending_dirty = False
-        self._announced: set[str] = set()
+        # Room ID -> digest of the membership last announced for it; a change
+        # announces the room again, so the gateway holds the current members.
+        self._announced: dict[str, str] = {}
         self._pending: dict[str, tuple[str, dict[str, Any], float]] = self._load_pending()
+        # Who invited us into each room we joined, so a restart can tell an
+        # allowed room from one that is not (#264).
+        self._inviters: dict[str, str] = self._load_inviters()
+        # Rooms that passed the inviter rule this process; rooms to leave;
+        # rooms left. Nothing is forwarded from the last two.
+        self._vetted: set[str] = set()
+        self._evict: set[str] = set()
+        self._left: set[str] = set()
         self.ready = asyncio.Event()
+        if not settings.allowed_inviters:
+            logger.warning(
+                "bridge[%s]: BRIDGE_ALLOWED_INVITERS is empty: every invite is refused "
+                "and every joined room will be left",
+                settings.profile,
+            )
 
     # ---------------------------------------------------------- persistence
 
@@ -143,6 +174,24 @@ class Bridge:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
         staged.replace(path)
+
+    @property
+    def _inviters_file(self) -> Path:
+        return self.settings.store_dir / "inviters.json"
+
+    def _load_inviters(self) -> dict[str, str]:
+        try:
+            raw = json.loads(self._inviters_file.read_text(encoding="utf-8"))
+            return {str(k): str(v) for k, v in raw.items()}
+        except FileNotFoundError:
+            return {}
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise RuntimeError(f"{self._inviters_file} is not an inviter record") from exc
+
+    async def _save_inviters(self) -> None:
+        await asyncio.to_thread(
+            self._write_private, self._inviters_file, json.dumps(self._inviters)
+        )
 
     def _load_pending(self) -> dict[str, tuple[str, dict[str, Any], float]]:
         try:
@@ -246,8 +295,15 @@ class Bridge:
         taken by the gateway: ``forward`` does not return until it was.
         """
         await self.maintain_keys()
+        # A left room only needs holding while nio still knows it (a failed
+        # forget); otherwise every rejected invite would be kept for good.
+        # Pruned before this batch, which may still carry a room left in
+        # the previous one.
+        self._left &= set(self.client.rooms)
         await self._join_invites(resp)
-        await self._announce_rooms()
+        await self._vet_rooms()
+        await self._announce_rooms(resp)
+        await self._evict_rooms()
         # The first sync is history. Forwarding it would replay every room
         # into the agent's new homeserver, so it only establishes position.
         if not first:
@@ -275,39 +331,90 @@ class Bridge:
             await c.keys_claim(c.get_users_for_key_claiming())
         await c.send_to_device_messages()
 
-    async def _announce_rooms(self) -> None:
-        """Tell the gateway about every joined room it has not heard of yet.
+    def _members(self, room: MatrixRoom | None) -> list[str]:
+        """Everyone joined to or invited into ``room`` but us, sorted."""
+        if room is None:
+            return []
+        users = set(getattr(room, "users", None) or {})
+        users |= set(getattr(room, "invited_users", None) or {})
+        users.discard(self.client.user_id)
+        return sorted(users)
+
+    async def _announce_rooms(self, resp: Any) -> None:
+        """Tell the gateway about every joined room it has not heard of yet,
+        and again whenever a room's membership changes.
 
         So the agent's local room exists, and the agent is in it, before the
         first message arrives. Created on the first message instead, the room
         would invite the agent at the moment the message was written, and the
-        agent would join too late to read it. Scans every room the client knows, not this sync's: a
-        resumed sync omits unchanged rooms, which a restart would then never
-        announce. Once per room per process; the
-        gateway dedupes a repeat.
+        agent would join too late to read it. Every room the client knows
+        and has not announced is announced, not only this sync's: a resumed
+        sync omits unchanged rooms, which a restart would then never announce.
+        After that a room is looked at again only when a sync carries it,
+        which any membership change does. The event ID carries a digest of
+        the membership, so the gateway's dedupe passes a changed room and
+        swallows a repeat.
+
+        The members ride along because the gateway decides whether a room
+        holds another bridged agent (#264); a room it refuses is left.
         """
-        for room_id in sorted(set(self.client.rooms) - self._announced):
-            await self.forward(
-                {
-                    **self._payload(room_id, {"sender": self.client.user_id}),
-                    "event_id": f"room:{room_id}",
-                    "type": ROOM_ANNOUNCE,
-                    "content": {},
-                }
-            )
-            self._announced.add(room_id)
+        known = set(self.client.rooms)
+        touched = (known - set(self._announced)) | (known & set(resp.rooms.join))
+        for room_id in sorted(touched - self._evict - self._left):
+            members = self._members(self.client.rooms.get(room_id))
+            digest = membership_digest(members)
+            if self._announced.get(room_id) == digest:
+                continue
+            announcement = {
+                **self._payload(room_id, {"sender": self.client.user_id}),
+                "event_id": f"room:{room_id}:{digest}",
+                "type": ROOM_ANNOUNCE,
+                "content": {},
+            }
+            announcement["room"]["members"] = members
+            outcome = await self.forward(announcement)
+            # Remembered only once the gateway answered it. A report it
+            # dropped would otherwise leave the gateway holding the old
+            # members until a restart: a quiet agent that joined would stay
+            # unseen, so the next sync reports again instead.
+            if not outcome:
+                continue
+            self._announced[room_id] = digest
+            if outcome == ROOM_REFUSED:
+                logger.warning(
+                    "bridge[%s]: the gateway refused room %s; leaving it",
+                    self.settings.profile,
+                    redact_source(room_id),
+                )
+                self._evict.add(room_id)
+
+    def _allowed(self, user_id: str | None) -> bool:
+        return bool(user_id) and user_id in self.settings.allowed_inviters
 
     async def _join_invites(self, resp: Any) -> None:
-        """Accept every open invite: this batch's, and any that failed before.
+        """Accept every open invite from an allowed inviter; reject the rest.
 
-        nio keeps pending invites in ``invited_rooms`` until they are joined,
-        so a join that fails is simply tried again on the next sync rather
-        than lost behind an advanced sync position.
+        nio keeps pending invites in ``invited_rooms`` until they are joined
+        or left, so a join or rejection that fails is simply tried again on
+        the next sync rather than lost behind an advanced sync position.
+
+        The inviter is the sender of our own ``invite`` membership in the
+        invite's stripped state, which nio records as ``inviter``. An invite
+        that does not say who sent it is rejected: an unknown inviter is not
+        an allowed one.
         """
-        invites = set(resp.rooms.invite) | set(getattr(self.client, "invited_rooms", {}))
-        for room_id in sorted(invites):
+        invited = getattr(self.client, "invited_rooms", None) or {}
+        recorded = len(self._inviters)
+        for room_id in sorted(set(resp.rooms.invite) | set(invited)):
+            inviter = getattr(invited.get(room_id), "inviter", None)
+            if not self._allowed(inviter):
+                await self._leave(room_id, "invite not from an allowed inviter")
+                continue
             result = await self.client.join(room_id)
             if isinstance(result, JoinResponse):
+                self._inviters[room_id] = str(inviter)
+                self._vetted.add(room_id)
+                self._left.discard(room_id)
                 logger.warning("bridge[%s]: joined an invited room", self.settings.profile)
             else:
                 logger.warning(
@@ -315,9 +422,88 @@ class Bridge:
                     self.settings.profile,
                     type(result).__name__,
                 )
+        # Once per batch. Before the sync position is written, so a crash in
+        # between re-reads the invite and records it again.
+        if len(self._inviters) != recorded:
+            await self._save_inviters()
+
+    async def _vet_rooms(self) -> None:
+        """Mark every joined room that fails the inviter rule for leaving.
+
+        Covers the rooms this process has not vetted yet, so the first sync
+        checks every room joined before the start, and later syncs only a
+        room that appeared without an invite this bridge accepted.
+
+        The inviter of a room joined before #264 was never recorded, and
+        nio keeps no trace of it once the invite is joined. For such a room
+        the rule falls back to its audience: it stays only when everyone else
+        in it, joined or invited, is an allowed inviter, so no stranger is on
+        the other end. Otherwise it is left. An allowed inviter who wants it
+        back invites the bridge again, which records the inviter.
+        """
+        for room_id in sorted(set(self.client.rooms) - self._vetted - self._evict - self._left):
+            recorded = self._inviters.get(room_id)
+            if recorded is not None:
+                ok = self._allowed(recorded)
+            else:
+                members = self._members(self.client.rooms.get(room_id))
+                ok = bool(members) and all(self._allowed(m) for m in members)
+            if ok:
+                self._vetted.add(room_id)
+                continue
+            logger.warning(
+                "bridge[%s]: room %s fails the inviter rule; leaving it",
+                self.settings.profile,
+                redact_source(room_id),
+            )
+            self._evict.add(room_id)
+
+    async def _evict_rooms(self) -> None:
+        for room_id in sorted(self._evict):
+            await self._leave(room_id, "room refused")
+
+    async def _leave(self, room_id: str, why: str) -> None:
+        """Leave ``room_id`` (for an invite, reject it), then forget it.
+
+        A failed leave keeps the room marked, so the next sync tries again.
+        The forget is best effort: leaving is what ends the channel.
+        """
+        self._evict.add(room_id)
+        left = await self.client.room_leave(room_id)
+        if not isinstance(left, RoomLeaveResponse):
+            logger.warning(
+                "bridge[%s]: leaving %s (%s) failed, retried next sync: %s",
+                self.settings.profile,
+                redact_source(room_id),
+                why,
+                type(left).__name__,
+            )
+            return
+        forgot = await self.client.room_forget(room_id)
+        if not isinstance(forgot, RoomForgetResponse):
+            logger.warning(
+                "bridge[%s]: forgetting %s failed: %s",
+                self.settings.profile,
+                redact_source(room_id),
+                type(forgot).__name__,
+            )
+        self._evict.discard(room_id)
+        self._vetted.discard(room_id)
+        self._announced.pop(room_id, None)
+        self._left.add(room_id)
+        if self._inviters.pop(room_id, None) is not None:
+            await self._save_inviters()
+        logger.warning(
+            "bridge[%s]: left and forgot %s: %s",
+            self.settings.profile,
+            redact_source(room_id),
+            why,
+        )
 
     async def _forward_batch(self, resp: Any) -> None:
         for room_id, info in resp.rooms.join.items():
+            if room_id in self._evict or room_id in self._left:
+                continue
             for event in info.timeline.events:
                 await self.handle(room_id, event)
 
@@ -350,7 +536,7 @@ class Bridge:
             logger.warning(
                 "bridge[%s]: dropped an encrypted payload posing as a redaction in %s",
                 self.settings.profile,
-                room_id,
+                redact_source(room_id),
             )
             return
         await self.forward(self._payload(room_id, source))
@@ -389,8 +575,9 @@ class Bridge:
             "peer_displayname": (room.user_name(peer) or "") if peer else "",
         }
 
-    async def forward(self, payload: dict[str, Any]) -> None:
-        """POST to the gateway until it takes the event. A 4xx other than an
+    async def forward(self, payload: dict[str, Any]) -> str:
+        """POST to the gateway until it takes the event, and return the
+        outcome it answered ("" when it named none). A 4xx other than an
         auth failure means the gateway will never take it: logged and dropped,
         because retrying it would stall every message behind it."""
         backoff = 1.0
@@ -404,7 +591,11 @@ class Bridge:
             else:
                 status, detail = resp.status_code, resp.text[:200]
                 if status == 200:
-                    return
+                    try:
+                        outcome = resp.json().get("outcome")
+                    except (ValueError, AttributeError):
+                        outcome = None
+                    return outcome if isinstance(outcome, str) else ""
                 if 400 <= status < 500 and status not in (401, 403, 429):
                     logger.error(
                         "bridge[%s]: gateway refused %s: %s %s",
@@ -413,7 +604,7 @@ class Bridge:
                         status,
                         redact_source(detail),
                     )
-                    return
+                    return ""
             logger.warning(
                 "bridge[%s]: gateway unavailable for %s (%s %s), retrying",
                 self.settings.profile,

@@ -64,6 +64,13 @@ classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/tools/judged.py"
+pattern = "_caller"
+justification = "Not single-use: called from check_blocklist (the blocklist read) and from judge_and_deliver (the detection row's profile attribution), verified by grep. The second call sits inside a dict literal passed to an awaited call, which the check appears not to count. Both sites must answer 'whose blocklist is this' the same way (#263), which is why it is one function."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "single_use_helpers"
 path = "tests/test_reload.py"
 pattern = "_registry"
 justification = "Not single-use: called from 10 distinct locations in the file, verified by grep. Same undercount as the tests/test_gateway_router.py `_profile` entry below -- the check appears to attribute callers per test class and stops counting once a module-level helper is also used by another module-level helper."
@@ -367,6 +374,18 @@ classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
+path = "tests/test_bridge_agent_rule.py"
+justification = "Not single-use: _started is called from seven tests in TestStartupVetting and from TestBothBotsInOneRoom in test_matrix_bridge.py, verified by grep. Same single_use_helpers undercount as the test_content.py exception (gourmand_bug)."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/bridge/client.py"
+justification = "Not single-use: Bridge._payload is called from _announce_rooms and _forward_event, verified by grep. It is the one place the bridge's wire format for an event is built, so an announcement and a message cannot drift apart. Linter undercount (gourmand_bug)."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/client.py"
 justification = "_build_redirect_chain is 17 lines of redirect-following bookkeeping. Keeping it out of the request path is what makes that path readable; it is called once because there is one place redirects are followed."
 classification = "by_design"
@@ -647,6 +666,27 @@ check = "redundant_error_handling"
 path = "src/mcp_trentina_crunchtools/gateway/matrix_proxy.py"
 pattern = "_text_fallback_scan"
 justification = "The text-mode fallback is the last scan of an unparseable response the proxy forwards anyway (there is no annotation channel); its failure is recorded by kind and frames (#262) and must not break the forward it follows."
+classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "tests/test_request_body_cap.py"
+pattern = "_scope"
+justification = "Not single-use: called from six tests across two classes, verified by grep. The same per-class undercount as the tests/test_reload.py `_registry` entry."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "dead_structs"
+path = "src/mcp_trentina_crunchtools/httpbody.py"
+pattern = "RequestBodyCap"
+justification = "Constructed by Starlette, not by a literal call: production passes the class to starlette.middleware.Middleware(RequestBodyCap, cap=..., applies=...) in __init__._body_cap and gateway/app.gateway_app, and Starlette instantiates it when it builds the middleware stack. That is the only way to install ASGI middleware through FastMCP's run(middleware=...)."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/gateway/router.py"
+pattern = "_audit"
+justification = "The audit row must never fail the tools/call it records, and a write can raise more than sqlite3.Error (thread-affinity ProgrammingError, OSError on a full disk). Logging profile and exception class is the handling: a silently lost audit row was itself a finding on #281."
 classification = "by_design"
 
 [[exceptions]]

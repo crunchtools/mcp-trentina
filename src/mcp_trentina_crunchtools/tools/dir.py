@@ -16,18 +16,18 @@ time, all three layers.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from itertools import islice
 from typing import Any
 
 from ..config import get_config
-from ..database import is_blocked
 from ..errors import FileReadError
 from ..l1.pipeline import run_l1
-from ..l1.shadows import ShadowStats, detect_module_shadows
+from ..l1.shadows import ShadowScanResult, ShadowStats, detect_module_shadows
 from ..modes import Mode
-from .confine import open_confined
-from .judged import blocklisted, judge_and_deliver
+from .confine import REFUSAL_REASONS, open_confined, refused
+from .judged import check_blocklist, judge_and_deliver
 
 MAX_DIR_ENTRIES = 500
 
@@ -45,7 +45,19 @@ def _entry(entry: os.DirEntry[str]) -> dict[str, Any]:
     return {"name": entry.name, "type": kind, "size": size}
 
 
-async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
+def _list_confined(path: str) -> tuple[list[dict[str, Any]], str, ShadowScanResult]:
+    """Open ``path`` through confinement and list it, all in the calling thread.
+
+    Blocking: ``list_dir`` runs it in ONE worker thread, so the confinement
+    checks, the open and the listing through that descriptor never cross a
+    thread or touch the event loop (#267).
+
+    The shadow scan re-lists by path, so it is bounded to the same
+    ``MAX_DIR_ENTRIES + 1`` entries. The listing already refused a directory
+    that large, so reaching the bound means the directory changed in between,
+    and a scan that stopped early could have missed a shadow: that fails
+    closed rather than reporting partial coverage as clean.
+    """
     fd, _, confined = open_confined(path, os.O_DIRECTORY)
     resolved = str(confined)
     try:
@@ -58,15 +70,27 @@ async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str
             entries = sorted((_entry(e) for e in found), key=lambda e: e["name"])
     finally:
         os.close(fd)
+    shadows = detect_module_shadows(resolved, max_entries=MAX_DIR_ENTRIES + 1)
+    if shadows.entries_read > MAX_DIR_ENTRIES:
+        raise FileReadError("changed_during_read")
+    return entries, resolved, shadows
 
-    blocked = is_blocked(resolved)
-    if blocked and mode is not Mode.REDACT:
-        raise blocklisted(resolved, mode, blocked["detected_at"])
+
+async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str, Any]:
+    try:
+        entries, resolved, shadows = await asyncio.to_thread(_list_confined, path)
+    except FileReadError as exc:
+        # A confinement refusal (#278), or a directory that changed under the
+        # listing or the shadow scan: both are refusals, never a read error.
+        if exc.reason not in REFUSAL_REASONS:
+            raise
+        raise refused(exc, mode) from exc
+
+    blocked = check_blocklist(resolved, mode)
 
     listing = "\n".join(
         f"{e['name']}\t{e['type']}\t{e['size'] if e['size'] is not None else '-'}" for e in entries
     )
-    shadows = detect_module_shadows(resolved)
     pipeline = run_l1(listing)
     pipeline.stats.shadows = ShadowStats.from_result(shadows)
 
@@ -98,7 +122,7 @@ async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str
         ref=resolved,
         prompt=prompt,
         allowlisted=get_config().is_trusted_path(resolved),
-        blocklisted_at=blocked["detected_at"] if blocked else None,
+        blocklisted=blocked,
         precomputed_l1=pipeline,
         l3_context=briefing,
         extras={"entries": entries, "shadows": shadow_fields},

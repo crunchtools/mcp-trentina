@@ -50,6 +50,7 @@ worse shape than one that costs an operator reload or a restart.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -340,6 +341,46 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
     return held
 
 
+def _lost_destination_rules(before: Profile, after: Profile) -> list[str]:
+    """The ``destination_params`` rules an agent reload would remove, as ``tool:param``.
+
+    ``destination_params`` is what records who a comms tool was pointed at
+    (#266). Two checks, both needed:
+
+    - Profile-wide, as a multiset: whatever the backends are renamed or
+      repointed to, every (tool, param) pair must still be there, as many
+      times as before.
+    - Per backend: one that keeps its name or its URL is the same service,
+      so its own rules must stay on it. Without this, moving a rule onto a
+      dummy backend passes the count and leaves the real one unaudited.
+
+    A backend renamed AND repointed has no identity left to check, so it is
+    held by the count alone. New rules are free to add.
+
+    Args:
+        before: The caller's profile as it runs now.
+        after: The same profile as the file on disk would make it.
+
+    Returns:
+        Every lost rule as ``tool:param``, sorted. Empty means the reload
+        keeps every rule, and the caller refuses the reload otherwise.
+    """
+
+    def rules(profile: Profile) -> Counter[tuple[str, str]]:
+        return Counter(
+            pair for b in profile.backends.values() for pair in b.destination_params.items()
+        )
+
+    lost = {f"{tool}:{param}" for tool, param in rules(before) - rules(after)}
+    by_url = {b.url: b for b in before.backends.values()}
+    for name, backend in after.backends.items():
+        old = before.backends.get(name) or by_url.get(backend.url)
+        for tool, param in (old.destination_params if old else {}).items():
+            if backend.destination_params.get(tool) != param:
+                lost.add(f"{tool}:{param}")
+    return sorted(lost)
+
+
 def _hold_floor(
     label: str, floor: Sequence[str], new: Any, inherited: Sequence[str], ceiling: Sequence[str]
 ) -> list[str]:
@@ -433,6 +474,18 @@ async def _apply_own_profile(
             ),
         }
 
+    lost = _lost_destination_rules(before, after)
+    if lost:
+        # Refused, not held: a hold must pick which backend a rule lands on,
+        # and a rename plus a repoint leaves no right answer (#266).
+        return {
+            "reloaded": False,
+            "scope": name,
+            "error": (
+                "this reload removes destination_params rules "
+                f"({', '.join(lost)}); an operator reload or a restart applies that"
+            ),
+        }
     held = _hold_perimeter_fields(before, after)
     delta = _profile_delta(before, after)
     registry[name] = after

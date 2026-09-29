@@ -8,7 +8,6 @@ from urllib.parse import urlparse
 
 from ..client import fetch_url
 from ..config import get_config
-from ..database import is_blocked
 from ..defense import defend
 from ..errors import (
     BlockedSourceError,
@@ -20,7 +19,7 @@ from ..logsafe import exc_kind, redact_source
 from ..modes import Mode
 from ..quarantine.prompts import finding_types
 from ..report import Disposition, build_report
-from .judged import blocklisted, judge_and_deliver
+from .judged import check_blocklist, judge_and_deliver
 from .preprocess import prepare
 
 log = logging.getLogger(__name__)
@@ -213,9 +212,7 @@ async def fetch_page(
     content rather than counting it. ``false`` delivers it as sent, and
     ``l1/hidden.py`` counts whatever markup is delivered.
     """
-    blocked = is_blocked(url)
-    if blocked and mode is not Mode.REDACT:
-        raise blocklisted(url, mode, blocked["detected_at"])
+    blocked = check_blocklist(url, mode)
 
     try:
         content, content_type = await fetch_url(url)
@@ -244,7 +241,7 @@ async def fetch_page(
         ref=url,
         prompt=prompt,
         allowlisted=get_config().is_trusted_domain(url),
-        blocklisted_at=blocked["detected_at"] if blocked else None,
+        blocklisted=blocked,
         domain=urlparse(url).hostname,
         provenance=page.provenance,
         precomputed_l1=page.pipeline,

@@ -54,6 +54,7 @@ from ..logsafe import exc_kind, exc_where, redact_source
 from ..matrix.keybackup import KeyBackupProvider
 from ..modes import gaps_of
 from ..preprocess import SelectionContext
+from ..reserved import WARNING_KEY, strip_reserved, with_stripped
 from ..warning import build_warning
 from .context import profile_context
 from .drivers import build_preprocessors
@@ -514,8 +515,21 @@ async def _scan_and_forward(
 
     payload: Any = None
     view = None
+    stripped = 0
     try:
         payload = json.loads(body)
+        # Any room member can put the gateway's markers in an event (#265).
+        # Removed before the scan, and the body rewritten only when one was,
+        # so every path below forwards the stripped bytes.
+        stripped = await asyncio.to_thread(strip_reserved, payload)
+        if stripped:
+            body = json.dumps(payload).encode("utf-8")
+            logger.info(
+                "matrix_proxy: stripped %d reserved key(s) from %s for profile=%s",
+                stripped,
+                redact_source(path),
+                profile.name,
+            )
         # The deadline wraps extraction AND judgement. Bounding only the
         # judge would leave any I/O an extractor does (a key fetch, later)
         # unbounded, which is the stall risk selection itself introduces.
@@ -567,7 +581,7 @@ async def _scan_and_forward(
             body,
             headers,
             content_type,
-            {"risk_level": "unknown", "scan_timeout": True},
+            with_stripped({"risk_level": "unknown", "scan_timeout": True}, stripped),
             withhold=_withholds(profile),
         )
     except Exception as exc:
@@ -587,7 +601,7 @@ async def _scan_and_forward(
         return _respond(None, body, headers, content_type, None, withhold=_withholds(profile))
 
     extras = describe(view, cfg) if (view is not None and cfg is not None) else {}
-    warning = build_warning(verdict, extras=extras)
+    warning = with_stripped(build_warning(verdict, extras=extras), stripped)
     gaps = gaps_of(verdict)
     if verdict.flagged:
         logger.warning(
@@ -754,7 +768,7 @@ def _respond(
             )
         warning = {**(warning or {}), "withheld_events": _withhold_events(payload)}
     if warning is not None and isinstance(payload, dict):
-        payload["_trentina_warning"] = warning
+        payload[WARNING_KEY] = warning
         body = json.dumps(payload).encode("utf-8")
     return Response(content=body, status_code=200, headers=headers, media_type=content_type)
 

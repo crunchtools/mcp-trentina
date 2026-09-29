@@ -5,11 +5,10 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from ..database import is_blocked
 from ..defense import admission
 from ..errors import ContentSizeError
 from ..modes import Mode
-from .judged import blocklisted, judge_and_deliver
+from .judged import check_blocklist, judge_and_deliver
 from .preprocess import prepare
 
 
@@ -43,9 +42,7 @@ async def judge_content(
         raise ContentSizeError(tokens, cap)
 
     chash = _content_hash(content)
-    blocked = is_blocked(chash)
-    if blocked and mode is not Mode.REDACT:
-        raise blocklisted(chash, mode, blocked["detected_at"])
+    blocked = check_blocklist(chash, mode)
 
     page = await prepare(
         content, requested=preprocess, tool="content_tool", source=chash, content_type=content_type
@@ -59,7 +56,7 @@ async def judge_content(
         kind="content",
         ref=chash,
         prompt=prompt,
-        blocklisted_at=blocked["detected_at"] if blocked else None,
+        blocklisted=blocked,
         provenance=page.provenance,
         precomputed_l1=page.pipeline,
         l3_context=page.briefing,

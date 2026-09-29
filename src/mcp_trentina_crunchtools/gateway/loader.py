@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import SecretStr, ValidationError
@@ -20,7 +21,8 @@ from pydantic import SecretStr, ValidationError
 from ..channels import Channel
 from .drivers import build_preprocessors
 from .errors import ProfileConfigError
-from .profile import AlertIngressConfig, MatrixIngressConfig, Profile
+from .filter import filter_tools
+from .profile import AlertIngressConfig, MatrixIngressConfig, Profile, is_matrix_user_id
 from .transform import resolve
 
 
@@ -38,10 +40,11 @@ class GatewayConfig:
 logger = logging.getLogger(__name__)
 
 _ENV_REF_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
+_URL_SAFE_VALUE_RE = re.compile(r"[A-Za-z0-9._~%-]+")
 
 
 def _expand_env_refs(value: str, *, context: str) -> str:
-    """Substitute ${VAR} references in a header value from os.environ.
+    """Substitute ${VAR} references in a header value or URL from os.environ.
 
     Fails closed (raises ProfileConfigError) if a referenced var is unset or
     empty — a missing auth secret must not silently become an unauthenticated
@@ -87,8 +90,9 @@ def _build_profile(name: str, body: Any) -> Profile:
     _resolve_oauth_client_secret(name, profile)
     _resolve_oauth_audience(name, profile)
     _resolve_llm_key_secrets(name, profile)
-    _expand_backend_headers(name, profile)
+    _expand_backend_env_refs(name, profile)
     _check_drivers(name, profile)
+    _check_destination_params(name, profile)
     _resolve_matrix_bridge_secrets(name, profile)
     if profile.alert_ingress is not None:
         _resolve_alert_ingress_secrets(name, profile.alert_ingress)
@@ -97,6 +101,22 @@ def _build_profile(name: str, body: Any) -> Profile:
         _resolve_matrix_ingress_secrets(name, profile.matrix_ingress)
 
     return profile
+
+
+def _check_destination_params(name: str, profile: Profile) -> None:
+    """Refuse a ``destination_params`` entry for a tool the backend never serves.
+
+    The allowlist is known at load; the backend's tool list is not. An entry
+    the allowlist filters out is an audit rule that can never fire, which is
+    a typo the operator should hear about now, not after an incident.
+    """
+    for backend_name, backend in profile.backends.items():
+        for tool in backend.destination_params:
+            if not filter_tools([{"name": tool}], backend):
+                raise ProfileConfigError(
+                    f"Profile {name!r}: backends.{backend_name}.destination_params."
+                    f"{tool}: the tool is not allowed on this backend"
+                )
 
 
 def _check_drivers(name: str, profile: Profile) -> None:
@@ -237,8 +257,41 @@ def _resolve_llm_key_secrets(name: str, profile: Profile) -> None:
         override.api_key = SecretStr(key_value)
 
 
-def _expand_backend_headers(name: str, profile: Profile) -> None:
+def _expand_backend_url(name: str, backend_name: str, url: str) -> str:
+    """Expand ${VAR} in a backend URL's path and query only (#268).
+
+    A token-in-URL backend keeps its credential in the environment, not in
+    profiles.yaml. Logs print a backend as ``safe_url(url)``, which keeps the
+    host, so a reference in the scheme, userinfo, host or port would log the
+    secret: refuse it there.
+    """
+    context = f"Profile {name!r} backend {backend_name!r} url"
+    first_ref = _ENV_REF_RE.search(url)
+    if first_ref is None:
+        return url
+    parts = urlsplit(url)
+    authority_end = len(f"{parts.scheme}://{parts.netloc}")
+    if (
+        not parts.scheme
+        or not url.startswith(f"{parts.scheme}://")
+        or (first_ref.start() < authority_end)
+    ):
+        raise ProfileConfigError(f"{context}: ${{VAR}} is allowed only in the path or query")
+    expanded = _expand_env_refs(url, context=context)
+    # Inserted verbatim, so a value must not restructure the URL: `&`, `#`,
+    # `/` or `?` in a token would move it into another component.
+    for match in _ENV_REF_RE.finditer(url):
+        if not _URL_SAFE_VALUE_RE.fullmatch(read_secret_env(match.group(1))):
+            raise ProfileConfigError(
+                f"{context}: env var {match.group(1)} holds characters outside "
+                "[A-Za-z0-9._~%-]; percent-encode it"
+            )
+    return expanded
+
+
+def _expand_backend_env_refs(name: str, profile: Profile) -> None:
     for backend_name, backend in profile.backends.items():
+        backend.url = _expand_backend_url(name, backend_name, backend.url)
         if backend.headers:
             backend.headers = {
                 key: _expand_env_refs(
@@ -250,6 +303,16 @@ def _expand_backend_headers(name: str, profile: Profile) -> None:
 
 
 _ENV_FILE_SUFFIX = "_FILE"
+
+#: Every env var a profile resolved a secret from, across the startup load and
+#: every reload since. ``reload_profiles`` reads them again, so the startup
+#: scrub (``gateway/envscrub.py``) must never pop one of these.
+_profile_env_names: set[str] = set()
+
+
+def profile_env_names() -> frozenset[str]:
+    """The env var names profiles have resolved secrets from (see ``read_secret_env``)."""
+    return frozenset(_profile_env_names)
 
 
 def _warn_on_loose_mode(path: Path, file_var: str) -> None:
@@ -277,7 +340,7 @@ def _warn_on_loose_mode(path: Path, file_var: str) -> None:
         )
 
 
-def read_secret_env(env_var: str) -> str:
+def read_secret_env(env_var: str, *, record: bool = True) -> str:
     """Resolve a secret from ``FOO``, or from the file named by ``FOO_FILE``.
 
     The ``_FILE`` indirection is the preferred shape for container
@@ -294,7 +357,13 @@ def read_secret_env(env_var: str) -> str:
     Returns "" when neither is set, leaving "is this required?" to the caller.
     Raises only when the operator named a file we cannot use — a secret
     pointed at a missing file is a broken deployment, not an absent secret.
+
+    ``record`` notes ``env_var`` as one a profile depends on, so the startup
+    scrub leaves it for ``reload_profiles`` to read again. A caller reading a
+    startup-only secret (the OAuth signing key) passes False.
     """
+    if record:
+        _profile_env_names.add(env_var)
     file_var = f"{env_var}{_ENV_FILE_SUFFIX}"
     path_value = os.environ.get(file_var, "").strip()
     if path_value:
@@ -425,6 +494,26 @@ def _check_operator(registry: dict[str, Profile]) -> None:
         )
 
 
+def matrix_other_agents(matrix: dict[str, Any]) -> frozenset[str]:
+    """``matrix.other_agent_user_ids``: agents the gateway does not bridge (#264).
+
+    Matrix IDs of agents that are not a profile here (Ashigaru, say), treated
+    exactly like another bridged profile's ``public_user_id``: their events
+    are dropped and no room holding one is relayed into. Absent is empty. A
+    malformed list is fatal, and the error counts entries rather than
+    echoing them.
+    """
+    raw = matrix.get("other_agent_user_ids", [])
+    if not isinstance(raw, list) or not all(isinstance(v, str) for v in raw):
+        raise ProfileConfigError("matrix.other_agent_user_ids must be a list of Matrix user IDs")
+    bad = sum(1 for v in raw if not is_matrix_user_id(v, historical=True))
+    if bad:
+        raise ProfileConfigError(
+            f"matrix.other_agent_user_ids: {bad} entries are not Matrix user IDs"
+        )
+    return frozenset(raw)
+
+
 def load_profiles(path: Path | str) -> GatewayConfig:
     """Load gateway configuration from YAML.
 
@@ -472,6 +561,8 @@ def load_profiles(path: Path | str) -> GatewayConfig:
 
     llm_section = cfg_data.get("llm_providers", {})
     matrix_section = cfg_data.get("matrix", {})
+    if isinstance(matrix_section, dict):
+        matrix_other_agents(matrix_section)  # validated here, bound at startup
     gateway_section = cfg_data.get("gateway", {})
     if not isinstance(gateway_section, dict):
         gateway_section = {}

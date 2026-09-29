@@ -38,6 +38,9 @@ uv run mcp-trentina-crunchtools
   1000000). With `CLASSIFIER_MAX_TOKENS` it sets `Config.admission_tokens`.
   `QUARANTINE_MAX_CONTENT` was removed in 0.43.0 (#225); setting it fails startup.
 - `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-trentina/trentina.db)
+- `TRENTINA_BLOCKLIST_TTL_DAYS` — days a block refusal stays on the blocklist
+  (default 30, floor 1). Expired rows stop counting at once and are swept
+  hourly by `is_blocked` (#263).
 - `TRENTINA_PERIMETER_DB` — perimeter verdict store, a SEPARATE database from the
   blocklist (default: `perimeter.db` beside `QUARANTINE_DB`). See `perimeter_db.py`
   for why it is its own file. Deleting it costs one slow restart and nothing else.
@@ -49,7 +52,12 @@ uv run mcp-trentina-crunchtools
   standalone keeps full reach. Either way `tools/confine.py` refuses `/config`,
   `/data`, `/proc`, `/sys`, `/run`, `/dev` and the directories of the two
   databases, the trust config and the live `profiles.yaml`. Refusals are a
-  closed reason code, never the path.
+  closed reason code, never the path. The path is checked as written
+  (normalized) BEFORE it is resolved, then again resolved; behind a gateway
+  `not_found`/`denied_path`/`outside_read_roots` are one reason,
+  `not_found_or_denied`, so a refusal is no existence oracle (#263). A
+  confinement refusal is a `BlockedSourceError` with no alternatives
+  (`confine.refused`), audited `blocked_defense` like egress's (#278).
 - `TRENTINA_FETCH_ALLOW_PRIVATE` — default false. Lifts the egress guard's
   address rule so fetch can reach non-global addresses; scheme, port and
   redirect rules still hold. Warns at startup. See `egress.py` (#260).
@@ -60,6 +68,19 @@ uv run mcp-trentina-crunchtools
   one rate-limit bucket** — the limiter keys on `scope["client"]`, which
   uvicorn only rewrites for a trusted peer. Startup logs which is in effect.
 - `TRENTINA_MAX_REGISTRATION_BYTES` — `POST /register` body cap (default 8192)
+- `TRENTINA_MAX_REQUEST_BYTES` — request body cap on every MCP route
+  (`/gateway/<profile>/mcp`, FastMCP's own mount) and the alert ingress
+  (default 1 MiB, floor 1 KiB). Over it: 413, the rest unread, chunked or
+  not (`httpbody.RequestBodyCap`, #267). A backend's RESPONSE has its own
+  cap, derived rather than set: `admission_tokens * 32` bytes, floor 1 MiB
+  (`gateway/backend.py` `BYTES_PER_TOKEN`); over it, admission's oversize
+  refusal with no alternatives, audited `blocked_defense`.
+- `TRENTINA_OAUTH_JWT_SIGNING_KEY` / `TRENTINA_OAUTH_JWT_SIGNING_KEY_FILE` and
+  `TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET[_FILE]` — read once at startup; `_FILE`
+  wins. After startup `gateway/envscrub.py` pops these, the `Config` LLM keys
+  and `llm_providers` keys from `os.environ` unless a profile references the
+  name (`reload_profiles` re-reads those). `/proc/self/environ` still holds
+  every value: only `_FILE` keeps a secret out (#268).
 - `TRENTINA_REGISTRATION_TTL_DAYS` — lifetime of a PROMOTED registration
   (default 90). A new one is provisional for an hour; a token exchange
   promotes it and every later exchange re-stamps it. See `gateway/oauth_store.py`.
@@ -87,10 +108,16 @@ Required: `BRIDGE_PROFILE`, `BRIDGE_USER_ID`, `BRIDGE_GATEWAY_URL`,
 `BRIDGE_INGRESS_TOKEN`, `BRIDGE_TOKEN`, `BRIDGE_PICKLE_KEY`. Optional:
 `BRIDGE_HOMESERVER`, `BRIDGE_STORE_DIR` (`/data`), `BRIDGE_LISTEN_HOST`
 (`127.0.0.1`), `BRIDGE_LISTEN_PORT` (8471), `BRIDGE_DEVICE_NAME`,
-`BRIDGE_LOG_LEVEL`, and one way in: `BRIDGE_DEVICE_ID` + `BRIDGE_ACCESS_TOKEN`
+`BRIDGE_LOG_LEVEL`, `BRIDGE_ALLOWED_INVITERS` (comma-separated Matrix IDs
+whose invites are accepted; empty or unset refuses every invite and leaves
+every joined room, #264), and one way in: `BRIDGE_DEVICE_ID` + `BRIDGE_ACCESS_TOKEN`
 (adopt) or `BRIDGE_PASSWORD` (new device). One-shot commands:
 `BRIDGE_OLD_ACCESS_TOKEN` (`logout-device`), `BRIDGE_RECOVERY_KEY`
-(`sign-device`). Secrets take `_FILE`.
+(`sign-device`). Secrets and `BRIDGE_ALLOWED_INVITERS` take `_FILE`. The
+gateway half of #264 (drop another bridged agent's events, relay into no room
+holding one or whose members were never reported) reads every profile's
+`matrix_bridge.public_user_id`, plus `matrix.other_agent_user_ids` in
+`profiles.yaml` for agents it does not bridge (Ashigaru); bound at startup.
 
 ## onnxruntime telemetry
 
@@ -254,7 +281,9 @@ nothing, so a backend in another profile is refused exactly like one that does
 not exist. Standalone (no gateway registered) is single-tenant and therefore
 operator; a live gateway with no bound caller is refused.
 
-- cache_flush — flush tool-list caches. Agent: its own backends and aggregate.
+- cache_flush — flush tool-list caches. Agent: its own aggregate ONLY, with a
+  constant body; the per-URL cache is shared, so an agent flushing it and
+  reporting what was warm was a channel between profiles (#263).
   Operator: every cache. A name is resolved by EXACT name, never by substring
   over cached URLs — that is how `gw` used to reach `gw-work` and
   `gw-personal` both.
@@ -348,7 +377,11 @@ skill's format.
   Refusal reasons are a closed set and never name the address. Never give an
   outbound `httpx.AsyncClient` an agent-chosen URL without it.
 - `tools/` — Tool implementations called by server.py wrappers
-- `database.py` — SQLite blocklist for cumulative detection memory
+- `database.py` — SQLite blocklist for cumulative detection memory, keyed on
+  (profile, source) since #263: `is_blocked(source, profile)` sees the
+  caller's own rows, `gateway_wide=True` (operator, standalone) every row,
+  and NULL-profile rows are operator-only. It answers a bool; a refusal
+  (`judged.blocklisted`) is constant and carries no timestamp.
 - `perimeter_db.py` — the perimeter's own store, deliberately a second database:
   verdicts `defend()` reached, so a restart does not re-judge ~210 tool
   descriptions through all three layers before the first `tools/list` answers
@@ -359,6 +392,10 @@ skill's format.
 - `jsonwalk.py` — the ONE JSON walk. There were two hand-maintained copies
   until #167; `tests/test_full_is_defend_json.py` proves they agreed, which is
   what made deleting one safe.
+- `reserved.py` — the keys only the gateway may write (#265): `_trentina_*`
+  at any depth, `RESERVED_ROOT_KEYS` at a document's root. Every path that
+  carries someone else's JSON strips them before the scan and before adding
+  its own marker. A new marker takes the prefix and is covered automatically.
 - `preprocess/` — Payload transformation, OUTSIDE the perimeter. May subtract
   but never absolve: it drops, collapses, normalizes and restructures, and
   everything it emits still crosses `defend()` as untrusted. Reduction is the

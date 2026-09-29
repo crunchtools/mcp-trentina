@@ -1,15 +1,16 @@
 """Cache management tool — flush backend and profile tool list caches.
 
-Scoped by role. An agent profile flushes its own backends and its own
-aggregate; the operator flushes the gateway. What an agent may name is
-therefore exactly what it already holds, which also ends the old substring
-match — ``cache_flush("gw")`` used to evict every cached URL containing "gw",
-including backends in profiles the caller had never heard of.
+Scoped by role. An agent profile drops its own aggregate and nothing else;
+the operator flushes the gateway.
 
-The eviction itself is still felt gateway-wide when a backend is shared: the
-tool list cache is keyed by URL, so dropping it drops it for everyone using
-that URL, and their aggregates rebuild on next use. That is correctness — a
-stale list is stale for every reader — and it discloses nothing.
+An agent's flush used to evict its backends' entries from the tool-list
+cache and report which were still warm (``backends_flushed``). That cache is
+keyed by URL and shared by every profile holding the URL, so one profile
+could re-list, flush a chosen subset, and have another read the pattern back:
+a bit per shared backend, per round (#263). An agent's flush therefore leaves
+the shared cache alone and returns a body built from nothing another profile
+can influence. A stale backend list is the operator's to flush, or
+``reconnect_backend``'s to re-probe.
 """
 
 from __future__ import annotations
@@ -28,29 +29,17 @@ logger = logging.getLogger(__name__)
 
 
 def _flush_own(scope: CallerScope, backend: str | None) -> dict[str, Any]:
-    """Agent path: the caller's own backends, named or all of them."""
-    if backend is not None:
-        url, _cfg = resolve_backend(scope, backend)
-        invalidate_profile_cache(scope.label)
-        return {
-            "flushed": "backend",
-            "scope": scope.label,
-            "backend": backend,
-            "evicted": evict_backend_cache_url(url),
-        }
+    """Agent path: the caller's own aggregate, and a constant answer.
 
-    flushed = [
-        name
-        for name, cfg in sorted(scope.backends.items())
-        if not cfg.is_internal and evict_backend_cache_url(cfg.url)
-    ]
+    A named backend is still checked against the caller's own profile, so a
+    typo is refused rather than silently ignored; the refusal depends only on
+    that profile. Whether an aggregate was cached is not reported: it is
+    rebuilt from the shared cache, so its presence is not the caller's alone.
+    """
+    if backend is not None:
+        resolve_backend(scope, backend)
     invalidate_profile_cache(scope.label)
-    return {
-        "flushed": "profile",
-        "scope": scope.label,
-        "backends_flushed": flushed,
-        "profile_cache_cleared": True,
-    }
+    return {"flushed": "profile", "scope": scope.label, "profile_cache_cleared": True}
 
 
 def _flush_named_gateway_wide(backend: str) -> dict[str, Any]:
@@ -79,12 +68,14 @@ async def cache_flush(backend: str | None = None) -> dict[str, Any]:
     """Flush tool list caches, within the caller's role.
 
     Args:
-        backend: Backend name to flush. Omit to flush everything in scope —
-            the caller's own backends, or every cache for an operator.
+        backend: Backend name. An agent's must be in its own profile, and
+            only its own aggregate is dropped either way; an operator's is
+            flushed wherever it is configured. Omit for everything in scope:
+            the agent's aggregate, or every cache for an operator.
 
     Returns:
-        What was flushed. An agent profile's result names only its own
-        backends; a refusal names nothing at all.
+        What was flushed. An agent profile's result is the same every time
+        for the same caller; a refusal names nothing at all.
     """
     try:
         scope = require_caller("cache_flush")
