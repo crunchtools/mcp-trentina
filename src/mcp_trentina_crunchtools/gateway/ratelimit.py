@@ -39,6 +39,7 @@ from collections import OrderedDict
 from typing import Any
 
 from ..config import int_env
+from ..httpbody import BufferedReceive, drain_capped
 from ..logsafe import safe_address
 
 logger = logging.getLogger(__name__)
@@ -208,27 +209,6 @@ def describe_limits() -> str:
     )
 
 
-class _BufferedBody:
-    """An ASGI ``receive`` that replays an already-drained request body once.
-
-    The guard has to read the body to measure it, which consumes the real
-    ``receive``. The inner app still expects to read its own body, so it is
-    handed this instead.
-    """
-
-    __slots__ = ("_body", "_sent")
-
-    def __init__(self, body: bytes) -> None:
-        self._body = body
-        self._sent = False
-
-    async def __call__(self) -> dict[str, Any]:
-        if self._sent:
-            return {"type": "http.disconnect"}
-        self._sent = True
-        return {"type": "http.request", "body": self._body, "more_body": False}
-
-
 class UnauthenticatedWriteGuard:
     """ASGI wrapper: cap the body, then rate-limit, then delegate.
 
@@ -286,7 +266,9 @@ class UnauthenticatedWriteGuard:
                     },
                 )
                 return
-            receive = _BufferedBody(body)
+            if body is None:
+                return  # the client left mid-body; there is no request to serve
+            receive = BufferedReceive(body, receive)
 
         address = client_address(scope)
         if not self._limiter.allow(address):
@@ -307,39 +289,13 @@ class UnauthenticatedWriteGuard:
 
         await self._inner(scope, receive, send)
 
-    async def _read_capped(self, scope: Any, receive: Any) -> tuple[bytes, bool]:
+    async def _read_capped(self, scope: Any, receive: Any) -> tuple[bytes | None, bool]:
         """Drain the request body, stopping one byte past the cap.
 
-        A declared ``content-length`` is checked first so an oversized body is
-        refused without being transferred at all. It is not TRUSTED, because a
-        chunked request declares none and a lying one declares whatever it
-        likes, so the drained bytes are counted regardless.
+        See ``httpbody.drain_capped``: a declared ``content-length`` refuses
+        early, and the drained bytes are counted regardless.
         """
-        cap = self._max_body_bytes or 0
-
-        for name, value in scope.get("headers", []):
-            if name.lower() == b"content-length":
-                try:
-                    if int(value) > cap:
-                        return b"", True
-                except ValueError:
-                    return b"", True
-                break
-
-        chunks: list[bytes] = []
-        total = 0
-        while True:
-            message = await receive()
-            if message["type"] == "http.disconnect":
-                break
-            chunk = message.get("body", b"")
-            total += len(chunk)
-            if total > cap:
-                return b"", True
-            chunks.append(chunk)
-            if not message.get("more_body"):
-                break
-        return b"".join(chunks), False
+        return await drain_capped(scope, receive, self._max_body_bytes or 0)
 
 
 async def _send_text(

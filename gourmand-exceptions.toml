@@ -669,6 +669,20 @@ justification = "The text-mode fallback is the last scan of an unparseable respo
 classification = "by_design"
 
 [[exceptions]]
+check = "single_use_helpers"
+path = "tests/test_request_body_cap.py"
+pattern = "_scope"
+justification = "Not single-use: called from six tests across two classes, verified by grep. The same per-class undercount as the tests/test_reload.py `_registry` entry."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "dead_structs"
+path = "src/mcp_trentina_crunchtools/httpbody.py"
+pattern = "RequestBodyCap"
+justification = "Constructed by Starlette, not by a literal call: production passes the class to starlette.middleware.Middleware(RequestBodyCap, cap=..., applies=...) in __init__._body_cap and gateway/app.gateway_app, and Starlette instantiates it when it builds the middleware stack. That is the only way to install ASGI middleware through FastMCP's run(middleware=...)."
+classification = "gourmand_bug"
+
+[[exceptions]]
 check = "redundant_error_handling"
 path = "src/mcp_trentina_crunchtools/gateway/router.py"
 pattern = "_audit"

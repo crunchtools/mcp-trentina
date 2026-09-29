@@ -89,6 +89,8 @@ async def _error_body(resp: httpx.Response) -> str | None:
     """
     buf = bytearray()
     try:
+        # open_guarded refused an encoded body before this, so these are the
+        # bytes that crossed the wire, not a decompressor's output (#276).
         async for chunk in resp.aiter_bytes():
             buf += chunk
             if len(buf) >= MAX_ERROR_BODY:
@@ -106,7 +108,8 @@ async def fetch_url(url: str) -> tuple[str, str]:
     is streamed so the content-type and size can be rejected from headers
     alone, before a large or binary body is pulled over the wire and decoded.
     Servers lie about or omit content-length, so the cap is re-checked
-    against bytes actually received.
+    against bytes actually received. Those are wire bytes: the guard asks for
+    ``identity`` and refuses an encoded body (#276), so nothing is inflated.
 
     Raises FetchError on failure, UnsupportedContentTypeError on non-text,
     EgressRefusedError when the guard refuses a hop.
@@ -133,6 +136,8 @@ async def fetch_url(url: str) -> tuple[str, str]:
                 raise FetchError(url, f"Response too large: {declared} bytes")
 
             buf = bytearray()
+            # Identity only (open_guarded refuses anything else), so the cap
+            # counts what crossed the wire, never a decompressor's output (#276).
             async for chunk in resp.aiter_bytes():
                 buf += chunk
                 if len(buf) > MAX_RESPONSE_SIZE:

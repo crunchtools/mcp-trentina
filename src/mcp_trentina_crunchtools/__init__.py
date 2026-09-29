@@ -136,6 +136,7 @@ def main() -> None:
                     host=args.host,
                     port=args.port,
                     log_level=log_level,
+                    middleware=_body_cap("/mcp"),
                 )
 
 
@@ -287,7 +288,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         oauth_route_registered=(oauth_context is not None and oauth_context.provider is not None),
     )
 
-    _warm_classifier()
+    _ready_to_serve(llm_providers)
 
     legacy_mcp = os.environ.get("TRENTINA_LEGACY_MCP", "").strip().lower() in _TRUTHY
     if legacy_mcp:
@@ -326,8 +327,39 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         port=port,
         log_level=log_level,
         path=mcp_path,
+        middleware=_body_cap(mcp_path, "/mcp"),
         **_uvicorn_overrides(),
     )
+
+
+def _ready_to_serve(llm_providers: Mapping[str, Any]) -> None:
+    """Warm the classifier, then drop the secrets nothing reads again (#268).
+
+    The scrub is last on purpose: everything that reads a startup-only secret
+    has run by now. See ``gateway/envscrub.py`` for what goes, what stays,
+    and why ``/proc/self/environ`` still holds them all.
+    """
+    from .gateway.envscrub import scrub_startup_secrets
+
+    _warm_classifier()
+    scrub_startup_secrets(provider.api_key_env for provider in llm_providers.values())
+
+
+def _body_cap(*mcp_paths: str) -> list[Any]:
+    """The request body cap on every MCP route, as FastMCP's ``middleware=`` (#267).
+
+    Covers ``/gateway/<profile>/mcp`` and FastMCP's own mount, whose SDK
+    handler reads the body with an unbounded ``request.body()``. Scoped by
+    path so the LLM and Matrix proxies, which stream bodies through, are left
+    alone. ``TRENTINA_MAX_REQUEST_BYTES`` sets it (default 1 MiB).
+    """
+    from starlette.middleware import Middleware
+
+    from .httpbody import RequestBodyCap, max_request_bytes, mcp_path_matcher
+
+    cap = max_request_bytes()
+    logger.info("http: MCP request bodies capped at %d bytes", cap)
+    return [Middleware(RequestBodyCap, cap=cap, applies=mcp_path_matcher(*mcp_paths))]
 
 
 def _uvicorn_overrides() -> dict[str, Any]:
@@ -844,9 +876,11 @@ def _build_proxy_provider(
     its ``super()`` calls reach the provider.
     """
     from .gateway.errors import ProfileConfigError
+    from .gateway.loader import read_secret_env
 
     client_id = os.environ.get("TRENTINA_OAUTH_GOOGLE_CLIENT_ID", "").strip()
-    client_secret = os.environ.get("TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET", "").strip()
+    # Startup-only, so not recorded: the scrub drops it once the provider holds it.
+    client_secret = read_secret_env("TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET", record=False).strip()
     if not client_id or not client_secret:
         raise ProfileConfigError(
             "profile(s) "
@@ -1161,6 +1195,8 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
             FastMCP tokens and derives the on-disk storage location. Set it so
             issued tokens and stored registrations survive a Google client
             secret rotation; if unset, the key derives from the secret.
+            ``TRENTINA_OAUTH_JWT_SIGNING_KEY_FILE`` names a file holding it
+            instead, and wins when both are set (#268). Read once, here.
     """
     from .gateway.app import OAuthContext
 
@@ -1179,7 +1215,11 @@ def _build_oauth_context(gateway_config: GatewayConfig) -> OAuthContext | None:
     base_url = (
         os.environ.get("TRENTINA_OAUTH_BASE_URL", "https://mcp.crunchtools.com").strip().rstrip("/")
     )
-    signing_key = os.environ.get("TRENTINA_OAUTH_JWT_SIGNING_KEY", "").strip() or None
+    from .gateway.loader import read_secret_env
+
+    # Once, at startup, and not recorded: the scrub removes it from os.environ
+    # after the provider has derived its keys from it (#268).
+    signing_key = read_secret_env("TRENTINA_OAUTH_JWT_SIGNING_KEY", record=False).strip() or None
 
     delegated = _delegated_auth(profiles, delegated_names, proxy_client_id=client_id)
 

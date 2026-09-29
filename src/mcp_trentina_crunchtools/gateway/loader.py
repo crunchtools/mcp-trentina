@@ -304,6 +304,16 @@ def _expand_backend_env_refs(name: str, profile: Profile) -> None:
 
 _ENV_FILE_SUFFIX = "_FILE"
 
+#: Every env var a profile resolved a secret from, across the startup load and
+#: every reload since. ``reload_profiles`` reads them again, so the startup
+#: scrub (``gateway/envscrub.py``) must never pop one of these.
+_profile_env_names: set[str] = set()
+
+
+def profile_env_names() -> frozenset[str]:
+    """The env var names profiles have resolved secrets from (see ``read_secret_env``)."""
+    return frozenset(_profile_env_names)
+
 
 def _warn_on_loose_mode(path: Path, file_var: str) -> None:
     """Warn, never fail, when a secret file is group- or world-readable.
@@ -330,7 +340,7 @@ def _warn_on_loose_mode(path: Path, file_var: str) -> None:
         )
 
 
-def read_secret_env(env_var: str) -> str:
+def read_secret_env(env_var: str, *, record: bool = True) -> str:
     """Resolve a secret from ``FOO``, or from the file named by ``FOO_FILE``.
 
     The ``_FILE`` indirection is the preferred shape for container
@@ -347,7 +357,13 @@ def read_secret_env(env_var: str) -> str:
     Returns "" when neither is set, leaving "is this required?" to the caller.
     Raises only when the operator named a file we cannot use — a secret
     pointed at a missing file is a broken deployment, not an absent secret.
+
+    ``record`` notes ``env_var`` as one a profile depends on, so the startup
+    scrub leaves it for ``reload_profiles`` to read again. A caller reading a
+    startup-only secret (the OAuth signing key) passes False.
     """
+    if record:
+        _profile_env_names.add(env_var)
     file_var = f"{env_var}{_ENV_FILE_SUFFIX}"
     path_value = os.environ.get(file_var, "").strip()
     if path_value:

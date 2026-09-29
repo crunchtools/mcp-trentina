@@ -44,6 +44,7 @@ import httpx
 from starlette.responses import Response
 
 from ..defense import defend, defend_json
+from ..httpbody import STATUS_TOO_LARGE, TooLargeError, max_request_bytes, read_capped
 from ..l1.pipeline import risk_level_for_count
 from ..logsafe import exc_kind
 from ..reserved import WARNING_KEY, strip_reserved, with_stripped
@@ -152,7 +153,14 @@ async def _handle_alert(
     forward_url = profile.alert_ingress.forward_url
 
     try:
-        body = await request.body()
+        body = await read_capped(request, max_request_bytes())
+    except TooLargeError:
+        logger.warning("alert_ingress: refused a body over %d bytes", max_request_bytes())
+        return Response(
+            content="request body too large",
+            status_code=STATUS_TOO_LARGE,
+            media_type="text/plain",
+        )
     except Exception as exc:
         # Client disconnect mid-read, malformed chunked encoding, and a body
         # exceeding the server limit all land here. 400 is the right answer to

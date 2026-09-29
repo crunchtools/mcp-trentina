@@ -43,7 +43,15 @@ class FetchError(TrentinaError):
 
 
 EGRESS_REASONS = frozenset(
-    {"scheme", "port", "non_global_address", "unresolvable", "too_many_redirects", "downgrade"}
+    {
+        "scheme",
+        "port",
+        "non_global_address",
+        "unresolvable",
+        "too_many_redirects",
+        "downgrade",
+        "encoded",
+    }
 )
 
 

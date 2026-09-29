@@ -13,6 +13,7 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
+from itertools import islice
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -103,6 +104,9 @@ class ShadowScanResult:
     directory: str
     shadows_found: list[ShadowFinding] = field(default_factory=list)
     files_scanned: int = 0
+    entries_read: int = 0
+    """Directory entries looked at, so a caller that bounded the scan can tell
+    whether the bound cut it short."""
 
     @property
     def risk_level(self) -> str:
@@ -197,12 +201,15 @@ def _scan_shadow_file(filename: str, module_name: str, path: str) -> ShadowFindi
     )
 
 
-def detect_module_shadows(directory: str) -> ShadowScanResult:
+def detect_module_shadows(directory: str, *, max_entries: int | None = None) -> ShadowScanResult:
     """Scan a directory for Python files that shadow stdlib modules.
 
     Checks both file-based modules (struct.py) and package-based modules
     (struct/__init__.py).  For each shadow, scans the source for obfuscation
     indicators that suggest the shadow is weaponized.
+
+    ``max_entries`` stops the scan after that many directory entries, lazily,
+    so a caller that has already bounded a listing is not undone here (#267).
     """
     resolved = str(Path(directory).resolve())
     result = ShadowScanResult(directory=resolved)
@@ -210,19 +217,26 @@ def detect_module_shadows(directory: str) -> ShadowScanResult:
     if not os.path.isdir(resolved):
         return result
 
-    for entry in os.scandir(resolved):
-        if entry.is_file() and entry.name.endswith(".py"):
-            result.files_scanned += 1
-            module_name = entry.name[:-3]
-            if module_name in STDLIB_MODULES:
-                result.shadows_found.append(_scan_shadow_file(entry.name, module_name, entry.path))
-
-        if entry.is_dir():
-            init_path = os.path.join(entry.path, "__init__.py")
-            if os.path.isfile(init_path) and entry.name in STDLIB_MODULES:
-                result.files_scanned += 1
-                result.shadows_found.append(
-                    _scan_shadow_file(f"{entry.name}/__init__.py", entry.name, init_path)
-                )
+    with os.scandir(resolved) as it:
+        for entry in islice(it, max_entries):
+            result.entries_read += 1
+            _scan_entry(entry, result)
 
     return result
+
+
+def _scan_entry(entry: os.DirEntry[str], result: ShadowScanResult) -> None:
+    """Record ``entry`` in ``result`` if it shadows a stdlib module."""
+    if entry.is_file() and entry.name.endswith(".py"):
+        result.files_scanned += 1
+        module_name = entry.name[:-3]
+        if module_name in STDLIB_MODULES:
+            result.shadows_found.append(_scan_shadow_file(entry.name, module_name, entry.path))
+
+    if entry.is_dir():
+        init_path = os.path.join(entry.path, "__init__.py")
+        if os.path.isfile(init_path) and entry.name in STDLIB_MODULES:
+            result.files_scanned += 1
+            result.shadows_found.append(
+                _scan_shadow_file(f"{entry.name}/__init__.py", entry.name, init_path)
+            )

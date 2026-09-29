@@ -12,6 +12,30 @@ under that name.
 
 ### Security
 
+- Request bodies on the MCP routes are capped while they stream (#267).
+  `/gateway/<profile>/mcp` read `request.body()` with no limit, so one request
+  could push the container toward OOM. `httpbody.RequestBodyCap` answers 413
+  as soon as a body passes `TRENTINA_MAX_REQUEST_BYTES` (default 1 MiB),
+  whether or not it declared a `Content-Length`, and never reads the rest. It
+  covers FastMCP's own MCP mount too; the LLM and Matrix proxies are left
+  alone. The alert ingress reads under the same cap.
+- Backend responses are capped while they stream (#267). The MCP SDK reads a
+  reply with an unbounded `aread()` or `EventSource`, so the cap sits under it
+  on the transport's raw stream: `admission_tokens * 32` bytes, floor 1 MiB.
+  A response cut there gets admission's oversize refusal (`gaps: ["oversize"]`,
+  no alternatives, since nothing was read), audits as `blocked_defense`, and
+  does not count against the backend's circuit. Backends are asked for
+  `Accept-Encoding: identity`, and an encoded reply is refused.
+- `fetch` can no longer be gzip-bombed past its size caps (#276). It asks for
+  `identity` and refuses any other `Content-Encoding` before reading a byte,
+  on the 2xx path and the 4xx error-body path alike: `egress refused
+  (encoded)`, no alternatives, `blocked_defense`. HEAD is exempt.
+- `TRENTINA_OAUTH_JWT_SIGNING_KEY_FILE` and
+  `TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET_FILE` (#268). After startup the
+  gateway removes the startup-only secrets (those two, the `Config` LLM keys,
+  `llm_providers` keys) from `os.environ`, keeping any a profile references
+  because `reload_profiles` reads them again. This does not clear
+  `/proc/self/environ`, which keeps the initial environment; use `_FILE`.
 - Gateway trust markers could be forged in-band (#265). A backend's
   `structuredContent`, JSON in its text content, an alert body or a Matrix
   event could carry `_trentina_warning: {"risk_level": "low"}` (or
@@ -74,6 +98,12 @@ under that name.
 - A backend `url` expands `${VAR}` like a header does, so a token-in-URL
   credential lives in the environment instead of profiles.yaml (#268).
 
+### Changed
+
+- `read_tool` and `dir_tool` do their filesystem work in a worker thread,
+  with the confinement checks, the open and the read in one call (#267). The
+  stdlib-shadow scan stops at the same 501 entries as the listing instead of
+  walking the whole directory.
 ### Added
 
 - Call destinations in the audit (#266). `gateway_calls` gains `destination`

@@ -183,6 +183,12 @@ TRENTINA_OAUTH_JWT_SIGNING_KEY=...         # pin it so issued tokens and client
                                            # registrations survive a secret rotation
 ```
 
+Both secrets take a `_FILE` form (`TRENTINA_OAUTH_JWT_SIGNING_KEY_FILE`,
+`TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET_FILE`), which wins when both are set.
+Prefer it. Each is read once at startup and then removed from `os.environ`,
+but an env var's value stays in `/proc/<pid>/environ` for the life of the
+process; a file-mounted secret never enters the environment at all.
+
 `enabled: true` requires a non-empty `allowed_emails`; a seat open to any Google
 account fails validation. Registrations persist across a restart under
 `FASTMCP_HOME`, which the image sets to `/data/fastmcp`; mount that path to a
