@@ -9,6 +9,7 @@ anything able to inspect the container can read.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -75,16 +76,16 @@ class TestReadSecretEnv:
         with pytest.raises(ProfileConfigError, match="cannot read the secret file"):
             read_secret_env("SECRET_X")
 
-    def test_empty_file_is_empty(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_file_is_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         secret = tmp_path / "token"
         secret.write_text("\n")
         monkeypatch.setenv("SECRET_X_FILE", str(secret))
         assert read_secret_env("SECRET_X") == ""
 
     def test_the_secret_path_is_never_logged(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Name the env var, never the path.
@@ -115,7 +116,9 @@ class TestReadSecretEnv:
         assert "very-secret-location" not in str(exc.value)
 
     def test_loose_permissions_warn_but_do_not_fail(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         secret = tmp_path / "token"
@@ -127,7 +130,9 @@ class TestReadSecretEnv:
         assert "more permissive than 0600" in caplog.text
 
     def test_tight_permissions_are_silent(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         secret = tmp_path / "token"
@@ -154,9 +159,7 @@ class TestConsumersRouteThroughIt:
             "bearer-from-file"
         )
 
-    def test_require_env_error_names_both_spellings(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_require_env_error_names_both_spellings(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("TEST_BEARER", raising=False)
         monkeypatch.delenv("TEST_BEARER_FILE", raising=False)
         with pytest.raises(ProfileConfigError, match="TEST_BEARER_FILE"):
@@ -172,9 +175,7 @@ class TestConsumersRouteThroughIt:
         out = _expand_env_refs("Bearer ${HDR_TOKEN}", context="t")
         assert out == "Bearer hdr-from-file"
 
-    def test_end_to_end_profile_load(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_end_to_end_profile_load(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = tmp_path / "profiles.yaml"
         cfg.write_text(PROFILE_YAML)
         secret = tmp_path / "bearer"
@@ -186,3 +187,76 @@ class TestConsumersRouteThroughIt:
         token = loaded.profiles["agent2"].auth.bearer_token
         assert token is not None
         assert token.get_secret_value() == "tok-from-file"
+
+
+URL_PROFILE_YAML = """\
+profiles:
+  agent2:
+    auth:
+      bearer_token_env: TEST_BEARER
+    backends:
+      rotv:
+        url: http://rotv.example:8080/mcp?token=${ROTV_TOKEN}
+"""
+
+
+class TestBackendUrlSecrets:
+    """A token-in-URL backend keeps its credential out of profiles.yaml, and
+    the journal, which agents can read, never sees it (#268)."""
+
+    def test_url_expansion(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        cfg = tmp_path / "profiles.yaml"
+        cfg.write_text(URL_PROFILE_YAML)
+        monkeypatch.setenv("TEST_BEARER", "b")
+        monkeypatch.setenv("ROTV_TOKEN", "zqx7canary")
+        loaded = load_profiles(cfg)
+        url = loaded.profiles["agent2"].backends["rotv"].url
+        assert url == "http://rotv.example:8080/mcp?token=zqx7canary"
+
+    def test_unset_url_ref_fails_closed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cfg = tmp_path / "profiles.yaml"
+        cfg.write_text(URL_PROFILE_YAML)
+        monkeypatch.setenv("TEST_BEARER", "b")
+        monkeypatch.delenv("ROTV_TOKEN", raising=False)
+        monkeypatch.delenv("ROTV_TOKEN_FILE", raising=False)
+        with pytest.raises(ProfileConfigError, match="ROTV_TOKEN"):
+            load_profiles(cfg)
+
+    def test_safe_url_drops_path_query_and_userinfo(self) -> None:
+        from mcp_trentina_crunchtools.logsafe import safe_url
+
+        assert safe_url("http://u:zqx7canary@h:5000/api/mcp/zqx7canary?t=zqx7canary") == (
+            "http://h:5000"
+        )
+        assert safe_url("internal://trentina") == "internal://trentina"
+
+    def test_circuit_and_cache_logs_carry_no_url_secret(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from mcp_trentina_crunchtools.gateway import backend
+        from mcp_trentina_crunchtools.gateway.circuit import CircuitBreaker
+
+        url = "http://h:5000/api/mcp/zqx7canary"
+        caplog.set_level(logging.DEBUG)
+        breaker = CircuitBreaker(failure_threshold=1, cooldown_seconds=0)
+        breaker.record_failure(url)
+        breaker.allow(url)
+        breaker.record_success(url)
+        backend._tool_list_cache[url] = []
+        backend._evict_backend_cache(url)
+        assert caplog.records
+        assert "zqx7canary" not in caplog.text
+
+    def test_url_ref_in_host_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cfg = tmp_path / "profiles.yaml"
+        cfg.write_text(
+            URL_PROFILE_YAML.replace("rotv.example:8080/mcp?token=", "${ROTV_TOKEN}.example/mcp?t=")
+        )
+        monkeypatch.setenv("TEST_BEARER", "b")
+        monkeypatch.setenv("ROTV_TOKEN", "zqx7canary")
+        with pytest.raises(ProfileConfigError, match="path or query"):
+            load_profiles(cfg)
