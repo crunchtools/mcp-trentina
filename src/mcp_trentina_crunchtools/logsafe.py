@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import traceback
+from urllib.parse import urlsplit
 
 #: HTTP methods written as they are; anything else is a caller's token.
 _METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"})
@@ -83,6 +84,19 @@ def safe_address(host: object) -> str:
     fingerprints still group one client's lines."""
     text = str(host)
     return "unix" if text in {"", "None"} else redact_source(text)
+
+
+def safe_url(url: object) -> str:
+    """An operator-configured URL as ``scheme://host[:port]`` only. Backend
+    URLs are ours, not a caller's, but some carry a credential in the path or
+    query (a token-in-URL MCP server), and the journal is agent-readable."""
+    try:
+        parts = urlsplit(str(url))
+        host = parts.hostname or ""
+        port = f":{parts.port}" if parts.port else ""
+    except ValueError:
+        return redact_source(url)
+    return f"{parts.scheme}://{host}{port}" if host else redact_source(url)
 
 
 def safe_path(path: object) -> str:

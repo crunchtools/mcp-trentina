@@ -96,9 +96,7 @@ def require_caller(tool: str) -> CallerScope:
     """
     scope = current_scope()
     if scope is None:
-        raise ScopeError(
-            f"{tool}: no calling profile bound — refusing to act gateway-wide"
-        )
+        raise ScopeError(f"{tool}: no calling profile bound — refusing to act gateway-wide")
     return scope
 
 
