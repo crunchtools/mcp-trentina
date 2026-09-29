@@ -1174,6 +1174,24 @@ class MatrixBridgeLocalConfig(BaseModel):
         return value
 
 
+# The spec's historical user IDs: any printable ASCII but a colon. Still
+# served by matrix.org for accounts made before the grammar was tightened.
+_HISTORICAL_LOCALPART_RE = re.compile(r"^[!-9;-~]+$")
+
+
+def is_matrix_user_id(value: str, *, historical: bool = False) -> bool:
+    """``@localpart:server``, by the spec's grammar for both halves.
+
+    ``historical`` also accepts a localpart by the spec's older, looser
+    grammar (upper case, for one), which existing accounts still carry.
+    """
+    localpart, sep, server = value[1:].partition(":")
+    pattern = _HISTORICAL_LOCALPART_RE if historical else _MATRIX_LOCALPART_RE
+    return bool(
+        value.startswith("@") and sep and pattern.match(localpart) and _valid_server_name(server)
+    )
+
+
 class MatrixBridgeConfig(BaseModel):
     """Matrix E2EE termination by bridge (#162, spec 015).
 
@@ -1227,13 +1245,7 @@ class MatrixBridgeConfig(BaseModel):
     @field_validator("public_user_id")
     @classmethod
     def _user_id(cls, value: str) -> str:
-        localpart, sep, server = value[1:].partition(":")
-        if not (
-            value.startswith("@")
-            and sep
-            and _MATRIX_LOCALPART_RE.match(localpart)
-            and _valid_server_name(server)
-        ):
+        if not is_matrix_user_id(value):
             raise ValueError(f"{value!r} is not a Matrix user ID")
         return value
 

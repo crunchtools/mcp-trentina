@@ -22,7 +22,7 @@ from ..channels import Channel
 from .drivers import build_preprocessors
 from .errors import ProfileConfigError
 from .filter import filter_tools
-from .profile import AlertIngressConfig, MatrixIngressConfig, Profile
+from .profile import AlertIngressConfig, MatrixIngressConfig, Profile, is_matrix_user_id
 from .transform import resolve
 
 
@@ -478,6 +478,26 @@ def _check_operator(registry: dict[str, Profile]) -> None:
         )
 
 
+def matrix_other_agents(matrix: dict[str, Any]) -> frozenset[str]:
+    """``matrix.other_agent_user_ids``: agents the gateway does not bridge (#264).
+
+    Matrix IDs of agents that are not a profile here (Ashigaru, say), treated
+    exactly like another bridged profile's ``public_user_id``: their events
+    are dropped and no room holding one is relayed into. Absent is empty. A
+    malformed list is fatal, and the error counts entries rather than
+    echoing them.
+    """
+    raw = matrix.get("other_agent_user_ids", [])
+    if not isinstance(raw, list) or not all(isinstance(v, str) for v in raw):
+        raise ProfileConfigError("matrix.other_agent_user_ids must be a list of Matrix user IDs")
+    bad = sum(1 for v in raw if not is_matrix_user_id(v, historical=True))
+    if bad:
+        raise ProfileConfigError(
+            f"matrix.other_agent_user_ids: {bad} entries are not Matrix user IDs"
+        )
+    return frozenset(raw)
+
+
 def load_profiles(path: Path | str) -> GatewayConfig:
     """Load gateway configuration from YAML.
 
@@ -525,6 +545,8 @@ def load_profiles(path: Path | str) -> GatewayConfig:
 
     llm_section = cfg_data.get("llm_providers", {})
     matrix_section = cfg_data.get("matrix", {})
+    if isinstance(matrix_section, dict):
+        matrix_other_agents(matrix_section)  # validated here, bound at startup
     gateway_section = cfg_data.get("gateway", {})
     if not isinstance(gateway_section, dict):
         gateway_section = {}
