@@ -10,6 +10,13 @@ under that name.
 
 ## [Unreleased]
 
+### Security
+- Backend URLs are logged as `scheme://host[:port]` only (`logsafe.safe_url`).
+  The circuit-breaker and cache-evict lines printed the whole URL, and a
+  token-in-URL backend's credential reached the agent-readable journal.
+- A backend `url` expands `${VAR}` like a header does, so a token-in-URL
+  credential lives in the environment instead of profiles.yaml (#268).
+
 ### Added
 
 - Call destinations in the audit (#266). `gateway_calls` gains `destination`

@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import SecretStr, ValidationError
@@ -42,7 +43,7 @@ _ENV_REF_RE = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
 
 
 def _expand_env_refs(value: str, *, context: str) -> str:
-    """Substitute ${VAR} references in a header value from os.environ.
+    """Substitute ${VAR} references in a header value or URL from os.environ.
 
     Fails closed (raises ProfileConfigError) if a referenced var is unset or
     empty — a missing auth secret must not silently become an unauthenticated
@@ -88,7 +89,7 @@ def _build_profile(name: str, body: Any) -> Profile:
     _resolve_oauth_client_secret(name, profile)
     _resolve_oauth_audience(name, profile)
     _resolve_llm_key_secrets(name, profile)
-    _expand_backend_headers(name, profile)
+    _expand_backend_env_refs(name, profile)
     _check_drivers(name, profile)
     _check_destination_params(name, profile)
     _resolve_matrix_bridge_secrets(name, profile)
@@ -255,8 +256,26 @@ def _resolve_llm_key_secrets(name: str, profile: Profile) -> None:
         override.api_key = SecretStr(key_value)
 
 
-def _expand_backend_headers(name: str, profile: Profile) -> None:
+def _expand_backend_url(name: str, backend_name: str, url: str) -> str:
+    """Expand ${VAR} in a backend URL's path and query only (#268).
+
+    A token-in-URL backend keeps its credential in the environment, not in
+    profiles.yaml. Logs print a backend as ``safe_url(url)``, which keeps the
+    host, so a reference in the scheme, userinfo, host or port would log the
+    secret: refuse it there.
+    """
+    context = f"Profile {name!r} backend {backend_name!r} url"
+    if not _ENV_REF_RE.search(url):
+        return url
+    parts = urlsplit(url)
+    if _ENV_REF_RE.search(f"{parts.scheme}://{parts.netloc}"):
+        raise ProfileConfigError(f"{context}: ${{VAR}} is allowed only in the path or query")
+    return _expand_env_refs(url, context=context)
+
+
+def _expand_backend_env_refs(name: str, profile: Profile) -> None:
     for backend_name, backend in profile.backends.items():
+        backend.url = _expand_backend_url(name, backend_name, backend.url)
         if backend.headers:
             backend.headers = {
                 key: _expand_env_refs(
