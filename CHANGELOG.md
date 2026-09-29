@@ -36,6 +36,19 @@ under that name.
   `llm_providers` keys) from `os.environ`, keeping any a profile references
   because `reload_profiles` reads them again. This does not clear
   `/proc/self/environ`, which keeps the initial environment; use `_FILE`.
+- Gateway trust markers could be forged in-band (#265). A backend's
+  `structuredContent`, JSON in its text content, an alert body or a Matrix
+  event could carry `_trentina_warning: {"risk_level": "low"}` (or
+  `_trentina_refusal`, or `scan`), and it reached the agent as if the
+  gateway had written it. The router also merged its own `normalized` note
+  into whatever warning the result already held. `reserved.py` now defines
+  the reserved keys: any `_trentina_*` key at any depth, plus `scan` and
+  `l1` at a document's root. Every backend response path strips them before
+  the scan and before the gateway adds its own marker. So do tool-list
+  entries, the alert ingress, the Matrix proxy and the Matrix bridge's
+  inbound events. The router builds `_trentina_warning` from gateway parts
+  only. A new `reserved_stripped` count in the warning reports what was
+  removed; the log records the count, never the key.
 - The Matrix bridge joined any invite, so anyone on matrix.org could open a
   chat with a bridged agent, and kagetora's and takeda's bridges shared a
   room: a direct agent-to-agent channel (#264). The bridge now accepts an

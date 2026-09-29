@@ -18,6 +18,7 @@ forwards. Only a name tools/list serves resolves: since 0.43.0 the
 from __future__ import annotations
 
 import asyncio
+import copy
 import functools
 import json
 import logging
@@ -34,10 +35,17 @@ from .. import __version__
 from ..database import record_gateway_call
 from ..defense import Provenance
 from ..errors import ModeNotPermittedError, PreProcessNotPermittedError
-from ..logsafe import exc_kind
+from ..logsafe import exc_kind, redact_source
 from ..outcomes import Outcome, classify_exception, refusal_of
 from ..preprocess.policy import PREPROCESS_PARAM
 from ..quarantine.limiter import Priority, l3_priority
+from ..reserved import (
+    WARNING_KEY,
+    reserved_sites,
+    strip_content_blocks,
+    strip_reserved,
+    with_stripped,
+)
 from .args import Normalized, normalize_arguments
 from .backend import (
     cached_tool_schema,
@@ -241,6 +249,11 @@ class Assembled:
     result: dict[str, Any]
     outcome: Outcome
     error: str | None = None
+    # The perimeter's own warning, kept apart from ``result`` so what
+    # ``_deliver`` writes is built only from gateway parts (#265).
+    warning: dict[str, Any] | None = None
+    # Gateway-reserved keys the backend's response carried and lost (#265).
+    stripped: int = 0
 
 
 def _ok(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -444,7 +457,7 @@ async def _build_profile_tools(
         }
         # Ours and any backend's, removed BEFORE the scan and compression and
         # re-inserted after, so gateway text is never judged as backend text.
-        raw_tools = [strip_params(t) for t in raw_tools]
+        raw_tools = [_backend_tool_entry(t, backend) for t in raw_tools]
         filtered = filter_tools(raw_tools, backend)
         allowed = await asyncio.to_thread(Stage.of, filtered)
         pre_compress = filtered
@@ -807,12 +820,21 @@ async def _deliver(
             destination=destination,
         )
         raise
-    if normalized:
-        warning = assembled.result.get("_trentina_warning")
-        assembled.result["_trentina_warning"] = {
-            **(warning if isinstance(warning, dict) else {}),
-            "normalized": normalized,
-        }
+    if normalized or assembled.stripped:
+        # REPLACED, never merged into what the result carries (#265): built
+        # from the perimeter's own verdict and the gateway's own notes only.
+        warning = with_stripped(assembled.warning, assembled.stripped) or {}
+        if normalized:
+            warning = {**warning, "normalized": normalized}
+        assembled.result[WARNING_KEY] = warning
+    if assembled.stripped:
+        logger.info(
+            "gateway: profile=%s %s/%s stripped %d reserved key(s) from the response",
+            profile.name,
+            backend_name,
+            loggable_tool(backend.url, tool_name),
+            assembled.stripped,
+        )
     # An internal tool minifies inside itself, so what arrived here is
     # already the delivered form: its arrived size stays NULL, not equal.
     arrived = (
@@ -931,6 +953,62 @@ def _preprocess_refusal(failed: str, mode: Mode | None) -> dict[str, Any]:
     }
 
 
+def _backend_tool_entry(tool: dict[str, Any], backend: Backend) -> dict[str, Any]:
+    """The entry without any ``trentina_*`` param, nor, from a remote backend, reserved keys.
+
+    A backend's own tool entry may not carry the gateway's markers (#265);
+    the perimeter adds the real one after it judges the entry.
+    """
+    tool = strip_params(tool)
+    return tool if backend.is_internal else _strip_tool(tool)
+
+
+def _strip_tool(tool: dict[str, Any]) -> dict[str, Any]:
+    """A backend's tool entry without reserved keys; the same object when it had none.
+
+    Copied before stripping: the entry may be the tool-list cache's own.
+    """
+    if not reserved_sites(tool):
+        return tool
+    copied = copy.deepcopy(tool)
+    count = strip_reserved(copied)
+    logger.info(
+        "gateway: stripped %d reserved key(s) from tool %s",
+        count,
+        redact_source(str(tool.get("name"))),
+    )
+    return copied
+
+
+def _arrived(backend: Backend, call_result: Any) -> tuple[list[Any] | None, Any, int]:
+    """Content, structured content and the reserved-key count, ready for the perimeter.
+
+    Stripped before the scan and before the gateway adds anything (#265): a
+    remote backend does not get to write the gateway's markers. An internal
+    tool's markers ARE the gateway's, so its result is left alone.
+    """
+    blocks: list[Any] | None = call_result.content
+    structured: Any = call_result.structured_content
+    stripped = 0
+    if not backend.is_internal:
+        blocks, structured, stripped = _strip_backend_result(blocks, structured)
+    return blocks, _drop_duplicate_structured(structured, blocks), stripped
+
+
+def _strip_backend_result(
+    content_blocks: list[Any] | None, structured: dict[str, Any] | None
+) -> tuple[list[Any], dict[str, Any] | None, int]:
+    """A remote result without the gateway's reserved keys (``reserved.py``, #265).
+
+    Content blocks are copied; ``structuredContent`` is stripped in place,
+    since the serializer built it for this call alone.
+    """
+    blocks, count = strip_content_blocks(content_blocks)
+    if structured is not None:
+        count += strip_reserved(structured)
+    return blocks, structured, count
+
+
 def _drop_duplicate_structured(structured: Any, content_blocks: list[Any] | None) -> Any:
     """``structuredContent``, or None when it is the one text block again, as data.
 
@@ -976,10 +1054,7 @@ async def _assemble_call_result(
     scanning the same bytes twice is cost, not defense.
     """
     ok = Outcome.TOOL_ERROR if call_result.is_error else Outcome.OK
-    content_blocks = call_result.content
-    structured = await asyncio.to_thread(
-        _drop_duplicate_structured, call_result.structured_content, content_blocks
-    )
+    content_blocks, structured, stripped = await asyncio.to_thread(_arrived, backend, call_result)
     provenance = Provenance.EXTERNAL
     reduced: TransformOutcome | None = None
 
@@ -1002,7 +1077,10 @@ async def _assemble_call_result(
         )
         if reduced.failed is not None:
             return Assembled(
-                _preprocess_refusal(reduced.failed, mode), Outcome.BLOCKED_DEFENSE, reduced.failed
+                _preprocess_refusal(reduced.failed, mode),
+                Outcome.BLOCKED_DEFENSE,
+                reduced.failed,
+                stripped=stripped,
             )
         content_blocks = reduced.content_blocks
         provenance = reduced.provenance
@@ -1014,6 +1092,7 @@ async def _assemble_call_result(
     if structured is not None:
         result["structuredContent"] = structured
 
+    gateway_warning: dict[str, Any] | None = None
     if not backend.is_internal:
         decision = await scan_tool_response(
             profile=profile,
@@ -1030,6 +1109,7 @@ async def _assemble_call_result(
             else backend.l3_briefing,
             hidden=reduced.hidden if reduced is not None else None,
         )
+        gateway_warning = decision.warning
         if decision.blocked:
             # The content never reaches the agent; the warning does. Audited
             # as a defense block so a misfiring threshold is visible in the
@@ -1039,6 +1119,8 @@ async def _assemble_call_result(
                 _blocked_result(decision),
                 Outcome.BLOCKED_DEFENSE,
                 f"response blocked by defense (risk={risk})",
+                warning=gateway_warning,
+                stripped=stripped,
             )
         if decision.extraction is not None:
             # redact: the verified extraction REPLACES the response, and
@@ -1049,10 +1131,10 @@ async def _assemble_call_result(
                 "isError": call_result.is_error,
             }
             if decision.warning is not None:
-                result["_trentina_warning"] = decision.warning
-            return Assembled(result, ok)
+                result[WARNING_KEY] = decision.warning
+            return Assembled(result, ok, warning=gateway_warning, stripped=stripped)
         if decision.warning is not None:
-            result["_trentina_warning"] = decision.warning
+            result[WARNING_KEY] = decision.warning
             if decision.warning.get("flagged_by"):
                 # A sibling key is exactly what strict MCP clients strip
                 # before the model reads the result; a text content block is
@@ -1071,4 +1153,4 @@ async def _assemble_call_result(
                     },
                 ]
 
-    return Assembled(result, ok)
+    return Assembled(result, ok, warning=gateway_warning, stripped=stripped)
