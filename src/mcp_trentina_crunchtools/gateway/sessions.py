@@ -259,6 +259,7 @@ class SessionRegistry:
                     await self._notification_callback(session.session_id, notification)
                     delivered = True
                 except Exception:
+                    # nosemgrep: trentina-log-exception-text -- logsafe: ours
                     logger.warning(  # logsafe: ours — a stream error; the payload is ours
                         "sessions: failed to notify session=%s",
                         session.session_id[:8],

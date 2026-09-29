@@ -1,0 +1,191 @@
+# Eval suite for the trentina-boundary-review skill (#90).
+#
+# Shape follows google/rust-skills unsafe_rust_review/EVAL.yml: a prompt per
+# case plus explicit expectations, against fixtures the reviewer never sees
+# labelled. Known-bad cases are reduced from real defects in this repo's
+# history; controls look alarming and are correct, and a reviewer that flags
+# one fails the suite. Precision is graded as hard as recall.
+#
+# tests/boundary_review_eval.py runs it. A must_find passes when a finding
+# names one of `obligations` or hits one of `keywords` (the cheap check) AND
+# the judge model agrees it describes `expectation`. A control fails on any
+# finding at `max_severity` or above, or if the judge says a finding flags
+# the behavior in `must_not_flag`.
+
+suite_name: trentina_boundary_review
+skill: SKILL.md
+fixtures_dir: ../../../tests/fixtures/boundary-review
+reviewer_model: claude-sonnet-5
+judge_model: claude-haiku-4-5
+timeout_seconds: 300
+
+prompt_template: >-
+  Please perform a rigorous trust-boundary review of the Python file
+  {fixture} using the trentina-boundary-review skill. It is a reduced excerpt
+  of Trentina's gateway; treat imported project names as behaving as their
+  names and the docstrings claim, unless the code shows otherwise. Report every
+  UNSOUND or UNPROVED obligation, and nothing that is a documented contract.
+  Return only the JSON object the skill's Output format specifies.
+
+cases:
+  - name: bad_01_audit_boolean
+    kind: known_bad
+    fixture: bad_01_audit_boolean.py
+    source: "gateway/router.py at 353f261; fixed by #87"
+    must_find:
+      - id: is-error-audited-as-success
+        obligations: [O4]
+        keywords: [is_error, isError, "success", "True"]
+        expectation: >-
+          Identifies that the audit records success=True whenever no exception
+          was raised, so a backend result with isError=True is audited as a
+          success.
+      - id: defense-block-audited-as-failure
+        obligations: [O4, O1]
+        keywords: [BlockedSourceError, "defense", "block", "False"]
+        expectation: >-
+          Identifies that a fail-closed defense block (BlockedSourceError wrapped
+          in BackendCallError) is recorded as success=False, indistinguishable
+          from the backend being down.
+
+  - name: bad_02_sync_classify_in_coroutine
+    kind: known_bad
+    fixture: bad_02_sync_classify_in_coroutine.py
+    source: "CLAUDE.md 'Async callers must use classify_async'; #90"
+    must_find:
+      - id: classify-blocks-event-loop
+        obligations: [O5]
+        keywords: [event loop, classify_async, to_thread, blocking, block the loop]
+        expectation: >-
+          Identifies that the synchronous classify() is called inside an async
+          def, blocking the shared event loop for the whole scan (a liveness
+          failure for every profile), and that classify_async or
+          asyncio.to_thread is required.
+
+  - name: bad_03_except_returns_benign
+    kind: known_bad
+    fixture: bad_03_except_returns_benign.py
+    source: "#90 activation list: except Exception returning BENIGN"
+    must_find:
+      - id: exception-becomes-benign
+        obligations: [O1]
+        keywords: [BENIGN, "except Exception", fail-open, fail open]
+        expectation: >-
+          Identifies that any exception during classification (model missing,
+          inference error) returns a BENIGN verdict, so an L2 failure is
+          reported as clean content instead of refusing or reporting the layer
+          as unavailable.
+
+  - name: bad_04_guard_denial_before_audit
+    kind: known_bad
+    fixture: bad_04_guard_denial_before_audit.py
+    source: "#87 defect 3: allowlist and guard denials returned before _audit"
+    must_find:
+      - id: guard-denial-unaudited
+        obligations: [O3]
+        keywords: [guard_err, check_parameter_guards, denied_guard, DENIED_GUARD, parameter guard]
+        expectation: >-
+          Identifies that the parameter-guard denial returns before _audit, so
+          a refused call leaves no audit row.
+      - id: allowlist-denial-unaudited
+        obligations: [O3]
+        keywords: [filter_tools, allowlist, DENIED_ALLOWLIST, not permitted]
+        expectation: >-
+          Identifies that the allowlist denial returns before _audit, so a
+          consumer probing tools outside its allowlist leaves no trace.
+
+  - name: bad_05_truncated_scan_reports_clean
+    kind: known_bad
+    fixture: bad_05_truncated_scan_reports_clean.py
+    source: "the truncation path closed by UnscannableContentError and #225 admission"
+    must_find:
+      - id: head-scan-reported-clean
+        obligations: [O2, O1]
+        keywords: [truncat, CLASSIFIER_MAX_TOKENS, head, partial, "clean"]
+        expectation: >-
+          Identifies that only the first CLASSIFIER_MAX_TOKENS tokens are
+          classified, yet block mode delivers the whole page and reports it
+          clean, so an injection placed after the cap passes unread.
+
+  - name: bad_06_global_blocklist_echoes_detected_at
+    kind: known_bad
+    fixture: bad_06_global_blocklist_echoes_detected_at.py
+    source: "#263 (open at the time of writing)"
+    must_find:
+      - id: cross-profile-channel
+        obligations: [O9]
+        keywords: [profile, cross-profile, channel, shared, message board, covert]
+        expectation: >-
+          Identifies that the blocklist is global and keyed only by source, so
+          one profile's refusal changes what another profile observes when it
+          fetches the same URL: a cross-profile bit channel.
+      - id: detected-at-oracle
+        obligations: [O9, O12]
+        keywords: [detected_at, timestamp, oracle]
+        expectation: >-
+          Identifies that the refusal text echoes detected_at, revealing to a
+          second profile when the first one fetched the URL.
+
+  - name: bad_07_fetch_follows_redirects
+    kind: known_bad
+    fixture: bad_07_fetch_follows_redirects.py
+    source: "client.py before #260 (production reached 127.0.0.1:8019)"
+    must_find:
+      - id: ssrf-redirect-and-resolved-address
+        obligations: [O6]
+        keywords: [follow_redirects, redirect, resolved, SSRF, egress, hostname]
+        expectation: >-
+          Identifies SSRF: redirects are followed by httpx with no check on
+          each hop, and the host check is a string denylist on the hostname
+          rather than on the resolved address, so a public URL that redirects
+          to, or resolves to, an internal address (10.x, 127.0.0.1 spelled
+          2130706433, a container name) is fetched.
+
+  - name: bad_08_logger_prints_caller_url
+    kind: known_bad
+    fixture: bad_08_logger_prints_caller_url.py
+    source: "tools/fetch.py before #262"
+    must_find:
+      - id: caller-url-in-log
+        obligations: [O8]
+        keywords: [log, url, journal, redact_source, caller]
+        expectation: >-
+          Identifies that the caller-chosen URL (and the exception text, which
+          carries it) is written to the log, which other agents can read
+          through journal/container-log tools, making it a cross-agent channel.
+
+  - name: ctrl_01_flag_mode_truncated_head
+    kind: control
+    fixture: ctrl_01_flag_mode_truncated_head.py
+    source: "CLAUDE.md 'Layer 2 scanning limits'; the control #90 asks for"
+    max_severity: medium
+    must_not_flag:
+      - id: flag-truncation-is-contract
+        expectation: >-
+          Flags flag mode delivering the full content after judging only the
+          head as a defect (fail-open or incomplete scan), even though the
+          warning states l2_truncated/l3_truncated and block/redact refuse.
+
+  - name: ctrl_02_except_reraises_as_refusal
+    kind: control
+    fixture: ctrl_02_except_reraises_as_refusal.py
+    source: "gateway/ingress_defense.py and router.py after #87"
+    max_severity: medium
+    must_not_flag:
+      - id: broad-except-is-fail-closed
+        expectation: >-
+          Flags the `except Exception` around the L3 call as a fail-open or
+          swallowed error, even though it re-raises as a BlockedSourceError
+          refusal that the router audits as blocked_defense.
+
+  - name: ctrl_03_logsafe_ours_exception_log
+    kind: control
+    fixture: ctrl_03_logsafe_ours_exception_log.py
+    source: "logsafe.py '# logsafe: ours' marker (#262)"
+    max_severity: medium
+    must_not_flag:
+      - id: logsafe-ours-is-allowed
+        expectation: >-
+          Flags the log.exception call marked `# logsafe: ours` as logging a
+          caller-chosen string, even though it runs only at startup and prints
+          only the operator's path and the library's own message.

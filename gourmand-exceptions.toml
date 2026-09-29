@@ -688,3 +688,17 @@ path = "src/mcp_trentina_crunchtools/gateway/router.py"
 pattern = "_audit"
 justification = "The audit row must never fail the tools/call it records, and a write can raise more than sqlite3.Error (thread-affinity ProgrammingError, OSError on a full disk). Logging profile and exception class is the handling: a silently lost audit row was itself a finding on #281."
 classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/mcp_trentina_crunchtools/gateway/profile_lint.py"
+pattern = "_admits"
+justification = "Not single-use: called from held_tools (per synthetic name a glob admits) and from _open_fetch, verified by grep. It is the allowlist's own rule (allow minus deny, as gateway/filter.py applies it), and two copies of that rule are how a lint drifts from the filter it describes."
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "tests/test_incident_replay.py"
+pattern = "_profile"
+justification = "Not single-use: called from the cross-profile blocklist replay and the forged-marker replay, verified by grep. The same per-class undercount as the tests/test_gateway_router.py `_profile` entry."
+classification = "gourmand_bug"

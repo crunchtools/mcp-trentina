@@ -1,0 +1,40 @@
+# One seat with a Matrix inbox, unguarded fetch and an unguarded way out.
+# `guarded` has the same shape with fetch_tool's url and the send guarded.
+profiles:
+  toxic:
+    auth: {bearer_token_env: TOKEN_X}
+    matrix_ingress: {token_env: MATRIX_TOKEN}
+    backends:
+      web: {url: "internal://web", tools_allow: ["*"]}
+      gmail:
+        url: "http://mcp-gw:8000/mcp"
+        tools_allow: ["personal_send_gmail_message", "personal_search_gmail_messages"]
+      postiz:
+        url: "http://mcp-postiz:8000/mcp"
+        tools_allow: ["*"]
+        tools_deny: ["deletePostTool"]
+  catch-all:
+    # A guard that admits every value is no guard.
+    auth: {bearer_token_env: TOKEN_C}
+    alert_ingress: {token_env: ALERT_C, forward_url: "http://hermes:8080/hook"}
+    backends:
+      web: {url: "internal://web", tools_allow: ["fetch_tool"]}
+      slack:
+        url: "http://mcp-slack-c:8000/mcp"
+        tools_allow: ["send_message"]
+        parameter_guards:
+          send_message:
+            channel: {allow: ["*"]}
+  guarded:
+    auth: {bearer_token_env: TOKEN_G}
+    matrix_ingress: {token_env: MATRIX_TOKEN_G}
+    backends:
+      web:
+        url: "internal://web"
+        tools_allow: ["*"]
+        parameter_guards:
+          fetch_tool:
+            url: {allow: ["https://docs.example.com/*"]}
+      gmail:
+        url: "http://mcp-gw-g:8000/mcp"
+        tools_allow: ["personal_send_gmail_message"]

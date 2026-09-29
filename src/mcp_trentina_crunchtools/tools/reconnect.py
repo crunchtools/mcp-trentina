@@ -28,7 +28,7 @@ not a leak.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from ..gateway.backend import evict_backend_cache_url, list_backend_tools
@@ -45,6 +45,9 @@ from ..gateway.scope import (
 )
 from ..logsafe import exc_kind
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,6 +62,17 @@ def _safe_endpoint(url: str) -> str:
     if not parts.netloc:
         return "(redacted)"
     return f"{parts.scheme}://{parts.netloc}"
+
+
+def _configured_name(backends: Mapping[str, Any], name: str) -> str:
+    """The configured key equal to ``name``, once resolution has matched it.
+
+    ``list_backend_tools`` logs the name it is given. Handing it the key from
+    the configuration rather than the caller's argument makes what reaches the
+    log the gateway's own string by construction (#262), which is what the
+    CodeQL pack's tool-arg-to-log query checks (#269).
+    """
+    return next(key for key in backends if key == name)
 
 
 async def _reset_one(
@@ -124,7 +138,8 @@ async def reconnect_backend(backend: str) -> dict[str, Any]:
         if not scope.is_operator:
             url, cfg = resolve_backend(scope, backend)
             base = {"endpoint": _safe_endpoint(url), "scope": scope.label}
-            results = [await _reset_one(backend, url, cfg, base, scope)]
+            name = _configured_name(scope.backends, backend)
+            results = [await _reset_one(name, url, cfg, base, scope)]
             return {
                 "backend": backend,
                 "scope": scope.label,
@@ -156,7 +171,8 @@ async def reconnect_backend(backend: str) -> dict[str, Any]:
     for profile in profiles.values():
         found = profile.backends.get(backend)
         if found is not None:
-            entry = targets.setdefault(found.url, {"cfg": found, "profiles": set()})
+            name = _configured_name(profile.backends, backend)
+            entry = targets.setdefault(found.url, {"cfg": found, "profiles": set(), "name": name})
             entry["profiles"].add(profile.name)
 
     if not targets:
@@ -173,7 +189,7 @@ async def reconnect_backend(backend: str) -> dict[str, Any]:
             "endpoint": _safe_endpoint(url),
             "profiles": sorted(entry["profiles"]),
         }
-        results.append(await _reset_one(backend, url, entry["cfg"], base, scope))
+        results.append(await _reset_one(entry["name"], url, entry["cfg"], base, scope))
 
     return {
         "backend": backend,

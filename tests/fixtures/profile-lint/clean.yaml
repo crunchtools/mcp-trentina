@@ -1,0 +1,30 @@
+# Two agents that share a backend only for reading, and one inbox seat whose
+# outbound tool is guarded. profile_lint reports nothing.
+profiles:
+  reader-a:
+    auth: {bearer_token_env: TOKEN_A}
+    backends:
+      web: {url: "internal://web", tools_allow: ["*"]}
+      wiki:
+        url: "http://mcp-wiki:8000/mcp"
+        tools_allow: ["wiki_search", "get_page", "list_*"]
+  reader-b:
+    auth: {bearer_token_env: TOKEN_B}
+    backends:
+      wiki:
+        url: "http://mcp-wiki:8000/mcp"
+        tools_allow: ["wiki_search", "get_page"]
+      memory:
+        url: "http://mcp-memory:8000/mcp"
+        tools_allow: ["*"]
+  pager:
+    auth: {bearer_token_env: TOKEN_P}
+    alert_ingress: {token_env: ALERT_TOKEN, forward_url: "http://hermes:8080/hook"}
+    backends:
+      web: {url: "internal://web", tools_allow: ["*"]}
+      slack:
+        url: "http://mcp-slack:8000/mcp"
+        tools_allow: ["send_message", "search_messages"]
+        parameter_guards:
+          send_message:
+            channel: {allow: ["C0OPS*"]}

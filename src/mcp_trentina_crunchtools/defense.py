@@ -456,9 +456,14 @@ async def defend(
     )
 
     if flagged_by is not None and record:
-        # Bookkeeping must never destroy a verdict that already exists: a
-        # failed SQLite write or D-Bus emit is an audit gap to alarm on, not
-        # a reason for the caller to lose the flag.
+        # TRUST: detection bookkeeping after the verdict exists
+        #   untrusted: `source`, the caller's URL or path, reaches the row and the log
+        #   judged-by: nothing needed; the verdict above is final
+        #   on-failure: fail-closed on the verdict: a failed SQLite write or D-Bus emit
+        #     is an audit gap to alarm on, never a reason to lose flagged_by
+        #   owner: defense.defend
+        #   evidence: T3 docstring "never raises on a detection"; T3 #262 logging rule;
+        #     T1 `except Exception` leaves CancelledError to propagate
         try:
             audit = defense is None or defense.audit
             if audit:

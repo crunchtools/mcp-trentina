@@ -86,6 +86,7 @@ async def _logout_device(settings: BridgeSettings) -> None:
         raise SystemExit("logout-device needs BRIDGE_OLD_ACCESS_TOKEN")
     if old == _session(settings)["access_token"]:
         raise SystemExit("refusing to log out the bridge's own device")
+    # nosemgrep: trentina-httpx-client-outside-egress -- operator env URL
     async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
         try:
             resp = await client.post(
@@ -105,6 +106,7 @@ async def _sign_device(settings: BridgeSettings) -> None:
     recovery_key = read_secret_env("BRIDGE_RECOVERY_KEY")
     if not recovery_key:
         raise SystemExit("sign-device needs BRIDGE_RECOVERY_KEY")
+    # nosemgrep: trentina-httpx-client-outside-egress -- operator env URL
     async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
         try:
             session = _session(settings)
@@ -130,6 +132,7 @@ async def _reset_identity(settings: BridgeSettings) -> None:
         sys.stdout.write(f"Recovery key (keep it; shown once): {recovery_key}\n")
         sys.stdout.flush()
 
+    # nosemgrep: trentina-httpx-client-outside-egress -- operator env URL
     async with httpx.AsyncClient(timeout=_ONE_SHOT_TIMEOUT) as client:
         try:
             session = _session(settings)

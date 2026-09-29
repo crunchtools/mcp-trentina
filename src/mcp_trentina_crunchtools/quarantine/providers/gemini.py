@@ -57,6 +57,7 @@ class GeminiProvider(Provider):
             raise QuarantineAgentError("SECURITY: tools in provider request")
 
         try:
+            # nosemgrep: trentina-httpx-client-outside-egress -- fixed or operator URL
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(GEMINI_TIMEOUT),
             ) as client:

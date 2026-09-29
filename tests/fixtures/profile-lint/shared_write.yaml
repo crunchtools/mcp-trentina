@@ -1,0 +1,25 @@
+# The #90 finding: agents holding memory_store on one shared memory server,
+# under one credential. kagetora/takeda is declared; josui is not.
+shared_backends:
+  - url: "http://mcp-memory:8000/mcp/"
+    profiles: [kagetora, takeda]
+    reason: "the pair shares a memory by design (fixture)"
+  - url: "http://mcp-rt:8000/mcp"
+    profiles: [kagetora, josui]
+    reason: ""   # no reason, no decision: still a finding
+
+profiles:
+  kagetora:
+    auth: {bearer_token_env: TOKEN_K}
+    backends:
+      memory: {url: "http://mcp-memory:8000/mcp", tools_allow: ["*"]}
+      rt: {url: "http://mcp-rt:8000/mcp", tools_allow: ["create_ticket", "get_ticket"]}
+  takeda:
+    auth: {bearer_token_env: TOKEN_T}
+    backends:
+      mem: {url: "http://mcp-memory:8000/mcp", tools_allow: ["memory_*"]}
+  josui:
+    auth: {bearer_token_env: TOKEN_J}
+    backends:
+      memory: {url: "http://mcp-memory:8000/mcp", tools_allow: ["memory_store", "memory_search"]}
+      rt: {url: "http://mcp-rt:8000/mcp", tools_allow: ["reply_to_ticket"]}

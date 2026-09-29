@@ -95,6 +95,7 @@ class OpenAIProvider(Provider):
             }
 
         try:
+            # nosemgrep: trentina-httpx-client-outside-egress -- fixed or operator URL
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(OPENAI_TIMEOUT),
             ) as client:
