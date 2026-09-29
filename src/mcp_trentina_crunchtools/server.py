@@ -223,14 +223,15 @@ async def cache_flush_tool(
 ) -> dict[str, Any]:
     """Flush gateway tool list caches.
 
-    Scoped to the calling profile: with no arguments it flushes the backends
-    in your own profile and your own aggregate; with a backend name, that one
-    backend, which must be in your profile. An operator profile flushes the
-    whole gateway.
+    Scoped to the calling profile: it drops your own tool-list aggregate so
+    the next tools/list rebuilds it. Backend tool lists are shared between
+    profiles and only an operator profile flushes them.
 
     Args:
-        backend: Backend name to flush (e.g. "rt", "wiki"). Omit to flush
-            everything in scope.
+        backend: A backend in your profile (e.g. "rt", "wiki"); it must exist
+            there, and the result is the same either way. An operator flushes
+            that backend everywhere it is configured. Omit for everything in
+            scope.
     """
     return await cache_flush(backend)
 

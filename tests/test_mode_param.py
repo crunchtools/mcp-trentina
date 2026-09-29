@@ -599,9 +599,9 @@ def test_a_blocklist_refusal_offers_redact_only_where_allowed() -> None:
 
     p = _profile(["block", "flag", "redact"])
     with profile_context(p, ModePolicy((Mode.BLOCK, Mode.FLAG, Mode.REDACT), Mode.BLOCK)):
-        assert blocklisted("u", Mode.FLAG, "t").refusal["alternatives"] == ["redact"]
+        assert blocklisted("u", Mode.FLAG).refusal["alternatives"] == ["redact"]
     with profile_context(p, ModePolicy((Mode.BLOCK, Mode.FLAG), Mode.BLOCK)):
-        assert blocklisted("u", Mode.BLOCK, "t").refusal["alternatives"] == []
+        assert blocklisted("u", Mode.BLOCK).refusal["alternatives"] == []
 
 
 FAMILY_TOOLS = {

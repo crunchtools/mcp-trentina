@@ -40,13 +40,13 @@ async def test_the_blocklist_is_keyed_by_hash(env: Path) -> None:
     with (
         layers(env),
         patch(
-            "mcp_trentina_crunchtools.tools.content.is_blocked",
-            return_value={"detected_at": "2026-03-10T00:00:00Z"},
+            "mcp_trentina_crunchtools.tools.judged.is_blocked",
+            return_value=True,
         ) as is_blocked,
         pytest.raises(BlockedSourceError),
     ):
         await block_content(content)
-    is_blocked.assert_called_once_with(_hash(content))
+    assert is_blocked.call_args.args[0] == _hash(content)
 
 
 @pytest.mark.parametrize("content_type", ["text/plain", "text/markdown"])
