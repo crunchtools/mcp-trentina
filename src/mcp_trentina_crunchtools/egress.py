@@ -58,10 +58,13 @@ _lookup_slots = threading.BoundedSemaphore(MAX_LOOKUPS)
 
 _IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
-# Neither is in ipaddress's non-global table, and both carry an IPv4 address
-# a host with the matching tunnel or translator would reach.
+# The well-known NAT64 prefix is global in ipaddress's table, so the IPv4
+# address it carries is checked instead.
 _NAT64 = ipaddress.IPv6Network("64:ff9b::/96")
-_V4_COMPATIBLE = ipaddress.IPv6Network("::/96")
+# Refused outright: v4-compatible is missing from ipaddress's table, and the
+# local-use NAT64 prefix (RFC 8215) is local by definition, whatever layout
+# its translator embeds the IPv4 address in.
+_REFUSED_V6 = (ipaddress.IPv6Network("::/96"), ipaddress.IPv6Network("64:ff9b:1::/48"))
 
 
 @dataclass(frozen=True)
@@ -89,7 +92,7 @@ def is_global_address(ip: _IPAddress) -> bool:
     so a change to Python's table cannot quietly readmit one.
     """
     if isinstance(ip, ipaddress.IPv6Address):
-        if ip in _V4_COMPATIBLE:
+        if any(ip in net for net in _REFUSED_V6):
             return False
         if any(not is_global_address(v4) for v4 in _embedded_v4(ip)):
             return False

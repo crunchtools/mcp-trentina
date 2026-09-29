@@ -63,6 +63,7 @@ class TestRefusedAddresses:
             "http://[::127.0.0.1]/",
             "http://[2002:7f00:1::]/",
             "http://[64:ff9b::a00:1]/",
+            "http://[64:ff9b:1::a00:1]/",
             "http://2130706433/",
             "http://0x7f.1/",
             "http://017700000001/",
