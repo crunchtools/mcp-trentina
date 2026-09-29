@@ -10,8 +10,25 @@ under that name.
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-09-29
+
+Hardening from the #90 audit, which uses the OpenAI–Hugging Face incident as its threat model.
+
 ### Security
 
+- `fetch` and grounding-redirect resolution could reach the gateway's own
+  network (#260): `http://127.0.0.1:8019/health` returned the gateway's health
+  JSON. Every gateway-side fetch now goes through `egress.py`: http/https on
+  ports 80 and 443 only; the host is resolved and refused unless every answer
+  is a global address (numeric forms like `2130706433` are caught by the
+  resolved address); the connection is pinned to the checked address, so DNS
+  rebinding cannot move it; redirects are followed by hand, at most five, each
+  hop checked, https to http refused. A refusal reaches the agent as
+  `egress refused (<reason>)` with no alternatives and audits as
+  `blocked_defense`; it never names the address. Grounding redirects are
+  matched on the exact host `vertexaisearch.cloud.google.com`, not a
+  substring. `TRENTINA_FETCH_ALLOW_PRIVATE=true` lifts the address rule only,
+  with a startup warning.
 - `read_tool` and `dir_tool` are confined (#261). `TRENTINA_READ_ROOTS` lists the
   directories they may reach; behind a live gateway, unset means every path is
   refused, and production leaves it unset. `/config`, `/data`, `/proc`, `/sys`,
@@ -20,6 +37,15 @@ under that name.
   `O_NOFOLLOW` and checked again by inode and by the kernel's name for the
   descriptor, so a path swapped after the check is refused. Refusals carry a
   reason code (`outside_read_roots`, `denied_path`, ...) and never the path.
+- The gateway never logs a string a caller chose (#262). Failed fetch URLs,
+  argument names, profile names from the request path, User-Agents, client
+  addresses and exception messages reached the journal verbatim, and agents
+  holding journal or container-log tools could read them: a message board
+  between agents. Logs now carry the profile, the tool, the exception class and
+  a `sha256:<12> len=<n>` fingerprint (`logsafe.py`). uvicorn's access log and
+  httpx are filtered the same way, and httpcore, MCP and FastMCP stay at INFO or
+  above whatever `TRENTINA_LOG_LEVEL` says. `tests/test_log_hygiene.py` drives
+  a canary through every tool path at DEBUG.
 
 ### Added
 
@@ -46,22 +72,6 @@ under that name.
   `--limit` or `--categories`; it now counts the cases that ran.
 - `fetch` never captured a 4xx body: it read it after the stream had closed,
   so the advisory scan for steering error pages never ran on a real response.
-
-### Security
-
-- `fetch` and grounding-redirect resolution could reach the gateway's own
-  network (#260): `http://127.0.0.1:8019/health` returned the gateway's health
-  JSON. Every gateway-side fetch now goes through `egress.py`: http/https on
-  ports 80 and 443 only; the host is resolved and refused unless every answer
-  is a global address (numeric forms like `2130706433` are caught by the
-  resolved address); the connection is pinned to the checked address, so DNS
-  rebinding cannot move it; redirects are followed by hand, at most five, each
-  hop checked, https to http refused. A refusal reaches the agent as
-  `egress refused (<reason>)` with no alternatives and audits as
-  `blocked_defense`; it never names the address. Grounding redirects are
-  matched on the exact host `vertexaisearch.cloud.google.com`, not a
-  substring. `TRENTINA_FETCH_ALLOW_PRIVATE=true` lifts the address rule only,
-  with a startup warning.
 
 ## [0.46.2] - 2026-09-28
 
