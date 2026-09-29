@@ -36,6 +36,24 @@ under that name.
   `llm_providers` keys) from `os.environ`, keeping any a profile references
   because `reload_profiles` reads them again. This does not clear
   `/proc/self/environ`, which keeps the initial environment; use `_FILE`.
+- The Matrix bridge joined any invite, so anyone on matrix.org could open a
+  chat with a bridged agent, and kagetora's and takeda's bridges shared a
+  room: a direct agent-to-agent channel (#264). The bridge now accepts an
+  invite only from `BRIDGE_ALLOWED_INVITERS` (comma-separated Matrix IDs,
+  `_FILE` supported; empty or unset refuses every invite, with a startup
+  warning), rejecting and forgetting the rest. It records who invited it into
+  each room, and on start leaves and forgets every joined room whose inviter
+  is not allowed; a room joined before this change, with no record, stays only
+  if everyone else in it is an allowed inviter. The gateway, which knows every
+  bridged profile's `public_user_id` plus any agent listed in
+  `matrix.other_agent_user_ids` (for agents it does not bridge, validated at
+  load), drops inbound events from another
+  bridged agent, refuses a room announced with one in it (the bridge then
+  leaves it), and relays nothing into a room holding one or whose members the
+  bridge never reported, even when an allowed inviter opened it. Drops are
+  audited as `denied_guard` under backend `matrix_bridge` and logged without
+  Matrix IDs. Deploy the gateway and bridges together, and set
+  `BRIDGE_ALLOWED_INVITERS` before the bridge restarts.
 - The blocklist and `cache_flush` were bit channels between profiles (#263).
   The blocklist was keyed on the source alone, so a URL one profile got
   refused was refused for every profile, and the refusal said

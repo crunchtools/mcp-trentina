@@ -17,6 +17,12 @@ A retry is minutes old, not weeks; a reply to a month-old message loses its
 relation and arrives as a plain message, which ``rewrite`` already handles.
 Rooms, users and memberships are bounded by the conversations themselves
 and are kept.
+
+``room_audience`` is the one table here that a decision reads (#264): whether
+an upstream room holds another bridged agent, as the bridge last reported its
+members or as an event from one proved. A room with no row has never had its
+members reported, and outbound refuses it. Losing the table costs a refused
+reply until the bridge next announces the room, which it does on every start.
 """
 
 from __future__ import annotations
@@ -62,6 +68,11 @@ CREATE TABLE IF NOT EXISTS processed (
     created REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS processed_created ON processed (created);
+CREATE TABLE IF NOT EXISTS room_audience (
+    remote_id     TEXT PRIMARY KEY,
+    agent_present INTEGER NOT NULL,
+    reported      REAL NOT NULL
+);
 """
 
 RETENTION_DAYS = 30
@@ -206,6 +217,28 @@ class BridgeMapping:
             "INSERT OR IGNORE INTO members (local_room, local_user) VALUES (?, ?)",
             local_room,
             local_user,
+        )
+
+    # audience (#264)
+
+    async def agent_present(self, remote_room: str) -> bool | None:
+        """Whether another bridged agent is in ``remote_room``; None when its
+        members were never reported."""
+        row = await self._row(
+            "SELECT agent_present FROM room_audience WHERE remote_id = ?", remote_room
+        )
+        return None if row is None else bool(row[0])
+
+    async def set_agent_present(self, remote_room: str, present: bool) -> None:
+        """Record whether another bridged agent is in ``remote_room``, which
+        also records that its members have been reported."""
+        await self._write(
+            "INSERT INTO room_audience (remote_id, agent_present, reported) VALUES (?, ?, ?) "
+            "ON CONFLICT(remote_id) DO UPDATE SET agent_present = excluded.agent_present, "
+            "reported = excluded.reported",
+            remote_room,
+            1 if present else 0,
+            time.time(),
         )
 
     # batch lookups: one query for every ID a message references

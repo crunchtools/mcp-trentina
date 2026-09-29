@@ -24,6 +24,8 @@ from nio import (
     JoinResponse,
     LoginResponse,
     MegolmEvent,
+    RoomForgetResponse,
+    RoomLeaveResponse,
     RoomSendResponse,
     ShareGroupSessionError,
     SyncError,
@@ -41,12 +43,13 @@ from starlette.testclient import TestClient
 from mcp_trentina_crunchtools.bridge import client as client_mod
 from mcp_trentina_crunchtools.bridge import main as main_mod
 from mcp_trentina_crunchtools.bridge.api import build_app
-from mcp_trentina_crunchtools.bridge.client import Bridge, SendError
+from mcp_trentina_crunchtools.bridge.client import Bridge, SendError, membership_digest
 from mcp_trentina_crunchtools.bridge.import_mautrix import SessionImportError, import_mautrix
 from mcp_trentina_crunchtools.bridge.settings import BridgeSettings, SettingsError
 
 USER = "@agent1-bot:matrix.org"
 ROOM = "!ops:matrix.org"
+SCOTT = "@Scott_M:matrix.org"
 
 
 @dataclass
@@ -64,6 +67,9 @@ class FakeNio:
     should_claim_keys: bool = False
     key_requests: list[str] = field(default_factory=list)
     decrypted: Any = None
+    left: list[str] = field(default_factory=list)
+    forgotten: list[str] = field(default_factory=list)
+    joined: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.rooms = {
@@ -74,8 +80,11 @@ class FakeNio:
                 topic="",
                 member_count=3,
                 user_name=lambda _u: "Scott",
+                users={USER: None, SCOTT: None},
+                invited_users={},
             )
         }
+        self.invited_rooms: dict[str, Any] = {}
         self.olm = SimpleNamespace(should_share_group_session=lambda _r: False)
 
     def encrypt(self, _room: str, event_type: str, content: dict[str, Any]) -> Any:
@@ -92,8 +101,20 @@ class FakeNio:
     async def request_room_key(self, event: Any) -> None:
         self.key_requests.append(event.session_id)
 
-    async def join(self, room_id: str) -> str:
-        return room_id
+    async def join(self, room_id: str) -> Any:
+        self.joined.append(room_id)
+        self.invited_rooms.pop(room_id, None)
+        return JoinResponse(room_id)
+
+    async def room_leave(self, room_id: str) -> Any:
+        self.left.append(room_id)
+        self.invited_rooms.pop(room_id, None)
+        return RoomLeaveResponse()
+
+    async def room_forget(self, room_id: str) -> Any:
+        self.forgotten.append(room_id)
+        self.rooms.pop(room_id, None)
+        return RoomForgetResponse(room_id)
 
     def decrypt_event(self, _event: Any) -> Any:
         if self.decrypted is None:
@@ -104,7 +125,12 @@ class FakeNio:
         return None
 
 
-def _bridge(tmp_path: Path, nio: FakeNio, handler: Any = None) -> Bridge:
+def _bridge(
+    tmp_path: Path,
+    nio: FakeNio,
+    handler: Any = None,
+    inviters: frozenset[str] = frozenset({SCOTT}),
+) -> Bridge:
     gateway = httpx.AsyncClient(
         transport=httpx.MockTransport(handler or (lambda _r: httpx.Response(200, json={})))
     )
@@ -123,11 +149,14 @@ def _bridge(tmp_path: Path, nio: FakeNio, handler: Any = None) -> Bridge:
         device_id="DEV",
         access_token="tok",
         password="",
+        allowed_inviters=inviters,
     )
     fake_client: Any = nio
     bridge = Bridge(settings, client=fake_client, gateway=gateway)
-    # Rooms count as announced unless a test is about announcing them.
-    bridge._announced.update(nio.rooms)
+    # Rooms count as vetted and announced unless a test is about that.
+    bridge._vetted.update(nio.rooms)
+    for room_id, room in nio.rooms.items():
+        bridge._announced[room_id] = membership_digest(bridge._members(room))
     return bridge
 
 
@@ -988,7 +1017,7 @@ class TestRoomAnnouncements:
 
         def gateway(request: httpx.Request) -> httpx.Response:
             seen.append(json.loads(request.content))
-            return httpx.Response(200)
+            return httpx.Response(200, json={"outcome": "mapped"})
 
         bridge = _bridge(tmp_path, FakeNio(), gateway)
         bridge._announced.clear()
@@ -1016,7 +1045,7 @@ class TestJoinRetry:
                 return JoinResponse(room_id)
 
         nio = JoiningNio()
-        nio.invited_rooms["!new:matrix.org"] = object()
+        nio.invited_rooms["!new:matrix.org"] = SimpleNamespace(inviter=SCOTT)
         bridge = _bridge(tmp_path, nio)
         await bridge.process(_sync(), first=False)
         await bridge.process(_sync(next_batch="s3"), first=False)

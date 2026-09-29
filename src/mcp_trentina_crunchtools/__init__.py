@@ -140,14 +140,19 @@ def main() -> None:
                 )
 
 
-def _register_push_ingresses(mcp_server: FastMCP, profiles: dict[str, Any], data_dir: Path) -> None:
+def _register_push_ingresses(
+    mcp_server: FastMCP,
+    profiles: dict[str, Any],
+    data_dir: Path,
+    other_agents: frozenset[str] = frozenset(),
+) -> None:
     """The paths content is pushed in on rather than fetched: alerts and the
     Matrix bridge. Both bind at startup."""
     from .gateway.alert_ingress import register_alert_routes
     from .gateway.matrix_bridge import register_bridge_routes
 
     register_alert_routes(mcp_server, profiles)
-    register_bridge_routes(mcp_server, profiles, data_dir)
+    register_bridge_routes(mcp_server, profiles, data_dir, other_agents=other_agents)
 
 
 def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: str) -> None:
@@ -174,7 +179,7 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
     from .gateway.circuit import breaker
     from .gateway.compress import load_compression_cache, set_profiles
     from .gateway.llm_proxy import load_llm_providers, register_llm_routes
-    from .gateway.loader import register_active_config
+    from .gateway.loader import matrix_other_agents, register_active_config
     from .gateway.matrix_proxy import register_matrix_routes
     from .gateway.service import log_service_identity
     from .gateway.sessions import session_registry
@@ -233,7 +238,12 @@ def _run_with_gateway(mcp_server: FastMCP, *, host: str, port: int, log_level: s
         )
 
     # Bridge mapping stores live beside the blocklist, like perimeter.db.
-    _register_push_ingresses(mcp_server, gateway_config.profiles, Path(get_config().db_path).parent)
+    _register_push_ingresses(
+        mcp_server,
+        gateway_config.profiles,
+        Path(get_config().db_path).parent,
+        other_agents=matrix_other_agents(gateway_config.matrix),
+    )
 
     from .gateway.backend import load_tool_list_cache
     from .gateway.ingress_defense import load_verdict_cache

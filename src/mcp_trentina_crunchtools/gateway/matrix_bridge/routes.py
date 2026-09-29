@@ -52,6 +52,9 @@ class RoomInfo(BaseModel):
     # In a direct message, the other member, so the local DM can be theirs.
     peer: str = ""
     peer_displayname: str = ""
+    # On a room announcement only: every member but the bridge's own user,
+    # joined or invited (#264). None from a bridge that reports none.
+    members: list[str] | None = None
 
 
 class BridgeEvent(BaseModel):
@@ -108,7 +111,22 @@ class Transaction(BaseModel):
     )
 
 
-def build_bridges(profiles: dict[str, Profile], data_dir: Path) -> dict[str, ProfileBridge]:
+def bridged_agents(profiles: dict[str, Profile]) -> frozenset[str]:
+    """The upstream user of every profile with a ``matrix_bridge`` block (#264).
+
+    Enabled or not: a block that is switched off still names an agent's
+    upstream identity, and another bridge talking to it is the same channel.
+    ``public_user_id`` is the only upstream ID a profile carries; the bridge
+    process logs in as it (``BRIDGE_USER_ID``).
+    """
+    return frozenset(
+        p.matrix_bridge.public_user_id for p in profiles.values() if p.matrix_bridge is not None
+    )
+
+
+def build_bridges(
+    profiles: dict[str, Profile], data_dir: Path, other_agents: frozenset[str] = frozenset()
+) -> dict[str, ProfileBridge]:
     """Build the gateway half of every enabled bridge.
 
     Args:
@@ -116,6 +134,8 @@ def build_bridges(profiles: dict[str, Profile], data_dir: Path) -> dict[str, Pro
             enabled (and so has resolved tokens) get a bridge.
         data_dir: where each profile's mapping store goes, as
             ``bridge-<profile>.db``. Created if absent.
+        other_agents: agents' Matrix IDs that no profile bridges
+            (``matrix.other_agent_user_ids``), refused like a bridged one.
 
     Returns:
         ``{profile name: ProfileBridge}``, empty when no bridge is enabled.
@@ -123,6 +143,7 @@ def build_bridges(profiles: dict[str, Profile], data_dir: Path) -> dict[str, Pro
         the ones registered at startup.
     """
     out: dict[str, ProfileBridge] = {}
+    agents = bridged_agents(profiles) | other_agents
     for name, profile in profiles.items():
         cfg = profile.matrix_bridge
         if cfg is None or not cfg.enabled or cfg.local.as_token is None:
@@ -137,7 +158,9 @@ def build_bridges(profiles: dict[str, Profile], data_dir: Path) -> dict[str, Pro
             agent_localpart=cfg.local.agent_localpart,
             mapping=mapping,
         )
-        out[name] = ProfileBridge(profile, mapping=mapping, appservice=appservice)
+        out[name] = ProfileBridge(
+            profile, mapping=mapping, appservice=appservice, other_agents=agents
+        )
     return out
 
 
@@ -258,7 +281,11 @@ class BridgeRoutes:
 
 
 def register_bridge_routes(
-    mcp_server: Any, profiles: dict[str, Profile], data_dir: Path
+    mcp_server: Any,
+    profiles: dict[str, Profile],
+    data_dir: Path,
+    *,
+    other_agents: frozenset[str] = frozenset(),
 ) -> BridgeRoutes | None:
     """Wire the bridge endpoints for every enabled bridge. Bound at startup.
 
@@ -266,12 +293,13 @@ def register_bridge_routes(
         mcp_server: the FastMCP server; routes go on via ``custom_route``.
         profiles: the loaded profiles (see ``build_bridges``).
         data_dir: where the mapping stores live.
+        other_agents: see ``build_bridges``.
 
     Returns:
         The bound handlers, or None when no profile has an enabled bridge,
         in which case no route is registered at all.
     """
-    bridges = build_bridges(profiles, data_dir)
+    bridges = build_bridges(profiles, data_dir, other_agents)
     if not bridges:
         return None
     _registered.extend(bridges.values())

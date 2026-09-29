@@ -108,10 +108,16 @@ Required: `BRIDGE_PROFILE`, `BRIDGE_USER_ID`, `BRIDGE_GATEWAY_URL`,
 `BRIDGE_INGRESS_TOKEN`, `BRIDGE_TOKEN`, `BRIDGE_PICKLE_KEY`. Optional:
 `BRIDGE_HOMESERVER`, `BRIDGE_STORE_DIR` (`/data`), `BRIDGE_LISTEN_HOST`
 (`127.0.0.1`), `BRIDGE_LISTEN_PORT` (8471), `BRIDGE_DEVICE_NAME`,
-`BRIDGE_LOG_LEVEL`, and one way in: `BRIDGE_DEVICE_ID` + `BRIDGE_ACCESS_TOKEN`
+`BRIDGE_LOG_LEVEL`, `BRIDGE_ALLOWED_INVITERS` (comma-separated Matrix IDs
+whose invites are accepted; empty or unset refuses every invite and leaves
+every joined room, #264), and one way in: `BRIDGE_DEVICE_ID` + `BRIDGE_ACCESS_TOKEN`
 (adopt) or `BRIDGE_PASSWORD` (new device). One-shot commands:
 `BRIDGE_OLD_ACCESS_TOKEN` (`logout-device`), `BRIDGE_RECOVERY_KEY`
-(`sign-device`). Secrets take `_FILE`.
+(`sign-device`). Secrets and `BRIDGE_ALLOWED_INVITERS` take `_FILE`. The
+gateway half of #264 (drop another bridged agent's events, relay into no room
+holding one or whose members were never reported) reads every profile's
+`matrix_bridge.public_user_id`, plus `matrix.other_agent_user_ids` in
+`profiles.yaml` for agents it does not bridge (Ashigaru); bound at startup.
 
 ## onnxruntime telemetry
 
