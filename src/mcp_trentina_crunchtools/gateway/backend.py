@@ -26,7 +26,7 @@ from mcp.shared.exceptions import MCPError
 from mcp_types import INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND
 
 from ..database import delete_all_tool_lists, delete_tool_list, save_tool_list
-from ..logsafe import exc_kind, redact_source
+from ..logsafe import exc_kind, redact_source, safe_url
 from .circuit import breaker
 from .errors import BackendCallError, BackendRejectedCallError
 
@@ -193,7 +193,7 @@ def _evict_backend_cache(url: str) -> None:
         delete_tool_list(url)
         for cb in _on_evict_callbacks:
             cb(url)
-        logger.info("cache: evicted backend %s", url)
+        logger.info("cache: evicted backend %s", safe_url(url))
 
 
 def evict_backend_cache_url(url: str) -> int:
