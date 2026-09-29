@@ -42,6 +42,26 @@ class FetchError(TrentinaError):
         self.error_body = error_body
 
 
+EGRESS_REASONS = frozenset(
+    {"scheme", "port", "non_global_address", "unresolvable", "too_many_redirects", "downgrade"}
+)
+
+
+class EgressRefusedError(TrentinaError):
+    """A gateway-side fetch was refused before it left the host (#260).
+
+    The reason is from a closed set and the message carries nothing else: a
+    refusal that named the resolved address would map the internal network
+    for whoever asked.
+    """
+
+    def __init__(self, reason: str) -> None:
+        if reason not in EGRESS_REASONS:
+            raise ValueError(f"unknown egress reason {reason!r}")
+        super().__init__(f"Egress refused: {reason}")
+        self.reason = reason
+
+
 class L1Error(TrentinaError):
     """Raised when L1 encounters an unrecoverable error."""
 
