@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .config import get_config
@@ -152,30 +152,93 @@ def _migrate(db: sqlite3.Connection) -> None:
         if column not in detection_columns:
             db.execute(f"ALTER TABLE detections ADD COLUMN {column} {sql_type}")
         db.commit()
-
-
-def is_blocked(source: str) -> dict[str, Any] | None:
-    """Check if a source is in the blocklist. Returns detection details or None."""
-    db = get_db()
-    cursor = db.execute(
-        "SELECT * FROM detections WHERE source = ? AND blocked = 1 "
-        "ORDER BY detected_at DESC LIMIT 1",
-        (source,),
+    # The blocklist is keyed on (profile, source) since #263. Created here, not
+    # in SCHEMA: on a table that predates the profile column, SCHEMA runs
+    # before the ALTER above and an index naming the column would fail the
+    # open. Rows written before #263 by the web tools carry a NULL profile and
+    # are read as operator-only; nothing is rewritten.
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_detections_profile_source ON detections(profile, source)"
     )
-    row = cursor.fetchone()
-    return dict(row) if row else None
+    db.execute("CREATE INDEX IF NOT EXISTS idx_detections_detected_at ON detections(detected_at)")
+    db.commit()
 
 
-def is_domain_blocked(domain: str) -> dict[str, Any] | None:
-    """Check if any URL from a domain is in the blocklist."""
-    db = get_db()
-    cursor = db.execute(
-        "SELECT * FROM detections WHERE domain = ? AND blocked = 1 "
-        "ORDER BY detected_at DESC LIMIT 1",
-        (domain,),
+def _block_cutoff() -> str:
+    """The oldest ``detected_at`` a blocklist row may carry and still count."""
+    ttl = timedelta(days=get_config().blocklist_ttl_days)
+    return (datetime.now(UTC) - ttl).isoformat()
+
+
+_SWEEP_INTERVAL_SECONDS = 3600.0
+_last_sweep = 0.0
+
+
+def sweep_expired_blocks(db: sqlite3.Connection | None = None) -> int:
+    """Delete blocklist rows past ``TRENTINA_BLOCKLIST_TTL_DAYS`` (#263).
+
+    Readers filter on the cutoff themselves, so an expired row never counts
+    whether or not a sweep has run; the sweep only stops the table from
+    holding what no reader will use. ``is_blocked`` runs it at most hourly,
+    the first time on the first lookup after start. Flag-mode observations (``blocked = 0``)
+    are not blocklist rows and are kept.
+
+    Returns:
+        The number of rows removed.
+    """
+    global _last_sweep
+    conn = db or get_db()
+    cursor = conn.execute(
+        "DELETE FROM detections WHERE blocked = 1 AND detected_at <= ?", (_block_cutoff(),)
     )
-    row = cursor.fetchone()
-    return dict(row) if row else None
+    conn.commit()
+    _last_sweep = time.monotonic()
+    return cursor.rowcount
+
+
+def _maybe_sweep(db: sqlite3.Connection) -> None:
+    if time.monotonic() - _last_sweep >= _SWEEP_INTERVAL_SECONDS:
+        sweep_expired_blocks(db)
+
+
+def is_blocked(source: str, profile: str | None, *, gateway_wide: bool = False) -> bool:
+    """Whether *source* is on the blocklist as *profile* sees it (#263).
+
+    The blocklist is keyed on ``(profile, source)``. It used to be keyed on
+    the source alone, so one profile's refusal was every profile's refusal:
+    profile A getting ``?slot=N`` flagged was a bit profile B could read, with
+    A's timestamp attached, and rows never expired.
+
+    Args:
+        source: The URL, resolved path or content hash.
+        profile: The calling agent profile. Its own rows count and nobody
+            else's; rows with a NULL profile (written before #263, or by a
+            standalone server) are operator-only. None with
+            ``gateway_wide`` False — a live gateway with no bound caller —
+            sees nothing.
+        gateway_wide: Every live row, whoever wrote it. Operator and
+            standalone scope only; the caller decides that, not this module.
+
+    Returns:
+        True or False and nothing else: no row, no timestamp. What a refusal
+        can say is decided here, and it is one bit about the caller's own
+        history.
+    """
+    db = get_db()
+    _maybe_sweep(db)
+    query = (
+        "SELECT 1 FROM detections WHERE source = ? AND blocked = 1 "
+        "AND detected_at > ?{profile_clause} LIMIT 1"
+    )
+    if gateway_wide:
+        row = db.execute(query.format(profile_clause=""), (source, _block_cutoff())).fetchone()
+    elif profile:
+        row = db.execute(
+            query.format(profile_clause=" AND profile = ?"), (source, _block_cutoff(), profile)
+        ).fetchone()
+    else:
+        return False
+    return row is not None
 
 
 def record_detection(
@@ -236,7 +299,10 @@ def record_detection(
 
 
 def get_blocklist_stats(profile: str | None = None) -> dict[str, Any]:
-    """Get summary statistics for the blocklist, optionally for one profile.
+    """Get summary statistics for the live blocklist, optionally for one profile.
+
+    Unfiltered is the gateway-wide view, for operator scope only; every agent
+    caller passes its own name (``tools/stats.py``).
 
     The *profile* filter matters more here than the column suggests. A
     detection's ``source`` is written as ``profile:backend:tool``, so an
@@ -253,8 +319,9 @@ def get_blocklist_stats(profile: str | None = None) -> dict[str, Any]:
     db = get_db()
     # Same idiom as get_gateway_call_stats above: fixed query templates with
     # one optional clause, the value always bound as a parameter.
-    clause = " AND profile = ?" if profile else ""
-    args: tuple[Any, ...] = (profile,) if profile else ()
+    # Expired rows are off the blocklist (#263) and are not counted as on it.
+    clause = " AND detected_at > ?" + (" AND profile = ?" if profile else "")
+    args: tuple[Any, ...] = (_block_cutoff(), profile) if profile else (_block_cutoff(),)
 
     total_query = "SELECT COUNT(*) as cnt FROM detections WHERE blocked = 1{profile_clause}"
     recent_query = (

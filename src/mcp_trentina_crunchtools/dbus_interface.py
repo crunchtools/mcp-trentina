@@ -89,6 +89,8 @@ def _build_interface() -> Any:
             from .database import get_blocklist_stats
             from .quarantine.classifier import is_classifier_available
 
+            # Gateway-wide on purpose: the system bus is the host operator's
+            # interface, and no agent profile reaches it (#263).
             stats = get_blocklist_stats()
             from .config import get_config
 

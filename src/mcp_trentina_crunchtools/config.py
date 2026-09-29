@@ -32,6 +32,9 @@ DEFAULT_QUARANTINE_CONTEXT_TOKENS = 1_000_000
 set it lower for a smaller provider (Ollama's default model reads 32k). The
 other input to ``Config.admission_tokens``."""
 
+DEFAULT_BLOCKLIST_TTL_DAYS = 30
+"""Days a block refusal keeps its source on the calling profile's blocklist."""
+
 DEFAULT_CLASSIFIER_THREADS = 4
 """ONNX intra-op threads. Its own default is one per core with a spin-wait,
 which lets a single inference saturate the host.
@@ -136,24 +139,28 @@ def _mode_policy_env() -> tuple[str, tuple[str, ...]]:
     return default, allowed
 
 
-def _read_roots_env() -> tuple[Path, ...]:
+def _read_roots_env() -> tuple[tuple[Path, ...], tuple[Path, ...]]:
     """``TRENTINA_READ_ROOTS``: the directories read_tool and dir_tool may reach (#261).
 
-    ``os.pathsep``-separated, each resolved so a root reached through a
-    symlinked directory compares against resolved targets.
+    ``os.pathsep``-separated. Returned twice: resolved, so a root reached
+    through a symlinked directory compares against resolved targets; and as
+    written (normalized), for confinement's check on the path as the agent
+    spelled it, which runs before anything is resolved (#263).
     A relative entry is refused at startup: it would be relative to whatever
     directory the process happened to start in.
     """
     from .errors import ConfigError
 
     roots = []
+    written = []
     for entry in os.environ.get("TRENTINA_READ_ROOTS", "").split(os.pathsep):
         if not entry.strip():
             continue
         if not os.path.isabs(entry.strip()):
             raise ConfigError(f"TRENTINA_READ_ROOTS entry {entry!r} is not an absolute path")
         roots.append(Path(entry.strip()).resolve())
-    return tuple(roots)
+        written.append(Path(os.path.normpath(entry.strip())))
+    return tuple(roots), tuple(written)
 
 
 class Config:
@@ -267,7 +274,14 @@ class Config:
             str(Path(self.db_path).parent / "perimeter.db"),
         )
 
-        self.read_roots: tuple[Path, ...] = _read_roots_env()
+        self.read_roots: tuple[Path, ...]
+        self.read_roots_written: tuple[Path, ...]
+        self.read_roots, self.read_roots_written = _read_roots_env()
+        # How long a block refusal keeps its source on the blocklist (#263).
+        # Rows never expired before, which made the table a dead drop.
+        self.blocklist_ttl_days: int = int_env(
+            "TRENTINA_BLOCKLIST_TTL_DAYS", DEFAULT_BLOCKLIST_TTL_DAYS, minimum=1
+        )
 
         trust_config_path = os.environ.get(
             "QUARANTINE_TRUST_CONFIG",

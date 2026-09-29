@@ -19,9 +19,11 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from ..config import get_config
+from ..database import is_blocked
 from ..dbus_interface import emit_request_event
 from ..defense import DefenseVerdict, Provenance, defend
 from ..errors import BlockedSourceError
+from ..gateway.scope import current_scope
 from ..modes import Mode, gaps_of, refusal_body, refusal_reason
 from ..quarantine.agent import quarantine_redact
 from ..report import Disposition, LayerState, build_report
@@ -37,16 +39,53 @@ DEFAULT_REDACT_PROMPT = "Extract the main content."
 for the bytes, so there is no extraction prompt of its own to use."""
 
 
-def blocklisted(source: str, mode: Mode, detected_at: str) -> BlockedSourceError:
+BLOCKLIST_REASON = "on the blocklist"
+
+
+def blocklisted(source: str, mode: Mode) -> BlockedSourceError:
     """block and flag on a blocklisted source, refused before any bytes arrive.
 
     Offers redact when the policy allows it, because redact is the mode that
-    proceeds on a blocklisted source.
+    proceeds on a blocklisted source. The body is constant (#263): it said
+    ``since {detected_at}`` until then, which handed a caller another
+    profile's timestamp. Nothing in it now depends on anything but the
+    caller's own source and mode policy.
     """
-    reason = f"on the blocklist since {detected_at}"
     return BlockedSourceError(
-        source, reason, refusal=refusal_body(reason, mode, flagged_by="blocklist")
+        source,
+        BLOCKLIST_REASON,
+        refusal=refusal_body(BLOCKLIST_REASON, mode, flagged_by="blocklist"),
     )
+
+
+def _caller() -> tuple[str | None, bool]:
+    """The calling profile's name, and whether it reads the gateway-wide blocklist.
+
+    Operator and standalone read every row; an agent reads its own. A live
+    gateway with no bound caller reads nothing and writes a NULL profile,
+    which only an operator sees: no path nobody designed can publish to an
+    agent's blocklist.
+    """
+    scope = current_scope()
+    if scope is None:
+        return None, False
+    return scope.name, scope.is_operator
+
+
+def check_blocklist(source: str, mode: Mode) -> bool:
+    """Refuse block and flag on a source the caller's blocklist holds.
+
+    Returns:
+        Whether it is blocklisted, for redact, which proceeds and says so.
+
+    Raises:
+        BlockedSourceError: block or flag, and the source is on it.
+    """
+    profile, gateway_wide = _caller()
+    blocked = is_blocked(source, profile, gateway_wide=gateway_wide)
+    if blocked and mode is not Mode.REDACT:
+        raise blocklisted(source, mode)
+    return blocked
 
 
 def l1_metadata(pipeline: PipelineResult) -> dict[str, Any]:
@@ -74,7 +113,7 @@ class _Call:
         kind: str,
         ref: str,
         allowlisted: bool,
-        blocklisted_at: str | None,
+        asserted: Mapping[str, bool],
     ) -> None:
         self.mode = mode
         self.tool = f"{mode.value}_{family}"
@@ -82,7 +121,9 @@ class _Call:
         self.kind = kind
         self.ref = ref
         self.allowlisted = allowlisted
-        self.blocklisted = blocklisted_at is not None
+        # Facts about the SOURCE the warning states whatever the verdict,
+        # such as the caller's own blocklist holding it.
+        self.asserted = asserted
         self.start = time.time()
 
     def emit(self, verdict: DefenseVerdict, disposition: Disposition, output_size: int) -> None:
@@ -126,7 +167,7 @@ class _Call:
 
     def warning(self, verdict: DefenseVerdict, **more: Any) -> dict[str, Any] | None:
         """``_trentina_warning``, or None when the scan completed and found nothing."""
-        forced = {**more, "blocklisted": self.blocklisted}
+        forced = {**more, **self.asserted}
         warning = build_warning(verdict, extras={k: v for k, v in forced.items() if v})
         if warning is not None:
             warning["mode"] = self.mode.value
@@ -144,7 +185,7 @@ async def judge_and_deliver(
     ref: str,
     prompt: str | None = None,
     allowlisted: bool = False,
-    blocklisted_at: str | None = None,
+    blocklisted: bool = False,
     provenance: Provenance = Provenance.EXTERNAL,
     domain: str | None = None,
     precomputed_l1: PipelineResult | None = None,
@@ -163,7 +204,7 @@ async def judge_and_deliver(
         allowlisted: An operator vouched for the source. Its flags still
             stand; block sends a flagged or partially-read payload to redact
             instead of refusing it. An ABSENT layer still refuses.
-        blocklisted_at: Set when redact proceeds on a blocklisted source.
+        blocklisted: Set when redact proceeds on a blocklisted source.
         delivered: What block and flag hand over, when it is not the document
             itself (search delivers L0's text, the sources separately).
         extras: Family fields for block and flag responses.
@@ -181,7 +222,7 @@ async def judge_and_deliver(
         kind=kind,
         ref=ref,
         allowlisted=allowlisted,
-        blocklisted_at=blocklisted_at,
+        asserted={"blocklisted": blocklisted},
     )
     verdict = await defend(
         document,
@@ -196,7 +237,10 @@ async def judge_and_deliver(
         l3_context=l3_context,
         # `blocked` feeds the blocklist. Only a block refusal belongs there:
         # a flag row marked blocked made the NEXT flag of the same page raise.
+        # `profile` keys the row (#263): only the caller that was refused is
+        # refused again.
         attribution={
+            "profile": _caller()[0],
             "tool": call.tool,
             "blocked": mode is Mode.BLOCK and not allowlisted,
         },

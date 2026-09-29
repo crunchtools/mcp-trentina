@@ -25,6 +25,31 @@ under that name.
   inbound events. The router builds `_trentina_warning` from gateway parts
   only. A new `reserved_stripped` count in the warning reports what was
   removed; the log records the count, never the key.
+- The blocklist and `cache_flush` were bit channels between profiles (#263).
+  The blocklist was keyed on the source alone, so a URL one profile got
+  refused was refused for every profile, and the refusal said
+  `on the blocklist since <detected_at>`, handing over the other profile's
+  timestamp; rows never expired. It is now keyed on (profile, source): an
+  agent reads its own rows, the operator and a standalone server read every
+  row, and rows written before this release (no profile) are operator-only.
+  The refusal is `on the blocklist` and nothing else. Rows expire after
+  `TRENTINA_BLOCKLIST_TTL_DAYS` (default 30) and are swept hourly.
+  `quarantine_stats` counts only live rows.
+- An agent's `cache_flush` evicted its backends from the per-URL tool-list
+  cache, which every profile holding the URL shares, and reported which were
+  still cached, so one profile could set a pattern another read back. It now
+  drops only the caller's own aggregate and returns the same body every
+  time. An operator flush is unchanged.
+- `read_tool` and `dir_tool` confinement resolved the path before checking
+  it, so a missing path answered `not_found` and an existing denied one
+  `denied_path`: a file-existence oracle (#263). The denylist and roots are
+  now checked on the path as written, normalized, before resolving, and again
+  after. Behind a gateway `not_found`, `denied_path` and `outside_read_roots`
+  are one reason, `not_found_or_denied`.
+- A confinement refusal audited as `backend_error` and reached the agent as
+  `call failed: FileReadError` (#278). It is now delivered like an egress
+  refusal: `confinement refused (<reason>)`, `flagged_by: confinement`, no
+  alternatives, audited `blocked_defense`.
 - Backend URLs are logged as `scheme://host[:port]` only (`logsafe.safe_url`).
   The circuit-breaker and cache-evict lines printed the whole URL, and a
   token-in-URL backend's credential reached the agent-readable journal.
