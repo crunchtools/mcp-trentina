@@ -41,9 +41,11 @@ from typing import Any
 from ..channels import Channel
 from ..defense import Provenance
 from ..l1.hidden import HiddenStats, detect_hidden_markup
+from ..logsafe import exc_kind, exc_where, redact_source
 from ..preprocess import PreProcessContext, PreProcessor, Strategy, run_preprocessors
 from ..preprocess.detect import hiding_briefing, hiding_removed
 from ..preprocess.policy import FAILED_DECLINES
+from .backend import loggable_tool
 from .drivers import build_preprocessors
 from .errors import ProfileConfigError
 from .profile import Backend, PreProcessConfig, Profile, ToolPreProcess
@@ -167,11 +169,13 @@ def _processors_for(
         cfg = cfg.model_copy(update={"processors": names, "required": []})
     try:
         return build_preprocessors(cfg, channel=Channel.TOOL, profile_name=profile_name)
-    except ProfileConfigError:
-        logger.exception(
-            "transform: unusable processor config for %s:%s; delivering unchanged",
+    except ProfileConfigError as exc:
+        # The kind only: the names checked may be ones the call asked for (#262).
+        logger.warning(
+            "transform: unusable processor config for %s:%s; delivering unchanged: %s",
             backend_name,
-            tool_name,
+            redact_source(tool_name),
+            exc_kind(exc),
         )
         return []
 
@@ -212,9 +216,12 @@ async def _transform_block(
             outcome = await run_preprocessors(
                 block.content, processors=processors, strategy=strategy, ctx=ctx
             )
-        except Exception:
-            logger.exception(
-                "transform: preprocessing failed for %s; delivering block unchanged", ctx.source
+        except Exception as exc:
+            logger.error(  # the message may carry the payload (#262)
+                "transform: preprocessing failed for %s; delivering block unchanged: %s at %s",
+                ctx.source,
+                exc_kind(exc),
+                exc_where(exc),
             )
             return block
         block.results.extend(outcome.results)
@@ -284,7 +291,9 @@ async def transform_response(
     # target_bytes is shared across blocks so a response's budget does not
     # multiply by how many pieces it arrived in.
     ctx = PreProcessContext(
-        source=f"{profile.name}:{backend_name}:{tool_name}",
+        # Logged below: the tool as listed, or a fingerprint of a name the
+        # caller typed that the backend answered anyway (#262).
+        source=f"{profile.name}:{backend_name}:{loggable_tool(backend.url, tool_name)}",
         target_bytes=max(1, cfg.target_bytes // len(targets)),
     )
     # An explicit true under strategy none still runs: the agent asked.

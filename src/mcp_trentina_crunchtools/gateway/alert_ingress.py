@@ -44,6 +44,7 @@ from starlette.responses import Response
 
 from ..defense import defend, defend_json
 from ..l1.pipeline import risk_level_for_count
+from ..logsafe import exc_kind
 from .context import profile_context
 
 if TYPE_CHECKING:
@@ -150,12 +151,13 @@ async def _handle_alert(
 
     try:
         body = await request.body()
-    except Exception:
+    except Exception as exc:
         # Client disconnect mid-read, malformed chunked encoding, and a body
         # exceeding the server limit all land here. 400 is the right answer to
         # all three, but the reason is the only signal distinguishing a flaky
-        # client from an attack, so it is logged rather than discarded.
-        logger.warning("alert_ingress: could not read request body", exc_info=True)
+        # client from an attack, so it is logged rather than discarded: its
+        # kind, since a parser's message can quote the bytes it choked on.
+        logger.warning("alert_ingress: could not read request body: %s", exc_kind(exc))
         return Response(
             content="bad request body",
             status_code=400,
@@ -212,14 +214,18 @@ async def _handle_alert(
             headers=fwd_headers,
         )
     except httpx.TimeoutException:
-        logger.warning("alert_ingress: timeout forwarding to %s", forward_url)
+        logger.warning("alert_ingress: timeout forwarding for profile %s", profile.name)
         return Response(
             content="forward timeout",
             status_code=504,
             media_type="text/plain",
         )
     except httpx.ConnectError as exc:
-        logger.warning("alert_ingress: connect error to %s: %s", forward_url, exc)
+        logger.warning(
+            "alert_ingress: connect error forwarding for profile %s: %s",
+            profile.name,
+            exc_kind(exc),
+        )
         return Response(
             content="forward unreachable",
             status_code=502,

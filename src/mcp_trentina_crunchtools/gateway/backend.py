@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -25,6 +26,7 @@ from mcp.shared.exceptions import MCPError
 from mcp_types import INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND
 
 from ..database import delete_all_tool_lists, delete_tool_list, save_tool_list
+from ..logsafe import exc_kind, redact_source
 from .circuit import breaker
 from .errors import BackendCallError, BackendRejectedCallError
 
@@ -160,6 +162,21 @@ def cached_tool_schema(url: str, tool_name: str) -> dict[str, Any] | None:
     return None
 
 
+#: MCP's tool-name charset. A listed name outside it could forge a log line.
+_TOOL_NAME = re.compile(r"[A-Za-z0-9_.\-]{1,128}")
+
+
+def loggable_tool(url: str, tool_name: str) -> str:
+    """The name when the backend listed it and it is shaped like a tool name;
+    otherwise a fingerprint. A long-form call can forward a name the caller
+    typed, unlisted (#262), and a listed name is one the backend already
+    publishes to every agent through tools/list."""
+    listed = any(tool.get("name") == tool_name for tool in _tool_list_cache.get(url, ()))
+    if listed and _TOOL_NAME.fullmatch(tool_name):
+        return tool_name
+    return redact_source(tool_name)
+
+
 _inflight: dict[str, asyncio.Task[list[dict[str, Any]]]] = {}
 
 _on_evict_callbacks: list[Any] = []
@@ -285,10 +302,9 @@ async def _fetch_and_cache(
     except Exception as exc:
         breaker.record_failure(backend.url)
         logger.warning(
-            "gateway: list_tools failed for backend=%s url=%s err=%s",
+            "gateway: list_tools failed for backend=%s err=%s",
             backend_name,
-            backend.url,
-            exc,
+            exc_kind(exc),
         )
         raise BackendCallError(
             f"backend {backend_name!r} list_tools failed: {type(exc).__name__}"
@@ -342,7 +358,7 @@ async def call_backend_tool(
             logger.warning(
                 "gateway: call_tool rejected backend=%s tool=%s reason=%s",
                 backend_name,
-                tool_name,
+                loggable_tool(backend.url, tool_name),
                 rejected,
             )
             raise BackendRejectedCallError(
@@ -352,8 +368,8 @@ async def call_backend_tool(
         logger.warning(
             "gateway: call_tool failed backend=%s tool=%s err=%s",
             backend_name,
-            tool_name,
-            exc,
+            loggable_tool(backend.url, tool_name),
+            exc_kind(exc),
         )
         raise BackendCallError(
             f"backend {backend_name!r} call_tool failed: {type(exc).__name__}"

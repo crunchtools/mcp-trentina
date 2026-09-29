@@ -104,7 +104,9 @@ def is_classifier_available() -> bool:
         _loaded = True
         logger.info("Layer 2 classifier loaded from %s", model_path)
     except Exception:
-        logger.warning("Failed to load classifier model from %s", model_path, exc_info=True)
+        logger.warning(  # logsafe: ours — loading the operator's model
+            "Failed to load classifier model from %s", model_path, exc_info=True
+        )
         return False
 
     return True

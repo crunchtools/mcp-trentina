@@ -35,6 +35,7 @@ from .. import __version__
 from ..database import record_gateway_call
 from ..defense import Provenance
 from ..errors import ModeNotPermittedError, PreProcessNotPermittedError
+from ..logsafe import exc_kind
 from ..outcomes import Outcome, classify_exception, refusal_of
 from ..preprocess.policy import PREPROCESS_PARAM
 from ..quarantine.limiter import Priority, l3_priority
@@ -43,6 +44,7 @@ from .backend import (
     cached_tool_schema,
     call_backend_tool,
     list_backend_tools,
+    loggable_tool,
     on_backend_cache_evict,
 )
 from .compress import (
@@ -489,7 +491,7 @@ async def _build_profile_tools(
                 "gateway: tools/list profile=%s backend=%s skipped: %s",
                 profile.name,
                 backend_name,
-                outcome,
+                exc_kind(outcome),
             )
             continue
         tools, measured[backend_name] = outcome
@@ -683,12 +685,14 @@ def _normalize_arguments(
         return Normalized(forwarded)
     normalized = normalize_arguments(forwarded, cached_tool_schema(backend.url, tool_name))
     if normalized.dropped:
+        # How many and why, never which: a name is the caller's (#262).
         logger.info(
-            "gateway: profile=%s %s/%s normalized args %s",
+            "gateway: profile=%s %s/%s normalized %d arg(s): %s",
             profile.name,
             backend_name,
-            tool_name,
-            normalized.dropped,
+            loggable_tool(backend.url, tool_name),
+            len(normalized.dropped),
+            ",".join(sorted(set(normalized.dropped.values()))),
         )
     return normalized
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
@@ -44,6 +44,18 @@ def test_where_invalid_names_the_field_not_the_value() -> None:
     where = where_invalid(caught.value)
     assert where == ["event_id"]
     assert secret not in repr(where)
+
+
+def test_where_invalid_does_not_name_a_forbidden_key() -> None:
+    """An extra key's name is the sender's text (#262)."""
+
+    class Event(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        event_id: int
+
+    with pytest.raises(ValidationError) as caught:
+        Event.model_validate({"event_id": 1, "zqx7canary": 2})
+    assert where_invalid(caught.value) == ["<extra>"]
 
 
 async def test_the_cap_counts_across_chunks() -> None:

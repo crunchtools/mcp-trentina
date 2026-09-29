@@ -60,6 +60,7 @@ from .l1.pipeline import (
     PipelineStats,
     run_l1,
 )
+from .logsafe import exc_kind, exc_where, redact_source
 from .quarantine.agent import quarantine_detect
 from .quarantine.classifier import (
     ClassifierResult,
@@ -422,7 +423,10 @@ async def defend(
         tokens, _ = await admission(pipeline.l2_input)
     if refuse_at_admission:
         logger.warning(
-            "admission: refused %s, %d tokens against a %d-token cap", source, tokens, cap
+            "admission: refused %s, %d tokens against a %d-token cap",
+            redact_source(source),
+            tokens,
+            cap,
         )
 
     # Either leg flags: the model's own MALICIOUS label (global threshold),
@@ -480,8 +484,13 @@ async def defend(
                 risk_level,
                 assessment if assessment is not None else pipeline.stats.to_flat_dict(),
             )
-        except Exception:
-            logger.exception("defense: failed to record detection for %s (verdict kept)", source)
+        except Exception as exc:
+            logger.error(  # the traceback's message may carry the source
+                "defense: failed to record detection for %s (verdict kept): %s at %s",
+                redact_source(source),
+                exc_kind(exc),
+                exc_where(exc),
+            )
 
     return DefenseVerdict(
         content=pipeline.content,

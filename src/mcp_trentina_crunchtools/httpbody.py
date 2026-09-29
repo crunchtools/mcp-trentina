@@ -34,5 +34,12 @@ async def read_capped(request: Request, limit: int = MAX_BODY_BYTES) -> bytes:
 
 def where_invalid(exc: ValidationError) -> list[str]:
     """Where validation failed, never the values that failed it: a rejected
-    event's content is exactly what must not reach a log."""
-    return [".".join(str(part) for part in e["loc"]) for e in exc.errors(include_input=False)]
+    event's content is exactly what must not reach a log. Nor a key the model
+    forbids: an extra key's name is the sender's text (#262)."""
+    return [
+        ".".join(
+            "<extra>" if e["type"] == "extra_forbidden" and i == len(e["loc"]) - 1 else str(part)
+            for i, part in enumerate(e["loc"])
+        )
+        for e in exc.errors(include_input=False)
+    ]

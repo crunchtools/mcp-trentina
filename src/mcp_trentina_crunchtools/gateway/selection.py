@@ -17,6 +17,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..jsonwalk import iter_leaves
+from ..logsafe import exc_kind, exc_where, redact_source
 from ..preprocess import Selection
 
 if TYPE_CHECKING:
@@ -71,15 +72,15 @@ async def run_l1(
         return read_everything(payload, extractor="none", why="")
     try:
         return await extractor.extract(payload, ctx)
-    except Exception:
-        logger.exception(
-            "selection: processor %r failed for %s — reading everything instead",
+    except Exception as exc:
+        logger.error(  # the message may carry the payload (#262)
+            "selection: processor %r failed for %s — reading everything instead: %s at %s",
             extractor.name,
-            ctx.path or ctx.source,
+            redact_source(ctx.path or ctx.source),
+            exc_kind(exc),
+            exc_where(exc),
         )
-        return read_everything(
-            payload, extractor=extractor.name, why=extractor.name
-        )
+        return read_everything(payload, extractor=extractor.name, why=extractor.name)
 
 
 def describe(view: Selection, cfg: MatrixPreProcessConfig) -> dict[str, Any]:

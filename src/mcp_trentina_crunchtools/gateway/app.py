@@ -25,6 +25,7 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
+from ..logsafe import exc_kind, exc_where, redact_source, safe_address
 from ..quarantine.classifier import classifier_status
 from .auth import verify_bearer, verify_oauth
 from .errors import (
@@ -182,7 +183,7 @@ async def _authorize(
                 oauth.verifier_for(profile.name) if oauth is not None else None,
             )
         except OAuthForbiddenError as exc:
-            logger.info(
+            logger.info(  # logsafe: ours — auth.py raises only fixed literals
                 "gateway: oauth forbidden profile=%s reason=%s [%s]",
                 profile.name,
                 exc,
@@ -190,7 +191,7 @@ async def _authorize(
             )
             return _plain(403, "Forbidden")
         except AuthError as exc:
-            logger.info(
+            logger.info(  # logsafe: ours — auth.py raises only fixed literals
                 "gateway: oauth challenge profile=%s reason=%s [%s]",
                 profile.name,
                 exc,
@@ -291,11 +292,13 @@ def _client_desc(request: Request) -> str:
 
     Source port distinguishes concurrent clients behind the same address,
     which is what separates one agent terminal from another over a tunnel.
+    The User-Agent is the client's own text, so it is fingerprinted: equal
+    fingerprints still tell two clients apart (#262).
     """
     client = request.client
-    peer = f"{client.host}:{client.port}" if client is not None else "unknown"
-    agent = request.headers.get("user-agent", "-")
-    return f"peer={peer} ua={agent!r}"
+    peer = f"{safe_address(client.host)}:{client.port}" if client is not None else "unknown"
+    agent = request.headers.get("user-agent")
+    return f"peer={peer} ua={redact_source(agent) if agent else '-'}"
 
 
 def gateway_app(
@@ -474,7 +477,7 @@ async def _handle_get(
     if session is None:
         logger.warning(
             "gateway: SSE stream rejected — session=%s profile=%s not found: %s [%s]",
-            session_id[:8],
+            redact_source(session_id),
             profile_name,
             sessions.explain_missing(session_id, None),
             _client_desc(request),
@@ -561,7 +564,7 @@ async def _handle_delete(
     if session is None:
         logger.warning(
             "gateway: DELETE rejected — session=%s profile=%s not found: %s [%s]",
-            session_id[:8],
+            redact_source(session_id),
             profile_name,
             sessions.explain_missing(session_id, None),
             _client_desc(request),
@@ -592,7 +595,7 @@ async def _handle_post(
     profile_name = request.path_params.get("profile", "")
     profile = registry.get(profile_name)
     if profile is None:
-        logger.info("gateway: unknown profile %r", profile_name)
+        logger.info("gateway: unknown profile %s", redact_source(profile_name))
         return _plain(404, "Not Found")
 
     auth_response = await _authorize(request, profile, oauth)
@@ -601,14 +604,14 @@ async def _handle_post(
 
     try:
         body_bytes = await request.body()
-    except Exception:
+    except Exception as exc:
         # Same reasoning as alert_ingress: 400 is correct for every cause, but
         # discarding the cause loses the only signal that separates a flaky
-        # client from someone probing the gateway.
+        # client from someone probing the gateway. The kind, not the message.
         logger.warning(
-            "gateway: could not read request body profile=%s",
+            "gateway: could not read request body profile=%s: %s",
             profile_name,
-            exc_info=True,
+            exc_kind(exc),
         )
         return _plain(400, "Bad Request: cannot read body")
 
@@ -632,7 +635,7 @@ async def _handle_post(
             # refuse the recovery (#104). It gets a fresh session below.
             logger.warning(
                 "gateway: re-initialize over stale session=%s profile=%s: %s [%s]",
-                session_id[:8],
+                redact_source(session_id),
                 profile_name,
                 sessions.explain_missing(session_id, None),
                 _client_desc(request),
@@ -641,10 +644,10 @@ async def _handle_post(
         elif session is None:
             logger.warning(
                 "gateway: DISCONNECT — session=%s profile=%s rejected on "
-                "method=%r: %s [%s] census=%s",
-                session_id[:8],
+                "method=%s: %s [%s] census=%s",
+                redact_source(session_id),
                 profile_name,
-                body.get("method", ""),
+                redact_source(body.get("method", "")),
                 sessions.explain_missing(session_id, None),
                 _client_desc(request),
                 sessions.census(),
@@ -674,8 +677,14 @@ async def _handle_post(
             },
             status_code=502,
         )
-    except GatewayError:
-        logger.exception("gateway: unexpected gateway error profile=%s", profile_name)
+    except GatewayError as exc:
+        # Where, not what: the message can carry the caller's arguments (#262).
+        logger.error(
+            "gateway: unexpected gateway error profile=%s: %s at %s",
+            profile_name,
+            exc_kind(exc),
+            exc_where(exc),
+        )
         return JSONResponse(
             {
                 "jsonrpc": "2.0",
@@ -684,8 +693,13 @@ async def _handle_post(
             },
             status_code=500,
         )
-    except Exception:
-        logger.exception("gateway: unhandled error profile=%s", profile_name)
+    except Exception as exc:
+        logger.error(
+            "gateway: unhandled error profile=%s: %s at %s",
+            profile_name,
+            exc_kind(exc),
+            exc_where(exc),
+        )
         return JSONResponse(
             {
                 "jsonrpc": "2.0",

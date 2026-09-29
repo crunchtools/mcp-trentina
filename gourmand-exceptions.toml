@@ -322,7 +322,7 @@ classification = "by_design"
 [[exceptions]]
 check = "redundant_error_handling"
 path = "src/mcp_trentina_crunchtools/gateway/compress.py"
-justification = "Pre-compressing one backend must not abort the sweep over the others; the failure is logged with exc_info and the loop continues. The missing exc_info on this handler was a real gap and is fixed in this change."
+justification = "Pre-compressing one backend must not abort the sweep over the others; the failure is logged by kind (#262: a backend's exception text is not the gateway's to log) and the loop continues."
 classification = "by_design"
 
 [[exceptions]]
@@ -620,3 +620,24 @@ path = "src/mcp_trentina_crunchtools/gateway/schema_compact.py"
 pattern = "_compact"
 justification = "Not a copy: _compact walks a JSON schema and _corrected in l1/evasion.py corrects a misspelled keyword. The two share only a shape, a chain of guard-clause early returns, which the similarity check scores as 100% identical."
 classification = "gourmand_bug"
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/defense.py"
+pattern = "defend"
+justification = "Recording a detection is bookkeeping: a failed SQLite write or D-Bus emit must not destroy a verdict that already exists, so the failure is logged (kind and frames, never the message -- #262) and the verdict is returned. Re-raising would turn an audit gap into a lost flag."
+classification = "by_design"
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/events.py"
+pattern = "emit"
+justification = "One subscriber's failure must not stop the event reaching the others, and must never propagate into the detection path that emitted it. Logged by kind and frames (#262) and the loop continues."
+classification = "by_design"
+
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/mcp_trentina_crunchtools/gateway/matrix_proxy.py"
+pattern = "_text_fallback_scan"
+justification = "The text-mode fallback is the last scan of an unparseable response the proxy forwards anyway (there is no annotation channel); its failure is recorded by kind and frames (#262) and must not break the forward it follows."
+classification = "by_design"

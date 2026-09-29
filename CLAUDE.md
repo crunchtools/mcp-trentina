@@ -104,6 +104,21 @@ concurrently (`scan_tool_list`); what paces them is the per-judge
 `limited_generate`. Call `generate` through `limited_generate`, never
 directly: a bare call is invisible to the limiter and competes with it blind.
 
+## Logging rule (#262)
+
+The gateway's journal is readable by agents through other backends'
+`journal_query`/`container_logs`, so a logged string a caller chose is a
+cross-agent message board. Never log one: not a URL, path, query, argument
+name, header, unresolved profile or tool name, backend or provider error
+text, Matrix id, nor an exception's message (`logger.exception` and
+`exc_info` print it). Log the profile, a resolved tool, `logsafe.exc_kind`/
+`exc_where`, and `logsafe.redact_source(s)` (`sha256:<12> len=<n>`) for
+anything else; the audit DB holds the rest. `logsafe.install` holds uvicorn's
+access log, httpx and the SDKs to the same rule at every level.
+`tests/test_log_hygiene.py` enforces it: canaries through every tool path at
+DEBUG, and an AST check that only a call marked `# logsafe: ours` may print
+an exception.
+
 ## Endpoints
 
 - `GET /health` — unauthenticated liveness probe returning `{status, classifier, profiles}`.

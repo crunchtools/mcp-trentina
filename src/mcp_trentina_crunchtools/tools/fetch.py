@@ -11,6 +11,7 @@ from ..config import get_config
 from ..database import is_blocked
 from ..defense import defend
 from ..errors import FetchError, UnsupportedContentTypeError
+from ..logsafe import exc_kind, redact_source
 from ..modes import Mode
 from ..quarantine.prompts import finding_types
 from ..report import Disposition, build_report
@@ -197,11 +198,11 @@ async def fetch_page(
     except FetchError as exc:
         advisory = await _handle_fetch_error(url, exc)
         if advisory:
-            log.warning("security advisory for %s: %s", url, exc)
+            log.warning("security advisory for %s: %s", redact_source(url), exc_kind(exc))
             return advisory
         raise
     except UnsupportedContentTypeError as exc:
-        log.warning("redirect-to-binary advisory for %s: %s", url, exc)
+        log.warning("redirect-to-binary advisory for %s: %s", redact_source(url), exc_kind(exc))
         return _handle_content_type_error(url, exc)
 
     page = await prepare(

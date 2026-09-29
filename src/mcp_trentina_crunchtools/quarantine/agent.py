@@ -26,6 +26,7 @@ from ..client import MAX_RESPONSE_SIZE
 from ..config import DEFAULT_SEARCH_MODEL, get_config
 from ..errors import MalformedResponseError, QuarantineAgentError
 from ..l1.pipeline import run_l1
+from ..logsafe import exc_kind
 from .limiter import THROTTLE_STATUS, limited_generate, throttle_budget
 from .prompts import (
     DETECTION_RESPONSE_SCHEMA,
@@ -192,14 +193,14 @@ async def _call_with_fallback(
                 logger.warning(
                     "provider fallback: %s failed (%s), trying %s",
                     name,
-                    exc,
+                    exc_kind(exc),
                     next_name,
                 )
             else:
                 logger.warning(
                     "provider fallback: %s failed (%s), all providers exhausted",
                     name,
-                    exc,
+                    exc_kind(exc),
                 )
 
     raise QuarantineAgentError(f"all providers exhausted: {[n for n, _ in chain]}") from last_exc
@@ -499,7 +500,7 @@ async def quarantine_verify(text: str) -> dict[str, Any]:
             response_schema=DETECTION_RESPONSE_SCHEMA,
         )
     except QuarantineAgentError as exc:
-        logger.warning("Q-Agent verification failed: %s", exc)
+        logger.warning("Q-Agent verification failed: %s", exc_kind(exc))
         return {"injection_detected": False, "l3_unavailable": True}
     parsed.pop("_usage", None)
     return parsed
@@ -572,7 +573,7 @@ async def quarantine_redact(
             content, prompt, briefing=extraction_briefing(detection)
         )
     except QuarantineAgentError as exc:
-        logger.warning("Q-Agent extraction failed: %s", exc)
+        logger.warning("Q-Agent extraction failed: %s", exc_kind(exc))
         return CleanResult(refused_by="t2_unavailable")
     return await _judge_extraction(extraction, content)
 
@@ -643,7 +644,7 @@ async def quarantine_detect(
                 response_schema=DETECTION_RESPONSE_SCHEMA,
             )
     except QuarantineAgentError as exc:
-        logger.warning("Q-Agent detection failed: %s", exc)
+        logger.warning("Q-Agent detection failed: %s", exc_kind(exc))
         # "We could not ask" is not "no injection". The distinct marker lets
         # enforcement tell an unavailable judge from a clean verdict — a
         # block-mode profile fails closed on it, and the adversarial review

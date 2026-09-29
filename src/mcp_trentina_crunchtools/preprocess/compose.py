@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from ..defense import Provenance
+from ..logsafe import exc_kind, exc_where
 from .base import Cost, PreProcessContext, PreProcessor, PreProcessResult
 
 logger = logging.getLogger(__name__)
@@ -144,8 +145,13 @@ async def _run_one(
 ) -> PreProcessResult:
     try:
         return await processor.run(payload, ctx)
-    except Exception:
-        logger.exception("preprocess: %s failed; passing payload through", processor.name)
+    except Exception as exc:
+        logger.error(  # the message may carry the payload (#262)
+            "preprocess: %s failed; passing payload through: %s at %s",
+            processor.name,
+            exc_kind(exc),
+            exc_where(exc),
+        )
         size = len(payload.encode("utf-8"))
         return PreProcessResult(
             name=processor.name,

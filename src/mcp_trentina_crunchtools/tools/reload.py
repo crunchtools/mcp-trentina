@@ -66,6 +66,7 @@ from ..gateway.router import invalidate_profile_cache
 from ..gateway.scope import CallerScope, require_caller
 from ..gateway.service import find_operator, judge_of, log_service_identity
 from ..gateway.sessions import session_registry
+from ..logsafe import exc_kind
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -501,7 +502,7 @@ async def reload_profiles() -> dict[str, Any]:
     try:
         scope = require_caller("reload_profiles")
     except ScopeError as exc:
-        logger.warning("reload_profiles refused: %s", exc)
+        logger.warning("reload_profiles refused: %s", exc_kind(exc))
         return {"reloaded": False, "error": str(exc)}
 
     path = active.path
@@ -520,7 +521,7 @@ async def reload_profiles() -> dict[str, Any]:
         # traceback goes to the journal because the returned message is
         # load_profiles' own for every expected cause, and an unexpected one
         # is exactly where an operator needs more than its str().
-        logger.warning(
+        logger.warning(  # logsafe: ours — the operator's profiles.yaml
             "gateway: profile reload REFUSED from %s: %s",
             path,
             exc,
