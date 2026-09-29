@@ -1017,7 +1017,7 @@ class TestRoomAnnouncements:
 
         def gateway(request: httpx.Request) -> httpx.Response:
             seen.append(json.loads(request.content))
-            return httpx.Response(200)
+            return httpx.Response(200, json={"outcome": "mapped"})
 
         bridge = _bridge(tmp_path, FakeNio(), gateway)
         bridge._announced.clear()

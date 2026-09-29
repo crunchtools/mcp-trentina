@@ -372,6 +372,12 @@ class Bridge:
             }
             announcement["room"]["members"] = members
             outcome = await self.forward(announcement)
+            # Remembered only once the gateway answered it. A report it
+            # dropped would otherwise leave the gateway holding the old
+            # members until a restart: a quiet agent that joined would stay
+            # unseen, so the next sync reports again instead.
+            if not outcome:
+                continue
             self._announced[room_id] = digest
             if outcome == ROOM_REFUSED:
                 logger.warning(

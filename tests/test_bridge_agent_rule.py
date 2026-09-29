@@ -217,6 +217,23 @@ class TestMembershipReports:
         assert again["type"] == ROOM_ANNOUNCE
         assert again["room"]["members"] == [SCOTT, "@friend:matrix.org"]
 
+    async def test_a_report_the_gateway_did_not_take_is_sent_again(self, tmp_path: Path) -> None:
+        answers = iter([httpx.Response(400), httpx.Response(200, json={"outcome": "mapped"})])
+        seen: list[dict[str, Any]] = []
+
+        def gateway(request: httpx.Request) -> httpx.Response:
+            seen.append(json.loads(request.content))
+            return next(answers)
+
+        nio = _FakeNio()
+        bridge = _bridge(tmp_path, nio, gateway)
+        _set_members(nio, UPSTREAM_ROOM, SCOTT, "@quiet-agent:matrix.org")
+        await bridge.process(_sync(), first=False)
+        await bridge.process(_sync(next_batch="s3"), first=False)
+        await bridge.process(_sync(next_batch="s4"), first=False)
+        assert len(seen) == 2, "retried once after the drop, then remembered"
+        assert seen[0]["event_id"] == seen[1]["event_id"]
+
     async def test_a_room_the_gateway_refuses_is_left(self, tmp_path: Path) -> None:
         def gateway(_request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json={"outcome": "refused"})
