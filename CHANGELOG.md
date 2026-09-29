@@ -10,6 +10,11 @@ under that name.
 
 ## [Unreleased]
 
+### Security
+
+- `llm_providers` keys take the `_FILE` form like every other secret, so a
+  provider key no longer has to sit in the process environment (#268).
+
 ## [0.48.0] - 2026-09-29
 
 The rest of the #90 audit: cross-agent channels (blocklist, `cache_flush`,

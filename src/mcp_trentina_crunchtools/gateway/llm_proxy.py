@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -31,6 +30,7 @@ from ..logsafe import exc_kind, exc_where, redact_source
 from .auth import resolve_profile_by_token
 from .context import profile_context
 from .errors import ProfileConfigError
+from .loader import read_secret_env
 from .proxy_utils import (
     PLAIN_TEXT,
     filter_response_headers,
@@ -134,10 +134,11 @@ def load_llm_providers(
         provider = LlmProvider(**body)
         if not provider.enabled:
             continue
-        key = os.environ.get(provider.api_key_env, "")
+        key = read_secret_env(provider.api_key_env)
         if not key:
             raise ProfileConfigError(
-                f"llm_providers.{name}: env var {provider.api_key_env} not set or empty",
+                f"llm_providers.{name}: env var {provider.api_key_env} (or "
+                f"{provider.api_key_env}_FILE) not set or empty",
             )
         provider.api_key = SecretStr(key)
         providers[name] = provider
