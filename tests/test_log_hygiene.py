@@ -468,6 +468,38 @@ def test_no_log_call_formats_an_exception_message() -> None:
     assert not found, "\n".join(found)
 
 
+def test_install_holds_the_sdk_loggers_above_debug() -> None:
+    names = ("httpcore", "mcp", "fastmcp", "sse_starlette", "hpack", "h2")
+    saved = {name: logging.getLogger(name).level for name in names}
+    try:
+        logsafe.install(logging.DEBUG)
+        assert logging.getLogger("httpcore").level == logging.WARNING
+        for name in names[1:]:
+            assert logging.getLogger(name).level == logging.INFO
+            assert not logging.getLogger(name).isEnabledFor(logging.DEBUG)
+    finally:
+        for name, level in saved.items():
+            logging.getLogger(name).setLevel(level)
+
+
+def test_exc_where_names_frames_not_the_message() -> None:
+    def inner() -> None:
+        raise RuntimeError(CANARY)
+
+    def outer() -> None:
+        inner()
+
+    try:
+        outer()
+    except RuntimeError as exc:
+        where = logsafe.exc_where(exc)
+    assert where.startswith("test_log_hygiene.py:")
+    assert " in inner < " in where
+    assert " in outer < " in where
+    assert CANARY not in where
+    assert logsafe.exc_where(RuntimeError(CANARY)) == ""
+
+
 def test_redact_source_is_a_stable_fingerprint() -> None:
     assert logsafe.redact_source(URL) == logsafe.redact_source(URL)
     assert CANARY not in logsafe.redact_source(URL)
