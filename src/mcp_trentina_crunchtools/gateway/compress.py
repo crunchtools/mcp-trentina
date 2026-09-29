@@ -158,11 +158,11 @@ async def maybe_trigger_compression() -> None:
     global _compress_triggered, _compress_task
     if _profiles is None:
         return
-    if _compress_task is not None and _compress_task.done() and _compress_task.exception():
-        logger.warning(
-            "compress: previous task failed: %s — allowing retry",
-            type(_compress_task.exception()).__name__,
-        )
+    failed = (
+        _compress_task.exception() if _compress_task is not None and _compress_task.done() else None
+    )
+    if failed is not None:
+        logger.warning("compress: previous task failed: %s — allowing retry", exc_kind(failed))
         _compress_triggered = False
     if _compress_triggered:
         return

@@ -190,7 +190,7 @@ class ProfileBridge:
             kind = event.get("type")
             stages.report(
                 f"{self.profile.name} inbound {redact_source(str(event.get('event_id')))} "
-                f"{kind if kind in _CARRIED else 'other'} {outcome}"
+                f"{kind if isinstance(kind, str) and kind in _CARRIED else 'other'} {outcome}"
             )
         return outcome
 

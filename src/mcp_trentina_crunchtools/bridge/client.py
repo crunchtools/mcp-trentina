@@ -442,7 +442,7 @@ class Bridge:
         logger.warning(
             "bridge[%s]: parked %s in %s awaiting key %s",
             self.settings.profile,
-            event.event_id,
+            redact_source(event.event_id),
             redact_source(room_id),
             redact_source(event.session_id),
         )

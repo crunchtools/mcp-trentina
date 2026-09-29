@@ -120,7 +120,8 @@ class _HttpxFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         if isinstance(args, tuple) and len(args) >= 2:
-            record.args = (args[0], redact_source(args[1]), *args[2:])
+            method = args[0] if args[0] in _METHODS else redact_source(args[0])
+            record.args = (method, redact_source(args[1]), *args[2:])
         return True
 
 

@@ -8,10 +8,9 @@ the URL, a backend's error text — with every logger at DEBUG after
 ``logsafe.install``, the way production runs when an operator lowers the
 level. The canary must appear in no record's message, exception or stack.
 
-Not driven here, and why: the Matrix proxy and the LLM proxy (their paths
-are reduced by the same ``redact_source`` these tests exercise, and standing
-either up needs an upstream homeserver or provider), and the bridge process
-(its own container and logger configuration).
+Not driven here: the Matrix proxy and the LLM proxy. Standing either up needs
+an upstream homeserver or provider; their lines go through the same
+``redact_source`` and ``exc_kind``, and the static check below covers them.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ import functools
 import logging
 import pathlib
 from collections.abc import Iterator
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
@@ -290,6 +290,40 @@ class TestProxiedTools:
                     "params": {"name": f"{CANARY}{NAMESPACE_SEP}{CANARY}", "arguments": {}},
                 },
             )
+
+
+@pytest.mark.parametrize(
+    ("listed", "name", "verbatim"),
+    [
+        ("post", "post", True),
+        ("post", CANARY, False),  # typed by the caller, never listed
+        (f"{CANARY} forged\nline", f"{CANARY} forged\nline", False),  # listed, not a tool name
+    ],
+)
+def test_loggable_tool(listed: str, name: str, verbatim: bool) -> None:
+    url = "http://mcp-slack:8000/mcp"
+    backend_mod._tool_list_cache[url] = [{"name": listed, "inputSchema": {}}]
+    assert (backend_mod.loggable_tool(url, name) == name) is verbatim
+
+
+class TestBridgeProcess:
+    async def test_gateway_refusal(self, tmp_path: Path, captured: _Capture) -> None:
+        from .test_bridge_process import ROOM, FakeNio, _bridge
+
+        def gateway(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(400, text=f"refused {CANARY}")
+
+        event = SimpleNamespace(
+            sender="@scott:matrix.org",
+            source={
+                "type": "m.room.message",
+                "event_id": f"${CANARY}",
+                "sender": "@scott:matrix.org",
+                "content": {"msgtype": "m.text", "body": CANARY},
+            },
+        )
+        await _bridge(tmp_path, FakeNio(), gateway).handle(ROOM, event)
+        assert any("gateway refused" in r.getMessage() for r in captured.records)
 
 
 # ------------------------------------------------------------ HTTP edge
