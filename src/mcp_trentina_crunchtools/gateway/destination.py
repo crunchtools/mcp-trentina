@@ -83,6 +83,14 @@ def _param(value: Any) -> str | None:
 
     The input is capped BEFORE it is serialized: an agent-sized argument
     must not cost an agent-sized ``json.dumps`` on every call.
+
+    Args:
+        value: The declared argument as the agent sent it.
+
+    Returns:
+        None for an absent or empty value. A scalar as text, a list's first
+        ``_MAX_ITEMS`` scalars as JSON, or ``NON_SCALAR`` for anything else,
+        each at most ``MAX_DESTINATION_CHARS`` long.
     """
     if value is None or value == "":
         return None

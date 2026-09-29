@@ -463,3 +463,17 @@ class TestFanoutCheck:
     def test_a_missing_database_is_unknown(self, tmp_path: Path) -> None:
         status, _ = _load_check().check(["--db", str(tmp_path / "none.db"), *THRESHOLDS])
         assert status == 3
+
+
+def test_a_lost_audit_row_is_logged_not_raised(caplog: pytest.LogCaptureFixture) -> None:
+    """The audit never fails the call, and never loses a row silently (#281)."""
+    from mcp_trentina_crunchtools.gateway import router
+
+    with patch.object(router, "record_gateway_call", side_effect=OSError("disk full C0SECRET")):
+        router._audit("kage", "slack", "send_message", Outcome.OK, 1)
+
+    lost = [r for r in caplog.records if "audit row lost" in r.getMessage()]
+    assert len(lost) == 1
+    assert "profile=kage" in lost[0].getMessage()
+    assert "OSError" in lost[0].getMessage()
+    assert "C0SECRET" not in lost[0].getMessage()

@@ -356,6 +356,14 @@ def _lost_destination_rules(before: Profile, after: Profile) -> list[str]:
 
     A backend renamed AND repointed has no identity left to check, so it is
     held by the count alone. New rules are free to add.
+
+    Args:
+        before: The caller's profile as it runs now.
+        after: The same profile as the file on disk would make it.
+
+    Returns:
+        Every lost rule as ``tool:param``, sorted. Empty means the reload
+        keeps every rule, and the caller refuses the reload otherwise.
     """
 
     def rules(profile: Profile) -> Counter[tuple[str, str]]:
