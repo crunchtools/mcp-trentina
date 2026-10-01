@@ -1,8 +1,7 @@
 """Security advisories for suspicious fetch failures.
 
-Reduced from tools/fetch.py before #262. The gateway's journal is also
-readable by agents through the podman and systemd backends'
-container_logs and journal_query tools.
+The gateway's journal is also readable by agents through the podman and
+systemd backends' container_logs and journal_query tools.
 """
 
 from __future__ import annotations

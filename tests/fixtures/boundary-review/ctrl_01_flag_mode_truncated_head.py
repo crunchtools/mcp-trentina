@@ -1,7 +1,7 @@
 """Delivery decision for a payload over the admission cap.
 
-Reduced from defense.defend and tools/judged.py. The contract, from CLAUDE.md
-"Layer 2 scanning limits" and docs/defense-pipeline.md:
+The contract, from CLAUDE.md "Layer 2 scanning limits" and
+docs/defense-pipeline.md:
 
 - block and redact refuse an oversize payload at admission, with no L2 or L3
   call; nothing partial is ever judged clean for them.

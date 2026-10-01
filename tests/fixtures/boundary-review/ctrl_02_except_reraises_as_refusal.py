@@ -1,8 +1,8 @@
 """L3 over a proxied response, where an L3 failure must never become clean.
 
-Reduced from gateway/ingress_defense.py and gateway/router.py. The router
-writes one audit row per call; ``classify_exception`` walks ``__cause__`` and
-maps a BlockedSourceError to Outcome.BLOCKED_DEFENSE (outcomes.py).
+The router writes one audit row per call; ``classify_exception`` walks
+``__cause__`` and maps a BlockedSourceError to Outcome.BLOCKED_DEFENSE
+(outcomes.py).
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ async def judge_l3(content: str, *, source: str, mode: str) -> dict[str, Any]:
     #   owner: this function; the router owns the audit row
     #   evidence: T1 `except Exception` leaves CancelledError and KeyboardInterrupt
     #     to propagate; T3 outcomes.classify_exception maps BlockedSourceError to
-    #     BLOCKED_DEFENSE via __cause__; T3 CLAUDE.md logging rule (#262)
+    #     BLOCKED_DEFENSE via __cause__; T3 CLAUDE.md logging rule
     """
     try:
         assessment = await quarantine_detect(content, layer1_context="")

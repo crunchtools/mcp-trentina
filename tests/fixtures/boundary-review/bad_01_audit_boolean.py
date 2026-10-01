@@ -1,8 +1,7 @@
 """Gateway tools/call routing with an audit row per call.
 
-Reduced from gateway/router.py as of 353f261 (before #87). Every call that
-reaches a backend is recorded in gateway_calls, so docs/audit-log.md can
-promise operators an ok/error count per tool.
+Every call that reaches a backend is recorded in gateway_calls, so
+docs/audit-log.md can promise operators an ok/error count per tool.
 """
 
 from __future__ import annotations

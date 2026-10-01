@@ -39,15 +39,20 @@ RETRIES = 3
 RETRY_BASE_DELAY = 1.0
 RETRY_MAX_DELAY = 15.0
 RETRYABLE_MARKERS = (
-    "503", "429", "500", "502", "504", "overload",
-    "timed out", "timeout", "unavailable", "connect",
+    "503",
+    "429",
+    "500",
+    "502",
+    "504",
+    "overload",
+    "timed out",
+    "timeout",
+    "unavailable",
+    "connect",
 )
 _DETECTION_FAILED_PREFIX = "Q-Agent detection failed"
 
-_enabled = (
-    bool(os.environ.get("GEMINI_API_KEY"))
-    and os.environ.get("TRENTINA_LIVE_L3") == "1"
-)
+_enabled = bool(os.environ.get("GEMINI_API_KEY")) and os.environ.get("TRENTINA_LIVE_L3") == "1"
 
 pytestmark = pytest.mark.skipif(
     not _enabled,
@@ -95,7 +100,8 @@ async def test_live_detection_floor() -> None:
     results = await asyncio.gather(*[_bounded(c) for c in ATTACKS])
 
     completed = [
-        (c, r) for c, r in results
+        (c, r)
+        for c, r in results
         if not str(r.get("summary", "")).startswith(_DETECTION_FAILED_PREFIX)
     ]
     completion = len(completed) / len(ATTACKS)

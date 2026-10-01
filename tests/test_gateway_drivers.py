@@ -79,11 +79,7 @@ class TestRegistryAndConfigAgree:
     def test_every_driver_is_reachable_on_some_channel(self) -> None:
         """A driver whose kind matches no channel is configurable and dead."""
         for name in PREPROCESSORS:
-            reachable = [
-                ch
-                for ch in Channel
-                if _buildable(name, ch)
-            ]
+            reachable = [ch for ch in Channel if _buildable(name, ch)]
             assert reachable, f"{name} cannot run on any channel"
 
 
@@ -185,9 +181,7 @@ class TestTheLockFiresAtStartup:
             async def run(self, payload: str, ctx: Any) -> Any:
                 raise AssertionError("never called")
 
-        monkeypatch.setitem(
-            PREPROCESSORS, "petit", lambda _cfg, _keys: cast("Any", _MatrixOnly())
-        )
+        monkeypatch.setitem(PREPROCESSORS, "petit", lambda _cfg, _keys: cast("Any", _MatrixOnly()))
         cfg = tmp_path / "profiles.yaml"
         cfg.write_text(
             """

@@ -1,8 +1,8 @@
 """Loading the L2 model at startup.
 
-Reduced from quarantine/classifier.py. Runs once from the server lifespan,
-before any route is served, so no request, caller or backend is in flight.
-The path is CLASSIFIER_MODEL_PATH, which only the operator sets.
+Runs once from the server lifespan, before any route is served, so no
+request, caller or backend is in flight. The path is CLASSIFIER_MODEL_PATH,
+which only the operator sets.
 """
 
 from __future__ import annotations
