@@ -40,7 +40,7 @@ from .config import canonical_mode, get_config
 from .errors import ModeNotPermittedError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
     from .defense import DefenseVerdict
 
@@ -173,6 +173,21 @@ class Gaps:
         )
 
 
+def _l3_answered(assessment: Mapping[str, Any] | None) -> bool:
+    """L3 gave a verdict: it ran, and said yes or no.
+
+    An assessment without a boolean ``injection_detected`` is not a clean
+    one (#294). ``_call_gemini`` refuses such an answer at the source; this
+    is the same rule where the gap is decided, so no other producer of an
+    assessment can reopen it.
+    """
+    return (
+        assessment is not None
+        and not assessment.get("l3_unavailable")
+        and isinstance(assessment.get("injection_detected"), bool)
+    )
+
+
 def gaps_of(verdict: DefenseVerdict) -> Gaps:
     """The one derivation of a verdict's gaps. warning, report and gateway read it."""
     has_text = bool(verdict.pipeline.content.strip())
@@ -187,7 +202,7 @@ def gaps_of(verdict: DefenseVerdict) -> Gaps:
     return Gaps(
         l2_unavailable=asked and classification is None and not l2_truncated,
         l2_truncated=l2_truncated,
-        l3_unavailable=bool(asked and (assessment is None or assessment.get("l3_unavailable"))),
+        l3_unavailable=bool(asked and not _l3_answered(assessment)),
         l3_truncated=verdict.l3_truncated,
         oversize=oversize,
     )

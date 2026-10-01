@@ -247,7 +247,9 @@ its own posture and nothing enforced it. Now the policy does:
   Flagged → `redact` only, NEVER `flag`; gap-only → `flag`.
 
 No text written by L3 reaches an agent: finding types are a closed enum
-(`prompts.FINDING_TYPES`).
+(`prompts.FINDING_TYPES`). Every L3 answer is held to its response schema in
+`_call_gemini` (`quarantine/schema.py`, #294); outside it is
+`MalformedResponseError` and then `l3_unavailable`, never clean.
 
 NOTE: `defense.enforcement` is the DEFAULT mode and accepts only `flag` and
 `block` — a call that omits the mode carries no extraction prompt.

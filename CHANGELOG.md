@@ -66,6 +66,20 @@ repeatable.
 
 ### Security
 
+- Every L3 answer is checked against the schema it was asked for, at the
+  provider-response boundary (#294). An answer without a boolean
+  `injection_detected` used to count as a complete, clean verdict; an
+  off-set `risk_level` reached `_trentina_warning`, the `[TRENTINA WARNING]`
+  text and the detection row as L3 prose; a non-string `title` or
+  `extracted_text` was delivered by redact unchecked; and `content: null`
+  (an OpenAI structured-output refusal) or a JSON list raised `TypeError`,
+  skipping the fallback chain, so Matrix annotate forwarded with no warning.
+  Each is now `MalformedResponseError`, asked once more, then
+  `l3_unavailable` or a redact refusal. Provider envelopes that are not the
+  provider's shape fail the same way. `risk_level` is reduced to
+  `RISK_LEVELS` where the verdict is decided too, and `gaps_of` treats an
+  assessment without a boolean verdict as a gap. An off-enum finding type
+  still becomes `other` (`ENUM_FALLBACKS`).
 - `llm_providers` keys take the `_FILE` form like every other secret, so a
   provider key no longer has to sit in the process environment (#268).
 - `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and
