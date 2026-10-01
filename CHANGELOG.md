@@ -10,6 +10,8 @@ under that name.
 
 ## [Unreleased]
 
+## [0.49.1] - 2026-10-01
+
 ### Fixed
 - A DISABLED `llm_providers` entry with a non-standard upstream and no `api:`
   no longer stops startup; only an enabled one must name its API shape. 0.49.0
