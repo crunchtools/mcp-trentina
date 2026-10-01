@@ -1,7 +1,7 @@
 """fetch_url: the one HTTP GET behind fetch_tool.
 
-Reduced from client.py before #260. The gateway runs on the container
-network beside backends that have no auth of their own.
+The gateway runs on the container network beside backends that have no auth
+of their own.
 """
 
 from __future__ import annotations

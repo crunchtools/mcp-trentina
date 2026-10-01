@@ -10,7 +10,13 @@
 # names one of `obligations` or hits one of `keywords` (the cheap check) AND
 # the judge model agrees it describes `expectation`. A control fails on any
 # finding at `max_severity` or above, or if the judge says a finding flags
-# the behavior in `must_not_flag`.
+# the behavior in `must_not_flag`. A known-bad case also fails when the judge
+# calls any other finding at `max_severity` (default medium) or above
+# spurious, and either kind fails on a line number outside the file (#300).
+#
+# The reviewer sees each fixture as case_NN.py, never its file name. Keep the
+# history (which issue or commit, before or after a fix) in `source` here and
+# out of the fixture: a docstring citing "before #87" is the answer.
 
 suite_name: trentina_boundary_review
 skill: SKILL.md

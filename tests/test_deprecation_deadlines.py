@@ -91,9 +91,7 @@ class TestDeprecationDeadlines:
             assert match is not None, f"pattern no longer matches: {text!r}"
             assert tuple(int(g) for g in match.groups()) == expected
 
-    @pytest.mark.parametrize(
-        ("rel", "lineno", "text", "version"), _notices(), ids=str
-    )
+    @pytest.mark.parametrize(("rel", "lineno", "text", "version"), _notices(), ids=str)
     def test_the_named_release_has_not_shipped(
         self, rel: str, lineno: int, text: str, version: tuple[int, int, int]
     ) -> None:

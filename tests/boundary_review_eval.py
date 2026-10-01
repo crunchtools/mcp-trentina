@@ -5,9 +5,15 @@ line-numbered, as the user turn; ask for findings as JSON (structured output);
 then grade them twice. The cheap check matches a finding's obligation code or
 a keyword. The judge, a second and cheaper model, says whether the findings
 describe each expectation (known-bad) or flag the documented behavior
-(control). A known-bad case passes when every must_find passes both checks.
-A control fails on any finding at or above its ``max_severity``, or when the
-judge says a finding flags its ``must_not_flag`` behavior.
+(control). A known-bad case passes when every must_find passes both checks
+and the judge calls no other finding at or above ``max_severity`` spurious
+(#300). A control fails on any finding at or above its ``max_severity``, or
+when the judge says a finding flags its ``must_not_flag`` behavior. Either
+kind fails on a finding whose line is outside the file.
+
+The reviewer sees the fixture as ``case_NN.py`` with no path: the real file
+name says which cases are controls, and the history (which issue fixed what)
+lives in EVAL.yml's ``source``, never in the fixture.
 
 Exits 0 when every case passes, 1 on any miss or any control flagged, and 2
 when it cannot run (no ``ANTHROPIC_API_KEY``, bad EVAL.yml). httpx only; no
@@ -97,24 +103,48 @@ FINDINGS_SCHEMA: dict[str, Any] = {
     },
 }
 
+_VERDICTS: dict[str, Any] = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["id", "yes", "reason"],
+        "properties": {
+            "id": {"type": "string"},
+            "yes": {"type": "boolean"},
+            "reason": {"type": "string"},
+        },
+    },
+}
+
 JUDGE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "required": ["verdicts"],
+    "properties": {"verdicts": _VERDICTS},
+}
+
+# Known-bad cases also grade precision: every finding not describing an
+# expectation is judged valid (a real defect in the file) or spurious.
+PRECISION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["verdicts", "extras"],
     "properties": {
-        "verdicts": {
+        "verdicts": _VERDICTS,
+        "extras": {
             "type": "array",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["id", "yes", "reason"],
+                "required": ["index", "valid", "reason"],
                 "properties": {
-                    "id": {"type": "string"},
-                    "yes": {"type": "boolean"},
+                    "index": {"type": "integer"},
+                    "valid": {"type": "boolean"},
                     "reason": {"type": "string"},
                 },
             },
-        }
+        },
     },
 }
 
@@ -130,10 +160,7 @@ class CaseResult:
     passed: bool
     notes: list[str] = field(default_factory=list)
     findings: list[dict[str, Any]] = field(default_factory=list)
-
-
-def _numbered(text: str) -> str:
-    return "\n".join(f"{n:4d}: {line}" for n, line in enumerate(text.splitlines(), 1))
+    spurious: int = 0
 
 
 def _finding_text(finding: dict[str, Any]) -> str:
@@ -158,6 +185,11 @@ def cheap_match(expectation: dict[str, Any], findings: list[dict[str, Any]]) -> 
         if any(word in _finding_text(finding) for word in words):
             return True
     return False
+
+
+def lines_outside(findings: list[dict[str, Any]], length: int) -> list[dict[str, Any]]:
+    """Findings citing a line the file does not have."""
+    return [f for f in findings if not 1 <= int(f.get("line") or 0) <= length]
 
 
 def over_severity(findings: list[dict[str, Any]], ceiling: str) -> list[dict[str, Any]]:
@@ -217,53 +249,77 @@ class Client:
         return parsed
 
 
+KNOWN_BAD_QUESTION = (
+    "For each expectation below, answer yes only if at least one finding "
+    "describes that same defect (same code location and same failure), "
+    "not merely a nearby or related concern. Then, under extras, judge EVERY "
+    "finding once, by its index: valid if it describes one of the expectations "
+    "or another real defect in the file as written, spurious if the code does "
+    "not do what it claims or the behavior is documented as intended."
+)
+CONTROL_QUESTION = (
+    "For each behavior below, answer yes if ANY finding treats that behavior "
+    "as a defect, at any severity."
+)
+
+
 async def _judge(
     client: Client,
     suite: dict[str, Any],
-    kind: str,
-    items: list[dict[str, Any]],
+    case: dict[str, Any],
+    source: str,
     findings: list[dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    if kind == "known_bad":
-        question = (
-            "For each expectation below, answer yes only if at least one finding "
-            "describes that same defect (same code location and same failure), "
-            "not merely a nearby or related concern."
-        )
-    else:
-        question = (
-            "For each behavior below, answer yes if ANY finding treats that behavior "
-            "as a defect, at any severity."
-        )
+) -> dict[str, Any]:
+    known_bad = case["kind"] == "known_bad"
+    items = case["must_find"] if known_bad else case["must_not_flag"]
     listing = "\n".join(f"- id={i['id']}: {' '.join(i['expectation'].split())}" for i in items)
+    indexed = [{"index": n, **f} for n, f in enumerate(findings)]
     user = (
-        f"{question}\n\n{listing}\n\nFindings (JSON):\n"
-        f"{json.dumps(findings, indent=1)}\n\nAnswer once per id."
+        f"{KNOWN_BAD_QUESTION if known_bad else CONTROL_QUESTION}\n\n{listing}\n\n"
+        f"The file reviewed:\n<file>\n{source}\n</file>\n\nFindings (JSON):\n"
+        f"{json.dumps(indexed, indent=1)}\n\nAnswer once per id."
     )
-    answer = await client.structured(
+    return await client.structured(
         model=suite["judge_model"],
         system="You grade a code reviewer's findings against fixed criteria. Be literal.",
         user=user,
-        schema=JUDGE_SCHEMA,
+        schema=PRECISION_SCHEMA if known_bad else JUDGE_SCHEMA,
         max_tokens=JUDGE_MAX_TOKENS,
     )
-    return {v["id"]: v for v in answer.get("verdicts", [])}
 
 
-def _grade_known_bad(
-    result: CaseResult, case: dict[str, Any], verdicts: dict[str, dict[str, Any]]
-) -> None:
+def _grade_known_bad(result: CaseResult, case: dict[str, Any], answer: dict[str, Any]) -> None:
+    verdicts = {v["id"]: v for v in answer.get("verdicts", [])}
     for item in case["must_find"]:
         cheap = cheap_match(item, result.findings)
         judged = verdicts.get(item["id"], {}).get("yes", False)
         if not (cheap and judged):
             result.passed = False
             result.notes.append(f"missed {item['id']} (cheap={cheap}, judge={judged})")
+    ceiling = SEVERITY_RANK[case.get("max_severity", "medium")]
+    extras = {e.get("index"): e for e in answer.get("extras", [])}
+    # A finding the judge skipped is ungraded, and ungraded is not precise.
+    unjudged = sorted(set(range(len(result.findings))) - extras.keys())
+    if unjudged:
+        result.passed = False
+        result.notes.append(f"judge left findings {unjudged} ungraded")
+    for index, extra in extras.items():
+        if extra.get("valid", True) or not isinstance(index, int):
+            continue
+        if not 0 <= index < len(result.findings):
+            continue
+        result.spurious += 1
+        finding = result.findings[index]
+        if SEVERITY_RANK.get(str(finding.get("severity")), 0) >= ceiling:
+            result.passed = False
+            result.notes.append(
+                f"spurious at {finding.get('severity')}: line {finding.get('line')}: "
+                f"{finding.get('title')}"
+            )
 
 
-def _grade_control(
-    result: CaseResult, case: dict[str, Any], verdicts: dict[str, dict[str, Any]]
-) -> None:
+def _grade_control(result: CaseResult, case: dict[str, Any], answer: dict[str, Any]) -> None:
+    verdicts = {v["id"]: v for v in answer.get("verdicts", [])}
     for finding in over_severity(result.findings, case.get("max_severity", "medium")):
         result.passed = False
         result.notes.append(
@@ -276,27 +332,39 @@ def _grade_control(
             result.notes.append(f"judge: flagged the documented behavior {item['id']}")
 
 
+def neutral_name(suite: dict[str, Any], case: dict[str, Any]) -> str:
+    """``case_NN.py``, by position in EVAL.yml: says nothing about the verdict."""
+    return f"case_{suite['cases'].index(case) + 1:02d}.py"
+
+
 async def run_case(
     client: Client, suite: dict[str, Any], skill: str, case: dict[str, Any], base: Path
 ) -> CaseResult:
     fixture = (base / suite["fixtures_dir"] / case["fixture"]).resolve()
-    rel = fixture.relative_to(REPO)
-    prompt = " ".join(suite["prompt_template"].format(fixture=rel).split())
-    user = f'{prompt}\n\n<file path="{rel}">\n{_numbered(fixture.read_text())}\n</file>'
+    if not fixture.is_relative_to(REPO):
+        raise EvalSetupError(f"case {case['name']!r}: fixture outside the repository")
+    lines = fixture.read_text().splitlines()
+    source = "\n".join(f"{n:4d}: {line}" for n, line in enumerate(lines, 1))
+    name = neutral_name(suite, case)
+    prompt = " ".join(suite["prompt_template"].format(fixture=name).split())
     review = await client.structured(
         model=suite["reviewer_model"],
         system=skill,
-        user=user,
+        user=f'{prompt}\n\n<file path="{name}">\n{source}\n</file>',
         schema=FINDINGS_SCHEMA,
         max_tokens=REVIEW_MAX_TOKENS,
     )
     result = CaseResult(case["name"], case["kind"], True, findings=review.get("findings", []))
-    items = case["must_find"] if case["kind"] == "known_bad" else case["must_not_flag"]
-    verdicts = await _judge(client, suite, case["kind"], items, result.findings)
+    for finding in lines_outside(result.findings, len(lines)):
+        result.passed = False
+        result.notes.append(
+            f"line {finding.get('line')} is outside the file: {finding.get('title')}"
+        )
+    answer = await _judge(client, suite, case, source, result.findings)
     if case["kind"] == "known_bad":
-        _grade_known_bad(result, case, verdicts)
+        _grade_known_bad(result, case, answer)
     else:
-        _grade_control(result, case, verdicts)
+        _grade_control(result, case, answer)
     return result
 
 
@@ -350,7 +418,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     for r in results:
         status = "PASS" if r.passed else "FAIL"
-        print(f"{status}  {r.kind:9s}  {r.name}  ({len(r.findings)} findings)")
+        print(
+            f"{status}  {r.kind:9s}  {r.name}  ({len(r.findings)} findings, {r.spurious} spurious)"
+        )
         for note in r.notes:
             print(f"        {note}")
     failed = [r.name for r in results if not r.passed]
