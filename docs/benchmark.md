@@ -190,14 +190,16 @@ is prompts.
 
 The periodic benchmark above is the deep, cross-provider comparison. For a
 per-push early-warning signal, CI also runs `tests/test_l3_live.py` — the corpus
-attacks through **live Gemini** (`gemini-2.5-flash`) — as the `Live L3
-Detection (Gemini)` job.
+attacks through a **live model on OpenRouter** (`google/gemini-2.5-flash`),
+production's L3 provider — as the `Live L3 Detection (OpenRouter)` job.
 
-It is engineered so a Google outage never reddens a PR:
+It is engineered so a provider outage never reddens a PR:
 
-- It only runs where a real key exists (`HAS_GEMINI_KEY`); fork PRs skip it.
-- The test itself is gated on `GEMINI_API_KEY` + `TRENTINA_LIVE_L3=1`, so it
-  never fires during normal local `pytest`.
+- It only runs where `OPENROUTER_API_KEY` is available; without it (fork PRs)
+  the job says so with a warning rather than passing silently.
+- The test itself is gated on the provider's key + `TRENTINA_LIVE_L3=1`, so it
+  never fires during normal local `pytest`. `TRENTINA_LIVE_L3_PROVIDER`
+  (default `openrouter`) picks another provider, e.g. `gemini`.
 - Transient failures are retried; if too few calls complete (a provider
   outage), it **skips as inconclusive** rather than failing.
 - It fails only on a genuine detection regression — detection among *completed*
@@ -206,7 +208,7 @@ It is engineered so a Google outage never reddens a PR:
 Run it locally the same way:
 
 ```bash
-GEMINI_API_KEY=... TRENTINA_LIVE_L3=1 QUARANTINE_MODEL=gemini-2.5-flash \
+OPENROUTER_API_KEY=... TRENTINA_LIVE_L3=1 QUARANTINE_MODEL=google/gemini-2.5-flash \
   uv run pytest tests/test_l3_live.py -v
 ```
 

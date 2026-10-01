@@ -1,13 +1,16 @@
-"""Live Layer 3 detection check — opt-in, Gemini only.
+"""Live Layer 3 detection check — opt-in.
 
 Runs the adversarial corpus attacks through the real Q-Agent against a live
-Gemini model and asserts detection stays above a floor. This is the one test
+model and asserts detection stays above a floor. The provider is
+``TRENTINA_LIVE_L3_PROVIDER``, default ``openrouter``: what production runs
+L3 on, so CI tests the path production takes. This is the one test
 that exercises actual semantic detection end to end, rather than the mocked
 fixtures in ``test_l3_integration.py``.
 
 Gating (so it never runs where it shouldn't):
 
-- Skipped unless BOTH ``GEMINI_API_KEY`` is set AND ``TRENTINA_LIVE_L3=1``. That
+- Skipped unless BOTH that provider's key (``OPENROUTER_API_KEY``,
+  ``GEMINI_API_KEY``, ...) is set AND ``TRENTINA_LIVE_L3=1``. That
   keeps it out of normal local ``pytest`` runs and out of fork-PR CI, where
   secrets are unavailable.
 
@@ -18,8 +21,9 @@ Outage tolerance (so a provider hiccup never reddens a PR):
   code regression — the test SKIPS as inconclusive instead of failing.
 - A genuine detection drop among the calls that *did* complete fails the build.
 
-Point it at a reliably-served model with ``QUARANTINE_MODEL=gemini-2.5-flash``;
-``gemini-2.5-flash-lite`` is prone to capacity 503s under load.
+Point it at a reliably-served model with ``QUARANTINE_MODEL``
+(``google/gemini-2.5-flash`` on OpenRouter, ``gemini-2.5-flash`` on Gemini);
+flash-lite is prone to capacity 503s and, through OpenRouter, malformed JSON.
 """
 
 from __future__ import annotations
@@ -52,17 +56,19 @@ RETRYABLE_MARKERS = (
 )
 _DETECTION_FAILED_PREFIX = "Q-Agent detection failed"
 
-_enabled = bool(os.environ.get("GEMINI_API_KEY")) and os.environ.get("TRENTINA_LIVE_L3") == "1"
+PROVIDER = os.environ.get("TRENTINA_LIVE_L3_PROVIDER", "openrouter")
+KEY_ENV = f"{PROVIDER.upper()}_API_KEY"
+_enabled = bool(os.environ.get(KEY_ENV)) and os.environ.get("TRENTINA_LIVE_L3") == "1"
 
 pytestmark = pytest.mark.skipif(
     not _enabled,
-    reason="live L3 disabled — set GEMINI_API_KEY and TRENTINA_LIVE_L3=1 to run",
+    reason=f"live L3 disabled — set {KEY_ENV} and TRENTINA_LIVE_L3=1 to run",
 )
 
 
 @pytest.mark.asyncio
 async def test_live_detection_floor() -> None:
-    """Live Gemini must flag at least DETECTION_FLOOR of the corpus attacks.
+    """The live model must flag at least DETECTION_FLOOR of the corpus attacks.
 
     Errored calls (post-retry API failures) are excluded from the denominator
     and, if too many, trigger an inconclusive skip.
@@ -76,7 +82,7 @@ async def test_live_detection_floor() -> None:
         }
         for attempt in range(RETRIES + 1):
             try:
-                result = await quarantine_detect(payload, provider_name="gemini")
+                result = await quarantine_detect(payload, provider_name=PROVIDER)
             except Exception as exc:
                 result = {
                     "injection_detected": False,
