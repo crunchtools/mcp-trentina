@@ -75,6 +75,21 @@ repeatable.
 
 ### Security
 
+- `dir_tool`'s stdlib-shadow scan re-listed the directory by path and opened
+  each shadow by path, following symlinks: `json.py -> /anywhere` was read
+  past `TRENTINA_READ_ROOTS` and the denylist. It now scans the entries the
+  listing read, through the descriptor confinement checked, opening each
+  shadow relative to it with `O_NOFOLLOW`; a symlinked shadow is reported
+  (`symlink`) and never read through, and a hard-linked one (`linked`) is
+  neither read nor sized (#287).
+- The confined open walks the resolved path one `O_NOFOLLOW` component at a
+  time, so an intermediate directory swapped for a symlink is refused even
+  where `/proc/self/fd` is unavailable; a FIFO or device in a root is refused
+  before it is opened; and a hard link to one of Trentina's own state or
+  config files is denied (#287).
+- Two shadow obfuscation regexes were quadratic on a long line (140 KB took
+  28-40 s of a worker thread); their gaps are bounded, and the scan reads at
+  most 4 MB per directory (#287).
 - The LLM proxy admits a request instead of forwarding it (#297). It passed
   the caller's path, query, raw body and every header but `Authorization`, so
   an agent on `--network=none` could have its provider fetch or connect
