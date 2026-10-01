@@ -5,18 +5,71 @@ querying pipeline state and signals for live event streaming.
 
 Uses dbus-fast (pure Python, async, no C deps). Gracefully degrades
 if D-Bus socket is unavailable (e.g. container without mount).
+
+Started from the server's lifespan, on the loop that serves (#298). It used
+to be started by ``main()`` on a throwaway loop that was closed the next
+line, so the bus connection died before the server began and the interface
+never answered a call. Who may own the name and call it is the policy file
+``dbus/com.crunchtools.Trentina1.conf``: root and the ``trentina`` group.
+Whatever crosses the bus is :func:`bus_view` of an event, never the event:
+sources are fingerprints and L3's assessment is reduced to its closed enum.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from typing import Any
 
+from .logsafe import redact_source
+from .quarantine.prompts import finding_types
+
 logger = logging.getLogger(__name__)
 
 _dbus_started = False
+_requested = False
+#: Held so the connection lives as long as the process, not the function.
+_bus: Any = None
+
+#: A bus socket that accepts and never answers must not hold up serving.
+CONNECT_TIMEOUT_SECONDS = 5.0
+
+
+def request_dbus() -> None:
+    """Ask for the interface; the lifespan starts it once the loop is serving."""
+    global _requested
+    _requested = True
+
+
+def dbus_requested() -> bool:
+    """Whether ``main()`` asked for the interface (``--no-dbus`` was absent)."""
+    return _requested
+
+
+def bus_view(event_data: dict[str, Any]) -> dict[str, Any]:
+    """What an event may say on the system bus.
+
+    The bus is readable by the host's operator tooling, not by the profiles
+    whose calls produced the events, so a source is a fingerprint that
+    correlates with the audit DB and nothing more. Detection details are L3's
+    assessment or L1's counts: numbers survive, prose does not, and findings
+    become their closed types.
+    """
+    view = dict(event_data)
+    if "source" in view:
+        view["source"] = redact_source(view["source"])
+    details = view.get("details")
+    if isinstance(details, dict):
+        closed: dict[str, Any] = {
+            key: value
+            for key, value in details.items()
+            if isinstance(value, (bool, int, float)) and not isinstance(value, str)
+        }
+        closed["finding_types"] = finding_types(details)
+        view["details"] = closed
+    return view
 
 
 def _has_dbus_fast() -> bool:
@@ -31,7 +84,7 @@ def _has_dbus_fast() -> bool:
 
 async def start_dbus() -> None:
     """Start the D-Bus interface. Non-blocking, logs warning on failure."""
-    global _dbus_started
+    global _dbus_started, _bus
 
     if _dbus_started:
         return
@@ -44,9 +97,11 @@ async def start_dbus() -> None:
         from dbus_fast import BusType
         from dbus_fast.aio import MessageBus
 
-        bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        bus = await asyncio.wait_for(
+            MessageBus(bus_type=BusType.SYSTEM).connect(), CONNECT_TIMEOUT_SECONDS
+        )
 
-        interface = _build_interface()
+        interface = _build_interface(asyncio.get_running_loop())
         bus.export("/com/crunchtools/Trentina1", interface)
 
         await bus.request_name("com.crunchtools.Trentina1")
@@ -57,6 +112,7 @@ async def start_dbus() -> None:
         event_bus.subscribe("request_processed", interface.on_request_processed)
         event_bus.subscribe("detection_occurred", interface.on_detection_occurred)
 
+        _bus = bus
         _dbus_started = True
         logger.info("D-Bus interface registered: com.crunchtools.Trentina1")
 
@@ -73,8 +129,13 @@ def l3_status(config: Any) -> dict[str, Any]:
     }
 
 
-def _build_interface() -> Any:
-    """Build the Trentina1 D-Bus interface object."""
+def _build_interface(loop: asyncio.AbstractEventLoop | None = None) -> Any:
+    """Build the Trentina1 D-Bus interface object.
+
+    ``loop`` is the one the bus connection lives on. Events are emitted from
+    worker threads as well as from it, and a signal must be sent from the
+    connection's own loop, so the callbacks hop onto it.
+    """
     from dbus_fast.service import ServiceInterface, method, signal
 
     class Trentina1Interface(ServiceInterface):
@@ -82,6 +143,13 @@ def _build_interface() -> Any:
 
         def __init__(self) -> None:
             super().__init__("com.crunchtools.Trentina1")
+            self._loop = loop
+
+        def _on_loop(self, fn: Any, *args: Any) -> None:
+            if self._loop is None:
+                fn(*args)
+            else:
+                self._loop.call_soon_threadsafe(fn, *args)
 
         @method()
         def GetStats(self) -> "s":  # type: ignore[name-defined]  # noqa: N802, F821
@@ -119,7 +187,7 @@ def _build_interface() -> Any:
             from .events import get_event_bus
 
             events = get_event_bus().recent_events(count)
-            return json.dumps(events)
+            return json.dumps([{**e, "data": bus_view(e.get("data", {}))} for e in events])
 
         @method()
         def GetLayerStatus(self) -> "s":  # type: ignore[name-defined]  # noqa: N802, F821
@@ -171,22 +239,26 @@ def _build_interface() -> Any:
 
         def on_request_processed(self, _event: str, event_payload: dict[str, Any]) -> None:
             """EventBus callback — emit D-Bus signal."""
-            self.RequestProcessed(
-                event_payload.get("tool", ""),
-                event_payload.get("source", ""),
-                event_payload.get("disposition", ""),
-                event_payload.get("risk_level", ""),
-                int(event_payload.get("duration_ms", 0)),
-                json.dumps(event_payload.get("stats", {})),
+            view = bus_view(event_payload)
+            self._on_loop(
+                self.RequestProcessed,
+                view.get("tool", ""),
+                view.get("source", ""),
+                view.get("disposition", ""),
+                view.get("risk_level", ""),
+                int(view.get("duration_ms", 0)),
+                json.dumps(view.get("stats", {})),
             )
 
         def on_detection_occurred(self, _event: str, event_payload: dict[str, Any]) -> None:
             """EventBus callback — emit D-Bus signal."""
-            self.DetectionOccurred(
-                event_payload.get("layer", ""),
-                event_payload.get("source", ""),
-                event_payload.get("severity", ""),
-                json.dumps(event_payload.get("details", {})),
+            view = bus_view(event_payload)
+            self._on_loop(
+                self.DetectionOccurred,
+                view.get("layer", ""),
+                view.get("source", ""),
+                view.get("severity", ""),
+                json.dumps(view.get("details", {})),
             )
 
     return Trentina1Interface()

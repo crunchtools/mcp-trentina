@@ -114,11 +114,10 @@ def main() -> None:
     get_db()
 
     if not args.no_dbus:
-        from .dbus_interface import start_dbus
+        from .dbus_interface import request_dbus
 
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(start_dbus())
-        loop.close()
+        # Started by the server's lifespan, on the loop that serves (#298).
+        request_dbus()
 
     gateway_enabled = os.environ.get("TRENTINA_GATEWAY_ENABLED", "").strip().lower() in _TRUTHY
 

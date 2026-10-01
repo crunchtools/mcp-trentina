@@ -30,7 +30,7 @@ Current blocklist state with:
 
 A scrolling table of defense pipeline events as they happen:
 
-- Source URL or file path
+- Source fingerprint (`sha256:<12> len=<n>`, matching the audit DB)
 - Detection scores from each layer
 - Risk level classification
 - Timestamp
@@ -50,6 +50,19 @@ The plugin connects to Trentina's D-Bus interface (`com.crunchtools.Trentina1`) 
 │  No React        │                       │  buffer         │
 └─────────────────┘                       └─────────────────┘
 ```
+
+### Who can reach it
+
+`dbus/com.crunchtools.Trentina1.conf` lets only root and members of the
+`trentina` group own the name, call its methods or receive its signals. Run
+Trentina as root or in that group, and open Cockpit with administrative
+access. Until 0.49.0 the default context allowed all three to any local user;
+the interface never answered then, because `main()` started it on a loop it
+closed straight away. It now starts from the server's lifespan.
+
+Nothing on the bus carries a caller's text. Every event's `source` is a
+fingerprint, and detection details keep their numbers and L3's finding types,
+never L3's prose.
 
 The plugin is vanilla JavaScript with PatternFly 6 CSS — no React, no build step, no node_modules. It renders directly from D-Bus signals using Cockpit's standard proxy API.
 
