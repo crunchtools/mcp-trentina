@@ -596,7 +596,9 @@ async def defend_json(
     texts: list[str] = []
     l2_inputs: list[str] = []
     stats = PipelineStats()
-    rebuilt = run_l1_json(payload, texts, stats, l2_inputs)
+    # L1 is CPU-bound and linear in the payload; on the loop, one large
+    # Matrix message or alert stalls every profile (#295).
+    rebuilt = await asyncio.to_thread(run_l1_json, payload, texts, stats, l2_inputs)
     joined = "\n".join(texts)
 
     verdict = await _defend_texts(
@@ -659,6 +661,17 @@ async def _defend_texts(
     )
 
 
+def _run_l1_segments(
+    segments: tuple[str, ...], texts: list[str], l2_inputs: list[str], stats: PipelineStats
+) -> None:
+    """L1 over each selected segment; run in a worker thread, never on the loop."""
+    for segment in segments:
+        leaf = run_l1(segment)
+        merge_stats(stats, leaf.stats)
+        texts.append(leaf.content)
+        l2_inputs.append(leaf.l2_input)
+
+
 async def defend_selection(
     view: Selection,
     *,
@@ -685,11 +698,7 @@ async def defend_selection(
     texts: list[str] = []
     l2_inputs: list[str] = []
     stats = PipelineStats()
-    for segment in view.segments:
-        leaf = run_l1(segment)
-        merge_stats(stats, leaf.stats)
-        texts.append(leaf.content)
-        l2_inputs.append(leaf.l2_input)
+    await asyncio.to_thread(_run_l1_segments, view.segments, texts, l2_inputs, stats)
 
     # Coverage goes to L3 on top of the standard briefing: "this scan read 4%
     # of the document" is context the judge should have before it concludes

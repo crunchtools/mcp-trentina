@@ -161,7 +161,9 @@ class TestTheBomb:
         headers = {"Content-Encoding": "gzip"}
         async with _BombServer("200 OK", headers, b"") as server:
             _route_to(monkeypatch, server)
-            async with egress.open_guarded("HEAD", "http://bomb.example/", timeout=5) as resp:
+            async with egress.open_guarded(
+                "HEAD", "http://bomb.example/", timeout=5, deadline=5
+            ) as resp:
                 assert resp.status_code == 200
 
 

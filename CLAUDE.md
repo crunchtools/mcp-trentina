@@ -40,7 +40,13 @@ uv run mcp-trentina-crunchtools
 - `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-trentina/trentina.db)
 - `TRENTINA_BLOCKLIST_TTL_DAYS` — days a block refusal stays on the blocklist
   (default 30, floor 1). Expired rows stop counting at once and are swept
-  hourly by `is_blocked` (#263).
+  hourly by `is_blocked` (#263), `SWEEP_BATCH` rows a pass (#295).
+- `TRENTINA_AUDIT_RETENTION_DAYS` — days a `gateway_calls` row is kept
+  (default 90; 0 keeps every row). Swept with the blocklist, from
+  `is_blocked` and `record_gateway_call`, in batches (#295).
+- `TRENTINA_FETCH_CONCURRENCY` — fetches in flight per profile (default 8).
+  A fetch also has `client.FETCH_DEADLINE` (60 s) of wall clock, every hop
+  and the body; `egress.open_guarded` requires a `deadline` (#295).
 - `TRENTINA_PERIMETER_DB` — perimeter verdict store, a SEPARATE database from the
   blocklist (default: `perimeter.db` beside `QUARANTINE_DB`). See `perimeter_db.py`
   for why it is its own file. Deleting it costs one slow restart and nothing else.
@@ -179,7 +185,11 @@ with input length. One cap bounds it (#225):
 
 Async callers must use `classify_async`. Calling the
 synchronous `classify()` from a coroutine blocks the event loop for the whole
-scan and takes the gateway down with it.
+scan and takes the gateway down with it. The same holds for L1 (#295):
+`run_l1`, `run_l1_json` and a document processor's selection run under
+`asyncio.to_thread`, and `quarantine_stats` reads SQLite in a worker on
+`database.snapshot_reader()`'s own connection. A new L1 regex goes into
+`tests/test_l1_patterns.py`'s linearity tests with the unit that repeats it.
 
 ## Tools
 

@@ -16,7 +16,11 @@ _INSTRUCTION_PATTERN = re.compile(
 
 _BASE64_PATTERN = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
 _HEX_PATTERN = re.compile(r"(?:0x|\\x)?([0-9a-f]{2}[\s,;]?){20,}", re.IGNORECASE)
-_DATA_URI_PATTERN = re.compile(r"data:text/[^;]*;base64,([A-Za-z0-9+/=]+)", re.IGNORECASE)
+# The subtype is bounded at RFC 6838's 127-character name limit. Unbounded,
+# `[^;]*` ran to the end of the payload from every `data:text/`, so repeating
+# that prefix made the scan quadratic: a 5 MB fetch held a worker for ~25 min
+# (#295).
+_DATA_URI_PATTERN = re.compile(r"data:text/[^;]{0,127};base64,([A-Za-z0-9+/=]+)", re.IGNORECASE)
 
 # Decoded characters past which a base64 run is left undecoded. Was 500, with
 # no recorded reason, and that made padding a free bypass: repeat an

@@ -15,6 +15,7 @@ crypto (matrix-js-sdk does exactly that).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -22,6 +23,7 @@ from urllib.parse import quote
 
 import httpx
 
+from ...httpbody import EncodedBodyError, TooLargeError, request_capped
 from .mapping import Room
 from .rewrite import escape_localpart
 
@@ -31,6 +33,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+# Wall clock for one homeserver call, the reply included (#295).
+_DEADLINE = 45.0
 
 # Rooms, names and memberships kept in memory per cache.
 _CACHE_ENTRIES = 4096
@@ -136,21 +140,25 @@ class AppService:
         path = "/" + "/".join(quote(segment, safe="") for segment in segments)
         params = {"user_id": as_user} if as_user else None
         try:
-            resp = await self._client.request(
+            resp, raw = await request_capped(
+                self._client,
                 method,
                 f"{self._homeserver}/_matrix/client/v3{path}",
+                deadline=_DEADLINE,
                 params=params,
                 json=body if body is not None else {},
                 headers={"Authorization": f"Bearer {self._token}"},
             )
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, TimeoutError, TooLargeError, EncodedBodyError) as exc:
             raise ConduitError(f"{method} {path}: {type(exc).__name__}") from exc
         try:
-            reply: dict[str, Any] = resp.json() if resp.content else {}
+            reply = json.loads(raw) if raw else {}
         except ValueError as exc:
             # A proxy's HTML error page, say. Not the caller's fault, so it is
             # a retryable delivery failure rather than a malformed request.
             raise ConduitError(f"{method} {path} -> {resp.status_code}, not JSON") from exc
+        if not isinstance(reply, dict):
+            raise ConduitError(f"{method} {path} -> {resp.status_code}, not a JSON object")
         if resp.status_code >= 400 and reply.get("errcode") not in ok_errcodes:
             raise ConduitError(
                 f"{method} {path} -> {resp.status_code} {reply.get('errcode')} {reply.get('error')}"

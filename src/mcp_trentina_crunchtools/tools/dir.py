@@ -91,7 +91,7 @@ async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str
     listing = "\n".join(
         f"{e['name']}\t{e['type']}\t{e['size'] if e['size'] is not None else '-'}" for e in entries
     )
-    pipeline = run_l1(listing)
+    pipeline = await asyncio.to_thread(run_l1, listing)
     pipeline.stats.shadows = ShadowStats.from_result(shadows)
 
     briefing = None

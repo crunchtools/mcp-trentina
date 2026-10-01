@@ -207,13 +207,16 @@ _PREFIX_PATTERNS = re.compile(
 # The only pattern that needs the previous line, so it is checked in the loop.
 _ROLE_LABEL = re.compile(r"^\s*\[?(?:system|assistant|user)\]?:", re.IGNORECASE)
 
-# A line break a reader sees as a WRAP, not a new line: Markdown's hard break
-# (two-plus trailing spaces or a trailing backslash before the newline), which
-# is how markdownify renders `<br>`, and a raw `<br>` in bytes the converter
-# never saw. Scanning per line let `ignore<br>previous instructions` evade
-# every multi-word pattern for the price of one tag (#179). A blank line is a
-# paragraph break and stays a separate unit.
-_SOFT_BREAK = re.compile(r"[ \t]{2,}\r?\n|\\\r?\n|<br\b[^<>]*>[ \t]*(?:\r?\n)?", re.IGNORECASE)
+# A line break a reader sees as a WRAP: Markdown's hard break (two-plus
+# trailing blanks or a backslash before the newline, markdownify's `<br>`) and
+# a raw `<br>`. Per-line scanning let `ignore<br>previous instructions` evade
+# every multi-word pattern (#179); a blank line stays a separate unit. The
+# lookbehind starts a blank run's match at its FIRST blank only: without it a
+# run with no newline after it was rescanned from every position, and 40k tabs
+# took 15 s (#295).
+_SOFT_BREAK = re.compile(
+    r"(?<![ \t])[ \t]{2,}\r?\n|\\\r?\n|<br\b[^<>]*>[ \t]*(?:\r?\n)?", re.IGNORECASE
+)
 
 
 @dataclass

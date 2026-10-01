@@ -44,7 +44,7 @@ Each agent profile reads only its own rows. Until #263 the blocklist was keyed o
 - An agent's refusal depends on nothing but its own history, its source and its mode policy. It carries no timestamp.
 - The operator profile, and a standalone server, read every live row: the gateway-wide view.
 - Rows written before #263 have no profile and are seen only by the operator.
-- A row older than `TRENTINA_BLOCKLIST_TTL_DAYS` no longer counts, and is deleted by an hourly sweep. Flag-mode observations are not blocklist rows and are kept.
+- A row older than `TRENTINA_BLOCKLIST_TTL_DAYS` no longer counts, and is deleted by an hourly sweep, at most 500 rows a pass until the backlog is gone (#295). Flag-mode observations are not blocklist rows and are kept.
 
 ### Viewing the Blocklist
 

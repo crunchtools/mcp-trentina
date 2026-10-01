@@ -44,7 +44,14 @@ import httpx
 from starlette.responses import Response
 
 from ..defense import defend, defend_json
-from ..httpbody import STATUS_TOO_LARGE, TooLargeError, max_request_bytes, read_capped
+from ..httpbody import (
+    STATUS_TOO_LARGE,
+    EncodedBodyError,
+    TooLargeError,
+    max_request_bytes,
+    read_capped,
+    request_capped,
+)
 from ..l1.pipeline import risk_level_for_count
 from ..logsafe import exc_kind
 from ..reserved import WARNING_KEY, strip_reserved, with_stripped
@@ -53,11 +60,13 @@ from .context import profile_context
 if TYPE_CHECKING:
     from starlette.requests import Request
 
-    from .profile import Profile
+    from .profile import AlertIngressConfig, Profile
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0)
+# Wall clock for one forward, the reply included (#295).
+_FORWARD_DEADLINE = 60.0
 _alert_client: httpx.AsyncClient | None = None
 
 
@@ -151,7 +160,6 @@ async def _handle_alert(
             status_code=500,
             media_type="text/plain",
         )
-    forward_url = profile.alert_ingress.forward_url
 
     try:
         body = await read_capped(request, max_request_bytes())
@@ -207,9 +215,15 @@ async def _handle_alert(
             media_type="application/json",
         )
 
+    return await _forward(profile, profile.alert_ingress, forward_body)
+
+
+async def _forward(profile: Profile, cfg: AlertIngressConfig, forward_body: bytes) -> Response:
+    """POST the judged body on, and relay the target's reply under the #267 cap."""
     fwd_headers: dict[str, str] = {"Content-Type": "application/json"}
-    if profile.alert_ingress.forward_secret is not None:
-        secret = profile.alert_ingress.forward_secret.get_secret_value()
+    forward_url = cfg.forward_url
+    if cfg.forward_secret is not None:
+        secret = cfg.forward_secret.get_secret_value()
         sig = hmac.new(
             secret.encode("utf-8"),
             forward_body,
@@ -219,12 +233,15 @@ async def _handle_alert(
 
     client = _get_alert_client()
     try:
-        resp = await client.post(
+        resp, reply = await request_capped(
+            client,
+            "POST",
             forward_url,
+            deadline=_FORWARD_DEADLINE,
             content=forward_body,
             headers=fwd_headers,
         )
-    except httpx.TimeoutException:
+    except (httpx.TimeoutException, TimeoutError):
         logger.warning("alert_ingress: timeout forwarding for profile %s", profile.name)
         return Response(
             content="forward timeout",
@@ -242,6 +259,19 @@ async def _handle_alert(
             status_code=502,
             media_type="text/plain",
         )
+    except (TooLargeError, EncodedBodyError, httpx.HTTPError) as exc:
+        # The forward target's reply is relayed to the sender; over the cap
+        # or encoded, it is refused rather than buffered (#295).
+        logger.warning(
+            "alert_ingress: unreadable reply forwarding for profile %s: %s",
+            profile.name,
+            exc_kind(exc),
+        )
+        return Response(
+            content="forward reply refused",
+            status_code=502,
+            media_type="text/plain",
+        )
 
     logger.info(
         "alert_ingress: forwarded to %s for profile %s (status=%d)",
@@ -251,7 +281,7 @@ async def _handle_alert(
     )
 
     return Response(
-        content=resp.content,
+        content=reply,
         status_code=resp.status_code,
         media_type=resp.headers.get("content-type", "application/json"),
     )

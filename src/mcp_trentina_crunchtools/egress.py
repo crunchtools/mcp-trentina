@@ -270,6 +270,7 @@ async def open_guarded(
     url: str,
     *,
     timeout: float,
+    deadline: float,
     headers: dict[str, str] | None = None,
 ) -> AsyncIterator[httpx.Response]:
     """Send ``method`` to ``url`` and follow up to five redirects, checking every hop.
@@ -278,6 +279,12 @@ async def open_guarded(
         method: HTTP method, sent unchanged except where a 303 makes it GET.
         url: the URL to fetch; checked like every hop after it.
         timeout: seconds for each connect, read and write, per hop.
+        deadline: wall-clock seconds for everything, from the first lookup
+            to the context's exit, the caller's body read included. The
+            per-operation ``timeout`` resets on every byte, so a server
+            dripping one byte inside it held a call open for as long as it
+            liked (#295). Required: no caller gets an unbounded fetch by
+            forgetting it.
         headers: sent on every hop, as httpx sends a client's headers.
 
     Yields the final ``httpx.Response``, still streaming, with ``history``
@@ -294,7 +301,21 @@ async def open_guarded(
     Raises:
         EgressRefusedError: a hop failed the check, dropped to http, there
             were more than five, or the body arrived encoded.
+        TimeoutError: ``deadline`` passed.
     """
+    async with asyncio.timeout(deadline):
+        async with _open_guarded(method, url, timeout=timeout, headers=headers) as resp:
+            yield resp
+
+
+@asynccontextmanager
+async def _open_guarded(
+    method: str,
+    url: str,
+    *,
+    timeout: float,
+    headers: dict[str, str] | None,
+) -> AsyncIterator[httpx.Response]:
     backend = PinnedBackend()
     transport = PinnedTransport(backend)
     sent = {k: v for k, v in (headers or {}).items() if k.lower() != "accept-encoding"}

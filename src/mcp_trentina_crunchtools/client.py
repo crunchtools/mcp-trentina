@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
 
+from .config import int_env
 from .egress import open_guarded
 from .errors import FetchError, UnsupportedContentTypeError
 
 log = logging.getLogger(__name__)
 
 FETCH_TIMEOUT = 30.0
+# Wall clock for the whole fetch, every hop and the body (#295). FETCH_TIMEOUT
+# is per read and resets on every byte. 5 MB in 60 s is ~85 KB/s.
+FETCH_DEADLINE = 60.0
+DEFAULT_FETCH_CONCURRENCY = 8
 MAX_RESPONSE_SIZE = 5_000_000  # 5 MB
 MAX_ERROR_BODY = 2048
 USER_AGENT = "mcp-trentina-crunchtools/0.1.0 (security-scanner)"
@@ -101,6 +107,31 @@ async def _error_body(resp: httpx.Response) -> str | None:
     return bytes(buf[:MAX_ERROR_BODY]).decode("utf-8", errors="replace")
 
 
+_slots: tuple[asyncio.AbstractEventLoop, dict[str, asyncio.Semaphore]] | None = None
+
+
+def _fetch_slot() -> asyncio.Semaphore:
+    """This profile's fetch slots: ``TRENTINA_FETCH_CONCURRENCY`` at once (#295).
+
+    Per profile, so one agent holding its slots open against a slow server
+    queues only itself; standalone is one tenant and one key. One table per
+    event loop, because a semaphore binds to the loop it first waits on.
+    """
+    from .gateway.context import get_current_profile
+
+    global _slots
+    loop = asyncio.get_running_loop()
+    if _slots is None or _slots[0] is not loop:
+        _slots = (loop, {})
+    profile = get_current_profile()
+    key = profile.name if profile is not None else ""
+    slot = _slots[1].get(key)
+    if slot is None:
+        limit = int_env("TRENTINA_FETCH_CONCURRENCY", DEFAULT_FETCH_CONCURRENCY, minimum=1)
+        slot = _slots[1][key] = asyncio.Semaphore(limit)
+    return slot
+
+
 async def fetch_url(url: str) -> tuple[str, str]:
     """Fetch a URL and return (content, content_type).
 
@@ -111,12 +142,27 @@ async def fetch_url(url: str) -> tuple[str, str]:
     against bytes actually received. Those are wire bytes: the guard asks for
     ``identity`` and refuses an encoded body (#276), so nothing is inflated.
 
+    The whole fetch, waiting for one of the profile's slots included, is
+    bounded by ``FETCH_DEADLINE``.
+
     Raises FetchError on failure, UnsupportedContentTypeError on non-text,
     EgressRefusedError when the guard refuses a hop.
     """
     try:
+        async with asyncio.timeout(FETCH_DEADLINE), _fetch_slot():
+            return await _fetch(url)
+    except TimeoutError as exc:
+        raise FetchError(url, "Request timed out") from exc
+
+
+async def _fetch(url: str) -> tuple[str, str]:
+    try:
         async with open_guarded(
-            "GET", url, timeout=FETCH_TIMEOUT, headers={"User-Agent": USER_AGENT}
+            "GET",
+            url,
+            timeout=FETCH_TIMEOUT,
+            deadline=FETCH_DEADLINE,
+            headers={"User-Agent": USER_AGENT},
         ) as resp:
             status = resp.status_code
             # Not only >= 400: a 3xx the guard did not follow (304, a 300

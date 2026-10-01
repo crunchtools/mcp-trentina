@@ -35,6 +35,9 @@ other input to ``Config.admission_tokens``."""
 DEFAULT_BLOCKLIST_TTL_DAYS = 30
 """Days a block refusal keeps its source on the calling profile's blocklist."""
 
+DEFAULT_AUDIT_RETENTION_DAYS = 90
+"""Days a ``gateway_calls`` audit row is kept; 0 keeps every row (#295)."""
+
 DEFAULT_CLASSIFIER_THREADS = 4
 """ONNX intra-op threads. Its own default is one per core with a spin-wait,
 which lets a single inference saturate the host.
@@ -281,6 +284,11 @@ class Config:
         # Rows never expired before, which made the table a dead drop.
         self.blocklist_ttl_days: int = int_env(
             "TRENTINA_BLOCKLIST_TTL_DAYS", DEFAULT_BLOCKLIST_TTL_DAYS, minimum=1
+        )
+        # How long an audit row is kept (#295). The table was never pruned, and
+        # a denied call costs the caller nothing, so it grew without bound.
+        self.audit_retention_days: int = int_env(
+            "TRENTINA_AUDIT_RETENTION_DAYS", DEFAULT_AUDIT_RETENTION_DAYS, minimum=0
         )
 
         trust_config_path = os.environ.get(

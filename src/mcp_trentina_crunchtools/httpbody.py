@@ -12,6 +12,7 @@ handler (or whose SDK) reads the body with an unbounded ``request.body()``
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -20,6 +21,7 @@ from .config import int_env
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    import httpx
     from pydantic import ValidationError
     from starlette.requests import Request
 
@@ -48,6 +50,10 @@ class TooLargeError(ValueError):
     """The body passed the cap while it was still arriving."""
 
 
+class EncodedBodyError(ValueError):
+    """A response asked for as ``identity`` arrived content-encoded anyway."""
+
+
 def max_request_bytes() -> int:
     """``TRENTINA_MAX_REQUEST_BYTES``, floored at ``MIN_REQUEST_BYTES``."""
     return int_env(
@@ -67,6 +73,65 @@ async def read_capped(request: Request, limit: int = MAX_BODY_BYTES) -> bytes:
         if len(received) > limit:
             raise TooLargeError(f"body over {limit} bytes")
     return bytes(received)
+
+
+async def request_capped(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    *,
+    deadline: float,
+    limit: int = MAX_BODY_BYTES,
+    headers: dict[str, str] | None = None,
+    **kwargs: Any,
+) -> tuple[httpx.Response, bytes]:
+    """Send a request; read the response under ``limit`` bytes and ``deadline`` seconds.
+
+    The response half of #267, for the webhooks that read a reply with an
+    unbounded ``resp.content`` or ``resp.json()`` (#295). The body is asked
+    for as ``identity`` and an encoded one is refused unread, so the cap
+    counts wire bytes and never a decompressor's output (#276's rule). The
+    deadline is wall clock: httpx's own timeout is per read and resets on
+    every byte.
+
+    Returns:
+        The response, closed, and its body. ``resp.content`` is not
+        available; decode the bytes returned.
+
+    Raises:
+        TooLargeError: the declared or received body passed ``limit``.
+        EncodedBodyError: the body arrived content-encoded.
+        TimeoutError: ``deadline`` passed.
+        httpx.HTTPError: as ``client.stream`` raises it.
+    """
+    # TRUST: reading a reply from a webhook peer into gateway memory
+    #   untrusted: the reply's size, encoding and pace (bridge process, alert target)
+    #   judged-by: nothing here; this bounds the read and never judges the bytes
+    #   on-failure: fail-closed; over the cap, encoded or late raises, nothing returned
+    #   owner: httpbody.request_capped
+    #   evidence: T1 asyncio.timeout cancels the task at the deadline; T2 httpx
+    #     aiter_bytes applies no decoder to an identity body
+    sent = {k: v for k, v in (headers or {}).items() if k.lower() != "accept-encoding"}
+    sent["Accept-Encoding"] = "identity"
+    async with (
+        asyncio.timeout(deadline),
+        client.stream(method, url, headers=sent, **kwargs) as resp,
+    ):
+        if resp.headers.get("content-encoding", "identity").strip().lower() not in (
+            "",
+            "identity",
+        ):
+            raise EncodedBodyError("response arrived encoded")
+        declared = resp.headers.get("content-length")
+        if declared is not None and (not declared.isdigit() or int(declared) > limit):
+            raise TooLargeError(f"response over {limit} bytes")
+        received = bytearray()
+        # Identity was checked above, so these are the wire bytes.
+        async for chunk in resp.aiter_bytes():
+            received.extend(chunk)
+            if len(received) > limit:
+                raise TooLargeError(f"response over {limit} bytes")
+    return resp, bytes(received)
 
 
 def declared_length_over(scope: Any, cap: int) -> bool:
