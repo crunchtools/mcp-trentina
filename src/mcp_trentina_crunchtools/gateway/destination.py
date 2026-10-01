@@ -12,6 +12,8 @@ Three kinds, each stored beside the call in ``gateway_calls``:
   without keeping a path or query that may carry a token.
 - ``search``: ``q#`` and ``sha256[:16]`` of the query. Repeats are visible,
   the words are not.
+- ``model``: for an LLM proxy call (#297), the model the agent named,
+  truncated. The provider is the row's backend.
 - ``param``: for a proxied tool its backend declares in ``destination_params``,
   that argument's value — the channel, recipient, repo or queue — truncated.
 
@@ -47,6 +49,7 @@ class DestinationKind(StrEnum):
     FETCH = "fetch"
     SEARCH = "search"
     PARAM = "param"
+    MODEL = "model"
 
 
 @dataclass(frozen=True)
