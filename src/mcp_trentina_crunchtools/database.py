@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from .config import get_config
+from .config import get_config, int_env
 from .outcomes import Outcome, group_of
 
 if TYPE_CHECKING:
@@ -279,6 +279,17 @@ def sweep_expired_blocks(db: sqlite3.Connection | None = None) -> int:
     return _delete_batch(db or get_db(), _SWEEP_BLOCKS, _block_cutoff())
 
 
+DEFAULT_AUDIT_RETENTION_DAYS = 90
+
+
+def audit_retention_days() -> int:
+    """``TRENTINA_AUDIT_RETENTION_DAYS``: days an audit row is kept, 0 for ever (#295).
+
+    The table was never pruned, and a denied call costs the caller nothing.
+    """
+    return int_env("TRENTINA_AUDIT_RETENTION_DAYS", DEFAULT_AUDIT_RETENTION_DAYS, minimum=0)
+
+
 def sweep_old_gateway_calls(db: sqlite3.Connection | None = None) -> int:
     """Delete up to ``SWEEP_BATCH`` audit rows past ``TRENTINA_AUDIT_RETENTION_DAYS`` (#295).
 
@@ -287,7 +298,7 @@ def sweep_old_gateway_calls(db: sqlite3.Connection | None = None) -> int:
     Returns:
         The number of rows removed.
     """
-    days = get_config().audit_retention_days
+    days = audit_retention_days()
     if days <= 0:
         return 0
     return _delete_batch(db or get_db(), _SWEEP_CALLS, time.time() - days * 86400)

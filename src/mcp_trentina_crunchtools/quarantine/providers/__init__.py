@@ -35,6 +35,21 @@ def _openrouter(key_value: str, model: str) -> Provider:
     )
 
 
+def _key_ordinal(key_value: str) -> str:
+    """The limiter's name for a key: the one an instance on it already has.
+
+    Read off the cache, which holds the key already, so no second copy is
+    kept and nothing is derived from it. A key not yet seen takes the next
+    ``key<n>``; the env key (``global``) keeps its own name.
+    """
+    if key_value == "global":
+        return key_value
+    for (_name, cached_key, _model), provider in _provider_cache.items():
+        if cached_key == key_value:
+            return provider.key_ordinal
+    return f"key{len({k for _n, k, _m in _provider_cache if k != 'global'}) + 1}"
+
+
 def get_provider(
     provider_name: str | None = None,
     api_key: SecretStr | None = None,
@@ -123,6 +138,7 @@ def get_provider(
             )
 
     provider.judge = (resolved_provider, provider.model)
+    provider.key_ordinal = _key_ordinal(cache_key[1])
     _provider_cache[cache_key] = provider
     logger.info(
         "provider: initialized %s (model=%s, key=%s)",

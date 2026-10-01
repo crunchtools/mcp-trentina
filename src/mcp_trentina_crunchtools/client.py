@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import NamedTuple
 
 import httpx
 
@@ -132,8 +133,21 @@ def _fetch_slot() -> asyncio.Semaphore:
     return slot
 
 
-async def fetch_url(url: str) -> tuple[str, str]:
-    """Fetch a URL and return (content, content_type).
+class Fetched(NamedTuple):
+    """A fetched page, and every URL that served a hop of it.
+
+    ``hops`` is each redirect's URL in order, ending with the URL the body
+    came from. A trust decision about the page is a decision about every one
+    of them, never only the URL the agent asked for (#298).
+    """
+
+    content: str
+    content_type: str
+    hops: tuple[str, ...]
+
+
+async def fetch_url(url: str) -> Fetched:
+    """Fetch a URL and return it as a :class:`Fetched` (content, content type, hops).
 
     Every hop passes the egress guard (``egress.open_guarded``). The response
     is streamed so the content-type and size can be rejected from headers
@@ -155,7 +169,7 @@ async def fetch_url(url: str) -> tuple[str, str]:
         raise FetchError(url, "Request timed out") from exc
 
 
-async def _fetch(url: str) -> tuple[str, str]:
+async def _fetch(url: str) -> Fetched:
     try:
         async with open_guarded(
             "GET",
@@ -189,7 +203,11 @@ async def _fetch(url: str) -> tuple[str, str]:
                 if len(buf) > MAX_RESPONSE_SIZE:
                     raise FetchError(url, f"Response too large: exceeds {MAX_RESPONSE_SIZE} bytes")
 
-            return bytes(buf).decode(resp.encoding or "utf-8", errors="replace"), content_type
+            return Fetched(
+                bytes(buf).decode(resp.encoding or "utf-8", errors="replace"),
+                content_type,
+                (*(str(hop.url) for hop in resp.history), str(resp.url)),
+            )
 
     except httpx.TimeoutException as exc:
         raise FetchError(url, "Request timed out") from exc

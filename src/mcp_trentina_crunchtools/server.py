@@ -30,11 +30,17 @@ if TYPE_CHECKING:
 async def _lifespan(_server: FastMCP[Any]) -> AsyncIterator[dict[str, Any]]:
     """Run the gateway's boot warm-up (#216) once the event loop serves.
 
+    D-Bus starts here too, when asked for: its connection belongs to this
+    loop, the one that will still be running when a call arrives (#298).
+
     Imported here, not at module top: a standalone server never loads the
     gateway, and should not pay for importing it.
     """
+    from .dbus_interface import dbus_requested, start_dbus
     from .gateway.warmup import trentina_lifespan
 
+    if dbus_requested():
+        await start_dbus()
     async with trentina_lifespan() as state:
         yield state
 

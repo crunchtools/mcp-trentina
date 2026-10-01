@@ -141,7 +141,7 @@ class TestRefusedAddresses:
         release.set()
 
         await asyncio.to_thread(lambda: slots.acquire(timeout=5) and slots.release())
-        content, _ = await fetch_url("https://slow.example/")
+        content, _, _ = await fetch_url("https://slow.example/")
         assert content == "ok"
 
     async def test_unresolvable(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,7 +174,7 @@ class TestRefusedShapes:
         self, monkeypatch: pytest.MonkeyPatch, url: str
     ) -> None:
         route(monkeypatch, lambda _r: httpx.Response(200, text="ok"))
-        content, _ = await fetch_url(url)
+        content, _, _ = await fetch_url(url)
         assert content == "ok"
 
     def test_an_unknown_reason_is_a_bug(self) -> None:
@@ -229,7 +229,7 @@ class TestRedirects:
             return by_scheme[request.url.scheme]
 
         route(monkeypatch, handler)
-        content, _ = await fetch_url("http://public.example/")
+        content, _, _ = await fetch_url("http://public.example/")
         assert content == "secure"
 
     async def test_five_hops_pass_six_refuse(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -243,7 +243,7 @@ class TestRedirects:
             return handler
 
         route(monkeypatch, chain(5))
-        content, _ = await fetch_url("https://public.example/")
+        content, _, _ = await fetch_url("https://public.example/")
         assert content == "end"
 
         route(monkeypatch, chain(6))
@@ -303,7 +303,7 @@ class TestPinning:
         monkeypatch.setattr(egress, "_lookup", rebinding)
         monkeypatch.setattr(egress, "_socket_backend", lambda: recorder)
 
-        content, _ = await fetch_url("https://rebind.example/")
+        content, _, _ = await fetch_url("https://rebind.example/")
 
         assert content == "ok"
         assert lookups == ["rebind.example"]
@@ -320,7 +320,7 @@ class TestPinning:
         monkeypatch.setattr(egress, "_lookup", lambda _h, _p: [v6, v4])
         monkeypatch.setattr(egress, "_socket_backend", lambda: recorder)
 
-        content, _ = await fetch_url("https://dual.example/")
+        content, _, _ = await fetch_url("https://dual.example/")
 
         assert content == "ok"
         assert recorder.dialled == [v6, v4]
@@ -356,7 +356,7 @@ class TestEscapeHatch:
         config_mod._config = None
         route(monkeypatch, lambda _r: httpx.Response(200, text="inside"), {"lab": ["10.0.0.9"]})
 
-        content, _ = await fetch_url("http://lab/")
+        content, _, _ = await fetch_url("http://lab/")
         assert content == "inside"
 
         err = await _refusal("http://lab:8019/")

@@ -6,10 +6,10 @@ recovery state that a backend restart leaves stale:
 
 1. Reset the per-URL circuit breaker (``cache_flush`` never touches it, so an
    open circuit otherwise blocks calls until the 60s cooldown probe succeeds).
-2. Evict the cached tool list so the next fetch is a real handshake.
-3. Force a fresh probe/fetch that re-warms the cache and records breaker
-   success/failure.
-4. Invalidate any profile aggregate that omitted the backend while it failed.
+2. Force a fresh probe/fetch that replaces the cached tool list and records
+   breaker success/failure.
+3. Invalidate the aggregates that omitted the backend while it failed: the
+   caller's own for an agent, every one holding the URL for the operator.
 
 This lets an operator recover one backend without restarting the whole gateway.
 
@@ -22,7 +22,9 @@ not a map of the rest of the gateway.
 
 Resetting a circuit is felt by every profile on that URL — the breaker is keyed
 by URL and healing it heals it for all of them. That is the point of the tool,
-not a leak.
+not a leak. An agent's aggregate rebuild is its own (#291): dropping every
+profile's that held the URL moved their ``surface.built_at``, which each of
+them reads in ``quarantine_stats``.
 """
 
 from __future__ import annotations
@@ -31,12 +33,16 @@ import logging
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
-from ..gateway.backend import evict_backend_cache_url, list_backend_tools
+from ..gateway.backend import (
+    evict_backend_cache_url,
+    list_backend_tools,
+    refresh_backend_tools,
+)
 from ..gateway.circuit import breaker
 from ..gateway.compress import get_profiles
 from ..gateway.errors import BackendCallError, ScopeError
 from ..gateway.filter import filter_tools
-from ..gateway.router import invalidate_profile_cache_for_backend
+from ..gateway.router import invalidate_profile_cache, invalidate_profile_cache_for_backend
 from ..gateway.scope import (
     CallerScope,
     current_scope,
@@ -94,9 +100,12 @@ async def _reset_one(
         }
 
     breaker.reset(url)
-    evict_backend_cache_url(url)
     try:
-        tools = await list_backend_tools(backend, cfg)
+        if scope.is_operator:
+            evict_backend_cache_url(url)
+            tools = await list_backend_tools(backend, cfg)
+        else:
+            tools = await refresh_backend_tools(backend, cfg)
     except BackendCallError as exc:
         return {
             **base,
@@ -104,7 +113,10 @@ async def _reset_one(
             "error": str(exc),
             "circuit": breaker.get_state(url).value,
         }
-    invalidate_profile_cache_for_backend(url)
+    if scope.is_operator:
+        invalidate_profile_cache_for_backend(url)
+    else:
+        invalidate_profile_cache(scope.label)
     visible = tools if scope.is_operator else filter_tools(tools, cfg)
     return {
         **base,

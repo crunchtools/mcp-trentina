@@ -109,9 +109,12 @@ uv run mcp-trentina-crunchtools
 - `CLASSIFIER_THREADS` — ONNX intra-op threads; 0 uses the ONNX default of one per core (default: 4).
   Set it to match the container's `--cpus`; threads beyond that quota contend and slow scans down.
 - `TRENTINA_L2_CONCURRENCY` — L2 scans at once (default 2); each uses `CLASSIFIER_THREADS`.
+  A freed slot goes to waiting profiles in turn (`classifier.FairGate`, #291).
 - `TRENTINA_L3_CONCURRENCY_START` / `TRENTINA_L3_CONCURRENCY_MAX` — the adaptive
-  L3 limiter's starting point and ceiling per (provider, model) (4 / 64). See
-  `quarantine/limiter.py`: it grows until the provider throttles, then AIMD.
+  L3 limiter's starting point and ceiling per (provider, model, key
+  ordinal) (4 / 64). See `quarantine/limiter.py`: it grows until the
+  provider throttles, then AIMD. The key is in it because a provider
+  throttles per key (#291).
 - `TRENTINA_L3_THROTTLE_BUDGET` — seconds a user-facing L3 call waits out 429s
   on one provider before falling back (default 20; the boot warm-up uses 300).
 
@@ -310,9 +313,10 @@ operator; a live gateway with no bound caller is refused.
   `gw-personal` both.
 - reconnect_backend — reset one backend's circuit breaker + re-probe after it
   restarts, without restarting the gateway. Agent: a backend in its own
-  profile, with the tool count that profile would actually see. The breaker is
-  keyed by URL, so healing it heals it for every profile sharing that URL —
-  that is the point of the tool, not a leak.
+  profile, with the tool count that profile would actually see, refreshing
+  the tool list in place and rebuilding only its own aggregate (#291). The
+  breaker is keyed by URL, so healing it heals it for every profile sharing
+  that URL — that is the point of the tool, not a leak.
 - reload_profiles — re-read `profiles.yaml` and apply it. Nothing else applies
   a profile edit: the router filters from the `Profile` objects loaded at
   startup, and `cache_flush`/`reconnect_backend` rebuild that aggregate from
@@ -320,8 +324,20 @@ operator; a live gateway with no bound caller is refused.
   Validates the whole file before swapping (a bad edit keeps the running
   config) and leaves the perimeter verdict cache alone so nothing is re-judged.
   Agent: applies its own section only, and cannot apply a change to its own
-  `role`. Operator: the whole file, plus what it could not apply —
-  `llm_providers`, `matrix`, and ingress routes bind at startup.
+  `role` or `defense` block (held, reported as `operator_only`, #298).
+  Operator: the whole file, plus what it could not apply — `llm_providers`,
+  `matrix`, ingress routes and proxy-mode `oauth` clients/redirects bind at
+  startup.
+
+## OAuth token binding (#298)
+
+The proxy has one JWT audience for every proxied profile, so the audience
+cannot separate seats. `gateway/oauth_binding.py` binds the profile the
+`/authorize` resource names to the flow (keyed on client id + PKCE
+challenge), then to the token's upstream lineage at `/token`; a refresh keeps
+it. `verify_oauth` asks the verifier's `bound_profile` and challenges any
+answer but the profile being called; a verifier without `bound_profile` is
+refused. Delegated verifiers answer their own profile (audience pin).
 
 ## Development
 
@@ -396,7 +412,8 @@ skill's format.
   pins the connection to it (`PinnedBackend` under httpx's pool; TLS still
   verifies the hostname), and follows redirects by hand, checking each hop.
   Refusal reasons are a closed set and never name the address. Never give an
-  outbound `httpx.AsyncClient` an agent-chosen URL without it.
+  outbound `httpx.AsyncClient` an agent-chosen URL without it. DNS lookups
+  are capped per profile (4) and gateway-wide (64), never queued (#291).
 - `tools/` — Tool implementations called by server.py wrappers
 - `database.py` — SQLite blocklist for cumulative detection memory, keyed on
   (profile, source) since #263: `is_blocked(source, profile)` sees the

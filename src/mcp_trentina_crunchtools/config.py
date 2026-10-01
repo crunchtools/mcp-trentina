@@ -35,9 +35,6 @@ other input to ``Config.admission_tokens``."""
 DEFAULT_BLOCKLIST_TTL_DAYS = 30
 """Days a block refusal keeps its source on the calling profile's blocklist."""
 
-DEFAULT_AUDIT_RETENTION_DAYS = 90
-"""Days a ``gateway_calls`` audit row is kept; 0 keeps every row (#295)."""
-
 DEFAULT_CLASSIFIER_THREADS = 4
 """ONNX intra-op threads. Its own default is one per core with a spin-wait,
 which lets a single inference saturate the host.
@@ -213,6 +210,19 @@ class Config:
         # never excuses a partial scan and never stops a layer that can run.
         self.require_l2: bool = bool_env("TRENTINA_REQUIRE_L2", True)
         self.require_l3: bool = bool_env("TRENTINA_REQUIRE_L3", True)
+        # Both are fail-closed switches turned off, so they say so at startup
+        # the way the egress escape hatch below does (#298). Silence here let
+        # a stale env file deliver unjudged content with nobody the wiser.
+        for layer, required in (("L2", self.require_l2), ("L3", self.require_l3)):
+            if not required:
+                logger.warning(
+                    "[WARNING] TRENTINA_REQUIRE_%s is off: block and redact deliver "
+                    "with a warning when %s is unavailable instead of refusing. "
+                    "Unset it unless this deployment runs without %s on purpose.",
+                    layer,
+                    layer,
+                    layer,
+                )
         # The egress guard's one escape hatch (#260): lets fetch reach a
         # non-global address. Scheme, port and redirect rules still hold.
         self.fetch_allow_private: bool = bool_env("TRENTINA_FETCH_ALLOW_PRIVATE", False)
@@ -288,11 +298,6 @@ class Config:
         # Rows never expired before, which made the table a dead drop.
         self.blocklist_ttl_days: int = int_env(
             "TRENTINA_BLOCKLIST_TTL_DAYS", DEFAULT_BLOCKLIST_TTL_DAYS, minimum=1
-        )
-        # How long an audit row is kept (#295). The table was never pruned, and
-        # a denied call costs the caller nothing, so it grew without bound.
-        self.audit_retention_days: int = int_env(
-            "TRENTINA_AUDIT_RETENTION_DAYS", DEFAULT_AUDIT_RETENTION_DAYS, minimum=0
         )
 
         trust_config_path = os.environ.get(

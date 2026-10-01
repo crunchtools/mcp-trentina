@@ -186,7 +186,7 @@ class TestRetention:
 
     def test_the_default_is_ninety_days(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("TRENTINA_AUDIT_RETENTION_DAYS", raising=False)
-        assert config_mod.Config().audit_retention_days == 90
+        assert database.audit_retention_days() == 90
 
     def test_a_pass_is_one_batch_and_the_sweep_stays_due(self, audit_db: Any) -> None:
         _audit_rows(audit_db, database.SWEEP_BATCH + 5, 400)
@@ -261,7 +261,7 @@ class TestFetchDeadline:
     async def test_fetch_url_reports_the_deadline_as_a_timeout(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        async def forever(_url: str) -> tuple[str, str]:
+        async def forever(_url: str) -> client_mod.Fetched:
             await asyncio.sleep(60)
             raise AssertionError("unreachable")
 
@@ -277,25 +277,25 @@ class TestFetchDeadline:
         monkeypatch.setattr(client_mod, "_slots", None)
         release = asyncio.Event()
 
-        async def held(url: str) -> tuple[str, str]:
+        async def held(url: str) -> client_mod.Fetched:
             if url.endswith("/hold"):
                 await release.wait()
-            return "ok", "text/plain"
+            return client_mod.Fetched("ok", "text/plain", (url,))
 
         monkeypatch.setattr(client_mod, "_fetch", held)
 
-        async def fetch_as(name: str, url: str) -> tuple[str, str]:
+        async def fetch_as(name: str, url: str) -> str:
             with profile_context(Profile(name=name, auth=AuthConfig(bearer_token_env="X"))):
-                return await client_mod.fetch_url(url)
+                return (await client_mod.fetch_url(url)).content
 
         holder = asyncio.create_task(fetch_as("alpha", "https://a.example/hold"))
         await asyncio.sleep(0.01)
         queued = asyncio.create_task(fetch_as("alpha", "https://a.example/second"))
-        assert await fetch_as("beta", "https://b.example/") == ("ok", "text/plain")
+        assert await fetch_as("beta", "https://b.example/") == "ok"
         await asyncio.sleep(0.05)
         assert not queued.done()  # alpha's second fetch waits for alpha's slot
         release.set()
-        assert await holder == await queued == ("ok", "text/plain")
+        assert await holder == await queued == "ok"
 
 
 def _client(handler: Any) -> httpx.AsyncClient:

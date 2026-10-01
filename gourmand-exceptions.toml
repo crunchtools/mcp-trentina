@@ -621,6 +621,13 @@ justification = "A mixin is never instantiated -- it is mixed in. _GatewayGoogle
 classification = "by_design"
 
 [[exceptions]]
+check = "dead_structs"
+path = "src/mcp_trentina_crunchtools/gateway/oauth_binding.py"
+pattern = "BindTokensToProfile"
+justification = "A mixin is never instantiated -- it is mixed in, ahead of PromoteOnExchange, by _GatewayGoogleProvider (src/mcp_trentina_crunchtools/__init__.py); tests/test_gateway_app.py asserts it precedes OAuthProxy in that MRO and tests/test_oauth_binding.py exercises it over a real in-memory store. Same reason as PromoteOnExchange: the provider class is defined inside a function."
+classification = "by_design"
+
+[[exceptions]]
 check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/gateway/ratelimit.py"
 pattern = "client_address"

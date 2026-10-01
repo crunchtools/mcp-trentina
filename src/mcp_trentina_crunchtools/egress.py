@@ -49,16 +49,40 @@ ALLOWED_PORTS = frozenset({80, 443})
 MAX_REDIRECTS = 5
 IDENTITY = "identity"
 RESOLVE_TIMEOUT = 10.0
-MAX_LOOKUPS = 16
-"""Lookups in flight at once, counting ones whose caller already timed out.
+MAX_LOOKUPS = 64
+"""Lookups in flight at once, gateway-wide, counting ones whose caller timed out.
 
 ``getaddrinfo`` cannot be cancelled, so a stalled resolver keeps its thread
 after ``RESOLVE_TIMEOUT``. The executor has exactly this many workers and a
 lookup takes a slot before it is submitted, so nothing ever queues behind a
 stalled one; past the limit a fetch is refused as ``unresolvable``."""
 
+MAX_LOOKUPS_PER_PROFILE = 4
+"""Of those, what one profile may hold (#291). The global pool was the only
+limit, so one agent pointing 16 lookups at a black-holed name server refused
+every other profile's fetch: a gateway-wide DoS, and a bit another agent could
+read. Now it takes ``MAX_LOOKUPS / MAX_LOOKUPS_PER_PROFILE`` profiles stalling
+together to reach the backstop, which docs/profiles.md records as a residual."""
+
 _RESOLVER = ThreadPoolExecutor(max_workers=MAX_LOOKUPS, thread_name_prefix="egress-dns")
 _lookup_slots = threading.BoundedSemaphore(MAX_LOOKUPS)
+_profile_slots: dict[str | None, threading.BoundedSemaphore] = {}
+_profile_slots_lock = threading.Lock()
+
+
+def _slots_for_caller() -> threading.BoundedSemaphore:
+    """The calling profile's own lookup slots; standalone shares one set."""
+    # Imported here: the gateway package imports this module on its way in.
+    from .gateway.context import get_current_profile
+
+    profile = get_current_profile()
+    name = profile.name if profile is not None else None
+    with _profile_slots_lock:
+        slots = _profile_slots.get(name)
+        if slots is None:
+            slots = _profile_slots[name] = threading.BoundedSemaphore(MAX_LOOKUPS_PER_PROFILE)
+        return slots
+
 
 _IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
@@ -124,18 +148,24 @@ def _lookup(host: str, port: int) -> list[str]:
 async def _resolve(host: str, port: int) -> list[str]:
     """Every address ``host`` resolves to, or ``unresolvable``.
 
-    A lookup takes one of ``MAX_LOOKUPS`` slots and never queues: with none
-    free, or after ``RESOLVE_TIMEOUT``, or on a resolver error, the fetch is
-    refused as ``unresolvable``. The slot comes back when the thread ends.
+    A lookup takes one of the caller's ``MAX_LOOKUPS_PER_PROFILE`` slots and
+    one of ``MAX_LOOKUPS`` gateway-wide, and never queues: with either
+    exhausted, or after ``RESOLVE_TIMEOUT``, or on a resolver error, the fetch
+    is refused as ``unresolvable``. Both slots come back when the thread ends.
     """
-    slots = _lookup_slots
+    mine, slots = _slots_for_caller(), _lookup_slots
+    if not mine.acquire(blocking=False):
+        log.warning("egress: this profile's resolver slots are busy; refusing")
+        raise EgressRefusedError("unresolvable")
     if not slots.acquire(blocking=False):
+        mine.release()
         log.warning("egress: every resolver slot is busy; refusing")
         raise EgressRefusedError("unresolvable")
     job = _RESOLVER.submit(_lookup, host, port)
     # On the executor's future, not asyncio's: it fires when the thread
     # finishes, however long after the caller timed out.
     job.add_done_callback(lambda _job: slots.release())
+    job.add_done_callback(lambda _job: mine.release())
     try:
         return await asyncio.wait_for(asyncio.wrap_future(job), RESOLVE_TIMEOUT)
     except (OSError, UnicodeError, TimeoutError) as exc:
