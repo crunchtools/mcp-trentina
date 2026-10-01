@@ -6,8 +6,8 @@ from typing import Any
 
 import httpx
 
-from ...errors import QuarantineAgentError
-from .base import Provider, ProviderResult, status_error
+from ...errors import MalformedResponseError, QuarantineAgentError
+from .base import Provider, ProviderResult, count, dig, envelope, status_error
 
 DEFAULT_BASE_URL = "http://localhost:11434"
 DEFAULT_MODEL = "qwen2.5:0.5b"
@@ -58,18 +58,16 @@ class OllamaProvider(Provider):
             ) as client:
                 resp = await client.post(url, json=request_body)
                 resp.raise_for_status()
-                resp_json = resp.json()
+                resp_json = envelope(resp)
 
-            message = resp_json.get("message", {})
-            text = message.get("content", "")
-
-            prompt_eval_count = resp_json.get("prompt_eval_count", 0)
-            eval_count = resp_json.get("eval_count", 0)
+            text = dig(resp_json, "message", "content")
+            if not isinstance(text, str):
+                raise MalformedResponseError("no text")
 
             return ProviderResult(
                 text=text,
-                input_tokens=prompt_eval_count,
-                output_tokens=eval_count,
+                input_tokens=count(dig(resp_json, "prompt_eval_count")),
+                output_tokens=count(dig(resp_json, "eval_count")),
             )
 
         except httpx.HTTPStatusError as exc:
