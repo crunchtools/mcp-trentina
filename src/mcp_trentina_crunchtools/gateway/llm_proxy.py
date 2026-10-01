@@ -184,8 +184,10 @@ def load_llm_providers(
         try:
             provider = LlmProvider(**body)
         except ValidationError as exc:
-            # Name the entry: pydantic's own message says which rule, not which provider.
-            reasons = "; ".join(str(e["msg"]) for e in exc.errors())
+            # Name the entry and field: pydantic's message says which rule only.
+            reasons = "; ".join(
+                f"{'.'.join(map(str, e['loc'])) or 'entry'}: {e['msg']}" for e in exc.errors()
+            )
             raise ProfileConfigError(f"llm_providers.{name}: {reasons}") from exc
         if not provider.enabled:
             continue

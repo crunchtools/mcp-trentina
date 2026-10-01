@@ -609,7 +609,8 @@ class TestProviderApi:
                 "api_key_env": "K",
             }
         }
-        with pytest.raises(ProfileConfigError, match=r"llm_providers\.groq: .*api must be set"):
+        expected = r"llm_providers\.groq: entry: .*api must be set"
+        with pytest.raises(ProfileConfigError, match=expected):
             load_llm_providers(section)
 
     def test_unknown_host_with_api_loads(self) -> None:
