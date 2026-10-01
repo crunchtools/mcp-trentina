@@ -220,6 +220,8 @@ def _unapplied(active: ActiveConfig, new_config: GatewayConfig) -> list[str]:
             "restart to serve it"
         )
     notes.extend(_unapplied_delegated(current, new_config))
+    for name, profile in sorted(new_config.profiles.items()):
+        notes.extend(_unapplied_proxy_oauth_for(current.profiles.get(name), profile, name))
     notes.extend(_unapplied_bridges(current, new_config))
     return notes
 
@@ -291,6 +293,48 @@ def _unapplied_delegated_for(before: Profile | None, after: Profile, name: str) 
     return []
 
 
+#: The proxy-mode ``oauth`` fields the built-in proxy reads once, at startup:
+#: the provisioned clients, the redirect allowlist every self-registering
+#: client is checked against, and the set of resources ``/authorize`` accepts
+#: and binds tokens to. ``allowed_emails`` is missing on purpose: it is read
+#: per request and does apply live.
+PROXY_OAUTH_STARTUP_FIELDS = (
+    "enabled",
+    "client_id",
+    "client_secret_env",
+    "client_redirect_uris",
+    "allowed_redirect_uris",
+)
+
+
+def _unapplied_proxy_oauth_for(before: Profile | None, after: Profile, name: str) -> list[str]:
+    """The restart note for a proxy-mode ``oauth`` edit, if there is one.
+
+    A reload validated these and reported success, and none of them moved
+    until the next restart (#298). Shared by the operator and agent paths,
+    like ``_unapplied_delegated_for``.
+    """
+    old = before.oauth if before is not None else None
+    new = after.oauth
+    if old is None and new is None:
+        return []
+    if getattr(old, "issuer", None) is not None or getattr(new, "issuer", None) is not None:
+        return []  # delegated: _unapplied_delegated_for owns that note
+    moved = sorted(
+        field
+        for field in PROXY_OAUTH_STARTUP_FIELDS
+        if getattr(old, field, None) != getattr(new, field, None)
+    )
+    if not moved:
+        return []
+    return [
+        (
+            f"profile {name!r} changed oauth {', '.join(moved)}: the OAuth proxy "
+            "binds its clients, redirect URIs and resources at startup — restart to apply"
+        )
+    ]
+
+
 AGENT_SCOPE_NOTE = (
     "agent scope — only this profile's section was applied; other profiles "
     "and gateway-wide settings need an operator-scope reload"
@@ -310,7 +354,8 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
     """Carry operator-only scan-view settings across an AGENT reload.
 
     An agent may retune its own performance — the sampling budget, the
-    coverage floor, the deadline. It may not reshape its own perimeter.
+    coverage floor, the deadline. It may not reshape its own perimeter, and
+    its ``defense`` block (modes, enforcement, audit, judge) is perimeter.
     ``extractor`` decides how much of a payload is read at all, so an agent
     able to set it could narrow what gets scanned on content an operator meant
     to be read in full. The agent does not control profiles.yaml, but it does
@@ -321,6 +366,17 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
     effect is told rather than left to discover it.
     """
     held = _hold_preprocess_floor(before, after)
+    # The whole defense block is held, not just the loosening directions
+    # (#298). modes, enforcement, the L2 threshold, the audit switch and the
+    # judging model each have a weaker setting, and "tighten only" would need
+    # an order on every one of them, kept in step with every field added
+    # later. An agent that wants a stricter policy asks the operator, who can
+    # apply it in one reload.
+    for field_name in type(after.defense).model_fields:
+        old = getattr(before.defense, field_name)
+        if old != getattr(after.defense, field_name):
+            setattr(after.defense, field_name, old)
+            held.append(f"defense.{field_name}")
     # The bridge block is perimeter end to end: where the plaintext side
     # lives, who may write to it, what a flagged message becomes. None of it
     # is an agent's performance knob, so the whole block is held.
@@ -498,7 +554,10 @@ async def _apply_own_profile(
     # bound at startup exactly as they are on the operator path. Reporting
     # "reloaded" over a changed issuer would be the same silent no-op, just
     # scoped to one profile — so say so here too.
-    restart_required = _unapplied_delegated_for(before, after, name)
+    restart_required = [
+        *_unapplied_delegated_for(before, after, name),
+        *_unapplied_proxy_oauth_for(before, after, name),
+    ]
 
     logger.warning(
         "gateway: profile %s reloaded its own section — %d field group(s) moved",
