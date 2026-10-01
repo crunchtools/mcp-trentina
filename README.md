@@ -13,6 +13,10 @@ like. It is named after the 1377 *trentino* of Ragusa, where ships anchored
 offshore for thirty days before anyone came ashore. The idea is the same:
 commerce keeps flowing, and nothing dangerous gets in.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/crunchtools/mcp-trentina/main/docs/demo/trentina.gif" alt="Demo: a request crosses Trentina's auth, policy, defense and minify stages; then, in a terminal, a 131-tool list is served as 6 tools, a recipe page with an injection in its comments is refused and then answered through redact, and a send to an outside address is refused while a draft goes through" width="800">
+</p>
+
 ## Why Trentina
 
 1. **Security.** Untrusted content gets the same three independent layers at
@@ -218,7 +222,7 @@ uv run mypy src
 uv run pytest -v
 ```
 
-The README demo is recorded against the published image by
+The demo above is recorded against the published image by
 [`demo.yml`](.github/workflows/demo.yml) (`docs/demo/render.sh`); see
 [`docs/demo/`](docs/demo/) for the fixtures it runs.
 
