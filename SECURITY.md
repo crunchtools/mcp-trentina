@@ -1,6 +1,6 @@
 # Security Design Document
 
-This document describes the security architecture of mcp-trentina-crunchtools.
+This document describes the security architecture of mcp-trentina-crunchtools, the MCP gateway. Deployment containment is in [docs/deployment-hardening.md](docs/deployment-hardening.md).
 
 ## 1. Threat Model
 
@@ -9,7 +9,7 @@ This document describes the security architecture of mcp-trentina-crunchtools.
 | Asset | Sensitivity | Impact if Compromised |
 |-------|-------------|----------------------|
 | Consuming agent's tool-calling capabilities | Critical | Attacker uses agent to send emails, modify files, call APIs |
-| API credentials (Gemini, connected systems) | Critical | Data theft, unauthorized access |
+| API credentials (LLM providers, OAuth, connected systems) | Critical | Data theft, unauthorized access |
 | Data in connected systems | High | Exfiltration, modification, deletion |
 | SQLite blocklist database | Low | Detection history exposed |
 
@@ -26,56 +26,65 @@ This document describes the security architecture of mcp-trentina-crunchtools.
 
 | Vector | Description | Mitigation |
 |--------|-------------|------------|
-| **Hidden HTML injection** | display:none, off-screen, same-color text | Layer 1 strips hidden elements |
-| **Invisible unicode** | Zero-width chars, bidi overrides | Layer 1 strips + NFKC normalization |
-| **Encoded payloads** | Base64/hex instruction injection | Layer 1 detects + removes |
-| **Exfiltration URLs** | Markdown images with data in query params | Layer 1 strips suspicious URLs |
-| **LLM delimiter spoofing** | Fake im_start, INST, Human: | Layer 1 strips all known delimiters |
-| **Semantic injection** | Instructions disguised as text | Layer 2 Q-Agent best-effort detection |
+| **Hidden HTML injection** | display:none, off-screen, same-color text | The `html` pre-processor converts markup to Markdown, which cannot express hidden text; L1 counts what it finds |
+| **Invisible unicode** | Zero-width chars, bidi overrides | L1 counts them in attack context and strips them from L2's copy |
+| **Encoded payloads** | Base64/hex instruction injection | L1 detects; L2 and L3 judge |
+| **Exfiltration URLs** | Markdown images with data in query params | L1 detects; the egress guard refuses non-global addresses |
+| **LLM delimiter spoofing** | Fake im_start, INST, Human: | L1 detects known delimiters |
+| **Instruction override** | "Ignore previous instructions" and kin | L2 (Prompt Guard 2) |
+| **Semantic injection** | Instructions disguised as text, social engineering | L3 quarantined LLM, best effort |
 | **LLM laundering** | P-LLM rephrases quarantined content | Not defended (requires CaMeL $VAR tokens) |
 
 ## 2. Security Architecture
 
 ### 2.1 Defense in Depth Layers
 
+Every untrusted payload, at every ingress (web, tool responses, tool
+descriptions, Matrix, LLM completions, alerts), runs all three layers. None
+can be switched off; an absent layer is a gap that `block` and `redact` refuse
+on. Details and measured catch rates: [docs/defense-pipeline.md](docs/defense-pipeline.md).
+
 ```
 +---------------------------------------------------------+
-| Layer 1: Deterministic Sanitization Pipeline             |
-| - HTML parse + hidden element removal                    |
-| - Script/style/noscript/meta tag stripping               |
-| - HTML to Markdown conversion                            |
-| - Unicode sanitization (zero-width, bidi, NFKC)         |
-| - Encoded payload detection (base64/hex)                 |
-| - Exfiltration URL detection                             |
-| - LLM delimiter stripping                                |
+| Layer 1: Deterministic checks (l1/)                      |
+| - Hidden-content, invisible Unicode, encoded payload,    |
+|   exfiltration URL and delimiter counts                  |
+| - Exact directive patterns, plus evasion undoing         |
+| - Normalizes a COPY for L2; never modifies delivery      |
 +---------------------------------------------------------+
-| Layer 2: Quarantined Q-Agent (Gemini Flash-Lite)         |
-| - NO function declarations (no tools)                    |
-| - NO google-genai SDK (no accidental tool config)        |
-| - NO memory (stateless per request)                      |
-| - Hardened system prompt                                  |
-| - Structured JSON output (responseSchema enforcement)    |
+| Layer 2: Prompt Guard 2 86M classifier (local ONNX)      |
+| - Reads the original and, when L1 changed it, the copy   |
 +---------------------------------------------------------+
-| Cumulative Intelligence: SQLite Blocklist                |
-| - Write access: deterministic code ONLY                  |
-| - Q-Agent cannot modify blocklist                        |
-| - Sources that fail scans are remembered                 |
+| Layer 3: Quarantined LLM, briefed with L1 and L2         |
+| - NO tools, NO SDK, NO memory                            |
+| - Answers held to a response schema; off-schema is a gap |
+| - Finding types are a closed enum: no L3 prose reaches   |
+|   an agent                                               |
 +---------------------------------------------------------+
-| Trust Allowlist: Server-Side Configuration               |
-| - Administrator-set, not agent-controlled                |
-| - Trusted sources skip Q-Agent (cost optimization)       |
-| - Untrusted sources get full L1+L2 scanning              |
+| Cumulative memory: SQLite blocklist                      |
+| - Written by deterministic code only                     |
+| - A refused source stays refused for its TTL             |
++---------------------------------------------------------+
+| Trust allowlist: operator configuration                  |
+| - Not agent-controlled                                   |
+| - Turns a `block` refusal into `redact`; all three       |
+|   layers still run                                       |
 +---------------------------------------------------------+
 ```
 
-### 2.2 Q-Agent Architectural Quarantine
+Around the layers: the egress guard (`egress.py`) pins every gateway-side
+fetch to a resolved, global address; file reads are confined
+(`tools/confine.py`); parameter and response guards hold tool calls to
+operator policy; `posture.py` checks the container's own containment.
 
-The Q-Agent's security comes from architectural constraints, not prompt engineering:
+### 2.2 L3 Architectural Quarantine
 
-1. **No tools**: Request body contains no `tools` or `functionDeclarations` keys. Runtime assertions verify this.
-2. **No SDK**: Uses raw httpx REST calls to Gemini API. The google-genai SDK is not installed, eliminating any possibility of accidental tool configuration.
-3. **No memory**: Each request is stateless. No conversation history, no context carryover.
-4. **No write access**: Q-Agent output is parsed by deterministic code. The Q-Agent cannot write to the SQLite blocklist or any other state.
+The quarantined LLM's security comes from architectural constraints, not prompt engineering:
+
+1. **No tools**: no provider's request body is built with tool declarations. The Gemini path also refuses one at runtime (`_enforce_quarantine`).
+2. **No SDK**: raw httpx REST calls, so no SDK can configure a tool by accident.
+3. **No memory**: each request is stateless.
+4. **No write access**: its answer is parsed and schema-checked by deterministic code (`quarantine/schema.py`). It cannot write to the blocklist or any other state, and none of its text is delivered to an agent.
 
 ### 2.3 Input Validation
 
@@ -94,14 +103,14 @@ Built on **[Hummingbird Python](https://quay.io/repository/hummingbird/python)**
 
 ### 3.2 Dependency Minimization
 
-No google-genai SDK. Direct REST API calls via httpx eliminate the entire Gemini SDK dependency tree.
+No LLM provider SDKs. Direct REST calls via httpx eliminate their dependency trees.
 
 ## 4. Security Checklist
 
 Before each release:
 
 - [ ] All inputs validated through Pydantic models
-- [ ] Q-Agent request body verified: no tools, no functionDeclarations
+- [ ] L3 request body verified: no tools, no functionDeclarations
 - [ ] No shell execution
 - [ ] No eval/exec
 - [ ] Error messages scrub API keys (SecretStr)

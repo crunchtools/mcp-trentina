@@ -1,5 +1,7 @@
 # MCP Gateway
 
+*Part of Trentina's **Architectural flexibility** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Trentina acts as a single MCP endpoint that proxies traffic to all your backend MCP servers. Instead of each agent connecting directly to 20+ servers with separate credentials and configurations, every agent talks to Trentina. One connection, one token, one policy plane.
 
 ## Why This Matters
@@ -51,12 +53,11 @@ perimeter store makes that call judge every tool description (see the startup
 
 ### Backend Routing
 
-When an agent calls a tool, Trentina parses the namespaced tool name to determine which backend handles it:
+When an agent calls a tool, Trentina resolves the name it served (see
+[Tool Names](#tool-names)) back to the real backend and tool:
 
 ```
-github__list_issues_tool
-^^^^^^  ^^^^^^^^^^^^^^^^
-backend   tool name
+list_issues  ->  github / list_issues_tool
 ```
 
 The gateway connects to the backend over the container network (Podman DNS), executes the call, and returns the response. The agent never talks to the backend directly.
@@ -146,8 +147,9 @@ takes the tag. Only the edge sees short names. Allowlists, parameter guards,
 `preprocess_tools`, the verdict cache and the audit log all keep using the real
 backend and tool names.
 
-`<backend>__<tool>` still routes, with a warning, until 0.40.0.
-`short_names: false` on a profile serves the old form.
+`short_names: false` on a profile serves the old `<backend>__<tool>` form.
+On a short-names profile only the names `tools/list` served route; the
+`<backend>__<tool>` fallback was removed in 0.43.0.
 
 ### Configuration
 
@@ -178,7 +180,10 @@ whole file. See [Roles](profiles.md#roles) and
 
 ### Real-World Scale
 
-The CrunchTools deployment proxies 21 backends through Trentina, serving three agent profiles (agent2, agent1, agent3) with 440+ tools total. The gateway has processed 5,700+ calls in the last 30 days with sub-5ms routing overhead on `tools/list` responses.
+The Crunchtools deployment serves 8 profiles over 30 backends. In the 30 days
+to 2026-10-01 it handled 18,724 tool calls: 18,007 succeeded, 180 were refused
+by the defense pipeline, 61 by parameter guards, 11 by response guards and 29
+by allowlists (`gateway_calls`, see [Audit Log](audit-log.md)).
 
 ## Related
 

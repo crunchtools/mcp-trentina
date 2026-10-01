@@ -75,7 +75,7 @@ class L1Error(TrentinaError):
 
 
 class QuarantineAgentError(TrentinaError):
-    """Raised when the Q-Agent (Gemini) call fails.
+    """Raised when the L3 provider call fails.
 
     ``status_code`` is the provider's HTTP status, when there was one.
     ``retry_after`` is seconds to wait before asking that provider again: the

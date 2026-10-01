@@ -1,4 +1,4 @@
-"""mcp-trentina-crunchtools: Quarantined web content extraction + MCP gateway."""
+"""mcp-trentina-crunchtools: the MCP gateway between AI agents and everything they touch."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.49.1"
+__version__ = "0.49.2"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -91,7 +91,7 @@ def main() -> None:
     log_level = _configure_logging()
     parser = argparse.ArgumentParser(
         prog="mcp-trentina-crunchtools",
-        description="MCP server for quarantined web content extraction and gateway",
+        description="MCP gateway: injection defense, token savings, policy and auth for AI agents",
     )
     parser.add_argument(
         "--transport",

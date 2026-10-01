@@ -260,7 +260,7 @@ Every code change must pass through these gates in order:
 - Required OCI labels:
   ```
   org.opencontainers.image.source=https://github.com/crunchtools/mcp-trentina
-  org.opencontainers.image.description=Quarantined web content extraction with prompt injection defense
+  org.opencontainers.image.description=MCP gateway for AI agents: injection defense, token savings, policy and auth
   org.opencontainers.image.licenses=AGPL-3.0-or-later
   ```
 

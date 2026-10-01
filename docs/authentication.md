@@ -1,5 +1,7 @@
 # Authentication
 
+*Part of Trentina's **Authentication** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Trentina supports four ways for a client to prove who it is. They are not
 alternatives to pick once for the gateway — each is set per profile, so one
 gateway can serve an agent over a static token, a desktop MCP client over

@@ -2,108 +2,182 @@
 
 <!-- mcp-name: io.github.crunchtools/trentina -->
 
-Trentina is a secure MCP gateway that inspects everything between your AI agents and the outside world — web content, MCP tool responses and tool definitions, Matrix messages, LLM completions, and monitoring alerts — through a [three-layer defense pipeline](docs/defense-pipeline.md) at every ingress, with per-profile enforcement (flag or block) and a full audit trail. Content is never silently modified: what your agent reads is what actually arrived, plus Trentina's verdict. (E2EE Matrix rooms are ciphertext at the gateway and outside what any proxy can defend.) Named after the 1377 quarantine system from Ragusa, where incoming ships had to anchor offshore for thirty days before anyone was allowed into the city. Same idea: keep the commerce flowing without letting something dangerous through.
+Trentina is an MCP gateway that sits between your AI agents and everything they
+touch: MCP servers, the web, Matrix, LLM providers and monitoring alerts. Every
+agent gets one endpoint and its own profile. Behind that endpoint Trentina
+stops prompt injection at every ingress and shrinks what reaches the context
+window. It also enforces policy the agent cannot talk its way past and handles
+OAuth for web clients like claude.ai and gemini.google.com. The same gateway
+can serve a personal assistant, a coding agent and a swarm, wired however you
+like. It is named after the 1377 *trentino* of Ragusa, where ships anchored
+offshore for thirty days before anyone came ashore. The idea is the same:
+commerce keeps flowing, and nothing dangerous gets in.
+
+## Why Trentina
+
+1. **Security.** Untrusted content gets the same three independent layers at
+   every ingress: tool responses, tool descriptions, web pages, Matrix
+   messages, LLM completions and alerts. L1 is deterministic checks, L2 is a
+   local Prompt Guard 2 classifier and L3 is a quarantined LLM with no tools.
+   On 1,306 external rows, L2 alone catches 93.7% of attacks at a 0.2%
+   false-positive rate. L3 picks up the semantic attacks L2 is blind to.
+   Around the layers sit an egress guard, file confinement and a startup
+   containment check. [Defense Pipeline](docs/defense-pipeline.md) ·
+   [Benchmark](docs/benchmark.md)
+
+2. **Token savings.** Agents pay for every tool name, schema and response byte
+   they read. Trentina hides tools a profile doesn't need, serves short names,
+   compacts schemas and compresses descriptions: 154 tool descriptions went
+   from 62K to 17K characters. It also minifies responses. On production
+   traffic, agents received **52% fewer response bytes** than backends sent,
+   across 4,164 calls. [Compression](docs/compression.md) ·
+   [Tool Filtering](docs/tool-filtering.md)
+
+3. **Determinism.** Asking a model nicely is not a control. Parameter guards,
+   response guards and allowlists are evaluated by the gateway, so an agent
+   that ignores its instructions, or assumes it has permission, is stopped
+   before the backend sees the call. Trentina can't know when your email is
+   ready to send. It can let the agent draft and keep the send for you.
+   Production, last 30 days: 61 calls stopped by parameter guards, 11
+   responses withheld by response guards. [Parameter Guards](docs/parameter-guards.md) ·
+   [Response Guards](docs/response-guards.md)
+
+4. **Authentication.** Web clients need OAuth, and most MCP servers don't
+   speak it. Trentina is the authorization server: dynamic client
+   registration for claude.ai and Claude Code, a provisioned client for
+   gemini.google.com, verified external issuers, or a static bearer, chosen
+   per profile. Each token is bound to the profile it was issued for, and LLM
+   API keys stay inside the gateway. [Authentication](docs/authentication.md) ·
+   [LLM Key Proxying](docs/llm-proxying.md)
+
+5. **Architectural flexibility.** One gateway, many shapes. A personal
+   assistant on Matrix, a coding agent in Claude Code and a swarm of locked-down
+   autonomous agents each get their own profile, with their own backends,
+   defense mode and credentials. An operator agent runs the gateway itself.
+   The production deployment serves 8 profiles over 30 backends.
+   [Profiles](docs/profiles.md) · [Operator](docs/operator.md)
 
 ## Capabilities
 
-### [MCP Gateway](docs/gateway.md)
+### Security
 
-Single chokepoint between your agents and all their MCP backends. One endpoint, one bearer token, one audit log — instead of each agent connecting directly to dozens of MCP servers. Backend tools are namespaced automatically (`slack__slack_search_messages`, `github__list_issues_tool`) so there are no collisions.
+1. **[Three-Layer Defense Pipeline](docs/defense-pipeline.md).** Every payload
+   runs L1 ∥ L2, then L3 briefed with both. The profile's mode decides delivery,
+   never detection: `block` refuses, `flag` delivers the exact bytes with a
+   verdict, `redact` returns an answer L3 extracted and a second pass verified.
+2. **[Content Tools](docs/quarantine-tools.md).** `fetch`, `read`, `dir`,
+   `content` and `search`, built-in tools that bring outside content in
+   through the pipeline. Fetches go through an egress guard that refuses
+   private addresses and checks every redirect. Reads are confined to
+   configured roots.
+3. **[Cumulative Detection Memory](docs/blocklist.md).** A refused source stays
+   refused for that profile until its entry expires, whatever a probabilistic
+   layer thinks on the next run.
+4. **[Matrix Bridge](docs/matrix-bridge.md).** Terminates end-to-end
+   encryption in a separate process so every message, in both directions,
+   crosses the pipeline.
+5. **[Deployment Hardening](docs/deployment-hardening.md).** Container flags,
+   secrets from files, network isolation, and a startup check that warns or
+   refuses on containment gaps.
 
-### [Authentication](docs/authentication.md)
+### Token savings
 
-Four ways a client can prove who it is, chosen per profile: a static bearer token, an OAuth identity Trentina issues while proxying login to Google (with dynamic client registration or a provisioned confidential client), or a token minted by an external identity provider that Trentina only verifies — for connectors that will not authenticate against a third-party authorization server.
+6. **[Tool Filtering](docs/tool-filtering.md).** Allowlists and denylists,
+   exact or glob. A tool a profile can't use never enters its context window.
+7. **[Tool Description Compression](docs/compression.md).** Tool and parameter
+   descriptions are compressed once by the operator's model and cached. Schemas
+   are compacted, and tools are served under short names.
+8. **[Minified Responses](docs/profiles.md#minifying-and-exact-text).** HTML
+   becomes Markdown, logs and JSON arrays are grouped by
+   [petit](https://github.com/crunchtools/petit), quoted mail threads collapse.
+   Minifying fails open: if it breaks, the agent gets the original.
 
-### [Per-Agent Profiles](docs/profiles.md)
+### Determinism
 
-Each consumer — Claude Code, Hermes, OpenClaw, or any MCP client — gets its own profile with independent tool access, defense settings, and authentication. Your human-supervised agent can have full tool access while your autonomous agent gets a locked-down subset, all through the same gateway.
+9. **[Parameter Guards](docs/parameter-guards.md).** Per-tool allow/deny
+   patterns on argument values: "this agent may send mail, but only to
+   `user@example.com`." Refused before the backend is called.
+10. **[Response Guards](docs/response-guards.md).** The same constraint on what
+    a backend returns, for semantic tools where nothing in the arguments is
+    matchable.
+11. **[Gateway Audit Log](docs/audit-log.md).** Every call, with profile,
+    backend, tool, outcome, bytes in and out, and duration. It tells you
+    which guards fired and which allowlisted tools no agent ever uses.
 
-### [Operator Profile](docs/operator.md)
+### Authentication
 
-Trentina is built to be run by an agent. One profile, `role: operator`, is the Operator agent's seat. It installs and configures the gateway, reloads it, and administers it through Trentina's own admin tools. It is also the gateway's service identity: compression and perimeter judgement of shared tool descriptions run on the operator's model and bill the operator's key. They never run on whichever tenant happens to sort first.
+12. **[Authentication](docs/authentication.md).** Static bearer, OAuth proxy
+    with DCR, OAuth proxy with a provisioned client, or a delegated external
+    issuer, each set per profile. The tokens Trentina issues are bound to
+    their profile.
+13. **[LLM Key Proxying](docs/llm-proxying.md).** Agents call models through
+    the gateway, which adds the real key. Request bodies are allowlisted and
+    re-serialized, so a provider can't become a side door out of a
+    `--network=none` container.
 
-### [Tool Allowlists & Denylists](docs/tool-filtering.md)
+### Architectural flexibility
 
-Control which tools each agent can even see. Tools not in the allowlist are stripped from `tools/list` responses before they reach the consumer — they never enter the agent's context window. Supports exact names and glob patterns (`delete*`, `*_gmail_*`). Reduces both context cost and attack surface.
-
-### [Parameter Guards](docs/parameter-guards.md)
-
-Per-tool argument validation at the gateway level. Restrict *what values* an agent can pass, not just which tools it can call. Example: "this agent can send email, but only to `user@example.com`." The call is rejected before it reaches the backend — no tokens spent, no side effects. Deterministic enforcement that doesn't depend on LLM behavior.
-
-### [Response Guards](docs/response-guards.md)
-
-The egress half of parameter guards: the same allow/deny constraint applied to what a backend *returns*, before the result is reduced, scanned or relayed. Argument-side matching cannot cover a semantic tool — an agent asking a memory server for "my employer's roadmap" sends nothing matchable, and the restricted material arrives in the response. Deny-oriented, blocks the whole response rather than scrubbing it, and audited as policy rather than failure.
-
-### [Three-Layer Defense Pipeline](docs/defense-pipeline.md)
-
-Every piece of untrusted content passes through three independent detection layers. Layer 1 deterministically detects structural attacks (hidden markup, invisible Unicode, encoded payloads, exfiltration URLs) and normalizes a copy for Layer 2 to read. Layer 2 runs a Prompt Guard 2 86M classifier on that copy to catch instruction overrides. Layer 3 hands the original content to a quarantined LLM (Gemini Flash Lite) for semantic analysis — no tools, no memory, minimal blast radius. Each layer catches what the others miss.
-
-### [Tool Description Compression](docs/compression.md)
-
-MCP servers ship verbose tool descriptions that waste context tokens. Trentina uses an LLM to compress every tool description as it passes through the gateway, caching results in SQLite so the model is only called once per unique description. Real-world results: 154 tools compressed from 62K to 17K characters (72% reduction), saving ~11K tokens per session. The compressed descriptions are fully functional — agents use them without issue.
-
-### [Gateway Audit Log](docs/audit-log.md)
-
-Every tool call through the gateway is recorded in SQLite with profile, backend, tool name, success/failure, duration, and error message. The `quarantine_stats` tool exposes this data for monitoring — tool call counts, error rates, per-backend breakdowns. Data-driven evidence for tightening allowlists and identifying problems.
-
-### [Cumulative Detection Memory](docs/blocklist.md)
-
-When `block` refuses a source, Trentina records it in a SQLite blocklist, and later `block`/`flag` requests for it are refused before anything is fetched — the system remembers what it's seen before. Blocklist entries include the source URL or content hash, detection timestamp, and risk level.
-
-### [Content Tools](docs/quarantine-tools.md)
-
-Five tools — `fetch` (URL), `read` (file), `dir` (directory listing), `content` (inline text), `search` (web) — each taking a `trentina_mode` argument. Every call runs all three layers; the mode decides only what is delivered. `block` refuses flagged or incompletely judged content. `flag` delivers the exact bytes with the verdict attached — a security-researcher grant. `{"redact": "<question>"}` returns an extraction that L3 wrote and a second L3 pass verified, answering the question. The names are [OpenRouter's guardrail actions](docs/quarantine-tools.md#the-names-are-openrouters), though `redact` rewrites through L3 rather than substituting spans; `warn` and `clean`, the pre-0.35.0 names, are deprecated aliases. Which modes an agent may choose is policy, not the agent's call: the profile's `defense.modes` through the gateway, which inserts the same argument into every backend's tools, or `TRENTINA_MODE`/`TRENTINA_MODES` standalone.
-
-### [LLM Key Proxying](docs/llm-proxying.md)
-
-Proxy LLM API calls (Gemini, OpenAI, Anthropic) through the gateway so API keys never leave the trusted boundary. Agents send model requests to Trentina, which forwards them with the real credentials. Adding a new provider is a YAML entry, not code. Streaming and non-streaming responses are forwarded transparently.
-
-### [Matrix Reverse Proxy](docs/network-isolation.md)
-
-Proxy Matrix Client-Server API traffic through the gateway so agents on the internal network can communicate via Matrix without direct internet access. Agents point `MATRIX_HOMESERVER` at Trentina instead of matrix.org. Long-poll `/sync` timeouts are tuned automatically.
-
-### [Cockpit Plugin](docs/cockpit-plugin.md)
-
-Live web dashboard for the defense pipeline, built as a Cockpit plugin with PatternFly 6. Shows layer status, blocklist entries, and pipeline events in real time through the same web console sysadmins already use to manage RHEL systems. Vanilla JavaScript, no React, no build step.
+14. **[MCP Gateway](docs/gateway.md).** One endpoint per profile in front of
+    any number of streamable-HTTP MCP backends, with circuit breakers, hot
+    reload and argument normalization.
+15. **[Per-Agent Profiles](docs/profiles.md).** Each consumer gets its own
+    backends, tools, defense mode, pre-processors and authentication.
+16. **[Operator Profile](docs/operator.md).** Trentina is built to be run by an
+    agent. The operator seat installs, reloads and administers the gateway, and
+    is the identity its own model calls bill to.
+17. **[Matrix Reverse Proxy](docs/network-isolation.md).** Agents on an
+    isolated network reach Matrix through the gateway rather than the internet.
+18. **[Cockpit Plugin](docs/cockpit-plugin.md).** A live dashboard of layers,
+    blocklist and pipeline events in the Cockpit console.
 
 ## Quick Start
 
 ```bash
-# PyPI
-pip install mcp-trentina-crunchtools
+# Container (includes the Prompt Guard 2 86M classifier)
+podman run -d -p 127.0.0.1:8019:8019 \
+    -v ./profiles.yaml:/config/profiles.yaml:ro,Z \
+    -e TRENTINA_GATEWAY_ENABLED=true \
+    -e TRENTINA_PROFILES_PATH=/config/profiles.yaml \
+    -e TRENTINA_PROFILE_MYAGENT_TOKEN=your-token \
+    -e OPENROUTER_API_KEY=your-key -e TRENTINA_MODEL_PROVIDER=openrouter \
+    quay.io/crunchtools/mcp-trentina \
+    --transport streamable-http --host 0.0.0.0 --port 8019
 
-# uvx (zero-install)
+# Or from PyPI, standalone (content tools only, no gateway)
 uvx mcp-trentina-crunchtools
-
-# Container (includes Prompt Guard 2 86M classifier)
-podman run quay.io/crunchtools/mcp-trentina
 ```
 
-### Minimal Configuration
+L3 needs a key for one LLM provider. Any of Gemini, OpenRouter, OpenAI,
+Anthropic or Ollama works. A minimal `profiles.yaml`:
 
-```bash
-# Required for Layer 3 (Q-Agent) and description compression
-export GEMINI_API_KEY=your-key
-
-# Enable gateway mode
-export TRENTINA_GATEWAY_ENABLED=true
-export TRENTINA_PROFILES_PATH=/path/to/profiles.yaml
-
-# Per-profile bearer tokens
-export TRENTINA_PROFILE_MYAGENT_TOKEN=your-token
+```yaml
+profiles:
+  myagent:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_MYAGENT_TOKEN
+    backends:
+      web:
+        url: "internal://web"         # Trentina's own content tools
+        tools_allow: ["*"]
+      gmail:
+        url: "http://gws-personal:8000/mcp"
+        tools_allow:                  # it may read and draft; you send
+          - search_gmail_messages
+          - get_gmail_message_content
+          - draft_gmail_message
+    defense:
+      enforcement: block
 ```
 
-### Claude Code
+Then point Claude Code at it:
 
 ```json
 {
   "mcpServers": {
     "trentina": {
       "type": "streamable-http",
-      "url": "http://localhost:8019/gateway/myprofile/mcp",
-      "headers": {
-        "Authorization": "Bearer your-token"
-      }
+      "url": "http://localhost:8019/gateway/myagent/mcp",
+      "headers": { "Authorization": "Bearer your-token" }
     }
   }
 }
@@ -113,71 +187,27 @@ export TRENTINA_PROFILE_MYAGENT_TOKEN=your-token
 
 | Document | Description |
 |----------|-------------|
-| [MCP Gateway](docs/gateway.md) | Architecture, routing, namespacing |
-| [Authentication](docs/authentication.md) | Static bearer, OAuth proxy, delegated issuers |
-| [Per-Agent Profiles](docs/profiles.md) | Profile schema, multi-agent setup |
-| [Operator Profile](docs/operator.md) | The Operator agent's seat, service identity |
-| [Tool Filtering](docs/tool-filtering.md) | Allowlists, denylists, glob patterns |
-| [Parameter Guards](docs/parameter-guards.md) | Per-tool argument validation |
-| [Response Guards](docs/response-guards.md) | Per-tool result validation (egress) |
-| [Defense Pipeline](docs/defense-pipeline.md) | L1/L2/L3 layers, coverage matrix |
-| [Description Compression](docs/compression.md) | LLM-powered context reduction |
-| [Audit Log](docs/audit-log.md) | Call recording, stats, monitoring |
+| [MCP Gateway](docs/gateway.md) | Endpoint, routing, tool names, argument normalization |
+| [Per-Agent Profiles](docs/profiles.md) | Profile schema, modes, minifying, roles, multi-agent setup |
+| [Operator Profile](docs/operator.md) | The operator agent's seat and the gateway's service identity |
+| [Configuration](docs/configuration.md) | Every environment variable |
+| [Authentication](docs/authentication.md) | Static bearer, OAuth proxy with DCR or a provisioned client, delegated issuers |
+| [Defense Pipeline](docs/defense-pipeline.md) | L1/L2/L3, modes, coverage matrix |
+| [Benchmark](docs/benchmark.md) | Detection rates per layer and per L3 provider |
+| [Content Tools](docs/quarantine-tools.md) | fetch, read, dir, content, search |
 | [Blocklist](docs/blocklist.md) | Cumulative detection memory |
-| [Quarantine Tools](docs/quarantine-tools.md) | Web fetch, read, search, scan |
-| [LLM Key Proxying](docs/llm-proxying.md) | API key isolation via reverse proxy |
-| [Matrix Reverse Proxy](docs/network-isolation.md) | Agent communication via Matrix |
+| [Tool Filtering](docs/tool-filtering.md) | Allowlists, denylists, glob patterns |
+| [Description Compression](docs/compression.md) | Description compression and schema compaction |
+| [Token Routing](docs/token-routing.md) | Response reduction (implemented); delegation (proposed) |
+| [Parameter Guards](docs/parameter-guards.md) | Per-tool argument validation |
+| [Response Guards](docs/response-guards.md) | Per-tool result validation |
+| [Audit Log](docs/audit-log.md) | Call recording, stats, monitoring |
+| [LLM Key Proxying](docs/llm-proxying.md) | Provider keys kept inside the gateway |
+| [Matrix Bridge](docs/matrix-bridge.md) | E2EE termination and two-way judging |
+| [Matrix Reverse Proxy](docs/network-isolation.md) | Matrix for agents on an isolated network |
 | [Deployment Hardening](docs/deployment-hardening.md) | Container flags, secrets, egress, the startup check |
 | [Cockpit Plugin](docs/cockpit-plugin.md) | Live defense pipeline dashboard |
-| [Internal: Gateway Design](docs/internal/gateway-design.md) | Original design document for contributors |
-
-## Environment Variables
-
-Trentina reads its gateway, profile and backend configuration from a YAML file;
-these variables control the process itself. Profile tokens
-(`TRENTINA_PROFILE_<NAME>_TOKEN`) and provider API keys are covered in
-[Per-Agent Profiles](docs/profiles.md) and [LLM Key Proxying](docs/llm-proxying.md).
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TRENTINA_LOG_LEVEL` | `INFO` | Application log level, sent to stderr. Any standard Python level name. |
-| `TRENTINA_GATEWAY_ENABLED` | unset (disabled) | Turns on the MCP gateway (profiles, auth, allowlists, audit). See [MCP Gateway](docs/gateway.md). |
-| `TRENTINA_PROFILES_PATH` | `/etc/trentina/profiles.yaml` | Path to the gateway's profile YAML file. See [Per-Agent Profiles](docs/profiles.md). |
-| `TRENTINA_LEGACY_MCP` | unset (disabled) | Restores the pre-gateway unguarded `/mcp` endpoint. **Bypasses auth, allowlists and audit** — migration aid only. See [MCP Gateway](docs/gateway.md). |
-| `TRENTINA_MODEL_PROVIDER` | `gemini` | Global LLM provider for L3 Q-Agent and tool-description compression, overridable per-profile. See [Per-Agent Profiles](docs/profiles.md). |
-| `TRENTINA_PROVIDER_FALLBACK` | unset (none) | Comma-separated provider names to fall back to if `TRENTINA_MODEL_PROVIDER` is unavailable. |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Base URL for the Ollama provider. |
-| `OLLAMA_MODEL` | `qwen2.5:0.5b` | Model used when the Ollama provider is selected. See [LLM Key Proxying](docs/llm-proxying.md). |
-| `QUARANTINE_MODEL` | `gemini-2.5-flash-lite` | Model used for quarantine agent (L3) extraction/detection calls. |
-| `QUARANTINE_SEARCH_MODEL` | `gemini-2.5-flash` | Model used for grounded L0 search. |
-| `TRENTINA_REQUIRE_L2` | `true` | `false` lets `block`/`redact` deliver with a warning when the L2 model is absent, instead of refusing. Never excuses a partial scan. See [Defense Pipeline](docs/defense-pipeline.md). |
-| `TRENTINA_REQUIRE_L3` | `true` | The same for an absent L3 provider. Replaces `QUARANTINE_FALLBACK` (removed in 0.31.0; setting it now fails startup). |
-| `TRENTINA_MODE` | `block` | Standalone only: the mode an omitted `trentina_mode` resolves to. `flag` or `block`. Under the gateway the profile's `defense.enforcement` decides. |
-| `TRENTINA_MODES` | the default | Standalone only: comma-separated modes a call may choose (`block,redact`). A default outside the set fails startup. Under the gateway the profile's `defense.modes` decides. |
-| `QUARANTINE_CONTEXT_TOKENS` | `1000000` | What the L3 model reads in one call. The admission cap is the smaller of this and `CLASSIFIER_MAX_TOKENS`; `block` and `redact` refuse a payload over it before any layer runs. Replaces `QUARANTINE_MAX_CONTENT` (removed in 0.43.0; setting it now fails startup). |
-| `CLASSIFIER_THRESHOLD` | `0.5` | Malicious-score threshold above which the L2 classifier flags content. |
-| `CLASSIFIER_MODEL_PATH` | `/models/prompt-guard-2-86m` | Filesystem path to the ONNX classifier model. Set to `/models/prompt-guard-2-86m` by the container image. |
-| `CLASSIFIER_MAX_TOKENS` | `32768` | L2's CPU budget in tokens, and with `QUARANTINE_CONTEXT_TOKENS` the admission cap. `0` removes L2's budget. |
-| `CLASSIFIER_THREADS` | `4` | ONNX Runtime intra-op thread count for the L2 classifier. |
-| `TRENTINA_L2_CONCURRENCY` | `2` | L2 scans run at once. Each already uses `CLASSIFIER_THREADS` threads, so size the product to the container's `--cpus`. A freed slot goes to waiting profiles in turn. |
-| `TRENTINA_L3_CONCURRENCY_START` | `4` | L3 calls in flight per (provider, model, API key) before the adaptive limiter has learned anything. It grows from here until the provider throttles. |
-| `TRENTINA_L3_CONCURRENCY_MAX` | `64` | Ceiling for the adaptive L3 limiter, per (provider, model, API key). A safety cap, not a target. |
-| `TRENTINA_L3_THROTTLE_BUDGET` | `20` | Seconds a user-facing L3 call may spend waiting out 429s on one provider before falling back. `0` falls back at once. The boot warm-up uses 300. |
-| `QUARANTINE_DB` | `~/.local/share/mcp-trentina/trentina.db` (container: `/data/quarantine.db`) | Path to the main SQLite database (blocklist, audit log). See [Audit Log](docs/audit-log.md) and [Blocklist](docs/blocklist.md). |
-| `TRENTINA_PERIMETER_DB` | `<QUARANTINE_DB's directory>/perimeter.db` | Path to the perimeter verdict-cache database, deliberately separate from `QUARANTINE_DB`. |
-| `TRENTINA_READ_ROOTS` | unset | `os.pathsep`-separated absolute directories `read_tool` and `dir_tool` may reach. Unset behind a gateway refuses every path (production's setting); unset standalone reads anywhere. Kernel and Trentina state/config directories are refused regardless. See [Quarantine Tools](docs/quarantine-tools.md#where-read-and-dir-may-look). |
-| `QUARANTINE_TRUST_CONFIG` | `~/.config/mcp-env/mcp-trentina-trust.json` | Path to the trust-level configuration JSON. See [Quarantine Tools](docs/quarantine-tools.md). |
-| `TRENTINA_FETCH_ALLOW_PRIVATE` | `false` | Lets `fetch` reach loopback, private, link-local and other non-global addresses. Scheme, port (80/443) and redirect rules still apply. Logs a warning at startup. See [Quarantine Tools](docs/quarantine-tools.md). |
-| `TRENTINA_RATE_LIMIT` | on | Set to `off`/`0`/`false` to disable rate limiting on the unauthenticated OAuth write paths. An escape hatch for an operator locked out during an incident — not a normal setting. |
-| `TRENTINA_MAX_REGISTRATION_BYTES` | `8192` | Largest `POST /register` body accepted, rejected before it is parsed. `0` or negative disables the cap. |
-| `TRENTINA_MAX_REQUEST_BYTES` | `1048576` | Largest request body accepted on an MCP route (`/gateway/<profile>/mcp`) and the alert ingress. Over it the request gets 413 and the rest is never read, chunked or not. Floored at 1024. |
-| `TRENTINA_OAUTH_JWT_SIGNING_KEY_FILE` | unset | A file holding `TRENTINA_OAUTH_JWT_SIGNING_KEY`; wins when both are set. The preferred form: an env var stays readable in `/proc/<pid>/environ` even after startup removes it from `os.environ`. `TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET_FILE` works the same way. |
-| `TRENTINA_FORWARDED_ALLOW_IPS` | unset (uvicorn's default of `127.0.0.1`) | Peer addresses whose `X-Forwarded-For` is trusted. **Set this to your reverse proxy's address**, or every caller behind it shares one rate-limit bucket. See [Authentication](docs/authentication.md). |
-| `TRENTINA_BLOCKLIST_TTL_DAYS` | `30` | Days a block refusal keeps its source on the calling profile's blocklist. Expired rows stop counting and are swept hourly. See [Blocklist](docs/blocklist.md). |
-| `TRENTINA_AUDIT_RETENTION_DAYS` | `90` | Days a `gateway_calls` audit row is kept; swept hourly. `0` keeps every row. See [Audit Log](docs/audit-log.md). |
-| `TRENTINA_FETCH_CONCURRENCY` | `8` | Fetches one profile may have in flight; the next waits for one of its own. Each fetch has 60 s of wall clock. See [Quarantine Tools](docs/quarantine-tools.md). |
-| `TRENTINA_REGISTRATION_TTL_DAYS` | `90` | How long a DCR registration lives once a token exchange has promoted it. Each later exchange re-stamps it. |
-| `TRENTINA_OAUTH_CULL_INTERVAL` | `3600` | Seconds between sweeps that unlink expired registrations, transactions and CSRF records from the OAuth store. Floored at 60. |
+| [Internal: Gateway Design](docs/internal/gateway-design.md) | Original design document, for contributors |
 
 ## Development
 

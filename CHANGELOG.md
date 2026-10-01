@@ -10,6 +10,25 @@ under that name.
 
 ## [Unreleased]
 
+## [0.49.2] - 2026-10-01
+
+### Changed
+- Positioning reset (#256). README rewritten around five promises: security,
+  token savings, determinism, authentication and architectural flexibility,
+  with capabilities grouped under each and production numbers cited. The
+  environment variable table moved to `docs/configuration.md`, which now
+  also lists `TRENTINA_OAUTH_BASE_URL`, `TRENTINA_OAUTH_GOOGLE_CLIENT_ID` and
+  `TRENTINA_REQUIRE_HARDENED`.
+- "Quarantined web content extraction" and "two-layer" retired everywhere
+  they still appeared: OCI labels, package description and keywords,
+  `server.json` (whose version had sat at 0.5.0), the argparse help, module
+  docstrings, the Cockpit spec and SECURITY.md, whose layer diagram now
+  shows L1/L2/L3 as they are and no longer claims trusted sources skip L3.
+- L3 is described as provider-neutral (`gemini-2.5-flash-lite` by default).
+- docs/gateway.md no longer documents `<backend>__<tool>` routing, removed in
+  0.43.0; docs/token-routing.md says plainly that only response reduction is
+  built.
+
 ## [0.49.1] - 2026-10-01
 
 ### Fixed

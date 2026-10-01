@@ -1,6 +1,8 @@
 # Cumulative Detection Memory (Blocklist)
 
-When Trentina detects prompt injection in a source, it adds the source to a persistent SQLite blocklist. Future requests for the same source trigger an immediate warning — the system remembers what it's seen before, even across restarts.
+*Part of Trentina's **Security** promise; see [Why Trentina](../README.md#why-trentina).*
+
+When Trentina detects prompt injection in a source, it adds the source to a persistent SQLite blocklist. Future requests for the same source are refused without re-running the pipeline — the system remembers what it's seen before, even across restarts.
 
 ## Why This Matters
 

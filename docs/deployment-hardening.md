@@ -1,5 +1,7 @@
 # Deployment Hardening
 
+*Part of Trentina's **Security** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Trentina holds every profile's bearer, every backend's credential, the LLM
 keys and the OAuth signing key. A file-write or code-execution primitive
 inside it compromises every agent it serves and lets the attacker mint OAuth

@@ -1,5 +1,7 @@
 # Matrix Reverse Proxy
 
+*Part of Trentina's **Architectural flexibility** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Proxy Matrix Client-Server API traffic through the gateway so agents on the internal network can communicate via Matrix without direct internet access. Agents point `MATRIX_HOMESERVER` at Trentina instead of matrix.org.
 
 ## Why This Matters

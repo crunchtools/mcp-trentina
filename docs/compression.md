@@ -1,5 +1,7 @@
 # Tool Description Compression
 
+*Part of Trentina's **Token savings** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Trentina compresses MCP tool descriptions as they pass through the gateway, reducing context token usage by 70-77% without affecting tool usability. Compressed descriptions are cached in SQLite so the LLM is only called once per unique description — after the first run, it's a local lookup.
 
 ## Why This Matters

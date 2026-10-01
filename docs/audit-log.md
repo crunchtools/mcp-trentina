@@ -1,5 +1,7 @@
 # Gateway Audit Log
 
+*Part of Trentina's **Determinism** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Every tool call through the Trentina gateway is recorded in SQLite — including calls the gateway itself refuses. The audit log captures who called what, **what outcome it reached**, how long it took, and what the defense pipeline found. This data drives allowlist tuning, error diagnosis, and usage monitoring.
 
 ## Why This Matters

@@ -1,5 +1,7 @@
 # The Operator Profile
 
+*Part of Trentina's **Architectural flexibility** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Trentina is meant to be run by an agent. It gets installed, configured, tuned
 and kept healthy by an **Operator agent**, and humans set policy rather than
 editing YAML. The operator profile (`role: operator`) is that agent's seat.

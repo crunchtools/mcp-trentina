@@ -1,5 +1,7 @@
 # Parameter Guards
 
+*Part of Trentina's **Determinism** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Parameter guards validate the *arguments* an agent passes to a tool, not just whether the agent can call the tool at all. They provide deterministic, gateway-level enforcement of constraints like "this agent can send email, but only to these specific recipients."
 
 ## Why This Matters
