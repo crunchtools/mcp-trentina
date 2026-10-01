@@ -42,6 +42,7 @@ from ...outcomes import Outcome
 from ...reserved import WARNING_KEY, strip_reserved, with_stripped
 from ...warning import build_warning
 from ..context import profile_context
+from ..matrix_relation import withheld_relation
 from .rewrite import IdMap, referenced_ids, rewrite_content
 
 if TYPE_CHECKING:
@@ -399,10 +400,15 @@ class ProfileBridge:
         return room, stand_in
 
     async def _withheld_notice(self, content: dict[str, Any], reason: str) -> dict[str, Any] | None:
-        """The notice that replaces a withheld message, in its thread or reply."""
+        """The notice that replaces a withheld message, in its thread or reply.
+
+        The relation is rebuilt from an allowlist, never copied: it arrived
+        with the event the verdict withheld (#296).
+        """
         notice: dict[str, Any] = {"msgtype": "m.notice", "body": f"[trentina] withheld: {reason}"}
-        if "m.relates_to" in content:
-            notice["m.relates_to"] = content["m.relates_to"]
+        relation = withheld_relation(content.get("m.relates_to"))
+        if relation is not None:
+            notice["m.relates_to"] = relation
         return rewrite_content(notice, await self._inbound_ids(notice))
 
     async def _inbound_room(self, event: dict[str, Any], remote_room: str) -> str:

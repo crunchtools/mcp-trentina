@@ -100,11 +100,13 @@ class Vectors:
             "session_data": self.session_data,
         }}}
 
-    def encrypted_event(self, body: str, *, event_id: str = "$ev:hs") -> dict[str, Any]:
+    def encrypted_event(
+        self, body: str, *, event_id: str = "$ev:hs", extra: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         plaintext = json.dumps({
             "type": "m.room.message",
             "room_id": self.room_id,
-            "content": {"msgtype": "m.text", "body": body},
+            "content": {"msgtype": "m.text", "body": body, **(extra or {})},
         })
         ciphertext = self._group.encrypt(plaintext.encode()).to_base64()
         return {

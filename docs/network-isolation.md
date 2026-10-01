@@ -50,7 +50,7 @@ MATRIX_HOMESERVER=https://matrix.org
 MATRIX_HOMESERVER=http://trentina:8019/matrix
 ```
 
-All Matrix Client-Server API operations (`/sync`, `/rooms`, `/send`, etc.) are forwarded transparently.
+All Matrix Client-Server API operations (`/sync`, `/rooms`, `/send`, etc.) are forwarded, and every response but a write's acknowledgement, E2EE key traffic and binary media is judged first (see [Defense Pipeline](defense-pipeline.md)).
 
 ### Architecture
 
