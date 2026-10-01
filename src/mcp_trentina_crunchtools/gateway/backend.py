@@ -370,6 +370,28 @@ async def list_backend_tools(
     return await inflight
 
 
+async def refresh_backend_tools(
+    backend_name: str,
+    backend: Backend,
+) -> list[dict[str, Any]]:
+    """Fetch one backend's tool list afresh, replacing the cached one in place.
+
+    Unlike ``evict_backend_cache_url``, no eviction callback fires, so no
+    profile's aggregate is dropped. That is what an agent's
+    ``reconnect_backend`` needs (#291): evicting reached every profile on the
+    URL and moved their ``surface.built_at``, a bit another agent could read.
+    A fetch already in flight for the URL is joined, not doubled.
+
+    Raises:
+        BackendCallError: as ``list_backend_tools`` on a cold miss.
+    """
+    inflight = _inflight.get(backend.url)
+    if inflight is None:
+        inflight = asyncio.ensure_future(_single_flight_fetch(backend_name, backend))
+        _inflight[backend.url] = inflight
+    return await inflight
+
+
 async def _single_flight_fetch(
     backend_name: str,
     backend: Backend,

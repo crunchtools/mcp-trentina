@@ -1,10 +1,14 @@
 """Adaptive concurrency for L3: send as fast as the provider will take (#216).
 
 One ``AdaptiveLimiter`` per judge — the (provider, model) a request actually
-goes to — shared by everything that calls it: user-facing scans, the
-perimeter, compression, the boot warm-up. Callers queue FIFO; foreground work
-is granted a slot before background work, so a warm-up judging hundreds of
-tool descriptions never makes a user's ``tools/call`` wait behind it.
+goes to — and per API key, shared by everything that calls it on that key:
+user-facing scans, the perimeter, compression, the boot warm-up. The key is in
+the limiter's identity because a provider throttles per key (#291): keyed by
+judge alone, one profile driving its own key into 429s paused, then refused,
+every other profile's L3 on that model, and block refused their content.
+Callers queue FIFO; foreground work is granted a slot before background work,
+so a warm-up judging hundreds of tool descriptions never makes a user's
+``tools/call`` wait behind it.
 
 The limit is found, not configured, by the rule TCP uses for the same
 problem (AIMD):
@@ -262,19 +266,25 @@ class AdaptiveLimiter:
         }
 
 
-_limiters: dict[tuple[str, str], AdaptiveLimiter] = {}
+_limiters: dict[tuple[str, str, str], AdaptiveLimiter] = {}
 
 
-def limiter_for(judge: tuple[str, str]) -> AdaptiveLimiter:
-    """The one limiter for this (provider, model), created on first use."""
-    limiter = _limiters.get(judge)
+def limiter_for(judge: tuple[str, str], key_ordinal: str = "global") -> AdaptiveLimiter:
+    """The one limiter for this (provider, model) on this key, created on first use.
+
+    ``key_ordinal`` is ``Provider.key_ordinal``: an ordinal, never
+    the key nor anything derived from it. Two profiles holding the same key
+    share a limiter, as they share the provider's quota for it.
+    """
+    slot = (*judge, key_ordinal)
+    limiter = _limiters.get(slot)
     if limiter is None:
         limiter = AdaptiveLimiter(
             judge,
             start=int_env("TRENTINA_L3_CONCURRENCY_START", 4, minimum=1),
             ceiling=int_env("TRENTINA_L3_CONCURRENCY_MAX", 64, minimum=1),
         )
-        _limiters[judge] = limiter
+        _limiters[slot] = limiter
     return limiter
 
 
@@ -295,7 +305,8 @@ async def limited_generate(provider: Provider, **kwargs: Any) -> ProviderResult:
     """``provider.generate`` behind that judge's limiter.
 
     Args:
-        provider: The driver to call; its ``judge`` picks the limiter.
+        provider: The driver to call; its ``judge`` and ``key_ordinal``
+            pick the limiter.
         **kwargs: Passed to ``provider.generate`` unchanged.
 
     Returns:
@@ -310,7 +321,7 @@ async def limited_generate(provider: Provider, **kwargs: Any) -> ProviderResult:
             is refused the same way without being sent, so a long
             Retry-After cannot hold a user's call past its budget.
     """
-    limiter = limiter_for(provider.judge)
+    limiter = limiter_for(provider.judge, provider.key_ordinal)
     if limiter.resume_in() > throttle_budget():
         raise QuarantineAgentError(
             f"{limiter.name} paused for throttling",
