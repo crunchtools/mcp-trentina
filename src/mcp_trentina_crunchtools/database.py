@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 _db: sqlite3.Connection | None = None
-_db_path: str | None = None
+_db_path = ""  # set by get_db on every open
 _local = threading.local()
 
 SCHEMA = """
@@ -116,8 +116,18 @@ def get_db(db_path: str | None = None) -> sqlite3.Connection:
     return _db
 
 
+def opened_path() -> str:
+    """The database file, opening it (schema and migrations) if nothing has yet.
+
+    Call on the event loop, where the singleton lives; the result is what a
+    worker hands ``snapshot_reader``.
+    """
+    get_db()
+    return _db_path
+
+
 @contextmanager
-def snapshot_reader() -> Iterator[None]:
+def snapshot_reader(path: str) -> Iterator[None]:
     """Route this thread's stats reads to a read-only connection of its own (#295).
 
     The aggregates behind ``quarantine_stats`` cost about 2.7 s per million
@@ -127,12 +137,10 @@ def snapshot_reader() -> Iterator[None]:
     the scan. A second connection under WAL reads a consistent snapshot while
     the singleton keeps writing.
 
-    The singleton must already be open, which fixes the path; call
-    ``get_db()`` on the loop first.
+    Args:
+        path: the database file, from ``opened_path()``.
     """
-    if _db_path is None:
-        raise RuntimeError("database not opened")
-    conn = sqlite3.connect(f"file:{quote(_db_path)}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{quote(path)}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     _local.reader = conn
     try:

@@ -159,7 +159,10 @@ class TestStatsOffTheLoop:
         assert conn is not audit_db
 
     def test_a_reader_cannot_write(self, audit_db: Any) -> None:
-        with database.snapshot_reader(), pytest.raises(sqlite3.OperationalError):
+        with (
+            database.snapshot_reader(database.opened_path()),
+            pytest.raises(sqlite3.OperationalError),
+        ):
             database._read_db().execute("DELETE FROM gateway_calls")
 
 

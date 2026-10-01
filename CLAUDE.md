@@ -188,7 +188,7 @@ synchronous `classify()` from a coroutine blocks the event loop for the whole
 scan and takes the gateway down with it. The same holds for L1 (#295):
 `run_l1`, `run_l1_json` and a document processor's selection run under
 `asyncio.to_thread`, and `quarantine_stats` reads SQLite in a worker on
-`database.snapshot_reader()`'s own connection. A new L1 regex goes into
+`database.snapshot_reader(path)`'s own connection. A new L1 regex goes into
 `tests/test_l1_patterns.py`'s linearity tests with the unit that repeats it.
 
 ## Tools

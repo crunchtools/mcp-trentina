@@ -20,10 +20,10 @@ from ..config import get_config
 from ..database import (
     get_blocklist_stats,
     get_compression_stats,
-    get_db,
     get_fanout,
     get_gateway_call_stats,
     get_recent_destinations,
+    opened_path,
     snapshot_reader,
 )
 from ..gateway.errors import ScopeError
@@ -110,13 +110,12 @@ async def get_trentina_stats() -> dict[str, Any]:
     # Every number below is a SQLite aggregate over the audit tables, about
     # 2.7 s per million rows; on the loop that stalls every profile, and a
     # denied call is a cheap way to add rows (#295).
-    get_db()  # opened on the loop: it fixes the path the reader opens
-    return await asyncio.to_thread(_snapshot, scope)
+    return await asyncio.to_thread(_snapshot, scope, opened_path())
 
 
-def _snapshot(scope: CallerScope) -> dict[str, Any]:
+def _snapshot(scope: CallerScope, path: str) -> dict[str, Any]:
     """The caller's view, read on this worker's own connection."""
-    with snapshot_reader():
+    with snapshot_reader(path):
         return _agent_stats(scope) if not scope.is_operator else _gateway_stats()
 
 

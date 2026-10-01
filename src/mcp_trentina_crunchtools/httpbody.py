@@ -94,6 +94,17 @@ async def request_capped(
     deadline is wall clock: httpx's own timeout is per read and resets on
     every byte.
 
+    Args:
+        client: the caller's client; its own timeouts still apply per read.
+        method: HTTP method.
+        url: the peer's URL, an operator's setting at every call site.
+        deadline: wall-clock seconds for the request and the whole reply.
+        limit: most reply bytes read before ``TooLargeError``.
+        headers: sent as given, except ``Accept-Encoding``, which is always
+            ``identity``.
+        **kwargs: passed to ``client.stream`` (``json``, ``content``,
+            ``params``).
+
     Returns:
         The response, closed, and its body. ``resp.content`` is not
         available; decode the bytes returned.
