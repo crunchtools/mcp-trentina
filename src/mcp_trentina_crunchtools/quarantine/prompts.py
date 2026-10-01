@@ -100,6 +100,17 @@ the judge quote it. See ``warning.py``.
 """
 
 
+ENUM_FALLBACKS: dict[str, str] = {"$.findings[].type": "other"}
+"""Off-enum answers the L3 schema check reduces instead of refusing (#294).
+
+A finding's type carries no verdict, ``finding_types`` already reads the
+closed set, and judges do drift here: the captured fixtures in
+``tests/test_l3_integration.py`` name ``policy_override`` and
+``scanner_manipulation``. Refusing them would turn a detected injection into
+an unavailable judge. ``risk_level`` and ``injection_detected`` are not here.
+"""
+
+
 def finding_types(assessment: Mapping[str, Any] | None) -> list[str]:
     """L3's finding types, reduced to the closed enum. Never its prose.
 

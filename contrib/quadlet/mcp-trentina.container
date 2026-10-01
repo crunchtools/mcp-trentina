@@ -1,0 +1,39 @@
+# Reference Quadlet unit for a contained Trentina gateway (#268).
+# Install to /etc/containers/systemd/ and `systemctl daemon-reload`.
+# See docs/deployment-hardening.md for what each line defends against.
+
+[Unit]
+Description=Trentina MCP gateway
+After=network-online.target
+
+[Container]
+Image=quay.io/crunchtools/mcp-trentina:latest
+ContainerName=mcp-trentina
+Network=trentina.network
+PublishPort=127.0.0.1:8019:8019
+Exec=--transport streamable-http --host 0.0.0.0 --port 8019 --no-dbus
+
+# Containment. TRENTINA_REQUIRE_HARDENED refuses to start without it.
+ReadOnly=true
+ReadOnlyTmpfs=true
+NoNewPrivileges=true
+DropCapability=all
+User=65532
+Environment=TRENTINA_REQUIRE_HARDENED=true
+
+# State: the only writable path besides /tmp.
+Volume=/srv/mcp-trentina/data:/data:Z
+
+# Config and secrets read-only. Every secret by its _FILE form, never inline:
+# an environment value stays readable at /proc/self/environ.
+Volume=/srv/mcp-trentina/config/profiles.yaml:/etc/trentina/profiles.yaml:ro,Z
+Volume=/srv/mcp-trentina/secrets:/run/secrets:ro,Z
+Environment=TRENTINA_GATEWAY_ENABLED=true
+Environment=TRENTINA_OAUTH_JWT_SIGNING_KEY_FILE=/run/secrets/oauth-jwt-signing-key
+Environment=OPENROUTER_API_KEY_FILE=/run/secrets/openrouter-api-key
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

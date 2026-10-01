@@ -191,7 +191,10 @@ def _decide(
         )
 
     if l3_assessment is not None:
-        return Layer.L3, str(l3_assessment.get("risk_level", "high")), l3_assessment
+        # The closed set, like every L3 field that leaves the perimeter: this
+        # one reaches the warning, the refusal text and the detection row.
+        risk = l3_assessment.get("risk_level")
+        return Layer.L3, risk if risk in RISK_LEVELS else "high", l3_assessment
 
     if pipeline.stats.total_detections() > 0 and l1_risk in _BLOCKING_L1_RISKS:
         return Layer.L1, l1_risk, None
@@ -447,7 +450,7 @@ async def defend(
                 pipeline.stats, classification, l2_truncated=l2_truncated, extra=l3_context
             ),
         )
-    l3_flagged = bool(l3_assessment and l3_assessment.get("injection_detected"))
+    l3_flagged = bool(l3_assessment and l3_assessment.get("injection_detected") is True)
 
     flagged_by, risk_level, assessment = _decide(
         pipeline=pipeline,
