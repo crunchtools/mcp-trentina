@@ -10,6 +10,12 @@ under that name.
 
 ## [Unreleased]
 
+### Added
+- `demo-container.yml` builds the attack-sim demo (`demo/attack-sim`) and
+  pushes `quay.io/crunchtools/trentina-demo` and its GHCR mirror (`:latest`
+  and the commit SHA), so the demo no longer depends on an image built on the
+  host (#273).
+
 ### Changed
 - Boundary-review eval: the reviewer sees each fixture as `case_NN.py`, and
   the fixtures no longer cite the issue that fixed them; that history lives
