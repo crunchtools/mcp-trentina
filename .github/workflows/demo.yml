@@ -8,7 +8,7 @@ name: Render README demo
 #   gh workflow run demo.yml && gh run download -n trentina-demo -D docs/demo
 
 # Always the published image: a dispatch input choosing it would choose what
-# code receives GEMINI_API_KEY.
+# code receives OPENROUTER_API_KEY.
 on:
   workflow_dispatch:
 
@@ -27,7 +27,7 @@ jobs:
 
       - name: Render
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: docs/demo/render.sh
 
       - uses: actions/upload-artifact@v7
