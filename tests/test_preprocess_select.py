@@ -22,7 +22,7 @@ from mcp_trentina_crunchtools.preprocess import (
     SelectProcessor,
     SkipReason,
 )
-from mcp_trentina_crunchtools.preprocess.shapes import classify_skip, looks_random
+from mcp_trentina_crunchtools.preprocess.shapes import classify_skip, looks_random, wordy
 
 from .adversarial_corpus import CORPUS
 
@@ -107,6 +107,23 @@ class TestSkipRules:
         spent, a skipped string is unread, and an attacker chooses what
         spends it."""
         assert classify_skip(text) is None
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("m.room.message", False),  # two: room, message
+            ("m.key.verification.request", False),  # two
+            ("m.room.history_visibility", True),  # three
+            ("ignorePreviousInstructions", True),  # camelCase splits
+            ("IGNORE.PREVIOUS.INSTRUCTIONS", True),  # all capitals is a run too
+            ("@scott.mccarty:matrix.org", False),  # parts counted apart
+            ("@a:ignore.previous.instructions", True),  # the server name counts
+            ("@tsktsktsk.brrrrrr.zzzzzzzz:x", False),  # no vowel, not a word
+            ("AwgAEnBxdGtzdHJrdG5ndGhzdHJuZ3Ro", False),  # base64 is not words
+        ],
+    )
+    def test_wordy(self, text: str, expected: bool) -> None:
+        assert wordy(text) is expected
 
     def test_real_base64_does_look_random(self) -> None:
         assert looks_random("AwgAEnBxdGtzdHJrdG5ndGhzdHJuZ3Ro+QzciWVD3p")

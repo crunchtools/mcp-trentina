@@ -15,7 +15,7 @@ access token in the Authorization header) still passes through untouched;
 this proxy never injects or reads Matrix credentials.
 
 **Scanning.** Every 200 response is buffered whole and judged by the
-shared pipeline, except what ``_unscanned`` names (#296): the
+shared pipeline, except what ``_judgement`` exempts (#296): the
 acknowledgements a write gets back, E2EE key traffic, and binary media.
 Deny by default, because the endpoints that carry prose are not the seven
 the proxy once listed: ``/members``, ``/state``, profiles and the room
@@ -49,7 +49,7 @@ import hmac
 import json
 import logging
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 from starlette.responses import Response, StreamingResponse
@@ -289,17 +289,28 @@ def register_matrix_routes(
     )
 
 
-def _unscanned(method: str, path: str, content_type: str) -> bool:
-    """Whether this response forwards unjudged. Everything else is judged."""
-    if method in ("DELETE", "OPTIONS"):
-        return True
-    if any(m == method and p.fullmatch(path) for m, p in _ACKS):
-        return True
-    return (
-        method == "GET"
-        and _MEDIA_DOWNLOAD.fullmatch(path) is not None
-        and content_type.strip().lower().startswith(_BINARY_TYPES)
+def _judgement(
+    method: str, path: str, status: int, content_type: str
+) -> Literal["json", "text"] | None:
+    """How a response is judged before it forwards, or None if it is not.
+
+    The one place the decision is made. Only a 200 is judged; of those,
+    the exempt set above forwards unjudged, JSON is judged as a document,
+    and anything else as text.
+    """
+    exempt = (
+        status != 200
+        or method in ("DELETE", "OPTIONS")
+        or any(m == method and p.fullmatch(path) for m, p in _ACKS)
+        or (
+            method == "GET"
+            and _MEDIA_DOWNLOAD.fullmatch(path) is not None
+            and content_type.strip().lower().startswith(_BINARY_TYPES)
+        )
     )
+    if exempt:
+        return None
+    return "json" if "json" in content_type.lower() else "text"
 
 
 async def _proxy_matrix(
@@ -353,9 +364,10 @@ async def _proxy_matrix(
     resp_headers = filter_response_headers(list(resp.headers.items()))
     ct = resp.headers.get("content-type", "application/json")
 
-    if resp.status_code == 200 and not _unscanned(request.method, path, ct):
-        if "json" in ct.lower():
-            return await _scan_and_forward(resp, resp_headers, ct, profile, path)
+    judged_as = _judgement(request.method, path, resp.status_code, ct)
+    if judged_as == "json":
+        return await _scan_and_forward(resp, resp_headers, ct, profile, path)
+    if judged_as == "text":
         return await _scan_text_and_forward(resp, resp_headers, ct, profile, path)
 
     async def stream_body() -> AsyncIterator[bytes]:
