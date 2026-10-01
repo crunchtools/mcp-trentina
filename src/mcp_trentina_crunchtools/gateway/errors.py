@@ -52,13 +52,6 @@ class ProfileNotFoundError(GatewayError):
     """
 
 
-class BackendNotInProfileError(GatewayError):
-    """Raised when a tool call targets a backend not present in the profile.
-
-    Maps to JSON-RPC error -32602 (invalid params).
-    """
-
-
 class ScopeError(GatewayError):
     """Raised when a caller asks an admin tool for something outside its role.
 

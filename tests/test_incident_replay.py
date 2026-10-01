@@ -12,7 +12,7 @@ import json
 import logging
 import re
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -199,8 +199,9 @@ class TestNoMessageBoardInTheJournal:
 
         route(monkeypatch, handler, {f"{CANARY}.internal": ["10.89.0.7"]})
         await _refused(f"http://{CANARY}.internal/{CANARY}?q={CANARY}")
-        advisory: Any = await fetch_page(f"https://{CANARY}.example/{CANARY}", Mode.BLOCK)
-        assert advisory["security_advisory"]["pattern"] == "suspicious_http_415"
+        with pytest.raises(BlockedSourceError) as advisory:
+            await fetch_page(f"https://{CANARY}.example/{CANARY}", Mode.BLOCK)
+        assert advisory.value.refusal["security_advisory"]["pattern"] == "suspicious_http_415"
 
         assert journal.lines, "nothing was logged: the paths under test did not run"
         leaked = [line for line in journal.lines if CANARY in line]

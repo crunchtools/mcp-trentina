@@ -116,6 +116,29 @@ repeatable.
   fingerprinted source and L3 finding types, never L3 prose. The interface now
   starts from the server's lifespan; `main()` used to start it on a loop it
   closed the next line, so it never answered.
+- Journal and refusal leaks the #262 rule missed (#292). The alert ingress
+  logged the first 4 KB of every alert raw (at WARNING when flagged); it logs
+  the payload's fingerprint. A refused `reload_profiles` returned the loader's
+  message to an agent (the config path, other profiles' fields, YAML
+  snippets) and logged it with a traceback; an agent now gets a constant, the
+  journal the error's class and frame, and every profile model sets
+  `hide_input_in_errors`, so pydantic no longer echoes an inline `llm_keys`
+  value even to the operator. The OAuth store logged a client-chosen CIMD
+  `client_id` and the store's exception text; it logs fingerprints and
+  kinds. A search provider failure became a refusal whose reason was the
+  provider's or httpx's text, an ollama base URL among it; it is now a
+  constant `search provider unavailable`, chained to nothing. New canaries
+  in `test_log_hygiene` cover all four paths.
+- Audit gaps (#293). Every `tools/call` now writes exactly one row: a long
+  form naming a backend outside the profile, and an issued short name whose
+  backend left it, are `denied_allowlist` like any unknown name (they raised
+  past the audit before), and refused identically; non-object `params` or
+  `arguments` are `denied_guard` (they were a 500 with no row); anything that
+  escapes every audited path is `gateway_error`. Fetch advisories (415/406, a
+  flagged 4xx body, a redirect to a binary) are refusals audited
+  `blocked_defense` with a `refused` D-Bus event, carrying the advisory in the
+  refusal; they were successful results audited `ok`. A search provider
+  outage is `backend_error`, an L0 canary leak `blocked_defense`.
 - `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and
   `OPENROUTER_API_KEY` take the `_FILE` form too, which wins (#268).
 - The image sets `PYTHONSAFEPATH=1` and `PYTHONDONTWRITEBYTECODE=1`. `python

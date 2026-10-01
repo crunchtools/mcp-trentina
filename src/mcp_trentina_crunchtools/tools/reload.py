@@ -67,7 +67,7 @@ from ..gateway.router import invalidate_profile_cache
 from ..gateway.scope import CallerScope, require_caller
 from ..gateway.service import find_operator, judge_of, log_service_identity
 from ..gateway.sessions import session_registry
-from ..logsafe import exc_kind
+from ..logsafe import exc_kind, exc_where
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -76,6 +76,10 @@ if TYPE_CHECKING:
     from ..gateway.profile import Backend, Profile
 
 logger = logging.getLogger(__name__)
+
+AGENT_RELOAD_REFUSED = "profiles file did not validate; ask the operator"
+"""What an agent's refused reload says, whatever the cause (#292). The cause
+is the whole file's, and the whole file is not an agent's to read."""
 
 
 def _glob_delta(before: list[str], after: list[str]) -> dict[str, list[str]] | None:
@@ -602,10 +606,11 @@ async def reload_profiles() -> dict[str, Any]:
 
         ``reloaded`` is False with an ``error`` when the caller is unknown, or
         when the file did not validate — in which case the running config is
-        untouched. That refusal is itself scoped: an operator also gets the
-        ``path`` it failed to load and the ``profiles`` currently serving,
-        while an agent gets the parse error alone, because the file it cannot
-        read and the roster it does not hold are not its business.
+        untouched. That refusal is itself scoped: an operator gets the parse
+        error, the ``path`` it failed to load and the ``profiles`` currently
+        serving, while an agent gets ``AGENT_RELOAD_REFUSED`` alone, because
+        the parse error quotes a file it cannot read and the roster it does
+        not hold is not its business (#292).
     """
     active = get_active_config()
     if active is None:
@@ -629,20 +634,22 @@ async def reload_profiles() -> dict[str, Any]:
         validate_profile_llm_keys(active.llm_providers, new_config.profiles)
     except Exception as exc:
         # Deliberately everything: whatever went wrong reading or validating
-        # the file, the running config is the one that keeps serving. The
-        # traceback goes to the journal because the returned message is
-        # load_profiles' own for every expected cause, and an unexpected one
-        # is exactly where an operator needs more than its str().
-        # nosemgrep: trentina-log-exception-text -- logsafe: ours
-        logger.warning(  # logsafe: ours — the operator's profiles.yaml
-            "gateway: profile reload REFUSED from %s: %s",
+        # the file, the running config is the one that keeps serving.
+        #
+        # The journal gets where, never what (#292): load_profiles' message
+        # quotes the file — other profiles' names and fields, a YAML snippet,
+        # pydantic's input — and the journal is agent-readable. An agent gets
+        # a constant for the same reason; the operator, who holds the file,
+        # gets the message.
+        logger.warning(
+            "gateway: profile reload REFUSED from %s: %s at %s",
             path,
-            exc,
-            exc_info=True,
+            exc_kind(exc),
+            exc_where(exc),
         )
         refusal: dict[str, Any] = {
             "reloaded": False,
-            "error": str(exc),
+            "error": str(exc) if scope.is_operator else AGENT_RELOAD_REFUSED,
             "note": "running configuration left unchanged",
         }
         if scope.is_operator:
