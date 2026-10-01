@@ -10,6 +10,13 @@ under that name.
 
 ## [Unreleased]
 
+### Added
+- The README demo (#256): `docs/demo/`. An animated flow (`flow.html`)
+  followed by a VHS recording (`trentina.tape`) of a real gateway in front of a
+  stand-in Google Workspace backend that serves google_workspace_mcp's real
+  tool list, and a recipe page carrying an injection. Rendered by
+  `demo.yml` on demand.
+
 ## [0.49.2] - 2026-10-01
 
 ### Changed

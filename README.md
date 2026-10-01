@@ -218,6 +218,10 @@ uv run mypy src
 uv run pytest -v
 ```
 
+The README demo is recorded against the published image by
+[`demo.yml`](.github/workflows/demo.yml) (`docs/demo/render.sh`); see
+[`docs/demo/`](docs/demo/) for the fixtures it runs.
+
 The container image is built by the GHA pipeline
 ([`container.yml`](.github/workflows/container.yml)), never locally. The model-export
 stage needs a gated HuggingFace credential that only CI holds, and building outside

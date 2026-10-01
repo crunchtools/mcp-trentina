@@ -4,3 +4,6 @@ uv.lock
 # Prompt-injection payloads: reviewing them feeds live injections to the reviewer
 tests/adversarial_corpus.py
 demo/attack-sim/payload/
+docs/demo/site/
+# Captured third-party tool list: data, not code under review
+docs/demo/fixtures/

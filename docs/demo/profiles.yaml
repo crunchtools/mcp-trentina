@@ -1,0 +1,40 @@
+# The README demo's gateway: one assistant profile in front of a Google
+# Workspace backend (backend.py) and Trentina's own content tools.
+#
+# It may read and draft mail, and send only to its owner. The defense default
+# is block, and the agent may also ask for redact.
+
+llm_providers:               # a profile's llm_keys must name one of these
+  gemini:
+    enabled: true
+    upstream: https://generativelanguage.googleapis.com
+    auth_header: x-goog-api-key
+    api_key_env: GEMINI_API_KEY
+
+profiles:
+  assistant:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_ASSISTANT_TOKEN
+    llm_keys:                 # L3 for this profile's calls
+      gemini:
+        api_key_env: GEMINI_API_KEY
+    backends:
+      web:
+        url: "internal://web"
+        tools_allow: ["fetch_tool", "quarantine_stats_tool"]
+      workspace:
+        url: "http://workspace:8000/mcp"
+        tools_allow:
+          - search_gmail_messages
+          - get_gmail_message_content
+          - draft_gmail_message
+          - send_gmail_message
+        parameter_guards:
+          send_gmail_message:
+            to: {allow: ["me@example.com"]}
+            cc: {allow: ["me@example.com"]}
+            bcc: {allow: ["me@example.com"]}
+    defense:
+      provider: gemini
+      enforcement: block
+      modes: [block, redact]

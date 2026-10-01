@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""tq: the README demo's MCP client, stdlib only.
+
+Speaks raw JSON-RPC over streamable HTTP to one Trentina profile and prints
+what came back, unedited, as JSON: a result's text, or the error object.
+
+    tq tools                        # the names this profile is served
+    tq surface                      # offered vs. served, from quarantine_stats
+    tq call <tool> key=value ...    # a value starting with { or [ is JSON
+
+TQ_URL and TQ_TOKEN name the endpoint and its bearer token.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+from typing import Any
+
+URL = os.environ.get("TQ_URL", "http://trentina:8019/gateway/assistant/mcp")
+TOKEN = os.environ.get("TQ_TOKEN", "")
+
+
+def _post(body: dict[str, Any], session: str | None) -> tuple[dict[str, Any] | None, str | None]:
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "Authorization": f"Bearer {TOKEN}",
+    }
+    if session:
+        headers["Mcp-Session-Id"] = session
+    req = urllib.request.Request(URL, json.dumps(body).encode(), headers)  # noqa: S310 -- http(s) only
+    with urllib.request.urlopen(req, timeout=300) as resp:  # noqa: S310
+        sid = resp.headers.get("Mcp-Session-Id") or session
+        raw = resp.read().decode()
+    if not raw.strip():
+        return None, sid
+    if resp.headers.get_content_type() == "text/event-stream":
+        data = [line[5:] for line in raw.splitlines() if line.startswith("data:")]
+        raw = data[-1]
+    return json.loads(raw), sid
+
+
+def rpc(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One request in a fresh session, as a client starting cold would."""
+    _init, sid = _post(
+        {
+            "jsonrpc": "2.0",
+            "id": 0,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "tq", "version": "1"},
+            },
+        },
+        None,
+    )
+    _post({"jsonrpc": "2.0", "method": "notifications/initialized"}, sid)
+    reply, _ = _post({"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}, sid)
+    return reply or {}
+
+
+def _value(text: str) -> Any:
+    return json.loads(text) if text[:1] in "{[" else text
+
+
+def _show(obj: Any) -> None:
+    print(json.dumps(obj, indent=2, ensure_ascii=False))
+
+
+def call(tool: str, pairs: list[str]) -> None:
+    args = {k: _value(v) for k, v in (p.split("=", 1) for p in pairs)}
+    reply = rpc("tools/call", {"name": tool, "arguments": args})
+    if "error" in reply:
+        _show({"error": reply["error"]})
+        return
+    result = reply["result"]
+    texts = [c.get("text", "") for c in result.get("content", []) if c.get("type") == "text"]
+    body: Any = "\n".join(texts)
+    with contextlib.suppress(ValueError):
+        body = json.loads(body)
+    out = {"result": body}
+    for key in [k for k in result if k.startswith("_trentina")]:
+        out[key] = result[key]
+    if result.get("isError"):
+        out["isError"] = True
+    _show(out)
+
+
+def surface() -> None:
+    reply = rpc("tools/call", {"name": "quarantine_stats", "arguments": {}})
+    text = reply["result"]["content"][0]["text"]
+    s = json.loads(text)["surface"]
+    for stage in ("offered", "allowed", "served"):
+        st = s[stage]
+        print(
+            f"{stage:>8}: {st['tools']:4d} tools  {st['bytes']:8,d} bytes"
+            f"  ~{st['est_tokens']:,d} tokens"
+        )
+    saved = s["saved"]["total"]["est_tokens"]
+    print(f"   saved: {saved:,d} tokens  ({100 - s['percent_of_offered']}%)")
+
+
+def tools() -> None:
+    for t in rpc("tools/list")["result"]["tools"]:
+        print(t["name"])
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        sys.exit(__doc__)
+    try:
+        match sys.argv[1]:
+            case "tools":
+                tools()
+            case "surface":
+                surface()
+            case "call":
+                call(sys.argv[2], sys.argv[3:])
+            case _:
+                sys.exit(__doc__)
+    except urllib.error.HTTPError as exc:
+        sys.exit(f"HTTP {exc.code}: {exc.read().decode()[:400]}")
+
+
+if __name__ == "__main__":
+    main()

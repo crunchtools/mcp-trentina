@@ -1,0 +1,7 @@
+# VHS plus what trentina.tape types: python3 for tq, jq to trim its output.
+# Built and run by render.sh.
+FROM ghcr.io/charmbracelet/vhs:latest
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 jq \
+ && rm -rf /var/lib/apt/lists/*

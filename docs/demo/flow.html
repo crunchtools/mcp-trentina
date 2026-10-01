@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<!--
+  Part one of the README demo: how a request and a response cross Trentina.
+  render(t) draws the frame at t seconds and is a pure function of t, so
+  render_flow.py can step it frame by frame and every render is identical.
+  Open it in a browser to watch it play.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Trentina flow</title>
+<style>
+  html, body { margin: 0; background: #282828; }
+  svg { display: block; font-family: "DejaVu Sans Mono", "JetBrains Mono", monospace; }
+  .box { fill: #32302f; stroke: #504945; stroke-width: 2; rx: 10; }
+  .lbl { fill: #ebdbb2; font-size: 17px; }
+  .sub { fill: #a89984; font-size: 13px; }
+  .stage { fill: #3c3836; stroke: #665c54; stroke-width: 2; rx: 8; }
+  .stage-t { fill: #ebdbb2; font-size: 16px; font-weight: bold; }
+  .wire { stroke: #504945; stroke-width: 2; fill: none; }
+  .pill { rx: 16; stroke-width: 2; }
+  .pill-t { font-size: 15px; font-weight: bold; }
+</style>
+</head>
+<body>
+<svg id="s" width="1200" height="720" viewBox="0 0 1200 720">
+  <text x="600" y="52" text-anchor="middle" class="lbl" style="font-size:26px;font-weight:bold" id="title">Trentina</text>
+  <text x="600" y="80" text-anchor="middle" class="sub" style="font-size:15px" id="subtitle">the MCP gateway between your agents and everything they touch</text>
+
+  <!-- clients -->
+  <g id="clients">
+    <rect class="box" x="30" y="150" width="220" height="70"/><text class="lbl" x="48" y="182">Claude Code</text><text class="sub" x="48" y="204">coding agent · bearer</text>
+    <rect class="box" x="30" y="260" width="220" height="70"/><text class="lbl" x="48" y="292">claude.ai · gemini</text><text class="sub" x="48" y="314">web clients · OAuth/DCR</text>
+    <rect class="box" x="30" y="370" width="220" height="70"/><text class="lbl" x="48" y="402">Agent swarm</text><text class="sub" x="48" y="424">one profile each</text>
+  </g>
+
+  <!-- trentina -->
+  <rect x="300" y="120" width="600" height="350" rx="14" fill="#1d2021" stroke="#d79921" stroke-width="3"/>
+  <text x="318" y="148" class="sub" style="fill:#d79921;font-size:14px">trentina · /gateway/&lt;profile&gt;/mcp</text>
+  <g id="stages"></g>
+
+  <!-- the outside -->
+  <g id="outside">
+    <rect class="box" x="950" y="150" width="220" height="70"/><text class="lbl" x="968" y="182">MCP servers</text><text class="sub" x="968" y="204">mail, chat, tickets, …</text>
+    <rect class="box" x="950" y="260" width="220" height="70"/><text class="lbl" x="968" y="292">The web</text><text class="sub" x="968" y="314">fetch · search</text>
+    <rect class="box" x="950" y="370" width="220" height="70"/><text class="lbl" x="968" y="402">Matrix · LLMs</text><text class="sub" x="968" y="424">bridged · proxied</text>
+  </g>
+
+  <g id="moving"></g>
+  <text id="caption" x="600" y="530" text-anchor="middle" class="lbl" style="font-size:20px"></text>
+  <g id="pillars"></g>
+</svg>
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const C = { gold: "#d79921", green: "#98971a", red: "#cc241d", blue: "#458588",
+            purple: "#b16286", orange: "#d65d0e", fg: "#ebdbb2", dim: "#665c54" };
+
+// Stages inside the gateway, left to right as a request travels.
+const STAGES = [
+  { id: "auth",   x: 320, t: "Auth",     s: "who is this",           pillar: 3 },
+  { id: "policy", x: 465, t: "Policy",   s: "tools · guards",        pillar: 2 },
+  { id: "defend", x: 610, t: "Defense",  s: "L1 ∥ L2 → L3",          pillar: 0 },
+  { id: "minify", x: 755, t: "Minify",   s: "fewer tokens",          pillar: 1 },
+];
+const PILLARS = [
+  { t: "Security",       c: C.red },
+  { t: "Token savings",  c: C.green },
+  { t: "Determinism",    c: C.blue },
+  { t: "Authentication", c: C.purple },
+  { t: "Flexibility",    c: C.orange },
+];
+
+function el(tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+const clamp = (v) => Math.max(0, Math.min(1, v));
+const ramp = (t, a, b) => clamp((t - a) / (b - a));           // 0 before a, 1 after b
+const ease = (u) => u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+const lerp = (a, b, u) => a + (b - a) * u;
+const lit = (t, a, b) => t >= a && t < b;
+
+const stagesG = document.getElementById("stages");
+const pillG = document.getElementById("pillars");
+const moving = document.getElementById("moving");
+const caption = document.getElementById("caption");
+
+// Stage boxes and pillar badges are rebuilt each frame; cheap at this size.
+function drawStages(active) {
+  stagesG.replaceChildren();
+  for (const s of STAGES) {
+    const on = active.includes(s.id);
+    const col = on ? PILLARS[s.pillar].c : "#665c54";
+    stagesG.append(el("rect", { class: "stage", x: s.x, y: 230, width: 130, height: 120,
+      style: `stroke:${col};fill:${on ? "#504945" : "#3c3836"}` }));
+    stagesG.append(el("text", { class: "stage-t", x: s.x + 65, y: 282, "text-anchor": "middle",
+      style: `fill:${on ? col : C.fg}` }, s.t));
+    stagesG.append(el("text", { class: "sub", x: s.x + 65, y: 306, "text-anchor": "middle" }, s.s));
+  }
+}
+
+function drawPillars(on) {
+  pillG.replaceChildren();
+  const w = 200, gap = 20, x0 = (1200 - (PILLARS.length * w + (PILLARS.length - 1) * gap)) / 2;
+  PILLARS.forEach((p, i) => {
+    const x = x0 + i * (w + gap), y = 600, a = on[i];
+    pillG.append(el("rect", { class: "pill", x, y, width: w, height: 44,
+      style: `fill:${a ? p.c : "#32302f"};stroke:${a ? p.c : "#504945"};opacity:${a ? 1 : 0.8}` }));
+    pillG.append(el("text", { class: "pill-t", x: x + w / 2, y: y + 28, "text-anchor": "middle",
+      style: `fill:${a ? "#1d2021" : "#a89984"}` }, p.t));
+  });
+}
+
+// A labelled packet travelling along x at height y.
+function packet(x, y, w, label, col, opacity = 1) {
+  const g = el("g", { opacity });
+  g.append(el("rect", { x: x - w / 2, y: y - 17, width: w, height: 34, rx: 6, fill: col }));
+  g.append(el("text", { x, y: y + 6, "text-anchor": "middle", style: "fill:#1d2021;font-size:14px;font-weight:bold" }, label));
+  moving.append(g);
+}
+
+const SCENES = [
+  // [start, end, caption]
+  [0.0, 2.0, ""],
+  [2.0, 5.0, "Every agent gets one endpoint and its own profile"],
+  [5.0, 8.5, "Tools it doesn't need never reach its context"],
+  [8.5, 12.0, "Untrusted content crosses three independent layers"],
+  [12.0, 14.5, "What survives is minified before the agent reads it"],
+  [14.5, 18.0, "One gateway: assistant, coding agent, swarm"],
+];
+const DURATION = 18.0;
+
+function render(t) {
+  moving.replaceChildren();
+  const active = [], pillars = [false, false, false, false, false];
+
+  const sc = SCENES.find(([a, b]) => t >= a && t < b) || SCENES[SCENES.length - 1];
+  caption.textContent = sc[2];
+  caption.setAttribute("opacity", ease(ramp(t, sc[0], sc[0] + 0.4)));
+
+  // 2–5 s: a request leaves Claude Code, is authenticated and checked by policy.
+  if (lit(t, 2.0, 5.0)) {
+    const u = ease(ramp(t, 2.2, 4.6));
+    const x = lerp(330, 870, u);
+    packet(x, 190, 120, "tools/call", C.fg);
+    if (x > 320) active.push("auth");
+    if (x > 465) active.push("policy");
+  }
+  if (t >= 2.6) pillars[3] = true;
+  if (t >= 3.4) pillars[2] = true;
+
+  // 5–8.5 s: the demo's real surface (tq surface): 131 tools offered, 6 served.
+  if (lit(t, 5.0, 8.5)) {
+    const u = ease(ramp(t, 5.2, 8.0));
+    const x = lerp(860, 400, u);
+    const big = x > 560;
+    const w = big ? 250 : 170;
+    packet(x, 190, w, big ? "131 tools · ~54K tokens" : "6 tools · ~2K tokens",
+           big ? C.gold : C.green);
+    if (x < 620 && x > 450) active.push("policy");
+  }
+  if (t >= 6.6) pillars[1] = true;
+
+  // 8.5–12 s: a web page with an injection is judged; the injection stops.
+  if (lit(t, 8.5, 12.0)) {
+    const u = ease(ramp(t, 8.7, 11.6));
+    const x = lerp(860, 400, u);
+    if (x > 640) {
+      packet(x, 400, 200, "page + injection", C.red);
+    } else {
+      packet(x, 400, 150, "page", C.fg);
+      const v = ramp(t, 10.0, 10.4);
+      const g = el("g", { opacity: v });
+      g.append(el("text", { x: 675, y: 450, "text-anchor": "middle", style: `fill:${C.red};font-size:16px;font-weight:bold` }, "✕ injection refused"));
+      moving.append(g);
+    }
+    if (x < 780 && x > 560) active.push("defend");
+    ["L1", "L2", "L3"].forEach((n, i) => {
+      const on = t > 9.6 + i * 0.35;
+      moving.append(el("text", { x: 640 + i * 35, y: 335, style: `fill:${on ? C.red : C.dim};font-size:13px;font-weight:bold` }, n));
+    });
+  }
+  if (t >= 9.8) pillars[0] = true;
+
+  // 12–14.5 s: minified on the way out. 52% is production's measured saving
+  // (gateway_calls, ok rows, 2026-09-26 to 10-01), not this page's.
+  if (lit(t, 12.0, 14.5)) {
+    const u = ease(ramp(t, 12.1, 14.2));
+    const x = lerp(860, 400, u);
+    const before = x > 700;
+    packet(x, 400, before ? 150 : 190, before ? "response" : "52% fewer bytes", before ? C.fg : C.green);
+    if (x < 860 && x > 680) active.push("minify");
+  }
+  if (t >= 12.8) pillars[1] = true;
+
+  // 14.5–18 s: every client lit, every stage lit, every pillar lit.
+  if (t >= 14.5) {
+    const v = ease(ramp(t, 14.5, 15.3));
+    ["auth", "policy", "defend", "minify"].forEach((s) => active.push(s));
+    [185, 295, 405].forEach((y, i) => {
+      moving.append(el("line", { x1: 250, y1: y, x2: 320, y2: lerp(y, 290, 0.5), stroke: PILLARS[4].c, "stroke-width": 3, opacity: v }));
+      moving.append(el("line", { x1: 885, y1: lerp(y, 290, 0.5), x2: 950, y2: y, stroke: PILLARS[4].c, "stroke-width": 3, opacity: v }));
+    });
+    pillars[4] = true;
+  }
+
+  drawStages(active);
+  drawPillars(pillars);
+  document.getElementById("title").setAttribute("opacity", ease(ramp(t, 0, 0.8)));
+  document.getElementById("subtitle").setAttribute("opacity", ease(ramp(t, 0.4, 1.2)));
+}
+
+window.render = render;
+window.DURATION = DURATION;
+render(0);
+if (!navigator.webdriver) {
+  const t0 = performance.now();
+  (function tick() {
+    render(((performance.now() - t0) / 1000) % (DURATION + 1));
+    requestAnimationFrame(tick);
+  })();
+}
+</script>
+</body>
+</html>
