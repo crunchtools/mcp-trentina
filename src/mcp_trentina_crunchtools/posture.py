@@ -70,11 +70,15 @@ def _writable_import_path() -> bool:
     # PYTHONSAFEPATH (or -P) is set. A writable entry anywhere on the path
     # turns a file write into code execution at the next lazy import, and
     # onnxruntime and transformers are imported lazily. A file entry is a zip
-    # archive Python imports from.
-    return any(
-        os.path.exists(entry or os.getcwd()) and os.access(entry or os.getcwd(), os.W_OK)
-        for entry in sys.path
-    )
+    # archive Python imports from. An entry that does not exist yet is judged
+    # by its nearest existing ancestor: whoever can write there can create it.
+    for entry in sys.path:
+        path = Path(entry or os.getcwd()).absolute()
+        while not path.exists() and path != path.parent:
+            path = path.parent
+        if os.access(path, os.W_OK):
+            return True
+    return False
 
 
 def _initial_env_names(raw: bytes) -> set[str]:

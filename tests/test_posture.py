@@ -177,3 +177,43 @@ def test_entrypoint_checks_network_transports_only(
             pkg.main()
     else:
         pkg.main()
+
+
+def test_missing_import_entry_under_writable_parent_is_a_gap(tmp_path: Path) -> None:
+    with patch.object(posture, "sys") as fake_sys:
+        fake_sys.path = [str(tmp_path / "not" / "yet")]
+        assert posture._writable_import_path()
+
+
+def test_bridge_run_checks_posture_before_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcp_trentina_crunchtools.bridge import main as bridge_main
+
+    class _RefusedError(Exception):
+        pass
+
+    calls: list[str] = []
+
+    def _refuse(*_args: object) -> None:
+        calls.append("checked")
+        raise _RefusedError
+
+    monkeypatch.setattr(bridge_main.BridgeSettings, "from_env", staticmethod(object))
+    monkeypatch.setattr(posture, "check_startup_posture", _refuse)
+    monkeypatch.setattr(bridge_main.asyncio, "run", lambda *_a: calls.append("ran"))
+    with pytest.raises(_RefusedError):
+        bridge_main.main(["run"])
+    assert calls == ["checked"]
+
+
+def test_ready_to_serve_checks_configured_secret_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    import mcp_trentina_crunchtools as pkg
+    from mcp_trentina_crunchtools.gateway import envscrub, loader
+
+    seen: list[set[str]] = []
+    monkeypatch.setattr(loader, "_secret_env_names", {"BACKEND_TOKEN", "OPENROUTER_API_KEY"})
+    monkeypatch.setattr(posture, "check_secret_sources", lambda names: seen.append(set(names)))
+    monkeypatch.setattr(pkg, "_warm_classifier", lambda: None)
+    monkeypatch.setattr(envscrub, "scrub_startup_secrets", lambda _names: [])
+    pkg._ready_to_serve({})
+    # The fixed names were checked at startup; this adds the rest.
+    assert seen == [{"BACKEND_TOKEN"}]
