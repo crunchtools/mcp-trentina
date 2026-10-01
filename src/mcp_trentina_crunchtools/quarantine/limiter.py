@@ -269,14 +269,14 @@ class AdaptiveLimiter:
 _limiters: dict[tuple[str, str, str], AdaptiveLimiter] = {}
 
 
-def limiter_for(judge: tuple[str, str], key_fingerprint: str = "global") -> AdaptiveLimiter:
+def limiter_for(judge: tuple[str, str], key_ordinal: str = "global") -> AdaptiveLimiter:
     """The one limiter for this (provider, model) on this key, created on first use.
 
-    ``key_fingerprint`` is ``Provider.key_fingerprint``: an ordinal, never
+    ``key_ordinal`` is ``Provider.key_ordinal``: an ordinal, never
     the key nor anything derived from it. Two profiles holding the same key
     share a limiter, as they share the provider's quota for it.
     """
-    slot = (*judge, key_fingerprint)
+    slot = (*judge, key_ordinal)
     limiter = _limiters.get(slot)
     if limiter is None:
         limiter = AdaptiveLimiter(
@@ -305,7 +305,7 @@ async def limited_generate(provider: Provider, **kwargs: Any) -> ProviderResult:
     """``provider.generate`` behind that judge's limiter.
 
     Args:
-        provider: The driver to call; its ``judge`` and ``key_fingerprint``
+        provider: The driver to call; its ``judge`` and ``key_ordinal``
             pick the limiter.
         **kwargs: Passed to ``provider.generate`` unchanged.
 
@@ -321,7 +321,7 @@ async def limited_generate(provider: Provider, **kwargs: Any) -> ProviderResult:
             is refused the same way without being sent, so a long
             Retry-After cannot hold a user's call past its budget.
     """
-    limiter = limiter_for(provider.judge, provider.key_fingerprint)
+    limiter = limiter_for(provider.judge, provider.key_ordinal)
     if limiter.resume_in() > throttle_budget():
         raise QuarantineAgentError(
             f"{limiter.name} paused for throttling",

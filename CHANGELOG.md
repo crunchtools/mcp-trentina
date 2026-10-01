@@ -75,7 +75,7 @@ repeatable.
   agent's `reconnect_backend` rebuilds only its own aggregate; session
   counts in the journal are the subject profile's own, and the stale-session
   explanation is scoped to the route's profile; the L3 limiter is keyed by
-  (provider, model, key fingerprint); and L2 hands a freed slot to waiting
+  (provider, model, key ordinal); and L2 hands a freed slot to waiting
   profiles in turn instead of one FIFO. The residuals and their rates are
   in `docs/profiles.md`.
 

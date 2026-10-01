@@ -46,7 +46,7 @@ def _key_ordinal(key_value: str) -> str:
         return key_value
     for (_name, cached_key, _model), provider in _provider_cache.items():
         if cached_key == key_value:
-            return provider.key_fingerprint
+            return provider.key_ordinal
     return f"key{len({k for _n, k, _m in _provider_cache if k != 'global'}) + 1}"
 
 
@@ -138,7 +138,7 @@ def get_provider(
             )
 
     provider.judge = (resolved_provider, provider.model)
-    provider.key_fingerprint = _key_ordinal(cache_key[1])
+    provider.key_ordinal = _key_ordinal(cache_key[1])
     _provider_cache[cache_key] = provider
     logger.info(
         "provider: initialized %s (model=%s, key=%s)",

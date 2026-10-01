@@ -98,7 +98,7 @@ uv run mcp-trentina-crunchtools
   A freed slot goes to waiting profiles in turn (`classifier.FairGate`, #291).
 - `TRENTINA_L3_CONCURRENCY_START` / `TRENTINA_L3_CONCURRENCY_MAX` — the adaptive
   L3 limiter's starting point and ceiling per (provider, model, key
-  fingerprint) (4 / 64). See `quarantine/limiter.py`: it grows until the
+  ordinal) (4 / 64). See `quarantine/limiter.py`: it grows until the
   provider throttles, then AIMD. The key is in it because a provider
   throttles per key (#291).
 - `TRENTINA_L3_THROTTLE_BUDGET` — seconds a user-facing L3 call waits out 429s

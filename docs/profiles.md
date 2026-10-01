@@ -233,7 +233,7 @@ could move and another could time or read:
   aggregate on that URL, which moved their `surface.built_at`.
 - Session counts in the journal are the subject profile's own. Every
   session event used to log every profile's count, and the roster with it.
-- The L3 limiter is per (provider, model, key fingerprint), because a
+- The L3 limiter is per (provider, model, key ordinal), because a
   provider throttles per key. One profile driving its own key into 429s
   paused every profile on that model, and block refused their content.
 - L2 hands a freed scan slot to waiting profiles in turn. One FIFO queue

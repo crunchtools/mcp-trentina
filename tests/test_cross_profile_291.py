@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 import time
 from typing import Any
@@ -173,7 +174,7 @@ class _KeyedProvider(Provider):
     def __init__(self, fingerprint: str, error: QuarantineAgentError | None = None) -> None:
         self._model = "m"
         self.judge = ("openrouter", "m")
-        self.key_fingerprint = fingerprint
+        self.key_ordinal = fingerprint
         self.error = error
 
     async def generate(self, *_args: object, **_kwargs: object) -> ProviderResult:
@@ -199,11 +200,11 @@ class TestL3LimiterKey:
         one = get_provider("openrouter", SecretStr("sk-or-alpha-secret"), "x/y")
         two = get_provider("openrouter", SecretStr("sk-or-beta-secret"), "x/y")
         again = get_provider("openrouter", SecretStr("sk-or-alpha-secret"), "x/z")
-        assert one.key_fingerprint != two.key_fingerprint
-        assert again.key_fingerprint == one.key_fingerprint
-        assert "secret" not in one.key_fingerprint
-        assert limiter_for(one.judge, one.key_fingerprint) is not limiter_for(
-            two.judge, two.key_fingerprint
+        assert one.key_ordinal != two.key_ordinal
+        assert again.key_ordinal == one.key_ordinal
+        assert re.fullmatch(r"key\d+", one.key_ordinal), "an ordinal, nothing of the key"
+        assert limiter_for(one.judge, one.key_ordinal) is not limiter_for(
+            two.judge, two.key_ordinal
         )
 
 

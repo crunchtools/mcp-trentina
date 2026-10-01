@@ -35,7 +35,7 @@ class Provider(ABC):
     """
 
     judge: tuple[str, str] = ("unknown", "unknown")
-    key_fingerprint: str = "global"
+    key_ordinal: str = "global"
     """Which API key this instance sends: ``global`` for the env key, else
     ``key<n>`` numbered by ``get_provider``, derived from nothing in the key.
     It keys the limiter with ``judge``: a provider throttles per key (#291)."""
