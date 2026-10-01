@@ -10,6 +10,11 @@ under that name.
 
 ## [Unreleased]
 
+### Added
+- `demo-container.yml` builds the attack-sim demo (`demo/attack-sim`) and
+  pushes `quay.io/crunchtools/trentina-demo` (`:latest` and the commit SHA),
+  so the demo no longer depends on an image built on the host (#273).
+
 ## [0.49.0] - 2026-10-01
 
 The trust-boundary review tooling (#90, #269), and the ten findings its first
