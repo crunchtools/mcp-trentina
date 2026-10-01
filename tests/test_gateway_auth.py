@@ -48,13 +48,24 @@ class _StubProvider:
     gateway call site serve proxy and delegated modes alike.
     """
 
-    def __init__(self, token_map: dict[str, _StubAccessToken | None]) -> None:
+    def __init__(
+        self,
+        token_map: dict[str, _StubAccessToken | None],
+        bound: dict[str, str] | None = None,
+    ) -> None:
         self._token_map = token_map
+        self._bound = bound
         self.calls: list[str] = []
 
     async def load_access_token(self, token: str) -> _StubAccessToken | None:
         self.calls.append(token)
         return self._token_map.get(token)
+
+    async def bound_profile(self, token: str) -> str | None:
+        """Every token is bound to the default test profile unless told otherwise."""
+        if self._bound is None:
+            return "gemini-app"
+        return self._bound.get(token)
 
     async def verify_token(self, token: str) -> _StubAccessToken | None:
         return await self.load_access_token(token)
@@ -74,6 +85,9 @@ class _StubVerifier:
     async def verify_token(self, token: str) -> _StubAccessToken | None:
         self.calls.append(token)
         return self._token_map.get(token)
+
+    async def bound_profile(self, _token: str) -> str | None:
+        return "gemini-app"
 
 
 def _oauth_profile(*emails: str, name: str = "gemini-app") -> Profile:
@@ -146,6 +160,38 @@ class TestVerifyOAuth:
         )
         with pytest.raises(OAuthForbiddenError, match="not permitted"):
             await verify_oauth("Bearer tok", profile, provider)
+
+    async def test_a_token_bound_to_another_profile_is_challenged(self) -> None:
+        """#298: one JWT audience covers every proxied profile, so the binding
+        is what keeps an agent seat's token out of an operator seat that
+        allowlists the same human."""
+        operator = _oauth_profile("alice@example.com", name="operator-seat")
+        provider = _StubProvider(
+            {"tok": _StubAccessToken({"email": "alice@example.com", "email_verified": True})},
+            bound={"tok": "agent-seat"},
+        )
+        with pytest.raises(OAuthChallengeError, match="not issued for this profile"):
+            await verify_oauth("Bearer tok", operator, provider)
+
+    async def test_an_unbound_token_is_challenged(self) -> None:
+        """A token from before 0.49.0 has no binding: its client re-authorizes."""
+        profile = _oauth_profile("alice@example.com")
+        provider = _StubProvider(
+            {"tok": _StubAccessToken({"email": "alice@example.com", "email_verified": True})},
+            bound={},
+        )
+        with pytest.raises(OAuthChallengeError, match="not issued for this profile"):
+            await verify_oauth("Bearer tok", profile, provider)
+
+    async def test_a_verifier_that_cannot_bind_is_refused(self) -> None:
+        """Fail closed: no binding answer is never read as 'bound here'."""
+
+        class _Unbinding:
+            async def verify_token(self, _token: str) -> _StubAccessToken:
+                return _StubAccessToken({"email": "alice@example.com", "email_verified": True})
+
+        with pytest.raises(OAuthChallengeError, match="cannot bind"):
+            await verify_oauth("Bearer tok", _oauth_profile("alice@example.com"), _Unbinding())
 
     async def test_forbidden_and_challenge_are_auth_errors(self) -> None:
         # Both subclass AuthError so existing except-blocks stay correct.
@@ -237,9 +283,7 @@ class TestResolveProfileByToken:
     def test_unresolved_token_profiles_skipped(self) -> None:
         """A profile whose token was never resolved must never match."""
         registry: dict[str, Profile] = {
-            "unresolved": Profile(
-                name="unresolved", auth=AuthConfig(bearer_token_env="TEST")
-            ),
+            "unresolved": Profile(name="unresolved", auth=AuthConfig(bearer_token_env="TEST")),
         }
         assert resolve_profile_by_token("Bearer anything", registry) is None
 

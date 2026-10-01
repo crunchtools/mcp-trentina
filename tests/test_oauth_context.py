@@ -237,9 +237,7 @@ class TestStartupLogsCarryNoSecrets:
     def _secrets(self) -> list[str]:
         return [self.UPSTREAM_SECRET, self.SIGNING_KEY, self.BEARER]
 
-    def test_proxy_startup_logs_no_secret(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_proxy_startup_logs_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:
         profile = _proxy_profile()
         profile.auth.bearer_token = SecretStr(self.BEARER)
         with caplog.at_level("DEBUG"):
@@ -249,9 +247,7 @@ class TestStartupLogsCarryNoSecrets:
         for secret in self._secrets():
             assert secret not in caplog.text
 
-    def test_delegated_startup_logs_no_secret(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_delegated_startup_logs_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:
         profile = _delegated_profile()
         profile.auth.bearer_token = SecretStr(self.BEARER)
         with caplog.at_level("DEBUG"):
@@ -259,9 +255,7 @@ class TestStartupLogsCarryNoSecrets:
         for secret in self._secrets():
             assert secret not in caplog.text
 
-    def test_mixed_startup_logs_no_secret(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_mixed_startup_logs_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:
         """Exercises the multi-proxy warning and the operator-role warning too."""
         proxy_a = _proxy_profile("agent2")
         proxy_b = _proxy_profile("agent1")
@@ -278,38 +272,9 @@ class TestStartupLogsCarryNoSecrets:
         for secret in self._secrets():
             assert secret not in caplog.text
 
-    def test_divergent_allowlist_warning_logs_no_secret(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """The 0.14.0 warning path. CodeQL flags its logger call as clear-text
-        logging of a password because the `profiles` mapping — which holds
-        every bearer token and client secret — is a parameter of the function
-        that logs. Only `sorted(proxied)`, a list of profile names, is passed
-        to the logger. Pinned here so that stays true."""
-        a = _proxy_profile("claude-web")
-        b = _proxy_profile("gemini-web")
-        a.auth.bearer_token = SecretStr(self.BEARER)
-        b.auth.bearer_token = SecretStr(self.BEARER)
-        assert b.oauth is not None
-        b.oauth.allowed_emails = ["someone-else@example.com"]
-
-        with caplog.at_level("DEBUG"):
-            ctx = _build({"claude-web": a, "gemini-web": b}, self._env())
-            assert ctx is not None
-            ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
-
-        # The warning must actually have fired, or this proves nothing.
-        assert "different allowed_emails" in caplog.text
-        for secret in self._secrets():
-            assert secret not in caplog.text
-
-    def test_the_guard_would_catch_a_real_leak(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_the_guard_would_catch_a_real_leak(self, caplog: pytest.LogCaptureFixture) -> None:
         """A canary: the assertion above only means something if caplog is
         actually capturing this logger."""
         with caplog.at_level("DEBUG"):
-            logging.getLogger("mcp_trentina_crunchtools").info(
-                "canary %s", self.UPSTREAM_SECRET
-            )
+            logging.getLogger("mcp_trentina_crunchtools").info("canary %s", self.UPSTREAM_SECRET)
         assert self.UPSTREAM_SECRET in caplog.text

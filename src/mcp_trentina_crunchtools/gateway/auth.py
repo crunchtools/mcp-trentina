@@ -90,9 +90,9 @@ async def verify_oauth(
         The verified access token, so the caller can audit-log the identity.
 
     Raises:
-        OAuthChallengeError: no provider, or no usable token — caller returns
-            401 with a ``WWW-Authenticate`` challenge so the client discovers
-            the flow.
+        OAuthChallengeError: no provider, no usable token, or a token bound to
+            another profile — caller returns 401 with a ``WWW-Authenticate``
+            challenge so the client discovers the flow.
         OAuthForbiddenError: token valid but the email is absent, unverified,
             or not on ``profile.oauth.allowed_emails`` — caller returns 403.
     """
@@ -115,6 +115,19 @@ async def verify_oauth(
     access = await verifier.verify_token(presented)
     if access is None:
         raise OAuthChallengeError("invalid or expired token")
+
+    # TRUST: bound_profile(token) == profile.name -> token admitted here.
+    # Tier: the gateway's own record of which profile a flow named (proxy
+    # mode, gateway/oauth_binding.py) or the per-profile audience pin
+    # (delegated). One JWT audience covers every proxied profile, so without
+    # this a token issued to an agent seat verified at an operator seat that
+    # allowlists the same email (#298). A verifier that cannot say is refused,
+    # never assumed bound; a challenge, so the client re-authorizes for here.
+    bound_profile = getattr(verifier, "bound_profile", None)
+    if bound_profile is None:
+        raise OAuthChallengeError("verifier cannot bind a token to a profile")
+    if await bound_profile(presented) != profile.name:
+        raise OAuthChallengeError("token was not issued for this profile")
 
     claims = access.claims or {}
     email = claims.get("email")

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from pydantic import SecretStr, ValidationError
@@ -229,6 +229,10 @@ class _StubProvider:
         # Mirrors fastmcp's OAuthProvider.verify_token, which forwards to
         # load_access_token — the gateway calls only verify_token now.
         return await self.load_access_token(token)
+
+    async def bound_profile(self, token: str) -> str | None:
+        # Every known token was issued for the fixture's one profile (#298).
+        return "gemini-app" if token in self._token_map else None
 
 
 OAUTH_BASE_URL = "https://mcp.example.com"
@@ -666,6 +670,9 @@ class _StubVerifier:
     async def verify_token(self, token: str) -> _StubAccessToken | None:
         return self._token_map.get(token)
 
+    async def bound_profile(self, _token: str) -> str | None:
+        return "gemini-app"
+
 
 @pytest.fixture
 def delegated_client() -> TestClient:
@@ -932,6 +939,7 @@ class TestMultiProfileResourceIndicator:
     class _Params:
         def __init__(self, resource: str | None) -> None:
             self.resource = resource
+            self.code_challenge = "challenge"
 
     @staticmethod
     def _profile(name: str, emails: list[str] | None = None) -> Profile:
@@ -1016,27 +1024,49 @@ class TestMultiProfileResourceIndicator:
         _clear_known_resource(params, ctx.provider.gateway_resources)
         assert params.resource is None
 
-    def test_matching_allowlists_are_silent(self, caplog: Any) -> None:
-        with caplog.at_level("WARNING"):
-            self._both()
-        assert "different allowed_emails" not in caplog.text
+    class _Client:
+        client_id = "cid"
 
-    def test_divergent_allowlists_warn(self, caplog: Any) -> None:
-        """One audience covers both seats, so differing allowlists are a
-        boundary the operator thinks exists and does not."""
-        with caplog.at_level("WARNING"):
-            self._build(
-                {
-                    "claude-web": self._profile("claude-web", ["alice@example.com"]),
-                    "gemini-web": self._profile("gemini-web", ["someone@example.com"]),
-                }
-            )
-        assert "different allowed_emails" in caplog.text
+    async def _start_flow(self, ctx: OAuthContext, resource: str | None) -> AsyncMock:
+        """Run the gateway's authorize with the base class and the store faked."""
+        from fastmcp.server.auth.oauth_proxy.proxy import OAuthProxy
 
-    def test_a_single_profile_never_warns(self, caplog: Any) -> None:
-        with caplog.at_level("WARNING"):
-            self._build({"claude-web": self._profile("claude-web")})
-        assert "different allowed_emails" not in caplog.text
+        bind = AsyncMock()
+        with (
+            patch.object(OAuthProxy, "authorize", AsyncMock(return_value="consent-url")),
+            patch.object(ctx.provider, "bind_flow", bind),
+        ):
+            assert await ctx.provider.authorize(self._Client(), self._Params(resource))
+        return bind
+
+    async def test_the_named_profile_is_bound_to_the_flow(self) -> None:
+        """#298: the indicator decides which profile the token will answer to."""
+        bind = await self._start_flow(self._both(), self.B)
+        bind.assert_awaited_once_with("cid", "challenge", "gemini-web")
+
+    async def test_no_indicator_is_refused_when_it_could_mean_two(self) -> None:
+        from mcp.server.auth.provider import AuthorizeError
+
+        with pytest.raises(AuthorizeError) as exc:
+            await self._start_flow(self._both(), None)
+        assert exc.value.error == "invalid_target"
+
+    def test_the_binding_wraps_fastmcps_exchanges(self) -> None:
+        """The mixin must sit ahead of OAuthProxy, or its exchanges never run."""
+        from fastmcp.server.auth.oauth_proxy.proxy import OAuthProxy
+
+        from mcp_trentina_crunchtools.gateway.oauth_binding import BindTokensToProfile
+
+        mro = type(self._both().provider).__mro__
+        assert mro.index(BindTokensToProfile) < mro.index(OAuthProxy)
+        for name in ("exchange_authorization_code", "exchange_refresh_token"):
+            owner = next(cls for cls in mro if name in vars(cls))
+            assert owner is BindTokensToProfile, name
+
+    async def test_no_indicator_binds_the_only_profile(self) -> None:
+        ctx = self._build({"claude-web": self._profile("claude-web")})
+        bind = await self._start_flow(ctx, None)
+        bind.assert_awaited_once_with("cid", "challenge", "claude-web")
 
 
 class TestRegisteredRedirectUriIsRestricted:

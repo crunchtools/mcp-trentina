@@ -553,6 +553,86 @@ class TestPerimeterIsOperatorOnly:
         assert result["reloaded"] is False
 
 
+class TestDefenseIsOperatorOnly:
+    """An agent cannot loosen its own defense block by reloading (#298)."""
+
+    BETA_BLOCK_YAML = BASE_YAML.replace(
+        "  beta:\n    auth:",
+        "  beta:\n    defense:\n      enforcement: block\n      audit: true\n    auth:",
+    )
+    BETA_LOOSE_YAML = BASE_YAML.replace(
+        "  beta:\n    auth:",
+        "  beta:\n    defense:\n      enforcement: flag\n      modes: [flag, block]\n"
+        "      audit: false\n      l2_threshold: 0.99\n    auth:",
+    )
+
+    async def test_agent_cannot_loosen_its_own_defense(self, profiles_path: Path) -> None:
+        profiles_path.write_text(self.BETA_BLOCK_YAML, encoding="utf-8")
+        await _reload_as("alpha")
+
+        profiles_path.write_text(self.BETA_LOOSE_YAML, encoding="utf-8")
+        result = await _reload_as("beta")
+
+        assert result["reloaded"] is True
+        defense = _registry()["beta"].defense
+        assert defense.enforcement == "block"
+        assert defense.modes == ["block"]
+        assert defense.audit is True
+        assert defense.l2_threshold == 0.5
+        held = result["not_applied"]["operator_only"]
+        for field in ("enforcement", "modes", "audit", "l2_threshold"):
+            assert f"defense.{field}" in held
+
+    async def test_operator_reload_applies_it(self, profiles_path: Path) -> None:
+        profiles_path.write_text(self.BETA_BLOCK_YAML, encoding="utf-8")
+        await _reload_as("alpha")
+
+        profiles_path.write_text(self.BETA_LOOSE_YAML, encoding="utf-8")
+        await _reload_as("alpha")
+
+        assert _registry()["beta"].defense.audit is False
+
+
+class TestProxyOAuthIsRestartOnly:
+    """The OAuth proxy binds clients, redirects and resources at startup (#298)."""
+
+    @staticmethod
+    def _yaml(redirects: str, emails: str = "[alice@example.com]") -> str:
+        return BASE_YAML.replace(
+            "  beta:\n",
+            "  beta:\n"
+            "    oauth:\n"
+            "      enabled: true\n"
+            f"      allowed_emails: {emails}\n"
+            f"      allowed_redirect_uris: {redirects}\n",
+        )
+
+    async def test_a_redirect_edit_is_reported_not_claimed(self, profiles_path: Path) -> None:
+        profiles_path.write_text(self._yaml("[]"), encoding="utf-8")
+        await _reload_as("alpha")
+
+        profiles_path.write_text(self._yaml("['https://new.example/cb']"), encoding="utf-8")
+        operator = await _reload_as("alpha")
+        assert any("allowed_redirect_uris" in note for note in operator["not_applied"])
+
+        profiles_path.write_text(self._yaml("['https://newer.example/cb']"), encoding="utf-8")
+        agent = await _reload_as("beta")
+        notes = agent["not_applied"]["restart_required"]
+        assert any("allowed_redirect_uris" in note for note in notes)
+
+    async def test_an_allowlist_edit_applies_live(self, profiles_path: Path) -> None:
+        profiles_path.write_text(self._yaml("[]"), encoding="utf-8")
+        await _reload_as("alpha")
+
+        profiles_path.write_text(
+            self._yaml("[]", emails="[alice@example.com, bob@example.com]"), encoding="utf-8"
+        )
+        result = await _reload_as("beta")
+
+        assert "not_applied" not in result
+        assert "bob@example.com" in _registry()["beta"].oauth.allowed_emails
+
+
 class TestBridgeIsOperatorOnly:
     """Every field of matrix_bridge shapes the perimeter (#162)."""
 

@@ -257,42 +257,35 @@ def classify(
             raise UnscannableContentError(source, total_tokens, max_tokens)
         all_ids = all_ids[:max_tokens]
 
-    if len(all_ids) <= max_length:
-        # Natural length, not padded to the window: see _pad_segment. The
-        # whole-document path is the common one now that extraction shrinks
-        # most payloads below a single window.
-        enc = _tokenizer(
-            text,
-            truncation=True,
-            max_length=max_length,
-            return_attention_mask=True,
-        )
-        label, score = _classify_segment(enc["input_ids"], enc["attention_mask"])
-    else:
-        best_label = "BENIGN"
-        best_score = 0.0
+    # One loop for every length. There was a single-window shortcut here that
+    # re-tokenized ``text`` with ``truncation=True`` whenever the input was at
+    # most WINDOW_TOKENS long, but a window carries only WINDOW_CONTENT_TOKENS
+    # of content: a 511- or 512-token input lost its last one or two tokens
+    # and came back with ``truncated`` False (#298). A short input is one
+    # pass of this loop at its natural length, which is what the shortcut
+    # bought, so nothing was gained by keeping a second path.
+    best_label = "BENIGN"
+    best_score = 0.0
 
-        # WINDOW_CONTENT_TOKENS states this; the tokenizer is the source of
-        # truth so a model wrapping windows differently stays correct.
-        content_length = max_length - _tokenizer.num_special_tokens_to_add()
+    # WINDOW_CONTENT_TOKENS states this; the tokenizer is the source of
+    # truth so a model wrapping windows differently stays correct.
+    content_length = max_length - _tokenizer.num_special_tokens_to_add()
 
-        for start_idx in range(0, len(all_ids), stride):
-            segment_ids = all_ids[start_idx : start_idx + content_length]
-            if not segment_ids:
-                break
+    # max(..., 1): empty text still gets its one pass, as it did before.
+    for start_idx in range(0, max(len(all_ids), 1), stride):
+        segment_ids = all_ids[start_idx : start_idx + content_length]
+        input_ids, attention_mask = _pad_segment(segment_ids, max_length)
+        seg_label, seg_score = _classify_segment(input_ids, attention_mask)
 
-            input_ids, attention_mask = _pad_segment(segment_ids, max_length)
-            seg_label, seg_score = _classify_segment(input_ids, attention_mask)
+        if seg_score > best_score:
+            best_score = seg_score
+            best_label = seg_label
 
-            if seg_score > best_score:
-                best_score = seg_score
-                best_label = seg_label
+        if start_idx + content_length >= len(all_ids):
+            break
 
-            if start_idx + content_length >= len(all_ids):
-                break
-
-        label = best_label
-        score = best_score
+    label = best_label
+    score = best_score
 
     elapsed_ms = (time.monotonic() - start) * 1000
 

@@ -166,7 +166,7 @@ def layers(
             fetch_url=p(
                 "mcp_trentina_crunchtools.tools.fetch.fetch_url",
                 new_callable=AsyncMock,
-                return_value=(payload, "text/plain"),
+                return_value=(payload, "text/plain", ()),
             ),
             search_grounded=p(
                 "mcp_trentina_crunchtools.tools.search.search_grounded",
