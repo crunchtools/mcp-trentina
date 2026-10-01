@@ -62,7 +62,7 @@ def opened(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         record(file, None)
         return real_open(file, *args, **kwargs)
 
-    def recording_os_open(path: Any, flags: int, mode: int = 0o777, *, dir_fd: Any = None) -> int:
+    def recording_os_open(path: Any, flags: int, mode: int = 0o600, *, dir_fd: Any = None) -> int:
         record(path, dir_fd)
         return real_os_open(path, flags, mode, dir_fd=dir_fd)
 
@@ -127,6 +127,16 @@ class TestShadowScanThroughTheDescriptor:
             categories = {i.category for i in found[module].obfuscation_indicators}
             assert "code_execution" in categories
 
+    def test_a_hard_linked_shadow_is_reported_not_read(
+        self, root: Path, outside: Path, opened: list[str]
+    ) -> None:
+        """A hard link passes every check on its directory; its bytes may be Trentina's."""
+        state = outside / "trentina.db"
+        state.write_text(PAYLOAD * 50_000, encoding="utf-8")
+        os.link(state, root / "json.py")
+        found = detect_module_shadows(str(root)).shadows_found[0]
+        assert [i.category for i in found.obfuscation_indicators] == ["linked"]
+
     def test_a_binary_shadow_is_reported_not_decoded(self, root: Path) -> None:
         (root / "struct.py").write_bytes(b"\x00exec(" + b"\xff" * 16)
         found = detect_module_shadows(str(root)).shadows_found[0]
@@ -174,7 +184,7 @@ class TestConfinedOpen:
         walked: list[str] = []
         real_os_open = os.open
 
-        def recording(path: Any, flags: int, mode: int = 0o777, *, dir_fd: Any = None) -> int:
+        def recording(path: Any, flags: int, mode: int = 0o600, *, dir_fd: Any = None) -> int:
             walked.append(str(path))
             return real_os_open(path, flags, mode, dir_fd=dir_fd)
 

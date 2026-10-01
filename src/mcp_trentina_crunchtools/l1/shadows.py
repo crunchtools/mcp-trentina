@@ -125,6 +125,8 @@ class ShadowScanResult:
     entries_read: int = 0
     """Directory entries looked at, so a caller that bounded the scan can tell
     whether the bound cut it short."""
+    bytes_read: int = 0
+    """Shadow bytes read so far, against ``MAX_SCAN_BYTES``."""
 
     @property
     def risk_level(self) -> str:
@@ -191,20 +193,35 @@ def _scan_for_obfuscation(content: str) -> list[ObfuscationIndicator]:
     return indicators
 
 
-def _read_shadow(fd: int, budget: list[int]) -> list[ObfuscationIndicator]:
-    """Obfuscation indicators for the open regular file ``fd``, within ``budget``."""
-    st = os.fstat(fd)
+def _not_read(st: os.stat_result, result: ShadowScanResult) -> ObfuscationIndicator | None:
+    """Why the shadow ``st`` is reported without being read, or None to read it.
+
+    A file with more than one link is not read, nor its size reported: a hard
+    link to Trentina's own state would pass every check on the directory it
+    sits in, and either answer would be a bit about that file (#287).
+    """
     if not stat.S_ISREG(st.st_mode):
-        return [ObfuscationIndicator("unreadable", "shadow changed type while being read")]
-    size = st.st_size
-    if size > MAX_FILE_SIZE:
-        return [ObfuscationIndicator("size", f"unusually large for a stdlib shadow ({size} bytes)")]
-    if size > budget[0]:
-        return [ObfuscationIndicator("unscanned", "directory's shadow read budget spent")]
+        return ObfuscationIndicator("unreadable", "shadow changed type while being read")
+    if st.st_nlink > 1:
+        return ObfuscationIndicator("linked", "shadow is hard-linked; not read")
+    if st.st_size > MAX_FILE_SIZE:
+        return ObfuscationIndicator(
+            "size", f"unusually large for a stdlib shadow ({st.st_size} bytes)"
+        )
+    if st.st_size > MAX_SCAN_BYTES - result.bytes_read:
+        return ObfuscationIndicator("unscanned", "directory's shadow read budget spent")
+    return None
+
+
+def _read_shadow(fd: int, result: ShadowScanResult) -> list[ObfuscationIndicator]:
+    """Obfuscation indicators for the open file ``fd``, within the scan's budget."""
+    skipped = _not_read(os.fstat(fd), result)
+    if skipped is not None:
+        return [skipped]
     with open(fd, "rb", closefd=False) as fh:
         # One byte past the cap, so a file that grew after fstat is caught too.
         raw = fh.read(MAX_FILE_SIZE + 1)
-    budget[0] -= len(raw)
+    result.bytes_read += len(raw)
     if len(raw) > MAX_FILE_SIZE:
         return [ObfuscationIndicator("size", "unusually large for a stdlib shadow")]
     if b"\x00" in raw:
@@ -212,7 +229,7 @@ def _read_shadow(fd: int, budget: list[int]) -> list[ObfuscationIndicator]:
     return _scan_for_obfuscation(raw.decode("utf-8", errors="replace"))
 
 
-def _scan_at(dir_fd: int, name: str, budget: list[int]) -> list[ObfuscationIndicator] | None:
+def _scan_at(dir_fd: int, name: str, result: ShadowScanResult) -> list[ObfuscationIndicator] | None:
     """Indicators for ``name`` in ``dir_fd``, or None when it is no importable file.
 
     Opened relative to the descriptor and never through a symlink. A
@@ -239,7 +256,7 @@ def _scan_at(dir_fd: int, name: str, budget: list[int]) -> list[ObfuscationIndic
     except OSError:
         return [ObfuscationIndicator("unreadable", "shadow file exists but cannot be read")]
     try:
-        return _read_shadow(fd, budget)
+        return _read_shadow(fd, result)
     except OSError:
         return [ObfuscationIndicator("unreadable", "shadow file exists but cannot be read")]
     finally:
@@ -272,10 +289,9 @@ def scan_shadows(
     opened by path. Blocking: run it in the thread that holds ``dir_fd``.
     """
     result = ShadowScanResult(directory=directory)
-    budget = [MAX_SCAN_BYTES]
     for entry in entries:
         result.entries_read += 1
-        _scan_entry(dir_fd, entry, result, budget)
+        _scan_entry(dir_fd, entry, result)
     return result
 
 
@@ -299,9 +315,7 @@ def detect_module_shadows(directory: str, *, max_entries: int | None = None) -> 
         os.close(fd)
 
 
-def _scan_entry(
-    dir_fd: int, entry: os.DirEntry[str], result: ShadowScanResult, budget: list[int]
-) -> None:
+def _scan_entry(dir_fd: int, entry: os.DirEntry[str], result: ShadowScanResult) -> None:
     """Record ``entry`` in ``result`` if it shadows a stdlib module."""
     name = entry.name
     if name.endswith(".py"):
@@ -309,15 +323,15 @@ def _scan_entry(
         if module_name not in STDLIB_MODULES:
             result.files_scanned += entry.is_file(follow_symlinks=False)
             return
-        indicators = _scan_at(dir_fd, name, budget)
+        indicators = _scan_at(dir_fd, name, result)
         if indicators is not None:
             _record(result, name, module_name, indicators)
         return
     if name in STDLIB_MODULES:
-        _scan_package(dir_fd, name, result, budget)
+        _scan_package(dir_fd, name, result)
 
 
-def _scan_package(dir_fd: int, name: str, result: ShadowScanResult, budget: list[int]) -> None:
+def _scan_package(dir_fd: int, name: str, result: ShadowScanResult) -> None:
     """A stdlib-named directory with an ``__init__.py`` is a package shadow."""
     try:
         st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
@@ -334,7 +348,7 @@ def _scan_package(dir_fd: int, name: str, result: ShadowScanResult, budget: list
     except OSError:
         return
     try:
-        indicators = _scan_at(pkg_fd, "__init__.py", budget)
+        indicators = _scan_at(pkg_fd, "__init__.py", result)
     finally:
         os.close(pkg_fd)
     if indicators is not None:

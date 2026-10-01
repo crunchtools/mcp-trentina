@@ -71,7 +71,8 @@ repeatable.
   past `TRENTINA_READ_ROOTS` and the denylist. It now scans the entries the
   listing read, through the descriptor confinement checked, opening each
   shadow relative to it with `O_NOFOLLOW`; a symlinked shadow is reported
-  (`symlink`) and never read through (#287).
+  (`symlink`) and never read through, and a hard-linked one (`linked`) is
+  neither read nor sized (#287).
 - The confined open walks the resolved path one `O_NOFOLLOW` component at a
   time, so an intermediate directory swapped for a symlink is refused even
   where `/proc/self/fd` is unavailable; a FIFO or device in a root is refused
