@@ -582,10 +582,35 @@ class TestProviderApi:
     def test_unknown_host_without_api_fails_closed(self) -> None:
         with pytest.raises(ValidationError, match="api must be set"):
             LlmProvider(
+                enabled=True,
                 upstream="https://api.groq.com/openai",
                 auth_header="Authorization",
                 api_key_env="K",
             )
+
+    def test_disabled_unknown_host_without_api_does_not_stop_startup(self) -> None:
+        """Production's disabled perplexity/xai/mistral entries crash-looped 0.49.0."""
+        section = {
+            "mistral": {
+                "enabled": False,
+                "upstream": "https://api.mistral.ai",
+                "auth_header": "Authorization",
+                "api_key_env": "MISTRAL_API_KEY",
+            }
+        }
+        assert load_llm_providers(section) == {}
+
+    def test_enabled_unknown_host_without_api_names_the_entry(self) -> None:
+        section = {
+            "groq": {
+                "enabled": True,
+                "upstream": "https://api.groq.com/openai",
+                "auth_header": "Authorization",
+                "api_key_env": "K",
+            }
+        }
+        with pytest.raises(ProfileConfigError, match=r"llm_providers\.groq: .*api must be set"):
+            load_llm_providers(section)
 
     def test_unknown_host_with_api_loads(self) -> None:
         provider = LlmProvider(

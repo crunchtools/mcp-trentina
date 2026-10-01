@@ -10,6 +10,13 @@ under that name.
 
 ## [Unreleased]
 
+### Fixed
+- A DISABLED `llm_providers` entry with a non-standard upstream and no `api:`
+  no longer stops startup; only an enabled one must name its API shape. 0.49.0
+  refused it, and a gateway on podman auto-update crash-looped on entries it
+  never loads. A provider that fails validation is now named in the error
+  (`llm_providers.<name>: ...`).
+
 ### Added
 - `demo-container.yml` builds the attack-sim demo (`demo/attack-sim`) and
   pushes `quay.io/crunchtools/trentina-demo` and its GHCR mirror (`:latest`
