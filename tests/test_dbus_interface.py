@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
+import json
+import threading
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -264,3 +268,94 @@ def test_l3_status_follows_the_provider_not_the_gemini_key() -> None:
 
     assert status["active"] is True
     assert "openrouter" in status["description"]
+
+
+class TestBusView:
+    """Nothing a caller wrote crosses the system bus (#298)."""
+
+    def test_source_is_a_fingerprint(self) -> None:
+        from mcp_trentina_crunchtools.dbus_interface import bus_view
+
+        view = bus_view({"source": "https://secret.example/token=abc", "tool": "block_fetch"})
+        assert view["source"].startswith("sha256:")
+        assert "secret" not in str(view)
+        assert view["tool"] == "block_fetch"
+
+    def test_l3_prose_is_reduced_to_finding_types(self) -> None:
+        from mcp_trentina_crunchtools.dbus_interface import bus_view
+
+        view = bus_view(
+            {
+                "source": "x",
+                "details": {
+                    "injection_detected": True,
+                    "summary": "CANARY prose written by the judge",
+                    "findings": [{"type": "role_reassignment", "description": "CANARY"}],
+                    "hidden_html": 2,
+                },
+            }
+        )
+        assert "CANARY" not in str(view)
+        assert view["details"]["finding_types"] == ["role_reassignment"]
+        assert view["details"]["hidden_html"] == 2
+
+    def test_recent_events_are_viewed(self) -> None:
+        """GetRecentEvents' body, called through the real dbus-fast interface."""
+        from mcp_trentina_crunchtools.dbus_interface import _build_interface
+
+        reset_event_bus()
+        emit_detection_event("L3", "/home/alice/secret.txt", "high", {"summary": "CANARY"})
+        interface = _build_interface()
+        out = type(interface).GetRecentEvents.__wrapped__(interface, 10)
+        assert "secret.txt" not in out
+        assert "CANARY" not in out
+        assert json.loads(out)[0]["data"]["source"].startswith("sha256:")
+
+
+class TestStartedOnTheServingLoop:
+    """main() no longer starts D-Bus on a loop it then closes (#298)."""
+
+    def test_main_only_requests_it(self) -> None:
+
+        import mcp_trentina_crunchtools as pkg
+
+        src = inspect.getsource(pkg.main)
+        assert "new_event_loop" not in src
+        assert "request_dbus()" in src
+
+    @pytest.mark.asyncio
+    async def test_the_lifespan_starts_it_on_the_running_loop(self) -> None:
+
+        import mcp_trentina_crunchtools.dbus_interface as dbi
+        from mcp_trentina_crunchtools import server
+
+        loops: list[asyncio.AbstractEventLoop] = []
+
+        async def fake_start() -> None:
+            loops.append(asyncio.get_running_loop())
+
+        with (
+            patch.object(dbi, "_requested", True),
+            patch.object(dbi, "start_dbus", fake_start),
+        ):
+            async with server._lifespan(server.mcp):
+                pass
+        assert loops == [asyncio.get_running_loop()]
+
+    @pytest.mark.asyncio
+    async def test_signals_hop_onto_the_bus_loop(self) -> None:
+        """A worker thread's event is signalled from the bus's loop, viewed."""
+        from mcp_trentina_crunchtools.dbus_interface import _build_interface
+
+        interface = _build_interface(asyncio.get_running_loop())
+        sent: list[tuple[str, int]] = []
+        interface.DetectionOccurred = lambda *a: sent.append((a[1], threading.get_ident()))
+
+        def worker() -> None:
+            interface.on_detection_occurred("detection_occurred", {"source": "s", "layer": "L1"})
+
+        await asyncio.to_thread(worker)
+        await asyncio.sleep(0)
+        assert sent
+        assert sent[0][1] == threading.get_ident()
+        assert sent[0][0].startswith("sha256:")

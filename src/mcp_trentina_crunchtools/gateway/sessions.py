@@ -154,19 +154,27 @@ class SessionRegistry:
         self._profile_index.setdefault(profile_name, set()).add(session_id)
 
         logger.info(
-            "sessions: created session=%s profile=%s (active=%d/%d, ttl=%.0fs) census=%s",
+            "sessions: created session=%s profile=%s (active=%d/%d, ttl=%.0fs)",
             session_id[:8],
             profile_name,
-            len(self._profile_index.get(profile_name, set())),
+            self.active(profile_name),
             self.max_sessions_per_profile,
             self.session_ttl,
-            self.census(),
         )
         return session_id
 
     def census(self) -> dict[str, int]:
-        """Live session count per profile, for tracking accumulation over time."""
+        """Live session count per profile, for tracking accumulation over time.
+
+        Never logged (#291): the journal is agent-readable, and every
+        profile's count on every session event was a few bits per round
+        between agents, plus the whole roster. Log ``active(name)`` instead.
+        """
         return {pname: len(ids) for pname, ids in self._profile_index.items() if ids}
+
+    def active(self, profile_name: str) -> int:
+        """Live sessions held by one profile: what its own log lines carry."""
+        return len(self._profile_index.get(profile_name, ()))
 
     def explain_missing(self, session_id: str, for_profile: str | None) -> str:
         """Describe why ``session_id`` is not in the registry.
@@ -177,12 +185,12 @@ class SessionRegistry:
         gateway restart).
 
         ``for_profile`` scopes the answer to a caller (#137). The full text
-        names the session's owner and its lifetime, which is fine in the
-        operator's journal and is not fine in a response: presenting another
-        profile's session id would learn that profile's name. So a tombstone
-        that belongs to someone else reads exactly like one that never
-        existed. Required, so no caller gets the unscoped text by omission:
-        only the operator's journal passes None, explicitly.
+        names the session's owner and its lifetime, which is not fine in a
+        response nor in the journal, which agents read (#262, #291):
+        presenting another profile's session id would learn that profile's
+        name. So a tombstone that belongs to someone else reads exactly like
+        one that never existed. Required, so no caller gets the unscoped text
+        by omission; the gateway's own call sites all pass the route's profile.
         """
         tomb = self._tombstones.get(session_id)
         if tomb is None or (for_profile is not None and tomb.profile_name != for_profile):
@@ -338,12 +346,12 @@ class SessionRegistry:
             logger.info(
                 "sessions: EXPIRED session=%s profile=%s — idle %.1fs > ttl %.0fs. "
                 "Raise gateway.session_ttl_seconds in profiles.yaml if this is "
-                "disconnecting idle clients. census=%s",
+                "disconnecting idle clients. active=%d",
                 sid[:8],
                 profile_name,
                 idle,
                 self.session_ttl,
-                self.census(),
+                self.active(profile_name),
             )
 
 

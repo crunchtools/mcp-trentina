@@ -443,7 +443,7 @@ class TestInternalTools:
     ) -> None:
         """`false` is unminified, not unscanned: tier 2 still counts the hiding."""
         with layers(env) as fakes:
-            fakes.fetch_url.return_value = (PAGE, "text/html")
+            fakes.fetch_url.return_value = (PAGE, "text/html", ())
             result = await fetch_page("https://example.com/notes", Mode.FLAG, preprocess=False)
         assert result["content"] == PAGE
         assert fakes.classify.call_args_list[0].args[0] == PAGE
@@ -452,7 +452,7 @@ class TestInternalTools:
 
     async def test_fetch_refuses_a_value_that_is_not_a_switch(self, env: Path) -> None:
         with layers(env) as fakes:
-            fakes.fetch_url.return_value = (PAGE, "text/html")
+            fakes.fetch_url.return_value = (PAGE, "text/html", ())
             with pytest.raises(PreProcessNotPermittedError):
                 await fetch_page("https://example.com", Mode.FLAG, preprocess="summarize")
         assert fakes.classify.await_count == 0
@@ -460,7 +460,7 @@ class TestInternalTools:
     async def test_the_bound_floor_converts_even_when_asked_not_to(self, env: Path) -> None:
         policy = PreProcessPolicy(["detect"], ["html"])
         with profile_context(_profile(), None, policy), layers(env) as fakes:
-            fakes.fetch_url.return_value = (PAGE, "text/plain")
+            fakes.fetch_url.return_value = (PAGE, "text/plain", ())
             result = await fetch_page("https://example.com", Mode.FLAG, preprocess=False)
         assert result["content"].startswith("# Release notes")
 
@@ -471,7 +471,7 @@ class TestInternalTools:
             layers(env) as fakes,
             patch(HTML_RUN, side_effect=RuntimeError("boom")),
         ):
-            fakes.fetch_url.return_value = (PAGE, "text/html")
+            fakes.fetch_url.return_value = (PAGE, "text/html", ())
             with pytest.raises(PreProcessFailedError):
                 await flag_fetch("https://example.com")
         assert fakes.classify.await_count == 0
@@ -482,7 +482,7 @@ class TestInternalTools:
         monkeypatch.setattr("mcp_trentina_crunchtools.preprocess.html._MAX_PARSE_BYTES", 16)
         policy = PreProcessPolicy(["html"], ["html"])
         with profile_context(_profile(), None, policy), layers(env) as fakes:
-            fakes.fetch_url.return_value = (PAGE, "text/html")
+            fakes.fetch_url.return_value = (PAGE, "text/html", ())
             with pytest.raises(PreProcessFailedError, match="too_large"):
                 await flag_fetch("https://example.com")
         assert fakes.classify.await_count == 0
@@ -505,7 +505,7 @@ class TestInternalTools:
             patch(SUMMARIZE_RUN, AsyncMock(return_value=summary)),
             patch("mcp_trentina_crunchtools.tools.fetch.judge_and_deliver", judge),
         ):
-            fakes.fetch_url.return_value = (PAGE, "text/plain")
+            fakes.fetch_url.return_value = (PAGE, "text/plain", ())
             await fetch_page("https://example.com", Mode.FLAG)
         assert judge.call_args.args[0] == "A page about release notes."
         assert judge.call_args.kwargs["provenance"] is Provenance.MODEL_OUTPUT
@@ -526,7 +526,7 @@ class TestInternalTools:
     ) -> None:
         """Minifying fails open: a broken minifier costs tokens, never content."""
         with layers(env) as fakes, patch(HTML_RUN, AsyncMock(**broken)):
-            fakes.fetch_url.return_value = (PAGE, "text/html")
+            fakes.fetch_url.return_value = (PAGE, "text/html", ())
             result = await flag_fetch("https://example.com")
         assert result["content"] == PAGE
         assert fakes.classify.call_args_list[0].args[0] == PAGE
@@ -543,7 +543,7 @@ class TestInternalTools:
             layers(env) as fakes,
             patch("mcp_trentina_crunchtools.preprocess.petit.PetitProcessor.run", petit),
         ):
-            fakes.fetch_url.return_value = (PAGE, "text/html")
+            fakes.fetch_url.return_value = (PAGE, "text/html", ())
             result = await fetch_page("https://e.com", Mode.FLAG)
         assert seen[0].startswith("# Release notes")
         assert result["content"] == "grouped"

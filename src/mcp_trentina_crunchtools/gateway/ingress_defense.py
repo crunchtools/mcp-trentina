@@ -365,11 +365,13 @@ async def scan_tool_response(
         return IngressDecision(warning={"unscannable": gaps} if gaps else None)
 
     # The briefing is in the key: the same bytes from a backend whose operator
-    # briefed L3 differently may be judged differently (#204).
+    # briefed L3 differently may be judged differently (#204). So is the
+    # profile (#291): a hit answers in milliseconds and a miss in seconds, so
+    # a shared key told B which of N objects A had fetched.
     briefing = hashlib.sha256((l3_context or "").encode()).hexdigest()[:16]
     key = _cache_key(
         profile,
-        f"response:{mode.value}:{provenance.value}:{briefing}",
+        f"response:{profile.name}:{mode.value}:{provenance.value}:{briefing}",
         joined
         + json.dumps(unscannable, sort_keys=True)
         + (json.dumps(asdict(hidden), sort_keys=True) if hidden is not None else ""),
@@ -718,6 +720,13 @@ async def scan_tool_list(
         )
         provenance = Provenance.MODEL_OUTPUT if compressed else Provenance.EXTERNAL
 
+        # TRUST: a verdict cache shared by every profile (#291)
+        #   untrusted: `surface`, the tool list a backend announces
+        #   judged-by: none needed; no agent chooses the text, so a hit is no channel
+        #   on-failure: n/a; a miss judges the description afresh
+        #   owner: ingress_defense.scan_tool_list
+        #   evidence: T4 surface is the backend's tools/list, not a call argument;
+        #     T3 #263 residual: the per-URL tool-list cache already says a URL is shared
         key = _cache_key(profile, f"tool:{provenance.value}", surface, judge)
         hit, warning = _cache_get(key)
         if hit and _judged_before_briefing(warning):

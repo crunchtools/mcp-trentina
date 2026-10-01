@@ -149,7 +149,7 @@ class TestTheBomb:
         headers = {"Content-Type": "text/plain", "Content-Encoding": "identity"}
         async with _BombServer("200 OK", headers, b"plain text") as server:
             _route_to(monkeypatch, server)
-            content, _ = await fetch_url("http://bomb.example/")
+            content, _, _ = await fetch_url("http://bomb.example/")
 
         assert content == "plain text"
         request = server.requests[0].lower()

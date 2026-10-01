@@ -24,7 +24,7 @@ from typing import Any
 from ..config import get_config
 from ..errors import FileReadError
 from ..l1.pipeline import run_l1
-from ..l1.shadows import ShadowScanResult, ShadowStats, detect_module_shadows
+from ..l1.shadows import ShadowScanResult, ShadowStats, scan_shadows
 from ..modes import Mode
 from .confine import REFUSAL_REASONS, open_confined, refused
 from .judged import check_blocklist, judge_and_deliver
@@ -46,33 +46,29 @@ def _entry(entry: os.DirEntry[str]) -> dict[str, Any]:
 
 
 def _list_confined(path: str) -> tuple[list[dict[str, Any]], str, ShadowScanResult]:
-    """Open ``path`` through confinement and list it, all in the calling thread.
+    """Open ``path`` through confinement, list it and scan it, all in the calling thread.
 
     Blocking: ``list_dir`` runs it in ONE worker thread, so the confinement
     checks, the open and the listing through that descriptor never cross a
     thread or touch the event loop (#267).
 
-    The shadow scan re-lists by path, so it is bounded to the same
-    ``MAX_DIR_ENTRIES + 1`` entries. The listing already refused a directory
-    that large, so reaching the bound means the directory changed in between,
-    and a scan that stopped early could have missed a shadow: that fails
-    closed rather than reporting partial coverage as clean.
+    The shadow scan reads the SAME entries through the SAME descriptor
+    (#287). It re-listed by path until then, which followed symlinks out of
+    the root and could see a different directory from the one delivered.
     """
-    fd, _, confined = open_confined(path, os.O_DIRECTORY)
+    fd, _, confined = open_confined(path, "dir")
     resolved = str(confined)
     try:
         # Listed through the checked descriptor, and lazily: a directory of a
         # million entries costs MAX_DIR_ENTRIES + 1 reads, not a million.
         with os.scandir(fd) as it:
             found = list(islice(it, MAX_DIR_ENTRIES + 1))
-            if len(found) > MAX_DIR_ENTRIES:
-                raise FileReadError("too_many_entries", f"max {MAX_DIR_ENTRIES}")
-            entries = sorted((_entry(e) for e in found), key=lambda e: e["name"])
+        if len(found) > MAX_DIR_ENTRIES:
+            raise FileReadError("too_many_entries", f"max {MAX_DIR_ENTRIES}")
+        entries = sorted((_entry(e) for e in found), key=lambda e: e["name"])
+        shadows = scan_shadows(fd, found, resolved)
     finally:
         os.close(fd)
-    shadows = detect_module_shadows(resolved, max_entries=MAX_DIR_ENTRIES + 1)
-    if shadows.entries_read > MAX_DIR_ENTRIES:
-        raise FileReadError("changed_during_read")
     return entries, resolved, shadows
 
 
@@ -80,8 +76,8 @@ async def list_dir(path: str, mode: Mode, prompt: str | None = None) -> dict[str
     try:
         entries, resolved, shadows = await asyncio.to_thread(_list_confined, path)
     except FileReadError as exc:
-        # A confinement refusal (#278), or a directory that changed under the
-        # listing or the shadow scan: both are refusals, never a read error.
+        # A confinement refusal (#278), or a directory swapped during the
+        # open: both are refusals, never a read error.
         if exc.reason not in REFUSAL_REASONS:
             raise
         raise refused(exc, mode) from exc

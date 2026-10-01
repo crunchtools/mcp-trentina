@@ -10,6 +10,7 @@ and extracted text (post-Layer 3) on the output verification path.
 from __future__ import annotations
 
 import asyncio
+import collections
 import logging
 import os
 import time
@@ -256,42 +257,35 @@ def classify(
             raise UnscannableContentError(source, total_tokens, max_tokens)
         all_ids = all_ids[:max_tokens]
 
-    if len(all_ids) <= max_length:
-        # Natural length, not padded to the window: see _pad_segment. The
-        # whole-document path is the common one now that extraction shrinks
-        # most payloads below a single window.
-        enc = _tokenizer(
-            text,
-            truncation=True,
-            max_length=max_length,
-            return_attention_mask=True,
-        )
-        label, score = _classify_segment(enc["input_ids"], enc["attention_mask"])
-    else:
-        best_label = "BENIGN"
-        best_score = 0.0
+    # One loop for every length. There was a single-window shortcut here that
+    # re-tokenized ``text`` with ``truncation=True`` whenever the input was at
+    # most WINDOW_TOKENS long, but a window carries only WINDOW_CONTENT_TOKENS
+    # of content: a 511- or 512-token input lost its last one or two tokens
+    # and came back with ``truncated`` False (#298). A short input is one
+    # pass of this loop at its natural length, which is what the shortcut
+    # bought, so nothing was gained by keeping a second path.
+    best_label = "BENIGN"
+    best_score = 0.0
 
-        # WINDOW_CONTENT_TOKENS states this; the tokenizer is the source of
-        # truth so a model wrapping windows differently stays correct.
-        content_length = max_length - _tokenizer.num_special_tokens_to_add()
+    # WINDOW_CONTENT_TOKENS states this; the tokenizer is the source of
+    # truth so a model wrapping windows differently stays correct.
+    content_length = max_length - _tokenizer.num_special_tokens_to_add()
 
-        for start_idx in range(0, len(all_ids), stride):
-            segment_ids = all_ids[start_idx : start_idx + content_length]
-            if not segment_ids:
-                break
+    # max(..., 1): empty text still gets its one pass, as it did before.
+    for start_idx in range(0, max(len(all_ids), 1), stride):
+        segment_ids = all_ids[start_idx : start_idx + content_length]
+        input_ids, attention_mask = _pad_segment(segment_ids, max_length)
+        seg_label, seg_score = _classify_segment(input_ids, attention_mask)
 
-            input_ids, attention_mask = _pad_segment(segment_ids, max_length)
-            seg_label, seg_score = _classify_segment(input_ids, attention_mask)
+        if seg_score > best_score:
+            best_score = seg_score
+            best_label = seg_label
 
-            if seg_score > best_score:
-                best_score = seg_score
-                best_label = seg_label
+        if start_idx + content_length >= len(all_ids):
+            break
 
-            if start_idx + content_length >= len(all_ids):
-                break
-
-        label = best_label
-        score = best_score
+    label = best_label
+    score = best_score
 
     elapsed_ms = (time.monotonic() - start) * 1000
 
@@ -381,7 +375,7 @@ async def classify_async(
     ``fail_on_truncate`` is for callers that refuse a partial scan anyway.
     """
     gate = _l2_gate()
-    await gate.acquire()
+    await gate.acquire(_caller())
     # The permit follows the THREAD, not this coroutine: a cancelled caller
     # leaves the scan running, and releasing on cancel would let the next
     # scan start beside it and break the bound.
@@ -392,22 +386,81 @@ async def classify_async(
     return await asyncio.shield(scan)
 
 
-_gate: tuple[asyncio.AbstractEventLoop, asyncio.Semaphore] | None = None
+class FairGate:
+    """A counting gate that hands a freed permit to profiles in turn (#291).
+
+    A plain semaphore is FIFO across every caller, so one profile queueing a
+    hundred scans made every other profile wait behind all hundred: a
+    gateway-wide stall one agent could cause, and a timing another agent
+    could read. Here each caller key has its own FIFO, and a freed permit
+    goes to the next key in rotation. Another profile's backlog now delays a
+    scan by at most one scan per profile waiting, not by the backlog.
+    """
+
+    def __init__(self, permits: int) -> None:
+        self._free = permits
+        self._queues: collections.OrderedDict[
+            str | None, collections.deque[asyncio.Future[None]]
+        ] = collections.OrderedDict()
+
+    def locked(self) -> bool:
+        """True when a new caller would have to wait."""
+        return self._free == 0
+
+    async def acquire(self, key: str | None) -> None:
+        """Wait for a permit in ``key``'s turn."""
+        if self._free > 0 and not self._queues:
+            self._free -= 1
+            return
+        waiter: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._queues.setdefault(key, collections.deque()).append(waiter)
+        try:
+            await waiter
+        except asyncio.CancelledError:
+            # Granted, then cancelled before it could run: pass the permit on.
+            if waiter.done() and not waiter.cancelled():
+                self.release()
+            raise
+
+    def release(self) -> None:
+        """Hand the permit to the next key in rotation, or put it back."""
+        while self._queues:
+            key, queue = next(iter(self._queues.items()))
+            waiter = queue.popleft()
+            if queue:
+                self._queues.move_to_end(key)
+            else:
+                del self._queues[key]
+            if not waiter.done():
+                waiter.set_result(None)
+                return
+        self._free += 1
 
 
-def _l2_gate() -> asyncio.Semaphore:
+def _caller() -> str | None:
+    """The profile a scan is for, or None standalone: the gate's turn key."""
+    # Imported here: the gateway package imports this one on its way in.
+    from ..gateway.context import get_current_profile
+
+    profile = get_current_profile()
+    return profile.name if profile is not None else None
+
+
+_gate: tuple[asyncio.AbstractEventLoop, FairGate] | None = None
+
+
+def _l2_gate() -> FairGate:
     """Bound concurrent scans, so a burst cannot oversubscribe the cores.
 
     Each scan already runs ``CLASSIFIER_THREADS`` intra-op threads; the boot
     warm-up hands L2 hundreds of descriptions at once (#216), and running
-    them all together is slower than running them a few at a time. One
-    semaphore per event loop, because a semaphore binds to the loop it
-    first waits on.
+    them all together is slower than running them a few at a time. One gate
+    per event loop, because its futures bind to the loop that made them.
     """
     global _gate
     loop = asyncio.get_running_loop()
     if _gate is None or _gate[0] is not loop:
-        _gate = (loop, asyncio.Semaphore(int_env("TRENTINA_L2_CONCURRENCY", 2, minimum=1)))
+        _gate = (loop, FairGate(int_env("TRENTINA_L2_CONCURRENCY", 2, minimum=1)))
     return _gate[1]
 
 

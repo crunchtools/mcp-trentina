@@ -104,7 +104,7 @@ class TestContentTypeAllowlist:
     ) -> None:
         mock_http(monkeypatch, content_type=content_type, body=b"body text")
 
-        content, returned_type = await fetch_url("https://example.com/thing")
+        content, returned_type, _ = await fetch_url("https://example.com/thing")
 
         assert content == "body text"
         assert returned_type == content_type
@@ -114,7 +114,7 @@ class TestContentTypeAllowlist:
         """An absent header is common on plain files; don't break those."""
         mock_http(monkeypatch, content_type=None, body=b"plain")
 
-        content, _ = await fetch_url("https://example.com/README")
+        content, _, _ = await fetch_url("https://example.com/README")
 
         assert content == "plain"
 
@@ -161,9 +161,36 @@ class TestSizeCap:
     async def test_body_at_the_limit_is_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_http(monkeypatch, content_type="text/plain", body=b"y" * 1000)
 
-        content, _ = await fetch_url("https://example.com/ok")
+        content, _, _ = await fetch_url("https://example.com/ok")
 
         assert len(content) == 1000
+
+
+class TestHops:
+    """Every URL that answered is returned, so trust can be judged on all of them (#298)."""
+
+    @pytest.mark.asyncio
+    async def test_hops_end_at_the_url_the_body_came_from(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "landing.example.net":
+                return httpx.Response(200, headers={"content-type": "text/plain"}, text="hi")
+            return httpx.Response(302, headers={"location": "https://landing.example.net/x"})
+
+        route(monkeypatch, handler)
+        fetched = await fetch_url("https://trusted.example.com/go")
+        assert fetched.content == "hi"
+        assert fetched.hops == (
+            "https://trusted.example.com/go",
+            "https://landing.example.net/x",
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_redirect_is_one_hop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        route(monkeypatch, lambda _r: httpx.Response(200, text="ok"))
+        fetched = await fetch_url("https://example.com/ok")
+        assert fetched.hops == ("https://example.com/ok",)
 
 
 class TestRedirectChainDiagnostics:

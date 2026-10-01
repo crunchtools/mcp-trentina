@@ -42,7 +42,7 @@ def _read_confined(path: str) -> tuple[str, str]:
     confinement checks, the open and the read all happen in the same call and
     nothing is split across threads or back onto the event loop (#267).
     """
-    fd, st, resolved = open_confined(path)
+    fd, st, resolved = open_confined(path, "file")
     with os.fdopen(fd, "rb") as fh:
         if not stat.S_ISREG(st.st_mode):
             raise FileReadError("not_a_file")
