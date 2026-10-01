@@ -42,6 +42,7 @@ it does not know must be "read it anyway", not "ignore it".
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING, Any
@@ -116,14 +117,16 @@ class MatrixProcessor:
             decrypted += 1
             decrypted_texts.extend(_decrypted_leaves(plaintext))
 
-        view = self._select.select(
-            iter_leaves(_without_ciphertext(payload)),
-            extra_segments=decrypted_texts,
-            extra_skipped=skipped,
-            encrypted_events=len(encrypted),
-            decrypted_events=decrypted,
-            undecryptable=tuple(undecryptable),
-            extractor_name=self.name,
+        view = await asyncio.to_thread(  # off the loop (#295)
+            lambda: self._select.select(
+                iter_leaves(_without_ciphertext(payload)),
+                extra_segments=decrypted_texts,
+                extra_skipped=skipped,
+                encrypted_events=len(encrypted),
+                decrypted_events=decrypted,
+                undecryptable=tuple(undecryptable),
+                extractor_name=self.name,
+            )
         )
         if undecryptable:
             logger.warning(

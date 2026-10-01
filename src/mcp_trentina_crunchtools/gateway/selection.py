@@ -13,6 +13,7 @@ written once, in the half nobody copied it out of. Both tables now live in
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -69,7 +70,7 @@ async def run_l1(
     open means delivering the original.
     """
     if extractor is None:
-        return read_everything(payload, extractor="none", why="")
+        return await asyncio.to_thread(read_everything, payload, extractor="none", why="")
     try:
         return await extractor.extract(payload, ctx)
     except Exception as exc:
@@ -80,7 +81,9 @@ async def run_l1(
             exc_kind(exc),
             exc_where(exc),
         )
-        return read_everything(payload, extractor=extractor.name, why=extractor.name)
+        return await asyncio.to_thread(
+            read_everything, payload, extractor=extractor.name, why=extractor.name
+        )
 
 
 def describe(view: Selection, cfg: MatrixPreProcessConfig) -> dict[str, Any]:

@@ -9,14 +9,22 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
-from .config import get_config
+from .config import get_config, int_env
 from .outcomes import Outcome, group_of
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 _db: sqlite3.Connection | None = None
+_db_path = ""  # set by get_db on every open
+_local = threading.local()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS detections (
@@ -94,17 +102,58 @@ CREATE TABLE IF NOT EXISTS tool_list_cache (
 
 def get_db(db_path: str | None = None) -> sqlite3.Connection:
     """Get or create the singleton database connection."""
-    global _db
+    global _db, _db_path
     if _db is None:
         path = db_path or get_config().db_path
         get_config().ensure_db_dir()
         _db = sqlite3.connect(path)
+        _db_path = path
         _db.row_factory = sqlite3.Row
         _db.execute("PRAGMA journal_mode=WAL")
         _db.execute("PRAGMA foreign_keys=ON")
         _db.executescript(SCHEMA)
         _migrate(_db)
     return _db
+
+
+def opened_path() -> str:
+    """The database file, opening it (schema and migrations) if nothing has yet.
+
+    Call on the event loop, where the singleton lives; the result is what a
+    worker hands ``snapshot_reader``.
+    """
+    get_db()
+    return _db_path
+
+
+@contextmanager
+def snapshot_reader(path: str) -> Iterator[None]:
+    """Route this thread's stats reads to a read-only connection of its own (#295).
+
+    The aggregates behind ``quarantine_stats`` cost about 2.7 s per million
+    audit rows. On the event loop that stalled every profile; in a worker on
+    the singleton connection it would trip sqlite3's thread check, and a lock
+    around the singleton would make every audit write on the loop wait out
+    the scan. A second connection under WAL reads a consistent snapshot while
+    the singleton keeps writing.
+
+    Args:
+        path: the database file, from ``opened_path()``.
+    """
+    conn = sqlite3.connect(f"file:{quote(path)}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    _local.reader = conn
+    try:
+        yield
+    finally:
+        _local.reader = None
+        conn.close()
+
+
+def _read_db() -> sqlite3.Connection:
+    """This thread's ``snapshot_reader`` connection, else the singleton."""
+    reader: sqlite3.Connection | None = getattr(_local, "reader", None)
+    return reader if reader is not None else get_db()
 
 
 _VERDICT_COLUMNS = (
@@ -189,34 +238,84 @@ def _block_cutoff() -> str:
 
 
 _SWEEP_INTERVAL_SECONDS = 3600.0
-_last_sweep = 0.0
+# None until the first sweep. It was 0.0, compared with `time.monotonic()`,
+# which counts from boot: on a host up less than an hour nothing was swept.
+_last_sweep: float | None = None
+
+# Rows one sweep pass deletes. The sweeps run on the event loop, inside the
+# call that triggered them, so a pass is bounded rather than "everything
+# expired": a month of a cheap denied-call flood is millions of rows (#295).
+# A full batch leaves the sweep due, and the next call takes the next batch.
+SWEEP_BATCH = 500
+
+
+_SWEEP_BLOCKS = (
+    "DELETE FROM detections WHERE rowid IN (SELECT rowid FROM detections "
+    "WHERE blocked = 1 AND detected_at <= ? LIMIT ?)"
+)
+_SWEEP_CALLS = (
+    "DELETE FROM gateway_calls WHERE rowid IN "
+    "(SELECT rowid FROM gateway_calls WHERE timestamp <= ? LIMIT ?)"
+)
+
+
+def _delete_batch(conn: sqlite3.Connection, statement: str, cutoff: str | float) -> int:
+    cursor = conn.execute(statement, (cutoff, SWEEP_BATCH))
+    conn.commit()
+    return cursor.rowcount
 
 
 def sweep_expired_blocks(db: sqlite3.Connection | None = None) -> int:
-    """Delete blocklist rows past ``TRENTINA_BLOCKLIST_TTL_DAYS`` (#263).
+    """Delete up to ``SWEEP_BATCH`` blocklist rows past ``TRENTINA_BLOCKLIST_TTL_DAYS`` (#263).
 
     Readers filter on the cutoff themselves, so an expired row never counts
     whether or not a sweep has run; the sweep only stops the table from
-    holding what no reader will use. ``is_blocked`` runs it at most hourly,
-    the first time on the first lookup after start. Flag-mode observations (``blocked = 0``)
+    holding what no reader will use. Flag-mode observations (``blocked = 0``)
     are not blocklist rows and are kept.
 
     Returns:
         The number of rows removed.
     """
-    global _last_sweep
-    conn = db or get_db()
-    cursor = conn.execute(
-        "DELETE FROM detections WHERE blocked = 1 AND detected_at <= ?", (_block_cutoff(),)
-    )
-    conn.commit()
-    _last_sweep = time.monotonic()
-    return cursor.rowcount
+    return _delete_batch(db or get_db(), _SWEEP_BLOCKS, _block_cutoff())
+
+
+DEFAULT_AUDIT_RETENTION_DAYS = 90
+
+
+def audit_retention_days() -> int:
+    """``TRENTINA_AUDIT_RETENTION_DAYS``: days an audit row is kept, 0 for ever (#295).
+
+    The table was never pruned, and a denied call costs the caller nothing.
+    """
+    return int_env("TRENTINA_AUDIT_RETENTION_DAYS", DEFAULT_AUDIT_RETENTION_DAYS, minimum=0)
+
+
+def sweep_old_gateway_calls(db: sqlite3.Connection | None = None) -> int:
+    """Delete up to ``SWEEP_BATCH`` audit rows past ``TRENTINA_AUDIT_RETENTION_DAYS`` (#295).
+
+    A retention of 0 keeps every row.
+
+    Returns:
+        The number of rows removed.
+    """
+    days = audit_retention_days()
+    if days <= 0:
+        return 0
+    return _delete_batch(db or get_db(), _SWEEP_CALLS, time.time() - days * 86400)
 
 
 def _maybe_sweep(db: sqlite3.Connection) -> None:
-    if time.monotonic() - _last_sweep >= _SWEEP_INTERVAL_SECONDS:
-        sweep_expired_blocks(db)
+    """Both sweeps, at most hourly, until a pass comes back short of a batch.
+
+    Run from ``is_blocked`` and ``record_gateway_call``, the first time on the
+    first call after start.
+    """
+    global _last_sweep
+    if _last_sweep is not None and time.monotonic() - _last_sweep < _SWEEP_INTERVAL_SECONDS:
+        return
+    removed = max(sweep_expired_blocks(db), sweep_old_gateway_calls(db))
+    if removed < SWEEP_BATCH:
+        _last_sweep = time.monotonic()
 
 
 def is_blocked(source: str, profile: str | None, *, gateway_wide: bool = False) -> bool:
@@ -334,7 +433,7 @@ def get_blocklist_stats(profile: str | None = None) -> dict[str, Any]:
         ``profile_filter`` — the profile the numbers are for, or None for the
         whole gateway, so a reader never has to guess which it got.
     """
-    db = get_db()
+    db = _read_db()
     # Same idiom as get_gateway_call_stats above: fixed query templates with
     # one optional clause, the value always bound as a parameter.
     # Expired rows are off the blocklist (#263) and are not counted as on it.
@@ -388,6 +487,7 @@ def record_gateway_call(
     defense block still reads as ``success = 0``, exactly as it did before.
     """
     db = get_db()
+    _maybe_sweep(db)
     success = outcome == Outcome.OK.value
     db.execute(
         "INSERT INTO gateway_calls "
@@ -443,7 +543,7 @@ def get_gateway_call_stats(
     "unknown" rather than guessed at: back-fitting an outcome from the old
     boolean would reintroduce the ambiguity this change removes.
     """
-    db = get_db()
+    db = _read_db()
     cutoff = time.time() - (days * 86400)
 
     query = (
@@ -570,7 +670,7 @@ def get_fanout(window_seconds: int = FANOUT_WINDOW_SECONDS) -> dict[str, Any]:
         backend declares in ``destination_params``). A profile with no
         destination-bearing call in the window is absent.
     """
-    rows = get_db().execute(FANOUT_QUERY, (time.time() - window_seconds,)).fetchall()
+    rows = _read_db().execute(FANOUT_QUERY, (time.time() - window_seconds,)).fetchall()
     return {
         "window_seconds": window_seconds,
         "profiles": {
@@ -604,7 +704,7 @@ def get_recent_destinations(
         ``outcome``, ``kind`` (``fetch``, ``search`` or ``param``) and the
         raw ``destination``. The caller decides who may read the value.
     """
-    db = get_db()
+    db = _read_db()
     cutoff = time.time() - days * 86400
     if profile:
         profiles = [profile]
@@ -670,7 +770,7 @@ def save_compression(
 
 def get_compression_stats() -> dict[str, Any]:
     """Aggregate compression savings from the tool_compressions table."""
-    db = get_db()
+    db = _read_db()
     row = db.execute(
         "SELECT COUNT(*) as cnt, "
         "COALESCE(SUM(original_length), 0) as orig, "

@@ -151,7 +151,9 @@ Track which agents use which capabilities, how tool usage changes over time, and
 
 ## Storage
 
-The audit table lives in the same SQLite database as the blocklist and compression cache (`trentina.db`). The table is append-only in normal operation — rows are never updated, and nothing in the request path deletes them.
+The audit table lives in the same SQLite database as the blocklist and compression cache (`trentina.db`). Rows are never updated. A row older than `TRENTINA_AUDIT_RETENTION_DAYS` (default 90; `0` keeps every row) is deleted by an hourly sweep (#295): before it, a denied call cost the caller nothing and its row was kept for ever. The sweep deletes at most 500 rows a pass and stays due until a pass comes back short, so a large backlog is cleared over several calls rather than in one statement on the event loop.
+
+`quarantine_stats` reads these tables in a worker thread on a read-only connection of its own (#295). Its aggregates cost about 2.7 s per million rows, which on the event loop stalled every profile; under WAL the reader sees a consistent snapshot while audit writes continue.
 
 Operators can reset the audit history with `reset_gateway_calls()`. It is deliberately **not** exposed as an MCP tool: erasing the audit trail is not a capability any consumer profile should hold. Database path is configurable:
 

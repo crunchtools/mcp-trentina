@@ -132,6 +132,34 @@ repeatable.
   still becomes `other` (`ENUM_FALLBACKS`).
 - `llm_providers` keys take the `_FILE` form like every other secret, so a
   provider key no longer has to sit in the process environment (#268).
+- Liveness: one agent could stall the event loop every profile shares (#295).
+  - Two L1 regexes were quadratic. `_SOFT_BREAK` on a run of blanks with no
+    newline (40k tabs: 15 s) now starts a match only at a run's first blank;
+    `_DATA_URI_PATTERN` on repeated `data:text/` now bounds the subtype at
+    RFC 6838's 127 characters. Every L1 pattern was timed against 73 repeated
+    units at 32k characters and end to end through `run_l1`; these were the
+    only two. Both units, plus blanks, are in the linearity tests.
+  - L1 ran on the loop under `defend_json` (every Matrix message and alert),
+    `defend_selection`, redact's turn-2 output check, a document processor's
+    selection and `dir`'s listing. All run in a worker now.
+  - `quarantine_stats` ran its SQLite aggregates on the loop, ~2.7 s per
+    million rows. They run in a worker on a read-only connection of their own
+    (`database.snapshot_reader`), so audit writes are not held either.
+  - `gateway_calls` was never pruned. `TRENTINA_AUDIT_RETENTION_DAYS`
+    (default 90, 0 keeps all) is swept hourly; that sweep and the blocklist's
+    delete at most 500 rows a pass instead of everything in one statement.
+    The blocklist sweep never ran on a host up for less than an hour: its
+    "never swept" sentinel was 0.0 against `time.monotonic()`, which counts
+    from boot.
+  - A fetch had a per-read timeout and no wall clock: a server dripping a byte
+    inside it held the call open for as long as it liked. Every fetch now has
+    60 s for every hop and the body (`open_guarded` requires a `deadline`;
+    grounding redirects get 10 s), and a profile has
+    `TRENTINA_FETCH_CONCURRENCY` (default 8) fetches in flight.
+  - The alert ingress's forward reply and the Matrix bridge's and Conduit's
+    replies were read whole. They are read under the #267 cap, as
+    `identity`, with a wall-clock deadline (`httpbody.request_capped`). The
+    bridge's error text no longer goes into the exception callers log.
 - An OAuth proxy token answers to one profile (#298). Every proxied profile
   shared one JWT audience, so a token issued for an agent seat verified at an
   operator seat that allowlisted the same email. The RFC 8707 `resource` sent
