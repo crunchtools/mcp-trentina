@@ -81,7 +81,12 @@ repeatable.
   as a `model` destination). `llm_providers` entries take `api` (required for
   an upstream other than the four known hosts; startup fails without it) and
   `allowed_models`. `docs/network-isolation.md` no longer claims the gateway
-  is the agent's only way out.
+  is the agent's only way out. The Anthropic allowlist tracks the current
+  Messages API (`output_config` with `effort`/`format`/`task_budget` only,
+  `cache_control`, `inference_geo`, `speed`, `diagnostics`, `fallbacks`,
+  `compaction`/`fallback` blocks, mid-conversation `system` messages), and
+  every `fallbacks` model passes the same model checks as `model`. Chat
+  Completions `store: true` is refused as stored state.
 - Every L3 answer is checked against the schema it was asked for, at the
   provider-response boundary (#294). An answer without a boolean
   `injection_detected` used to count as a complete, clean verdict; an

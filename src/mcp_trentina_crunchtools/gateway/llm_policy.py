@@ -193,9 +193,17 @@ _ANTHROPIC_KEYS = frozenset(
         "thinking",
         "service_tier",
         "context_management",
+        "output_config",
+        # The older spelling of ``output_config.format``; the API still takes it.
         "output_format",
+        "cache_control",
+        "inference_geo",
+        "speed",
+        "diagnostics",
+        "fallbacks",
     }
 )
+_ANTHROPIC_OUTPUT_CONFIG = frozenset({"effort", "format", "task_budget"})
 _ANTHROPIC_NAMED = {
     "mcp_servers": Reason.MCP_SERVERS,
     "container": Reason.SERVER_TOOL,
@@ -210,6 +218,9 @@ _ANTHROPIC_BLOCKS = frozenset(
         "thinking",
         "redacted_thinking",
         "search_result",
+        # Both come back in ``response.content`` and a client replays them.
+        "compaction",
+        "fallback",
     }
 )
 _ANTHROPIC_SOURCES = frozenset({"base64", "text", "content"})
@@ -231,6 +242,14 @@ def _anthropic_blocks(blocks: list[Any], field: str) -> None:
             _anthropic_blocks(block["content"], "tool_result.content")
 
 
+def _fallback_shape(fallbacks: Any) -> None:
+    """``"default"``, or a list of ``{"model": ...}``. The models are checked in ``_models``."""
+    if fallbacks is None or fallbacks == "default":
+        return
+    for raw in _seq(fallbacks, "fallbacks"):
+        _check_keys(_obj(raw, "fallbacks"), frozenset({"model"}), {})
+
+
 def _anthropic_messages(body: dict[str, Any]) -> None:
     _check_keys(body, _ANTHROPIC_KEYS, _ANTHROPIC_NAMED)
     for raw in _seq(body.get("tools"), "tools"):
@@ -240,8 +259,12 @@ def _anthropic_messages(body: dict[str, Any]) -> None:
         kind = _obj(raw, "tools").get("type")
         if kind not in (None, "custom"):
             raise LlmRefusedError(Reason.SERVER_TOOL, kind)
+    if "output_config" in body:
+        _check_keys(_obj(body["output_config"], "output_config"), _ANTHROPIC_OUTPUT_CONFIG, {})
+    _fallback_shape(body.get("fallbacks"))
     if isinstance(body.get("system"), list):
         _anthropic_blocks(body["system"], "system")
+    # A mid-conversation ``role: system`` message is checked like any other.
     for raw in _seq(body.get("messages"), "messages"):
         content = _obj(raw, "messages").get("content")
         if isinstance(content, list):
@@ -375,10 +398,19 @@ def _chat_parts(parts: list[Any]) -> None:
 
 
 def _models(body: dict[str, Any], allowed_models: Iterable[str]) -> None:
+    """Every model a request names, not only ``model``.
+
+    OpenRouter's ``models`` and Anthropic's ``fallbacks`` both name a model
+    the provider may run instead; skipping either bypasses ``allowed_models``.
+    """
     patterns = list(allowed_models)
     check_model(body.get("model"), patterns)
     for model in _seq(body.get("models"), "models"):
         check_model(model, patterns)
+    fallbacks = body.get("fallbacks")
+    if isinstance(fallbacks, list):
+        for raw in fallbacks:
+            check_model(_obj(raw, "fallbacks").get("model"), patterns)
 
 
 _FUNCTION = frozenset({"function"})
@@ -387,6 +419,11 @@ _FUNCTION = frozenset({"function"})
 def _openai_chat(keys: frozenset[str]) -> Callable[[dict[str, Any]], None]:
     def validate(body: dict[str, Any]) -> None:
         _check_keys(body, keys, _OPENAI_NAMED)
+        # ``store: true`` keeps the completion (and its ``metadata``) on the
+        # provider, retrievable later outside anything judged here.
+        store = body.get("store")
+        if store is not None and store is not False:
+            raise LlmRefusedError(Reason.STORED_STATE, "store")
         _function_tools(body.get("tools"), _FUNCTION)
         _tool_choice(body.get("tool_choice"), _FUNCTION)
         for raw in _seq(body.get("messages"), "messages"):
@@ -802,6 +839,14 @@ _SAFE_BETAS = (
     "prompt-caching-",
     "extended-cache-ttl-",
     "structured-outputs-",
+    "fast-mode-",
+    "server-side-fallback-",
+    "task-budgets-",
+    "mid-conversation-",
+    "compact-",
+    "cache-diagnosis-",
+    "thinking-display-",
+    "effort-",
 )
 
 

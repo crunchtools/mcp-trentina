@@ -48,12 +48,13 @@ So the proxy admits a request rather than forwarding it (#297,
 |---|---|
 | Endpoint | Completions (`messages`, `chat/completions`, `completions`, `responses`, `generateContent`, `streamGenerateContent`), token counting, embeddings, and `GET` model listings. Files, batches, assistants, cached content and uploads are refused. |
 | Query | `beta`/paging (Anthropic), paging (OpenAI, OpenRouter), `alt`/paging (Gemini). Gemini's `key` is refused. |
-| Headers | `accept`, `anthropic-version`, and `anthropic-beta` flags that only shape the response (`claude-code-`, `interleaved-thinking-`, `context-1m-`, ...). Everything else is dropped, including `OpenAI-Organization`/`-Project`, which would point the profile's key at another org. |
+| Headers | `accept`, `anthropic-version`, and `anthropic-beta` flags that only shape the response (`claude-code-`, `interleaved-thinking-`, `context-1m-`, `effort-`, `fast-mode-`, `compact-`, ...); `mcp-client-`, `code-execution-`, `web-`, `files-api-`, `skills-` and `oauth-` are dropped. Everything else is dropped, including `OpenAI-Organization`/`-Project`, which would point the profile's key at another org. |
 | Body keys | The documented completion parameters. An unknown key is refused (`unknown_param`), so a new provider feature is closed until it is reviewed. |
 | Tools | Only tools the caller runs: Anthropic tools with no `type` or `custom`, OpenAI `function` (and `custom` on Responses), Gemini `functionDeclarations`. Anything else is `server_tool`; `mcp_servers` is `mcp_servers`; `plugins` is `plugins`. |
 | Content | Inline data only. An image, document or file the provider would fetch by URL is `url_source`; a file id is `file_reference`; Gemini `fileData` must name its own Files API. |
-| Stored state | `prompt`, `conversation`, `background`, `previous_response_id` (Responses) and `cachedContent` (Gemini) are `stored_state`: they carry configuration the request does not show. |
-| Model | A model that searches by itself is `online_model`: `:online`, `*search*`, `sonar`, `perplexity/`, `compound`. That list is a floor; set `allowed_models` for the real control. |
+| Stored state | `prompt`, `conversation`, `background`, `previous_response_id` (Responses), `cachedContent` (Gemini) and `store: true` (Chat Completions, which keeps the completion and its `metadata` on the provider) are `stored_state`: they carry or keep state the request does not show. |
+| Model | A model that searches by itself is `online_model`: `:online`, `*search*`, `sonar`, `perplexity/`, `compound`. That list is a floor; set `allowed_models` for the real control. Every model a request names is checked, including OpenRouter's `models` and Anthropic's `fallbacks`. |
+| Nested | Anthropic `output_config` takes `effort`, `format` and `task_budget` only; `fallbacks` is `"default"` or a list of `{"model": ...}`. |
 
 The body is parsed with duplicate keys refused, and the provider receives it
 **re-serialized**: it parses exactly the object that was judged. The body is

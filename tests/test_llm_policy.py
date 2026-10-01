@@ -326,3 +326,135 @@ class TestForwardHeaders:
 
     def test_anthropic_beta_all_unsafe_dropped(self) -> None:
         assert forward_headers(A, [("anthropic-beta", "mcp-client-2025-04-04")]) == {}
+
+
+class TestCurrentAnthropicParams:
+    """What Claude Code and current SDKs send must pass (#304 review)."""
+
+    def test_output_config_and_top_level_params(self) -> None:
+        body = {
+            **_CLAUDE,
+            "output_config": {"effort": "high", "format": {"type": "json_schema"}},
+            "output_format": {"type": "json_schema"},
+            "cache_control": {"type": "ephemeral"},
+            "inference_geo": "us",
+            "speed": "fast",
+            "diagnostics": {"cache": True},
+        }
+        assert _admit(A, "v1/messages", body).endpoint == "messages"
+
+    def test_output_config_task_budget(self) -> None:
+        body = {**_CLAUDE, "output_config": {"task_budget": {"tokens": 1000}}}
+        assert _admit(A, "v1/messages", body).endpoint == "messages"
+
+    def test_output_config_unknown_key_refused(self) -> None:
+        body = {**_CLAUDE, "output_config": {"effort": "low", "tools": []}}
+        assert _reason(A, "v1/messages", body) is Reason.UNKNOWN_PARAM
+
+    def test_output_config_not_an_object(self) -> None:
+        assert _reason(A, "v1/messages", {**_CLAUDE, "output_config": "x"}) is Reason.MALFORMED
+
+    def test_fallbacks_default(self) -> None:
+        assert _admit(A, "v1/messages", {**_CLAUDE, "fallbacks": "default"}).model
+
+    def test_fallbacks_list_checked_against_allowed_models(self) -> None:
+        body = {**_CLAUDE, "fallbacks": [{"model": "claude-opus-4-1"}]}
+        assert _admit(A, "v1/messages", body, allowed_models=["claude-*"]).model
+        reason = _reason(A, "v1/messages", body, allowed_models=["claude-sonnet-*"])
+        assert reason is Reason.MODEL_NOT_ALLOWED
+
+    def test_fallbacks_online_model_refused(self) -> None:
+        body = {**_CLAUDE, "fallbacks": [{"model": "x:online"}]}
+        assert _reason(A, "v1/messages", body) is Reason.ONLINE_MODEL
+
+    @pytest.mark.parametrize(
+        "fallbacks", [[{"model": "claude-opus-4-1", "tools": []}], ["claude-opus-4-1"], "other"]
+    )
+    def test_fallbacks_shape(self, fallbacks: Any) -> None:
+        reason = _reason(A, "v1/messages", {**_CLAUDE, "fallbacks": fallbacks})
+        assert reason in (Reason.UNKNOWN_PARAM, Reason.MALFORMED)
+
+    @pytest.mark.parametrize("kind", ["compaction", "fallback"])
+    def test_replayed_response_blocks(self, kind: str) -> None:
+        block = {"type": kind, "content": "summary"}
+        body = {**_CLAUDE, "messages": [{"role": "assistant", "content": [block]}]}
+        assert _admit(A, "v1/messages", body).endpoint == "messages"
+
+    def test_mid_conversation_system_message(self) -> None:
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "system", "content": [{"type": "text", "text": "be brief"}]},
+            {"role": "system", "content": "plain string"},
+        ]
+        body = {**_CLAUDE, "messages": messages}
+        assert _admit(A, "v1/messages", body).endpoint == "messages"
+
+    def test_system_message_still_checks_blocks(self) -> None:
+        block = {"type": "image", "source": {"type": "url", "url": "https://evil"}}
+        body = {**_CLAUDE, "messages": [{"role": "system", "content": [block]}]}
+        assert _reason(A, "v1/messages", body) is Reason.URL_SOURCE
+
+    @pytest.mark.parametrize(
+        "flag",
+        [
+            "fast-mode-2026-02-01",
+            "server-side-fallback-2026-03-01",
+            "task-budgets-2026-01-01",
+            "mid-conversation-system-2026-01-01",
+            "compact-2026-01-12",
+            "cache-diagnosis-2026-01-01",
+            "thinking-display-2026-01-01",
+            "effort-2025-11-24",
+        ],
+    )
+    def test_safe_betas_kept(self, flag: str) -> None:
+        assert forward_headers(A, [("anthropic-beta", flag)]) == {"anthropic-beta": flag}
+
+    @pytest.mark.parametrize(
+        "flag",
+        [
+            "mcp-client-2025-11-20",
+            "code-execution-2025-08-25",
+            "web-fetch-2025-09-10",
+            "web-search-2025-03-05",
+            "files-api-2025-04-14",
+            "skills-2025-10-02",
+            "oauth-2025-04-20",
+        ],
+    )
+    def test_unsafe_betas_dropped(self, flag: str) -> None:
+        assert forward_headers(A, [("anthropic-beta", flag)]) == {}
+
+
+class TestCurrentOpenAiChatParams:
+    def test_current_params_pass(self) -> None:
+        body = {
+            **_GPT,
+            "reasoning_effort": "low",
+            "max_completion_tokens": 100,
+            "modalities": ["text"],
+            "prediction": {"type": "content", "content": "x"},
+            "store": False,
+            "verbosity": "low",
+            "parallel_tool_calls": False,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "response_format": {"type": "json_object"},
+            "seed": 1,
+            "logprobs": True,
+            "top_logprobs": 2,
+            "n": 1,
+            "service_tier": "auto",
+            "prompt_cache_key": "k",
+            "safety_identifier": "u",
+        }
+        assert _admit(OA, "v1/chat/completions", body).endpoint == "chat/completions"
+
+    @pytest.mark.parametrize("store", [True, "true", 1])
+    def test_store_refused(self, store: Any) -> None:
+        body = {**_GPT, "store": store, "metadata": {"k": "v"}}
+        assert _reason(OA, "v1/chat/completions", body) is Reason.STORED_STATE
+
+    def test_store_refused_on_openrouter_too(self) -> None:
+        body = {**_ROUTER, "store": True}
+        assert _reason(R, "v1/chat/completions", body) is Reason.STORED_STATE
