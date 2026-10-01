@@ -63,6 +63,14 @@ uv run mcp-trentina-crunchtools
 - `TRENTINA_FETCH_ALLOW_PRIVATE` — default false. Lifts the egress guard's
   address rule so fetch can reach non-global addresses; scheme, port and
   redirect rules still hold. Warns at startup. See `egress.py` (#260).
+- `TRENTINA_REQUIRE_HARDENED` — default false. On a network transport,
+  `posture.py` reads `/proc/self` at startup and WARNs each containment gap
+  (no-new-privileges, capabilities, seccomp, writable rootfs or import path,
+  a secret from the environment rather than `_FILE`); true refuses to start
+  on any. See `docs/deployment-hardening.md` (#268). The image sets
+  `PYTHONSAFEPATH=1` so the working directory is never on `sys.path`.
+  `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and
+  `OPENROUTER_API_KEY` take `_FILE` forms too.
 - `TRENTINA_RATE_LIMIT` — "off" disables limiting on the unauthenticated OAuth
   write paths (default on). An incident escape hatch, not a setting.
 - `TRENTINA_FORWARDED_ALLOW_IPS` — peer addresses whose `X-Forwarded-For` is
@@ -156,7 +164,8 @@ text, Matrix id, nor an exception's message (`logger.exception` and
 anything else; the audit DB holds the rest. `logsafe.install` holds uvicorn's
 access log, httpx and the SDKs to the same rule at every level.
 `tests/test_log_hygiene.py` enforces it: canaries at DEBUG through every tool,
-the HTTP edge, the bridge's refusal path and the proxies' failure paths, and
+the HTTP edge, the bridge's refusal path, the proxies' failure paths, the
+alert ingress, a refused reload and the OAuth store's CIMD path (#292), and
 an AST check over the whole package that only a call marked
 `# logsafe: ours` may print an exception.
 
@@ -241,7 +250,9 @@ its own posture and nothing enforced it. Now the policy does:
   Flagged → `redact` only, NEVER `flag`; gap-only → `flag`.
 
 No text written by L3 reaches an agent: finding types are a closed enum
-(`prompts.FINDING_TYPES`).
+(`prompts.FINDING_TYPES`). Every L3 answer is held to its response schema in
+`_call_gemini` (`quarantine/schema.py`, #294); outside it is
+`MalformedResponseError` and then `l3_unavailable`, never clean.
 
 NOTE: `defense.enforcement` is the DEFAULT mode and accepts only `flag` and
 `block` — a call that omits the mode carries no extraction prompt.

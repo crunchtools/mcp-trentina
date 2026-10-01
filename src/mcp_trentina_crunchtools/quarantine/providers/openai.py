@@ -7,8 +7,8 @@ from typing import Any
 
 import httpx
 
-from ...errors import QuarantineAgentError
-from .base import Provider, ProviderResult, status_error
+from ...errors import MalformedResponseError, QuarantineAgentError
+from .base import Provider, ProviderResult, count, dig, envelope, status_error
 
 OPENAI_API_BASE = "https://api.openai.com/v1"
 OPENAI_TIMEOUT = 60.0
@@ -108,19 +108,20 @@ class OpenAIProvider(Provider):
                     },
                 )
                 resp.raise_for_status()
-                resp_json = resp.json()
+                resp_json = envelope(resp)
 
-            choices = resp_json.get("choices", [])
-            if not choices:
+            if not dig(resp_json, "choices", 0):
                 raise QuarantineAgentError("No choices in OpenAI response")
 
-            text = choices[0].get("message", {}).get("content", "")
-            usage = resp_json.get("usage", {})
+            # null when the model refused structured output.
+            text = dig(resp_json, "choices", 0, "message", "content")
+            if not isinstance(text, str):
+                raise MalformedResponseError("no text")
 
             return ProviderResult(
                 text=text,
-                input_tokens=usage.get("prompt_tokens", 0),
-                output_tokens=usage.get("completion_tokens", 0),
+                input_tokens=count(dig(resp_json, "usage", "prompt_tokens")),
+                output_tokens=count(dig(resp_json, "usage", "completion_tokens")),
             )
 
         except httpx.HTTPStatusError as exc:

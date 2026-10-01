@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 from urllib.parse import urlparse
 
 from ..client import fetch_url
 from ..config import get_config
+from ..dbus_interface import emit_request_event
 from ..defense import defend
 from ..errors import (
     BlockedSourceError,
@@ -18,7 +20,7 @@ from ..errors import (
 from ..logsafe import exc_kind, redact_source
 from ..modes import Mode
 from ..quarantine.prompts import finding_types
-from ..report import Disposition, build_report
+from ..report import Disposition
 from .judged import check_blocklist, judge_and_deliver
 from .preprocess import prepare
 
@@ -89,7 +91,6 @@ async def _scan_error_body(body: str, url: str) -> dict[str, Any]:
 
 
 def _build_advisory(
-    url: str,
     pattern: str,
     what_happened: str,
     why_suspicious: str,
@@ -97,7 +98,7 @@ def _build_advisory(
     pipeline_scan: dict[str, Any] | None = None,
     redirect_hops: int | None = None,
 ) -> dict[str, Any]:
-    """Construct a security advisory response (non-error)."""
+    """The advisory a refusal carries: gateway-authored fields only."""
     advisory: dict[str, Any] = {
         "level": "critical",
         "pattern": pattern,
@@ -110,17 +111,49 @@ def _build_advisory(
         advisory["pipeline_scan"] = pipeline_scan
     if redirect_hops:
         advisory["redirect_hops"] = redirect_hops
+    return advisory
 
-    return {
-        "content": None,
-        "security_advisory": advisory,
-        "scan": build_report(
-            None,
-            disposition=Disposition.REFUSED,
-            kind="url",
-            ref=url,
-        ),
-    }
+
+def _advisory_refused(
+    url: str, mode: Mode, advisory: dict[str, Any], start: float
+) -> BlockedSourceError:
+    """An advisory delivered as what it is: a refusal (#293).
+
+    It used to be a successful result with ``content: None``, which the
+    gateway audited ``ok`` and the D-Bus stream never saw, so a server
+    steering agents toward curl left no trace where probing is looked for.
+    As a ``BlockedSourceError`` it audits ``blocked_defense``; the advisory
+    rides in the refusal, and the message keeps the instruction for a
+    client that reads only the text. No alternatives: no mode delivers a
+    page that was never served.
+    """
+    scan = advisory.get("pipeline_scan") or {}
+    emit_request_event(
+        tool=f"{mode.value}_fetch",
+        source=url,
+        disposition=Disposition.REFUSED.value,
+        risk_level=scan.get("l1_risk", "low"),
+        l1_detections=0,
+        l1_suspicious=scan.get("l1_suspicious", 0),
+        l2_label=scan.get("l2_label"),
+        l2_score=scan.get("l2_score"),
+        input_size=0,
+        output_size=0,
+        stats={},
+        start_time=start,
+    )
+    reason = f"security advisory ({advisory['pattern']})"
+    return BlockedSourceError(
+        url,
+        f"{reason}. {_DO_NOT}",
+        refusal={
+            "reason": reason,
+            "mode": mode.value,
+            "flagged_by": "advisory",
+            "alternatives": [],
+            "security_advisory": advisory,
+        },
+    )
 
 
 async def _handle_fetch_error(url: str, exc: FetchError) -> dict[str, Any] | None:
@@ -134,7 +167,6 @@ async def _handle_fetch_error(url: str, exc: FetchError) -> dict[str, Any] | Non
         if exc.error_body:
             scan = await _scan_error_body(exc.error_body, url)
         return _build_advisory(
-            url,
             pattern=f"suspicious_http_{code}",
             what_happened=f"Server returned HTTP {code}.",
             why_suspicious=_SUSPICIOUS_STATUS_CODES[code],
@@ -145,7 +177,6 @@ async def _handle_fetch_error(url: str, exc: FetchError) -> dict[str, Any] | Non
         scan = await _scan_error_body(exc.error_body, url)
         if scan["is_suspicious"]:
             return _build_advisory(
-                url,
                 pattern="adversarial_trajectory_guidance",
                 what_happened=f"Server returned HTTP {code} with a response "
                 "body containing embedded instructions.",
@@ -161,10 +192,9 @@ async def _handle_fetch_error(url: str, exc: FetchError) -> dict[str, Any] | Non
     return None
 
 
-def _handle_content_type_error(url: str, exc: UnsupportedContentTypeError) -> dict[str, Any]:
+def _handle_content_type_error(exc: UnsupportedContentTypeError) -> dict[str, Any]:
     """Convert redirect-to-binary errors to advisories."""
     return _build_advisory(
-        url,
         pattern="redirect_to_binary",
         # Not str(exc): that carried the attacker-chosen redirect URLs and
         # content type to the agent, unscanned.
@@ -213,6 +243,7 @@ async def fetch_page(
     ``l1/hidden.py`` counts whatever markup is delivered.
     """
     blocked = check_blocklist(url, mode)
+    start = time.time()
 
     try:
         content, content_type = await fetch_url(url)
@@ -220,13 +251,13 @@ async def fetch_page(
         advisory = await _handle_fetch_error(url, exc)
         if advisory:
             log.warning("security advisory for %s: %s", redact_source(url), exc_kind(exc))
-            return advisory
+            raise _advisory_refused(url, mode, advisory, start) from None
         raise
     except EgressRefusedError as exc:
         raise _egress_refused(url, mode, exc) from exc
     except UnsupportedContentTypeError as exc:
         log.warning("redirect-to-binary advisory for %s: %s", redact_source(url), exc_kind(exc))
-        return _handle_content_type_error(url, exc)
+        raise _advisory_refused(url, mode, _handle_content_type_error(exc), start) from None
 
     page = await prepare(
         content, requested=preprocess, tool="fetch_tool", source=url, content_type=content_type

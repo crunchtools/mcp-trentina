@@ -96,10 +96,26 @@ class QuarantineAgentError(TrentinaError):
 
 
 class MalformedResponseError(QuarantineAgentError):
-    """The provider replied, but not with JSON. Asked again once (0.43.1)."""
+    """The provider replied, but not with JSON its schema allows.
+
+    Not JSON, not an object, or outside the response schema (#294). Asked
+    again once (0.43.1), then the judge is unavailable. ``detail`` is ours —
+    a schema path — never text from the response.
+    """
+
+    def __init__(self, detail: str = "not JSON") -> None:
+        super().__init__(f"Invalid JSON in provider response: {detail}")
+
+
+class SearchCanaryLeakedError(QuarantineAgentError):
+    """L0 repeated its system prompt's canary: whatever it read steered it.
+
+    Its own type because it is the one search failure that is the defense
+    working, not the provider breaking (#293).
+    """
 
     def __init__(self) -> None:
-        super().__init__("Invalid JSON in provider response")
+        super().__init__("SECURITY: canary leaked in L0 search response")
 
 
 class BlockedSourceError(TrentinaError):

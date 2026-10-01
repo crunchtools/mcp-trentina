@@ -165,5 +165,13 @@ ENV FASTMCP_HOME=/data/fastmcp
 # alone prevents the crash.
 ENV ORT_DISABLE_TELEMETRY=1
 
+# `python -m` puts the working directory first on sys.path, and onnxruntime
+# and transformers are imported lazily, so a writable /app turned any file
+# write into code execution at the next import (#268). PYTHONSAFEPATH drops
+# that entry. No bytecode is written either: with --read-only it could not be,
+# and without it a .pyc beside the package is one more file to plant.
+ENV PYTHONSAFEPATH=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
 EXPOSE 8019
 ENTRYPOINT ["python", "-m", "mcp_trentina_crunchtools"]
