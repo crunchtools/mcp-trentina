@@ -1,8 +1,7 @@
 """tools/call routing: allowlist, parameter guards, dispatch, one audit row.
 
-Reduced from gateway/router.py between the outcome taxonomy's introduction
-and the fix that audited both denial paths (#87). docs/audit-log.md: "every
-tools/call is recorded in gateway_calls with its outcome".
+docs/audit-log.md: "every tools/call is recorded in gateway_calls with its
+outcome".
 """
 
 from __future__ import annotations

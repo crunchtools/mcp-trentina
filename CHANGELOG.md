@@ -16,6 +16,14 @@ under that name.
   and the commit SHA), so the demo no longer depends on an image built on the
   host (#273).
 
+### Changed
+- Boundary-review eval: the reviewer sees each fixture as `case_NN.py`, and
+  the fixtures no longer cite the issue that fixed them; that history lives
+  in EVAL.yml's `source`. Known-bad cases now grade precision: the judge calls
+  each extra finding valid or spurious, and a spurious one at medium or above
+  fails the case. A finding citing a line outside the file fails either kind
+  (#300).
+
 ## [0.49.0] - 2026-10-01
 
 The trust-boundary review tooling (#90, #269), and the ten findings its first

@@ -2,7 +2,6 @@
 
 A URL refused once in block mode is refused again before any bytes are
 fetched, for every caller, so a known-bad page costs no second scan.
-Reduced from database.py and tools/fetch.py as of 0.47.0 (see #263).
 """
 
 from __future__ import annotations
