@@ -96,10 +96,15 @@ class QuarantineAgentError(TrentinaError):
 
 
 class MalformedResponseError(QuarantineAgentError):
-    """The provider replied, but not with JSON. Asked again once (0.43.1)."""
+    """The provider replied, but not with JSON its schema allows.
 
-    def __init__(self) -> None:
-        super().__init__("Invalid JSON in provider response")
+    Not JSON, not an object, or outside the response schema (#294). Asked
+    again once (0.43.1), then the judge is unavailable. ``detail`` is ours —
+    a schema path — never text from the response.
+    """
+
+    def __init__(self, detail: str = "not JSON") -> None:
+        super().__init__(f"Invalid JSON in provider response: {detail}")
 
 
 class BlockedSourceError(TrentinaError):
