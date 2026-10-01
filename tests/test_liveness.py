@@ -205,6 +205,10 @@ class TestRetention:
         _audit_rows(audit_db, 3, 400)
         database.record_gateway_call("alpha", "b", "t", "ok", 0)
         assert _count(audit_db) == 1
+        assert database._last_sweep == 10.0
+        _audit_rows(audit_db, 2, 400)  # inside the hour: not swept again
+        database.record_gateway_call("alpha", "b", "t", "ok", 0)
+        assert _count(audit_db) == 4
 
     def test_the_blocklist_sweep_is_batched_too(self, audit_db: Any) -> None:
         then = "2000-01-01T00:00:00+00:00"
