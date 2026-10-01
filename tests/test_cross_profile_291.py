@@ -109,7 +109,7 @@ class TestResolverSlots:
                 )
             assert all(isinstance(r, EgressRefusedError) for r in stalled)
             with profile_context(_profile("beta")):
-                content, _ = await fetch_url("https://example.com/")
+                content = (await fetch_url("https://example.com/")).content
             assert content == "ok"
         finally:
             release.set()
