@@ -1,5 +1,11 @@
 # Token Routing
 
+*Part of Trentina's **Token savings** promise; see [Why Trentina](../README.md#why-trentina).*
+
+> **Status: mostly proposed.** Only [Response Reduction](#response-reduction-implemented) is
+> implemented. File-read delegation (`delegation:`) is a design, not a feature, and the
+> savings figures quoted below are other people's, not Trentina's.
+
 Route expensive I/O work to cheap models at the gateway layer. When a coding agent reads a large file or generates boilerplate code, Trentina intercepts the call, delegates it to a smaller model (Gemini Flash, GPT-4o-mini), and returns the result to the frontier model. The frontier model never sees the raw content — it gets a summary or confirmation instead.
 
 ## Why This Matters

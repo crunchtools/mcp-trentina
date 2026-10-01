@@ -1,5 +1,7 @@
 # Tool Allowlists & Denylists
 
+*Part of Trentina's **Token savings** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Trentina filters which tools each agent can see and call. Tools not in the allowlist are stripped from `tools/list` responses before they reach the consumer — they never enter the agent's context window and can never be called.
 
 ## Why This Matters

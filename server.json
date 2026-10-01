@@ -2,17 +2,17 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.crunchtools/trentina",
   "title": "Trentina",
-  "description": "Secure MCP gateway and quarantine for AI agent traffic — three-layer prompt injection defense",
+  "description": "MCP gateway for AI agents — injection defense, token savings, policy and OAuth",
   "repository": {
     "url": "https://github.com/crunchtools/mcp-trentina",
     "source": "github"
   },
-  "version": "0.5.0",
+  "version": "0.49.2",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mcp-trentina-crunchtools",
-      "version": "0.5.0",
+      "version": "0.49.2",
       "transport": {
         "type": "stdio"
       }

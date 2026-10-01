@@ -12,7 +12,7 @@ Requires:       cockpit-system >= 300
 
 %description
 Cockpit plugin that visualizes the MCP Trentina three-layer defense pipeline
-(L1 sanitization, L2 Prompt Guard 2 classifier, L3 Gemini Q-Agent) in real
+(L1 deterministic checks, L2 Prompt Guard 2 classifier, L3 quarantined LLM) in real
 time via the com.crunchtools.Trentina1 D-Bus interface.
 
 Displays layer status, blocklist stats, live pipeline events, and per-request

@@ -1,6 +1,9 @@
 # mcp-trentina-crunchtools
 
-Secure MCP server for quarantined web content extraction — two-layer defense against prompt injection.
+MCP gateway between AI agents and everything they touch. Five promises: prompt-injection
+defense (L1 ∥ L2 → L3 at every ingress), token savings, deterministic policy,
+authentication (OAuth/DCR), and architectural flexibility. README.md is the
+canonical statement of them; keep docs and comments in line with it.
 
 ## Quick Start
 

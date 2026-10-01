@@ -15,7 +15,7 @@ profiles:
 
     # Defense POLICY. All three layers always run — there are no per-layer
     # off switches. An autonomous agent gets `block` once thresholds are
-    # calibrated from warn-mode data; until then flag delivers
+    # calibrated from flag-mode data; until then flag delivers
     # flagged content with a warning and records every score.
     defense:
       enforcement: flag       # flip to `block` after calibration

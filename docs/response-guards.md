@@ -1,5 +1,7 @@
 # Response Guards
 
+*Part of Trentina's **Determinism** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Response guards validate what a backend *returns* before the gateway relays it. They are the egress half of [parameter guards](parameter-guards.md): the same allow/deny constraint, the same evaluator, the same fail-closed behaviour — applied to the tool result instead of the tool arguments.
 
 ## Why This Matters

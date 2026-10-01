@@ -1,5 +1,7 @@
 # LLM Key Proxying
 
+*Part of Trentina's **Authentication** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Proxy LLM API calls (Gemini, OpenAI, Anthropic) through the gateway so API keys never leave the trusted boundary. Agents send model requests to Trentina, which forwards them with the real credentials. No API keys in agent configs, no key exposure through prompt injection or tool-call exfiltration.
 
 ## Why This Matters

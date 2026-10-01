@@ -1,5 +1,7 @@
 # Per-Agent Profiles
 
+*Part of Trentina's **Architectural flexibility** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Every agent that connects to Trentina gets its own profile. A profile defines which backends the agent can access, which tools it can see, what defense layers run on responses, and how it authenticates. Different agents get different levels of trust through the same gateway.
 
 ## Why This Matters

@@ -1,5 +1,7 @@
 # Three-Layer Defense Pipeline
 
+*Part of Trentina's **Security** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Trentina runs untrusted content through three independent detection layers before it reaches your agent. Each layer catches attack categories the others miss. No single layer — structural, classifier, or LLM — covers everything.
 
 ## Two roles: guards decide, pre-processors transform
@@ -100,11 +102,11 @@ Meta's Prompt Guard 2 86M model running on ONNX Runtime (CPU, no GPU required). 
 
 ### Layer 3 — Quarantined LLM (Q-Agent)
 
-A hardened Gemini Flash Lite instance that receives the **original, unmodified content** and judges it while ignoring injected instructions. It waits for L1 and L2 and is briefed with both: L1's counts, L2's label and score, and — unconditionally — the caveat that L2 misses social engineering about 40% of the time and exfiltration intent about 20%, so a low score is never evidence of safety. The Q-Agent is deliberately constrained:
+A quarantined LLM — `gemini-2.5-flash-lite` by default, any configured provider otherwise — that receives the **original, unmodified content** and judges it while ignoring injected instructions. It waits for L1 and L2 and is briefed with both: L1's counts, L2's label and score, and — unconditionally — the caveat that L2 misses social engineering about 40% of the time and exfiltration intent about 20%, so a low score is never evidence of safety. The Q-Agent is deliberately constrained:
 
 - **No tools** — can't execute actions even if manipulated
 - **No memory** — can't be poisoned across sessions
-- **No SDK** — raw httpx calls to the Gemini REST API, no dependency surface
+- **No SDK** — raw httpx calls to the provider's REST API, no dependency surface
 - **Small model** — less capable models are harder to socially engineer
 - **Schema-checked answers** — the judge reads the content it judges, so its answer is checked against the schema it was asked for (`quarantine/schema.py`, #294) whatever the provider promises: only Gemini and OpenAI enforce one, Anthropic gets it as a hint and Ollama only `format: json`. A missing or non-boolean `injection_detected`, an off-set `risk_level`, a non-string extraction field, or a body that is not a JSON object is `MalformedResponseError`: asked once more, then `l3_unavailable` (redact: `t2_unavailable`/`t3_unavailable`), never clean. Undeclared keys are dropped and strings cut to their `maxLength`. A finding's `type` off the enum becomes `other` rather than refusing — it carries no verdict, and judges drift there.
 

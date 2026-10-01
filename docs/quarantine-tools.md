@@ -1,5 +1,7 @@
 # Content Tools
 
+*Part of Trentina's **Security** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Trentina's content tools put untrusted input through the defense pipeline before an agent sees it. Through the gateway they are the `web` backend (`internal://web`).
 
 ## Five tools, three modes
@@ -171,7 +173,7 @@ A confinement refusal is delivered like the egress guard's (#278): `confinement 
 
 ## Gateway Integration
 
-Through the gateway these appear as `web__fetch_tool`, `web__search_tool`, and so on. The profile's `defense.modes` decides which modes are offered; `tools_allow` decides which families.
+Through the gateway these are served as `fetch`, `search`, `read`, `dir` and `content` ([Tool Names](gateway.md#tool-names)). The profile's `defense.modes` decides which modes are offered; `tools_allow` decides which families.
 
 ## Related
 

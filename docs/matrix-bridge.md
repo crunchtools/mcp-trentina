@@ -1,5 +1,7 @@
 # Matrix Bridge
 
+*Part of Trentina's **Security** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Encrypted Matrix rooms are ciphertext at the perimeter, so a gateway that only
 proxies `/sync` cannot read what it forwards. The bridge terminates the
 encryption instead: Trentina's bridge process is the agent's Matrix client

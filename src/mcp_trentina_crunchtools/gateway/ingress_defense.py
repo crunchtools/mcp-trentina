@@ -1,9 +1,8 @@
 """The perimeter at the MCP proxy ingress — flag mode (plan step 5).
 
-Until tonight the gateway's README claim was false: proxied tool responses
-and tool descriptions crossed into the agent verbatim, and the three-layer
-pipeline ran only for the web tools and the alert ingress. These two
-functions are the missing wall:
+Before this module, proxied tool responses and tool descriptions crossed
+into the agent verbatim, and the three-layer pipeline ran only for the web
+tools and the alert ingress. These two functions close that gap:
 
 * ``scan_tool_response`` — every ``tools/call`` result from a REMOTE
   backend: text content blocks, resource text, and every string leaf of

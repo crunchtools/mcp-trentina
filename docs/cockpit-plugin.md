@@ -1,5 +1,7 @@
 # Cockpit Plugin
 
+*Part of Trentina's **Architectural flexibility** promise; see [Why Trentina](../README.md#why-trentina).*
+
 Trentina includes a Cockpit plugin that provides a live web dashboard for monitoring the defense pipeline. Layer status, blocklist entries, and pipeline events are displayed in real time through the Cockpit web console — the same interface sysadmins already use to manage RHEL systems.
 
 ## Why This Matters

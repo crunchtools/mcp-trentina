@@ -1,12 +1,10 @@
-"""Gateway subpackage — per-consumer MCP proxy with tool-allowlist filtering.
+"""Gateway subpackage — the per-profile MCP proxy.
 
-Phase 2 scope: Streamable HTTP transport with session persistence and
-``tools/listChanged`` notifications on circuit breaker state changes.
-Builds on Phase 1 (profile loader, bearer-token auth, JSON-RPC dispatch,
-tool-name allowlist filter, tools/call passthrough).
-
-See docs/gateway-design.md and .specify/specs/006-gateway-mode/ for the
-full design and phase plan.
+One endpoint per profile in front of every backend: authentication, tool
+allowlists and short names, parameter and response guards, the perimeter
+scan of tool descriptions and responses, and the Matrix, LLM and alert
+ingresses. See docs/gateway.md, and docs/internal/gateway-design.md for the
+original design.
 """
 
 from __future__ import annotations
