@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Render the README demo: docs/demo/trentina.gif and trentina.mp4.
 #
-#   GEMINI_API_KEY=... docs/demo/render.sh          # from the repository root
+#   OPENROUTER_API_KEY=... docs/demo/render.sh      # from the repository root
 #
 # Runs in GHA (.github/workflows/demo.yml); ENGINE=podman works locally.
 # Starts the published gateway image with the fixture backend and the
@@ -15,15 +15,11 @@ DEMO=$(cd "$(dirname "$0")" && pwd)
 OUT=${OUT:-$DEMO/out}
 NET=trentina-demo
 FPS=12
-# The committed profile judges with Gemini. PROFILES may name a variant that
-# uses another provider; its key and TRENTINA_MODEL_PROVIDER/QUARANTINE_MODEL
-# pass through when set.
+# L3 runs on OpenRouter, the key CI holds. gemini-2.5-flash rather than the
+# flash-lite default: through OpenRouter, flash-lite returned malformed JSON
+# often enough to withhold a tool description at warm-up.
+: "${OPENROUTER_API_KEY:?OPENROUTER_API_KEY is required for L3}"
 PROFILES=${PROFILES:-$DEMO/profiles.yaml}
-[[ -n "${GEMINI_API_KEY:-}${OPENROUTER_API_KEY:-}" ]] || { echo "need GEMINI_API_KEY (or OPENROUTER_API_KEY with PROFILES)" >&2; exit 1; }
-PASS=()
-for v in GEMINI_API_KEY OPENROUTER_API_KEY TRENTINA_MODEL_PROVIDER QUARANTINE_MODEL; do
-    if [[ -n "${!v:-}" ]]; then PASS+=(-e "$v"); fi
-done
 
 mkdir -p "$OUT/frames"
 cleanup() { $ENGINE rm -f td-workspace td-site td-gateway >/dev/null 2>&1 || true; $ENGINE network rm $NET >/dev/null 2>&1 || true; }
@@ -41,7 +37,8 @@ $ENGINE run -d --name td-gateway --network $NET --network-alias trentina --tmpfs
     -v "$PROFILES:/config/profiles.yaml:ro,z" \
     -e TRENTINA_GATEWAY_ENABLED=true -e TRENTINA_PROFILES_PATH=/config/profiles.yaml \
     -e TRENTINA_PROFILE_ASSISTANT_TOKEN=demo-token -e TRENTINA_FETCH_ALLOW_PRIVATE=true \
-    "${PASS[@]}" \
+    -e OPENROUTER_API_KEY -e TRENTINA_MODEL_PROVIDER=openrouter \
+    -e QUARANTINE_MODEL=google/gemini-2.5-flash \
     "$IMAGE" --transport streamable-http --host 0.0.0.0 --port 8019 >/dev/null
 
 $ENGINE build -q -t trentina-demo-vhs "$DEMO" >/dev/null

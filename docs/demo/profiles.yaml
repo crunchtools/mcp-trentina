@@ -5,19 +5,20 @@
 # is block, and the agent may also ask for redact.
 
 llm_providers:               # a profile's llm_keys must name one of these
-  gemini:
+  openrouter:
     enabled: true
-    upstream: https://generativelanguage.googleapis.com
-    auth_header: x-goog-api-key
-    api_key_env: GEMINI_API_KEY
+    upstream: https://openrouter.ai/api
+    auth_header: Authorization
+    auth_prefix: "Bearer "
+    api_key_env: OPENROUTER_API_KEY
 
 profiles:
   assistant:
     auth:
       bearer_token_env: TRENTINA_PROFILE_ASSISTANT_TOKEN
     llm_keys:                 # L3 for this profile's calls
-      gemini:
-        api_key_env: GEMINI_API_KEY
+      openrouter:
+        api_key_env: OPENROUTER_API_KEY
     backends:
       web:
         url: "internal://web"
@@ -35,6 +36,7 @@ profiles:
             cc: {allow: ["me@example.com"]}
             bcc: {allow: ["me@example.com"]}
     defense:
-      provider: gemini
+      provider: openrouter
+      model: google/gemini-2.5-flash
       enforcement: block
       modes: [block, redact]
