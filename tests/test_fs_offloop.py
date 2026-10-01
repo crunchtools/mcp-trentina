@@ -43,9 +43,9 @@ def threads(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
     real_open = confine.open_confined
     real_verify = confine._verify_opened
 
-    def open_confined(path: str, extra_flags: int = 0) -> Any:
+    def open_confined(path: str, kind: confine.FileKind) -> Any:
         seen["open"] = threading.get_ident()
-        return real_open(path, extra_flags)
+        return real_open(path, kind)
 
     def verify(fd: int, checked: os.stat_result) -> os.stat_result:
         seen["verify"] = threading.get_ident()
@@ -87,14 +87,14 @@ class TestOffTheLoop:
         monkeypatch.setattr(dir_mod, "judge_and_deliver", _delivered)
         monkeypatch.setattr(dir_mod, "check_blocklist", lambda _p, _m: False)
         scanned: dict[str, Any] = {}
-        real_detect = dir_mod.detect_module_shadows
+        real_scan = dir_mod.scan_shadows
 
-        def detect(directory: str, **kwargs: Any) -> Any:
+        def scan(fd: int, entries: Any, directory: str) -> Any:
             scanned["thread"] = threading.get_ident()
-            scanned["kwargs"] = kwargs
-            return real_detect(directory, **kwargs)
+            scanned["names"] = sorted(e.name for e in entries)
+            return real_scan(fd, entries, directory)
 
-        monkeypatch.setattr(dir_mod, "detect_module_shadows", detect)
+        monkeypatch.setattr(dir_mod, "scan_shadows", scan)
 
         result = await dir_mod.list_dir(str(root), Mode.FLAG)
 
@@ -102,26 +102,43 @@ class TestOffTheLoop:
         loop_thread = threading.get_ident()
         assert threads["open"] == threads["verify"] == scanned["thread"]
         assert threads["open"] != loop_thread
-        assert scanned["kwargs"] == {"max_entries": dir_mod.MAX_DIR_ENTRIES + 1}
 
 
 class TestShadowScanIsBounded:
-    async def test_a_scan_cut_short_fails_closed(
+    async def test_the_scan_reads_the_entries_the_listing_read(
         self, root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The listing saw few entries but the re-scan by path hit the bound:
-        the directory changed, and a partial scan could have missed a shadow.
-        Delivered as a confinement refusal (#278), with no alternatives."""
-        from mcp_trentina_crunchtools.errors import BlockedSourceError
-        from mcp_trentina_crunchtools.l1.shadows import ShadowScanResult
+        """#287: one listing of one descriptor; the scan never re-lists by path."""
+        (root / "json.py").write_text("x = 1\n", encoding="utf-8")
 
-        swapped = ShadowScanResult(directory=str(root), entries_read=dir_mod.MAX_DIR_ENTRIES + 1)
-        monkeypatch.setattr(dir_mod, "detect_module_shadows", lambda _d, **_k: swapped)
+        async def delivered(_content: str, **kwargs: Any) -> dict[str, Any]:
+            return kwargs["extras"]
 
-        with pytest.raises(BlockedSourceError) as caught:
-            await dir_mod.list_dir(str(root), Mode.FLAG)
-        assert caught.value.refusal["reason"] == "confinement refused (changed_during_read)"
-        assert caught.value.refusal["alternatives"] == []
+        monkeypatch.setattr(dir_mod, "judge_and_deliver", delivered)
+        monkeypatch.setattr(dir_mod, "check_blocklist", lambda _p, _m: False)
+        seen: dict[str, Any] = {}
+        real_scan = dir_mod.scan_shadows
+
+        def scan(fd: int, entries: Any, directory: str) -> Any:
+            seen["names"] = sorted(e.name for e in entries)
+            return real_scan(fd, entries, directory)
+
+        def no_scandir_by_path(target: Any) -> Any:
+            raise AssertionError(f"listed by path: {target!r}")
+
+        monkeypatch.setattr(dir_mod, "scan_shadows", scan)
+        real_scandir = os.scandir
+        monkeypatch.setattr(
+            dir_mod.os,
+            "scandir",
+            lambda t: real_scandir(t) if isinstance(t, int) else no_scandir_by_path(t),
+        )
+
+        result = await dir_mod.list_dir(str(root), Mode.FLAG)
+
+        assert seen["names"] == ["json.py", "notes.txt"]
+        assert [e["name"] for e in result["entries"]] == seen["names"]
+        assert [s["shadows_module"] for s in result["shadows"]] == ["json"]
 
     def test_it_stops_at_max_entries(self, tmp_path: Path) -> None:
         for name in ("json", "struct", "socket", "ssl", "types", "abc", "enum", "re"):

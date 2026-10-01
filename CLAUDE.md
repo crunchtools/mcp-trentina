@@ -52,7 +52,9 @@ uv run mcp-trentina-crunchtools
   standalone keeps full reach. Either way `tools/confine.py` refuses `/config`,
   `/data`, `/proc`, `/sys`, `/run`, `/dev` and the directories of the two
   databases, the trust config and the live `profiles.yaml`. Refusals are a
-  closed reason code, never the path. The path is checked as written
+  closed reason code, never the path. The open walks the resolved path one
+  `O_NOFOLLOW` component at a time (#287); a FIFO or device is refused
+  unopened, and a hard link to Trentina's own files is denied. The path is checked as written
   (normalized) BEFORE it is resolved, then again resolved; behind a gateway
   `not_found`/`denied_path`/`outside_read_roots` are one reason,
   `not_found_or_denied`, so a refusal is no existence oracle (#263). A
@@ -354,7 +356,10 @@ skill's format.
     hidden text's words are what L2 should still read. Owns the predicate
     table that `preprocess/html.py` imports, so the converter that strips an
     element and the stage that counts one decide by one rule.
-  - `shadows.py` — Python stdlib module shadow detection and obfuscation scanning
+  - `shadows.py` — Python stdlib module shadow detection and obfuscation scanning.
+    `scan_shadows` reads through the descriptor `dir_tool` listed (#287) and
+    never follows a link; `detect_module_shadows` takes a path and is NOT
+    confined, so no tool may hand it a caller's path.
   - `unicode.py` — strips every invisible character from the L2 copy but
     COUNTS one only in the context an attack needs (#204): zero-width inside
     a Latin word, a lone ESC, a run of variation selectors. Whether L2 reads

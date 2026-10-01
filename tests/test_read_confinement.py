@@ -297,8 +297,8 @@ class TestFileGrowth:
         target = root / "notes.txt"
         real_open_confined = read_mod.open_confined
 
-        def open_then_grow(path: str) -> Any:
-            opened = real_open_confined(path)
+        def open_then_grow(path: str, kind: confine.FileKind) -> Any:
+            opened = real_open_confined(path, kind)
             with target.open("ab") as fh:
                 fh.write(b"x" * (MAX_FILE_SIZE + 1))
             return opened

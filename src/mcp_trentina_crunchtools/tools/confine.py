@@ -23,6 +23,16 @@ catches a swapped INTERMEDIATE directory that the other two follow.
 
 Refusals carry a reason code and never the path (see ``FileReadError``).
 
+Since #287 the open itself is a walk: one ``openat`` per component of the
+resolved path, each with ``O_NOFOLLOW``, from ``/`` down. A symlink swapped
+into ANY component is refused by the kernel at that step, so the walk alone
+lands on the path that was checked, and the ``/proc/self/fd`` check above is
+a second witness rather than the only one (it is absent where ``/proc`` is).
+The checked stat must already be the file type the caller asked for, so a
+FIFO or device node in a root is refused before it is ever opened, and a
+file whose inode is one of Trentina's own (a hard link from inside a root to
+the blocklist, say) is denied like the path it is linked from.
+
 Two more rules since #263 and #278:
 
 - The denylist and roots are checked on the path as written, lexically
@@ -47,8 +57,9 @@ from __future__ import annotations
 
 import errno
 import os
+import stat
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from ..config import get_config
 from ..errors import BlockedSourceError, FileReadError
@@ -170,6 +181,20 @@ def _opened_path(fd: int) -> Path | None:
         return None
 
 
+def _own_inodes() -> set[tuple[int, int]]:
+    """Every (dev, ino) in Trentina's own state and config directories."""
+    inodes: set[tuple[int, int]] = set()
+    for directory in {Path(p).resolve().parent for p in _own_paths()}:
+        try:
+            with os.scandir(directory) as it:
+                for entry in it:
+                    st = entry.stat(follow_symlinks=False)
+                    inodes.add((st.st_dev, st.st_ino))
+        except OSError:
+            continue
+    return inodes
+
+
 def _verify_opened(fd: int, checked: os.stat_result) -> os.stat_result:
     """Refuse an fd that is not the inode checked, or whose real path is not admitted."""
     opened = os.fstat(fd)
@@ -178,29 +203,71 @@ def _verify_opened(fd: int, checked: os.stat_result) -> os.stat_result:
     actual = _opened_path(fd)
     if actual is not None:
         check(actual)
+    # A directory cannot be hard-linked; a file with one link is only itself.
+    linked = opened.st_nlink > 1 and stat.S_ISREG(opened.st_mode)
+    if linked and (opened.st_dev, opened.st_ino) in _own_inodes():
+        raise _refuse("denied_path")
     return opened
 
 
-def open_confined(path: str, extra_flags: int = 0) -> tuple[int, os.stat_result, Path]:
+_WALK_FLAGS = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _walk_open(resolved: Path, flags: int) -> int:
+    """Open ``resolved`` one component at a time, following no symlink anywhere.
+
+    ``resolved`` has no symlinks (``confine`` resolved it), so a link met
+    here was swapped in after the check: ``O_NOFOLLOW`` makes the final open
+    fail with ELOOP, and ``O_DIRECTORY`` makes an intermediate one fail with
+    ENOTDIR. Both are ``changed_during_read``.
+    """
+    parent = os.open("/", _WALK_FLAGS)
+    try:
+        for part in resolved.parts[1:-1]:
+            child = os.open(part, _WALK_FLAGS, dir_fd=parent)
+            os.close(parent)
+            parent = child
+        return os.open(resolved.name or "/", flags, dir_fd=parent)
+    finally:
+        os.close(parent)
+
+
+FileKind = Literal["file", "dir"]
+
+
+def open_confined(path: str, kind: FileKind) -> tuple[int, os.stat_result, Path]:
     """Open ``path`` read-only if confinement admits it; the caller closes the fd.
 
-    Returns the descriptor, its ``fstat`` and the resolved path. ``O_NONBLOCK``
-    keeps a FIFO swapped in after the check from hanging the open; callers
-    still require the file type they expect from the returned stat.
+    Returns the descriptor, its ``fstat`` and the resolved path. ``kind`` is
+    the file type the caller reads: anything else is refused before the open,
+    so a FIFO cannot hang it and a device is never opened at all. The
+    returned stat is the descriptor's own and is of that type too.
     """
     resolved = confine(path)
     try:
         checked = os.stat(resolved)
     except OSError:
         raise _refuse("not_found") from None
-    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC | extra_flags
+    is_dir = stat.S_ISDIR(checked.st_mode)
+    if kind == "dir" and not is_dir:
+        raise FileReadError("not_a_directory")
+    if kind == "file" and not stat.S_ISREG(checked.st_mode):
+        raise FileReadError("not_a_file")
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC
+    if is_dir:
+        flags |= os.O_DIRECTORY
     try:
-        fd = os.open(resolved, flags)
-    except NotADirectoryError:
-        raise FileReadError("not_a_directory") from None
+        # TRUST: opening a caller-supplied path
+        #   untrusted: `path`, and every directory on it a caller can write
+        #   judged-by: confine() as written and resolved; the walk, inode and
+        #     /proc checks bind the descriptor to what confine() admitted
+        #   on-failure: fail-closed (changed_during_read or a merged refusal)
+        #   owner: confine.open_confined
+        #   evidence: T1 openat O_NOFOLLOW fails ELOOP, O_DIRECTORY ENOTDIR; T3 #261 #287
+        fd = _walk_open(resolved, flags)
     except OSError as exc:
-        # ELOOP is O_NOFOLLOW meeting a symlink that was not there at check time.
-        swapped = exc.errno == errno.ELOOP
+        # ELOOP and ENOTDIR are a symlink that was not there at check time.
+        swapped = exc.errno in (errno.ELOOP, errno.ENOTDIR)
         raise (FileReadError("changed_during_read") if swapped else _refuse("not_found")) from None
     try:
         opened = _verify_opened(fd, checked)
