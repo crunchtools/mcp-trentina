@@ -66,6 +66,11 @@ repeatable.
 
 ### Security
 
+- A withheld Matrix event's notice dropped every relation key but the
+  allowlisted ones (#296), but an `event_id` of the legacy
+  `$localpart:server` form could still carry words. An ID that reads as words
+  (`shapes.wordy`) is no longer kept.
+
 - Every L3 answer is checked against the schema it was asked for, at the
   provider-response boundary (#294). An answer without a boolean
   `injection_detected` used to count as a complete, clean verdict; an
