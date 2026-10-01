@@ -116,6 +116,19 @@ path = "demo/**"
 justification = "demo/ holds the attack-simulation harness — build_archive.py, server.py and the two run.sh drivers are standalone scripts by design, not library code. They exist to be run by hand when demonstrating the defense"
 classification = "by_design"
 
+[[exceptions]]
+check = "random_scripts"
+path = "docs/demo/**"
+justification = "docs/demo/ is the README demo (#256): render.sh drives it, backend.py is the stand-in Workspace server it records against, render_flow.py renders flow.html. Standalone scripts by design, run by .github/workflows/demo.yml, never imported"
+classification = "by_design"
+
+[[exceptions]]
+check = "lint_suppression"
+path = "docs/demo/backend.py"
+pattern = "S104"
+justification = "The stand-in backend binds all interfaces because it runs in its own container on the demo's private network, where the gateway reaches it by alias. S104 is the right warning for a service and the wrong one for this"
+classification = "by_design"
+
 # --- Surfaced by restoring the [thresholds] block in gourmand.toml. ---
 # Until now this repo ran with every threshold silently zeroed, which switched
 # off the checks that need a minimum size to fire. These are what they found.

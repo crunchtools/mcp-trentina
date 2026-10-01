@@ -1,0 +1,38 @@
+name: Render README demo
+
+# Renders docs/demo/trentina.gif and trentina.mp4 (#256) against the
+# published image, with a live L3. On demand only: the recording costs model
+# calls and changes only when the demo or the image does. The result is an
+# artifact; commit it in a PR like any other change.
+#
+#   gh workflow run demo.yml && gh run download -n trentina-demo -D docs/demo
+
+# Always the published image: a dispatch input choosing it would choose what
+# code receives GEMINI_API_KEY.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    # main only: a dispatch on another branch would run that branch's
+    # render.sh with the key.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Render
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: docs/demo/render.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: trentina-demo
+          path: |
+            docs/demo/trentina.gif
+            docs/demo/trentina.mp4
