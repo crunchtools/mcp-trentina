@@ -430,16 +430,20 @@ class Bridge:
     async def _vet_rooms(self) -> None:
         """Mark every joined room that fails the inviter rule for leaving.
 
-        Covers the rooms this process has not vetted yet, so the first sync
-        checks every room joined before the start, and later syncs only a
-        room that appeared without an invite this bridge accepted.
+        A room whose inviter is recorded is vetted once: who invited the
+        bridge does not change. The first sync checks every room joined
+        before the start, and later syncs only a room that appeared without
+        an invite this bridge accepted.
 
         The inviter of a room joined before #264 was never recorded, and
         nio keeps no trace of it once the invite is joined. For such a room
         the rule falls back to its audience: it stays only when everyone else
         in it, joined or invited, is an allowed inviter, so no stranger is on
-        the other end. Otherwise it is left. An allowed inviter who wants it
-        back invites the bridge again, which records the inviter.
+        the other end. Otherwise it is left. An audience changes, so such a
+        room is checked again on every batch, before anything from it is
+        forwarded (#296): vetted once, a stranger invited later was on the
+        other end for as long as the process ran. An allowed inviter who
+        wants it back invites the bridge again, which records the inviter.
         """
         for room_id in sorted(set(self.client.rooms) - self._vetted - self._evict - self._left):
             recorded = self._inviters.get(room_id)
@@ -449,7 +453,9 @@ class Bridge:
                 members = self._members(self.client.rooms.get(room_id))
                 ok = bool(members) and all(self._allowed(m) for m in members)
             if ok:
-                self._vetted.add(room_id)
+                # The audience rule holds only as of this batch.
+                if recorded is not None:
+                    self._vetted.add(room_id)
                 continue
             logger.warning(
                 "bridge[%s]: room %s fails the inviter rule; leaving it",
@@ -639,11 +645,23 @@ class Bridge:
             redact_source(event.session_id),
         )
 
+    def _held(self, room_id: str) -> bool:
+        """Whether events from ``room_id`` may still be forwarded: the bridge
+        is in it, and it is neither being left nor left."""
+        return room_id in self.client.rooms and room_id not in self._evict | self._left
+
     async def _retry_pending(self) -> None:
         if not self._pending:
             return
         now = time.time()
         for event_id, (room_id, source, first_seen) in list(self._pending.items()):
+            if not self._held(room_id):
+                # Parked before the room was refused or left (#296). Not
+                # forwarded, not even as an undecryptable notice: the room
+                # is no longer one the agent may hear from.
+                del self._pending[event_id]
+                self._pending_dirty = True
+                continue
             parsed = MegolmEvent.from_dict(source)
             if not isinstance(parsed, MegolmEvent):
                 logger.error(

@@ -61,9 +61,6 @@ logger = logging.getLogger(__name__)
 MEGOLM_ALGORITHM = "m.megolm.v1.aes-sha2"
 OLM_ALGORITHM = "m.olm.v1.curve25519-aes-sha2"
 
-_PROSE_FIELDS = ("body", "formatted_body", "topic", "name")
-"""Fields of a decrypted event that carry language worth judging."""
-
 
 class MatrixProcessor:
     """Shape-based selection, plus Megolm decryption of room events."""
@@ -118,7 +115,7 @@ class MatrixProcessor:
                 continue
 
             decrypted += 1
-            decrypted_texts.extend(_prose_from(plaintext))
+            decrypted_texts.extend(_decrypted_leaves(plaintext))
 
         view = await asyncio.to_thread(  # off the loop (#295)
             lambda: self._select.select(
@@ -166,11 +163,15 @@ def _bump(skipped: dict[SkipReason, int], n: int) -> None:
     skipped[key] = skipped.get(key, 0) + n
 
 
-def _prose_from(plaintext: str) -> list[str]:
-    """Pull the language-bearing fields out of a decrypted event.
+def _decrypted_leaves(plaintext: str) -> list[str]:
+    """Every string in a decrypted event, keys included, for ``select``.
 
-    Falls back to every string leaf when the shape is not the expected one --
-    an event we cannot parse is a reason to read more of it, not less.
+    Not a list of prose fields (#296). Reading only ``body``,
+    ``formatted_body``, ``topic`` and ``name`` left every other key unread
+    AND uncounted, so an injection in ``m.relates_to``, an extension key or
+    ``m.new_content``'s neighbours crossed with coverage reporting 100%.
+    ``select`` decides what is skipped, by the same rules as cleartext, and
+    counts it. Text that is not a JSON object is read whole.
     """
     try:
         event = json.loads(plaintext)
@@ -178,16 +179,7 @@ def _prose_from(plaintext: str) -> list[str]:
         return [plaintext]
     if not isinstance(event, dict):
         return [plaintext]
-
-    content = event.get("content")
-    if not isinstance(content, dict):
-        return iter_leaves(event)
-
-    out = [v for f in _PROSE_FIELDS if isinstance(v := content.get(f), str) and v]
-    new_content = content.get("m.new_content")
-    if isinstance(new_content, dict):
-        out += [v for f in _PROSE_FIELDS if isinstance(v := new_content.get(f), str) and v]
-    return out or iter_leaves(event)
+    return iter_leaves(event)
 
 
 def _collect_encrypted(payload: Any, out: list[dict[str, Any]]) -> None:

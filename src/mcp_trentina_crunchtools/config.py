@@ -180,11 +180,15 @@ class Config:
             DEFAULT_PROVIDER,
         )
 
-        raw_key = os.environ.get("GEMINI_API_KEY", "")
+        # Each takes a _FILE form, which wins (#268): a key in the environment
+        # stays readable at /proc/self/environ whatever envscrub pops later.
+        from .gateway.loader import read_secret_env
+
+        raw_key = read_secret_env("GEMINI_API_KEY", record=False)
         self.api_key: SecretStr = SecretStr(raw_key) if raw_key else SecretStr("")
-        self.openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
-        self.anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
-        self.openrouter_api_key = SecretStr(os.environ.get("OPENROUTER_API_KEY", ""))
+        self.openai_api_key: str = read_secret_env("OPENAI_API_KEY", record=False)
+        self.anthropic_api_key: str = read_secret_env("ANTHROPIC_API_KEY", record=False)
+        self.openrouter_api_key = SecretStr(read_secret_env("OPENROUTER_API_KEY", record=False))
         self.ollama_base_url: str = os.environ.get(
             "OLLAMA_BASE_URL",
             DEFAULT_OLLAMA_BASE_URL,

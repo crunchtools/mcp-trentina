@@ -23,7 +23,7 @@ Each gateway call writes one row to the `gateway_calls` table:
 | `bytes_arrived` / `bytes_delivered` | integer | response size before and after minifying |
 | `normalized` | text (JSON) | `{"feed_id": "dropped: below minimum 1"}`: arguments dropped before forwarding ([normalization](gateway.md#argument-normalization)) |
 | `destination` | text | `docs.example.org#1a2b3c4d5e6f7a8b`, `q#…`, `C0OPS`: where the call was pointed ([call destinations](profiles.md#call-destinations)). Never logged |
-| `destination_kind` | text | `fetch`, `search` or `param`; NULL when the tool names no destination |
+| `destination_kind` | text | `fetch`, `search`, `param` or `model`; NULL when the tool names no destination |
 
 ### Outcomes
 
@@ -52,6 +52,18 @@ catching more, not that anything is broken.
 
 `success` is derived (`outcome == "ok"`) rather than stored independently, so
 the legacy boolean can never disagree with the taxonomy.
+
+### LLM proxy calls
+
+Every `/llm/{provider}/...` request from an authenticated profile writes a
+row too (#297): `backend` is `llm:<provider>`, `tool` is the admitted
+endpoint (`messages`, `chat/completions`, `generateContent`, ...) or `-` when
+the request was refused before one was matched, and `destination` is the
+model the agent named (`destination_kind = model`). A refused request is
+`denied_guard` with the [reason code](llm-proxying.md#what-the-proxy-admits)
+in `error_message`; a profile with no key for the provider is
+`denied_allowlist`. An admitted call is `ok`, or `tool_error` / `backend_error`
+for a provider 4xx / 5xx.
 
 ## Accessing Audit Data
 
@@ -109,6 +121,24 @@ defense got mistaken for a broken one.
 calls the gateway refused. A consumer repeatedly probing tools outside its
 allowlist is a signal worth alerting on — it can indicate a misconfigured
 client or a hijacked agent. These were previously not recorded at all.
+
+Every `tools/call` writes exactly one row (#293), including the ones that
+never reach a backend:
+
+- A name the profile was never served, a `<backend>__<tool>` naming a backend
+  outside it, and an issued short name whose backend has since left it are
+  all `denied_allowlist`, with `backend` empty and `tool` the name's
+  fingerprint (`sha256:<12> len=<n>`), never its text. The caller gets the
+  same `Unknown tool` refusal for each, so it cannot tell which.
+- `params` or `arguments` that are not a JSON object are `denied_guard`.
+- An exception that escapes every audited path is `gateway_error`, with
+  `error_message` naming its class only, before the HTTP edge answers 500.
+
+A fetch advisory (a suspicious 415/406, a 4xx body the pipeline flags, a
+redirect to a binary) is a refusal and audits as `blocked_defense`; until
+#293 it was a successful result with no content, audited `ok`. A search whose
+provider failed is `backend_error`; one whose L0 leaked its canary is
+`blocked_defense`.
 
 `denied_response_guard` is the one denial that still costs an upstream call:
 the backend answered and the answer was withheld here. A rising rate on it

@@ -53,7 +53,7 @@ from ..httpbody import (
     request_capped,
 )
 from ..l1.pipeline import risk_level_for_count
-from ..logsafe import exc_kind
+from ..logsafe import exc_kind, redact_source
 from ..reserved import WARNING_KEY, strip_reserved, with_stripped
 from .context import profile_context
 
@@ -189,13 +189,16 @@ async def _handle_alert(
 
     client_host = request.client.host if request.client is not None else "unknown"
     log_fn = logger.warning if flagged else logger.info
+    # The payload's fingerprint, never its text (#292): whoever shapes a
+    # monitored check's output chooses these bytes, and the journal is
+    # readable by agents through other backends.
     log_fn(
         "alert_ingress: profile=%s source_ip=%s risk=%s l1_detections=%d payload=%s",
         profile.name,
         client_host,
         risk_level,
         counts.detections,
-        forward_body[:4000],
+        redact_source(forward_body),
     )
 
     enforcement = profile.alert_ingress.enforcement

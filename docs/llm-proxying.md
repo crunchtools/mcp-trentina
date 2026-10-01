@@ -31,6 +31,44 @@ Authentication is **mandatory**:
 
 The caller's `Authorization` header is never forwarded upstream. Trentina's own Q-Agent does not go through `/llm/`; it calls providers directly, but with the same `llm_keys`. Judging a profile's tool response bills that profile's key. Judging a shared tool description, or compressing one, is the gateway's own work, and bills the operator's key ([operator.md](operator.md#service-identity)). The global `GEMINI_API_KEY` applies only when no operator is declared.
 
+### What the Proxy Admits
+
+A provider is not only a model. Several run tools on their own side that
+fetch a URL the caller chose: Anthropic's `web_fetch`, `web_search`, code
+execution and the `mcp_servers` connector; OpenAI's search models and the
+Responses API's `web_search`, `file_search` and `mcp` tools; OpenRouter's
+`web` plugin and `:online` model suffix; Gemini's Google Search grounding,
+`url_context` and code execution. Each is a channel from an isolated agent to
+any host, on the profile's key, that never crosses Trentina's egress guard.
+
+So the proxy admits a request rather than forwarding it (#297,
+`gateway/llm_policy.py`). Everything is an allowlist, per API shape:
+
+| Checked | Admitted |
+|---|---|
+| Endpoint | Completions (`messages`, `chat/completions`, `completions`, `responses`, `generateContent`, `streamGenerateContent`), token counting, embeddings, and `GET` model listings. Files, batches, assistants, cached content and uploads are refused. |
+| Query | `beta`/paging (Anthropic), paging (OpenAI, OpenRouter), `alt`/paging (Gemini). Gemini's `key` is refused. |
+| Headers | `accept`, `anthropic-version`, and `anthropic-beta` flags that only shape the response (`claude-code-`, `interleaved-thinking-`, `context-1m-`, `effort-`, `fast-mode-`, `compact-`, ...); `mcp-client-`, `code-execution-`, `web-`, `files-api-`, `skills-` and `oauth-` are dropped. Everything else is dropped, including `OpenAI-Organization`/`-Project`, which would point the profile's key at another org. |
+| Body keys | The documented completion parameters. An unknown key is refused (`unknown_param`), so a new provider feature is closed until it is reviewed. |
+| Tools | Only tools the caller runs: Anthropic tools with no `type` or `custom`, OpenAI `function` (and `custom` on Responses), Gemini `functionDeclarations`. Anything else is `server_tool`; `mcp_servers` is `mcp_servers`; `plugins` is `plugins`. |
+| Content | Inline data only. An image, document or file the provider would fetch by URL is `url_source`; a file id is `file_reference`; Gemini `fileData` must name its own Files API. |
+| Stored state | `prompt`, `conversation`, `background`, `previous_response_id` (Responses), `cachedContent` (Gemini) and `store: true` (Chat Completions, which keeps the completion and its `metadata` on the provider) are `stored_state`: they carry or keep state the request does not show. |
+| Model | A model that searches by itself is `online_model`: `:online`, `*search*`, `sonar`, `perplexity/`, `compound`. That list is a floor; set `allowed_models` for the real control. Every model a request names is checked, including OpenRouter's `models` and Anthropic's `fallbacks`. |
+| Nested | Anthropic `output_config` takes `effort`, `format` and `task_budget` only; `fallbacks` is `"default"` or a list of `{"model": ...}`. |
+
+The body is parsed with duplicate keys refused, and the provider receives it
+**re-serialized**: it parses exactly the object that was judged. The body is
+capped at 32 MiB and a compressed body is refused. A refusal is HTTP 403 (400
+for a malformed body, 413 over the cap) with
+`{"error": {"type": "trentina_refused", "reason": ..., "detail": ...}}`;
+`detail` names the caller's own offending key and goes nowhere else.
+
+Every call from an authenticated profile, admitted or refused, writes a
+`gateway_calls` row ([audit log](audit-log.md#llm-proxy-calls)).
+
+Message text is not judged on the way out: a model with no server-side tool
+cannot dereference a URL in a prompt. The completion streams back unchanged and is judged after the last frame, which records a flag but cannot withhold what already streamed (see `_streaming_response`).
+
 ### What This Buys You
 
 - **No key in agent environment** — the agent's container/process has no `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`
@@ -72,6 +110,8 @@ Each provider entry specifies:
 | `auth_header` | HTTP header name for the API key |
 | `auth_prefix` | Optional prefix before the key value (e.g., `"Bearer "`) |
 | `api_key_env` | Environment variable holding the real API key (used by Trentina's own Q-Agent path; the LLM proxy uses per-profile keys) |
+| `api` | Request shape: `anthropic`, `openai`, `openrouter` or `gemini`. Inferred for `api.anthropic.com`, `api.openai.com`, `openrouter.ai` and `generativelanguage.googleapis.com`; required for any other upstream (an OpenAI-compatible host is `openai`), or startup fails |
+| `allowed_models` | Optional list of globs (`claude-sonnet-*`); a request naming any other model is refused `model_not_allowed` |
 
 Each **profile** then declares the key it wants the proxy to inject, under `llm_keys`:
 
@@ -109,13 +149,14 @@ The provider name under `llm_keys` must match a configured `llm_providers` entry
 1. Agent sends `POST /llm/gemini/v1beta/models/gemini-2.5-flash:generateContent` with `Authorization: Bearer <profile gateway token>`
 2. Trentina looks up the `gemini` provider config and resolves the caller profile from the bearer token (`401` if it matches none)
 3. Looks up the profile's `llm_keys.gemini` key (`502` if the profile has none)
-4. Strips hop-by-hop headers **and the caller's `Authorization`**, injects `x-goog-api-key: <profile's real key>`
-5. Forwards to `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
-6. Streams the response back to the agent
+4. Admits the request ([what the proxy admits](#what-the-proxy-admits)) or refuses it, audited either way
+5. Keeps only allowlisted headers (never the caller's `Authorization`), injects `x-goog-api-key: <profile's real key>`
+6. Forwards the re-serialized body to `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
+7. Streams the response back to the agent
 
 ### Relationship to Network Isolation
 
-LLM key proxying works independently of the [Matrix reverse proxy](network-isolation.md), but they're complementary. With both enabled, the agent has no network access *and* no API keys — it can only interact with the outside world through Trentina's controlled gateway.
+LLM key proxying works independently of the [Matrix reverse proxy](network-isolation.md), but they're complementary. With both enabled, the agent has no network access *and* no API keys — it can only interact with the outside world through Trentina's controlled gateway, and the provider cannot be used to fetch on its behalf.
 
 ## Related
 

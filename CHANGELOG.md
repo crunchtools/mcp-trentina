@@ -66,6 +66,27 @@ repeatable.
 
 ### Security
 
+- The LLM proxy admits a request instead of forwarding it (#297). It passed
+  the caller's path, query, raw body and every header but `Authorization`, so
+  an agent on `--network=none` could have its provider fetch or connect
+  anywhere: Anthropic's `web_fetch`/`web_search`/`mcp_servers`, OpenRouter's
+  `web` plugin and `:online` models, Gemini's grounding and `url_context`,
+  OpenAI's search models and Responses server tools. `gateway/llm_policy.py`
+  now allowlists endpoint, method, query, headers and body keys per API shape;
+  refuses provider-run tools, URL-fetched content, file ids, stored-state
+  references and self-searching models with a closed reason code; refuses
+  duplicate JSON keys and forwards the body re-serialized, so the provider
+  parses what was judged; caps it at 32 MiB. Every call from an authenticated
+  profile writes a `gateway_calls` row (`backend = llm:<provider>`, the model
+  as a `model` destination). `llm_providers` entries take `api` (required for
+  an upstream other than the four known hosts; startup fails without it) and
+  `allowed_models`. `docs/network-isolation.md` no longer claims the gateway
+  is the agent's only way out. The Anthropic allowlist tracks the current
+  Messages API (`output_config` with `effort`/`format`/`task_budget` only,
+  `cache_control`, `inference_geo`, `speed`, `diagnostics`, `fallbacks`,
+  `compaction`/`fallback` blocks, mid-conversation `system` messages), and
+  every `fallbacks` model passes the same model checks as `model`. Chat
+  Completions `store: true` is refused as stored state.
 - Every L3 answer is checked against the schema it was asked for, at the
   provider-response boundary (#294). An answer without a boolean
   `injection_detected` used to count as a complete, clean verdict; an
@@ -110,6 +131,68 @@ repeatable.
     replies were read whole. They are read under the #267 cap, as
     `identity`, with a wall-clock deadline (`httpbody.request_capped`). The
     bridge's error text no longer goes into the exception callers log.
+- Journal and refusal leaks the #262 rule missed (#292). The alert ingress
+  logged the first 4 KB of every alert raw (at WARNING when flagged); it logs
+  the payload's fingerprint. A refused `reload_profiles` returned the loader's
+  message to an agent (the config path, other profiles' fields, YAML
+  snippets) and logged it with a traceback; an agent now gets a constant, the
+  journal the error's class and frame, and every profile model sets
+  `hide_input_in_errors`, so pydantic no longer echoes an inline `llm_keys`
+  value even to the operator. The OAuth store logged a client-chosen CIMD
+  `client_id` and the store's exception text; it logs fingerprints and
+  kinds. A search provider failure became a refusal whose reason was the
+  provider's or httpx's text, an ollama base URL among it; it is now a
+  constant `search provider unavailable`, chained to nothing. New canaries
+  in `test_log_hygiene` cover all four paths.
+- Audit gaps (#293). Every `tools/call` now writes exactly one row: a long
+  form naming a backend outside the profile, and an issued short name whose
+  backend left it, are `denied_allowlist` like any unknown name (they raised
+  past the audit before), and refused identically; non-object `params` or
+  `arguments` are `denied_guard` (they were a 500 with no row); anything that
+  escapes every audited path is `gateway_error`. Fetch advisories (415/406, a
+  flagged 4xx body, a redirect to a binary) are refusals audited
+  `blocked_defense` with a `refused` D-Bus event, carrying the advisory in the
+  refusal; they were successful results audited `ok`. A search provider
+  outage is `backend_error`, an L0 canary leak `blocked_defense`.
+- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and
+  `OPENROUTER_API_KEY` take the `_FILE` form too, which wins (#268).
+- The image sets `PYTHONSAFEPATH=1` and `PYTHONDONTWRITEBYTECODE=1`. `python
+  -m` put the working directory (`/app`) first on `sys.path`, and the ML
+  libraries import lazily, so a file write there became code execution (#268).
+- A network transport checks its own containment at startup and WARNs each
+  gap: no-new-privileges, capabilities, seccomp, a writable rootfs or import
+  path, a secret taken from the environment. `TRENTINA_REQUIRE_HARDENED=true`
+  refuses to start on any. `docs/deployment-hardening.md` and
+  `contrib/quadlet/mcp-trentina.container` are the reference deployment (#268).
+- Matrix surfaces that reached the agent unjudged (#296). A withheld event's
+  notice copied `m.relates_to` whole on the bridge, and the proxy kept its
+  values; both now rebuild it from one allowlist
+  (`gateway/matrix_relation.py`): `rel_type` in `m.thread`/`m.reference`/
+  `m.replace`, event-ID-shaped `event_id` and `m.in_reply_to.event_id`, a
+  boolean `is_falling_back`. A reaction's `key` is free text and is dropped.
+- The Matrix proxy judges every 200 response, deny by default. It used to
+  judge seven listed paths, so `/members`, `/state`, profiles and the room
+  directory forwarded display names, topics and names unread. Exempt, by
+  method and whole path: write acknowledgements, auth flows, one-time and
+  backup keys, every DELETE and OPTIONS, and binary media downloads
+  (`image/*`, `audio/*`, `video/*`, `application/octet-stream`). Any other
+  non-JSON body is judged as text and carries `X-Trentina-Warning` when
+  flagged or unjudged.
+- Under `matrix_ingress.unjudged: annotate`, a response over the 32 MB
+  buffer or one that cannot be parsed is now refused (502) as it is under
+  `withhold`, and a scan that raised forwards with `scan_failed` in the
+  warning and its reserved keys stripped again; it forwarded bare.
+- The Matrix document processor reads every string in a decrypted event, not
+  `body`/`formatted_body`/`topic`/`name`. Other keys were neither read nor
+  counted, so coverage reported 100%.
+- `select` no longer skips a prose-shaped identifier: an `IDENTIFIER` or
+  `ENUM_CONSTANT` match is skipped only when no `:`-separated part holds more
+  than two English-shaped words (`shapes.wordy`). `ignore.previous.instructions`
+  and `@ignore_previous_instructions:evil.example` are read instead of
+  depending on a skip sample an attacker can spend first.
+- The bridge re-checks a room held under the audience rule (no recorded
+  inviter) on every sync rather than once per process, and drops a parked
+  event from a room it has left or is leaving instead of forwarding it.
 
 ### Changed
 

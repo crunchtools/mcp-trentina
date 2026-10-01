@@ -127,6 +127,7 @@ export TRENTINA_PROFILE_MYAGENT_TOKEN=your-token
 | [Quarantine Tools](docs/quarantine-tools.md) | Web fetch, read, search, scan |
 | [LLM Key Proxying](docs/llm-proxying.md) | API key isolation via reverse proxy |
 | [Matrix Reverse Proxy](docs/network-isolation.md) | Agent communication via Matrix |
+| [Deployment Hardening](docs/deployment-hardening.md) | Container flags, secrets, egress, the startup check |
 | [Cockpit Plugin](docs/cockpit-plugin.md) | Live defense pipeline dashboard |
 | [Internal: Gateway Design](docs/internal/gateway-design.md) | Original design document for contributors |
 

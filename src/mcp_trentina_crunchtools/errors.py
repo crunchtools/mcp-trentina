@@ -107,6 +107,17 @@ class MalformedResponseError(QuarantineAgentError):
         super().__init__(f"Invalid JSON in provider response: {detail}")
 
 
+class SearchCanaryLeakedError(QuarantineAgentError):
+    """L0 repeated its system prompt's canary: whatever it read steered it.
+
+    Its own type because it is the one search failure that is the defense
+    working, not the provider breaking (#293).
+    """
+
+    def __init__(self) -> None:
+        super().__init__("SECURITY: canary leaked in L0 search response")
+
+
 class BlockedSourceError(TrentinaError):
     """Refused: flagged, not fully judged, or on the blocklist.
 

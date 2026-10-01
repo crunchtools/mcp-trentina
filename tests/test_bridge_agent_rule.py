@@ -162,6 +162,34 @@ class TestStartupVetting:
         await _started(tmp_path, nio).process(_sync(), first=True)
         assert nio.left == [UPSTREAM_ROOM]
 
+    async def test_an_unrecorded_room_is_vetted_again_when_its_members_change(
+        self, tmp_path: Path
+    ) -> None:
+        """#296: the audience rule held at the first sync, not for good."""
+        nio = _FakeNio()  # members: the bridge and Scott, no inviter on record
+        seen, gateway = _gateway_log()
+        bridge = _started(tmp_path, nio, gateway)
+        await bridge.process(_sync(), first=True)
+        assert nio.left == []
+        announced = len(seen)
+        _set_members(nio, UPSTREAM_ROOM, SCOTT, STRANGER)
+        await bridge.process(_sync(_text_event(), next_batch="s3"), first=False)
+        assert nio.left == [UPSTREAM_ROOM]
+        assert len(seen) == announced, "nothing from it is forwarded"
+
+    async def test_a_room_with_a_recorded_inviter_is_not_left_for_a_new_member(
+        self, tmp_path: Path
+    ) -> None:
+        """The inviter rule does not change with the audience; the gateway's
+        agent rule is what reads the members of such a room."""
+        (tmp_path / "inviters.json").write_text(json.dumps({UPSTREAM_ROOM: SCOTT}))
+        nio = _FakeNio()
+        bridge = _started(tmp_path, nio)
+        await bridge.process(_sync(), first=True)
+        _set_members(nio, UPSTREAM_ROOM, SCOTT, STRANGER)
+        await bridge.process(_sync(next_batch="s3"), first=False)
+        assert nio.left == []
+
     async def test_a_failed_forget_still_leaves_the_room_left(self, tmp_path: Path) -> None:
         (tmp_path / "inviters.json").write_text(json.dumps({UPSTREAM_ROOM: STRANGER}))
 

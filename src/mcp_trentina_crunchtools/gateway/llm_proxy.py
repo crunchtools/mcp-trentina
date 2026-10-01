@@ -14,32 +14,52 @@ Adding a new provider is a YAML entry, not code::
         api_key_env: ANTHROPIC_API_KEY
 
 Streaming (SSE) and non-streaming responses are forwarded transparently.
+
+A request is ADMITTED, not forwarded (#297): ``llm_policy`` allowlists the
+endpoint, query, headers and body for the provider's API shape and refuses
+anything that would have the provider fetch, search or connect on the
+agent's behalf. Every call, admitted or refused, writes a ``gateway_calls``
+row.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import time
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from starlette.responses import Response, StreamingResponse
 
+from ..database import record_gateway_call
 from ..logsafe import exc_kind, exc_where, redact_source
+from ..outcomes import Outcome
 from .auth import resolve_profile_by_token
 from .context import profile_context
+from .destination import MAX_DESTINATION_CHARS, DestinationKind
 from .errors import ProfileConfigError
+from .llm_policy import API_BY_HOST, LlmApi, LlmRefusedError, Reason, admit, forward_headers
 from .loader import read_secret_env
 from .proxy_utils import (
     PLAIN_TEXT,
     filter_response_headers,
-    forward_request_headers,
     normalize_proxy_path,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
     from starlette.requests import Request
 
@@ -55,6 +75,10 @@ _LLM_TIMEOUT = httpx.Timeout(
 )
 
 LLM_HTTP_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH"]
+
+# A request body is read whole to be judged. Anthropic's own request limit is
+# 32 MB; nothing an admitted endpoint takes needs more.
+MAX_LLM_REQUEST_BYTES = 32 * 1024 * 1024
 
 _llm_client: httpx.AsyncClient | None = None
 
@@ -78,7 +102,7 @@ async def close_llm_client() -> None:
 class LlmProvider(BaseModel):
     """One LLM provider driver entry."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     enabled: bool = Field(default=False)
     upstream: str = Field(
@@ -102,6 +126,14 @@ class LlmProvider(BaseModel):
         exclude=True,
         description="Resolved key (load-time)",
     )
+    api: LlmApi | None = Field(
+        default=None,
+        description="Request shape; inferred for the four known upstream hosts",
+    )
+    allowed_models: list[str] = Field(
+        default_factory=list,
+        description="Globs a requested model must match; empty allows any",
+    )
 
     @field_validator("upstream")
     @classmethod
@@ -111,6 +143,18 @@ class LlmProvider(BaseModel):
                 f"upstream must start with https://: {v!r}",
             )
         return v.rstrip("/")
+
+    @model_validator(mode="after")
+    def api_must_be_known(self) -> LlmProvider:
+        """An upstream we cannot name a shape for has no admission policy."""
+        if self.api is None:
+            self.api = API_BY_HOST.get(urlsplit(self.upstream).hostname or "")
+        if self.api is None:
+            raise ValueError(
+                "api must be set (anthropic, openai, openrouter or gemini) "
+                "for an upstream other than the four known hosts",
+            )
+        return self
 
 
 def load_llm_providers(
@@ -207,18 +251,92 @@ def register_llm_routes(
     )
 
 
+def _audit(
+    profile: Profile,
+    provider_name: str,
+    endpoint: str,
+    outcome: Outcome,
+    started: float,
+    reason: Reason | None = None,
+    model: str | None = None,
+) -> None:
+    """One ``gateway_calls`` row per proxied call, admitted or refused.
+
+    ``endpoint`` and ``reason`` are closed sets. ``model`` is the caller's
+    text, so it is stored as a destination and goes nowhere else (#266).
+    Like ``router._audit``, a lost row never fails the call it records.
+    """
+    try:
+        record_gateway_call(
+            profile.name,
+            f"llm:{provider_name}",
+            endpoint,
+            outcome.value,
+            int((time.monotonic() - started) * 1000),
+            reason.value if reason else None,
+            destination=model[:MAX_DESTINATION_CHARS] if model else None,
+            destination_kind=DestinationKind.MODEL.value if model else None,
+        )
+    except Exception as exc:
+        logger.warning("llm_proxy: audit row lost profile=%s err=%s", profile.name, exc_kind(exc))
+
+
+def _refusal_response(refusal: LlmRefusedError) -> Response:
+    """The refusal, to its own caller. ``detail`` is that caller's token."""
+    body = {
+        "error": {
+            "type": "trentina_refused",
+            "reason": refusal.reason.value,
+            "detail": refusal.detail,
+            "message": f"refused by Trentina: {refusal.reason.value}",
+        }
+    }
+    return Response(
+        content=json.dumps(body),
+        status_code=refusal.status,
+        media_type="application/json",
+    )
+
+
+async def _read_body(request: Request) -> bytes:
+    """The whole body, refused past ``MAX_LLM_REQUEST_BYTES``.
+
+    A compressed body is refused rather than inflated: what is judged must
+    be what the provider parses.
+
+    Raises:
+        LlmRefusedError: ``too_large`` (413) past the cap, declared or read;
+            ``malformed_body`` (415) for any ``Content-Encoding`` but identity.
+    """
+    encoding = request.headers.get("content-encoding", "identity").strip().lower()
+    if encoding not in ("", "identity"):
+        raise LlmRefusedError(
+            Reason.MALFORMED, "content-encoding", status=HTTPStatus.UNSUPPORTED_MEDIA_TYPE
+        )
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_LLM_REQUEST_BYTES:
+        raise LlmRefusedError(Reason.TOO_LARGE, status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_LLM_REQUEST_BYTES:
+            raise LlmRefusedError(Reason.TOO_LARGE, status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+    return bytes(body)
+
+
 async def _proxy_llm(
     request: Request,
     providers: dict[str, LlmProvider],
     profiles: dict[str, Profile],
 ) -> Response:
-    """Forward one LLM request to the upstream provider.
+    """Admit one LLM request and forward it to the upstream provider.
 
     Authenticates against the caller's gateway bearer token, resolves the
-    calling profile, and injects that profile's provider key. The caller's
-    ``Authorization`` header is stripped before forwarding — ``forward_request_headers``
-    keeps it (the Matrix proxy relies on that), so the token must be dropped here.
+    calling profile, admits the request through ``llm_policy`` and injects
+    that profile's provider key. Only allowlisted caller headers reach the
+    provider; the caller's ``Authorization`` is never one of them.
     """
+    started = time.monotonic()
     provider_name = request.path_params.get("provider", "")
     raw_path = request.path_params.get("path", "")
 
@@ -245,6 +363,7 @@ async def _proxy_llm(
             profile.name,
             provider_name,
         )
+        _audit(profile, provider_name, "-", Outcome.DENIED_ALLOWLIST, started)
         return Response(
             content="No API key configured for this provider",
             status_code=502,
@@ -253,60 +372,98 @@ async def _proxy_llm(
 
     path = normalize_proxy_path(raw_path)
     if path is None:
+        _audit(profile, provider_name, "-", Outcome.DENIED_GUARD, started, Reason.ENDPOINT)
         return Response(
             content="Path traversal rejected",
             status_code=400,
             media_type=PLAIN_TEXT,
         )
 
+    # TRUST: an agent's request to a provider that can fetch and run tools
+    #   untrusted: method, path, query, headers and body, all agent-chosen
+    #   judged-by: llm_policy.admit (allowlists per API shape) and forward_headers
+    #   on-failure: fail-closed; anything not on a list is refused and audited
+    #   owner: gateway/llm_policy.py
+    #   evidence: T3 llm_policy module docstring; T4 the body sent is the one
+    #     admit() re-serialized, so the provider parses what was judged
+    api = provider.api
+    if api is None:  # api_must_be_known sets it; a provider without one has no policy
+        raise ProfileConfigError(f"llm_providers.{provider_name}: no api shape")
+    try:
+        body = await _read_body(request)
+        admitted = admit(
+            api,
+            request.method,
+            path,
+            request.url.query,
+            body,
+            provider.allowed_models,
+        )
+    except LlmRefusedError as refusal:
+        logger.info(
+            "llm_proxy: refused profile=%s provider=%s reason=%s",
+            profile.name,
+            provider_name,
+            refusal.reason.value,
+        )
+        _audit(profile, provider_name, "-", Outcome.DENIED_GUARD, started, refusal.reason)
+        return _refusal_response(refusal)
+
     logger.info(
-        "llm_proxy: profile=%s provider=%s path=%s",
+        "llm_proxy: profile=%s provider=%s endpoint=%s path=%s",
         profile.name,
         provider_name,
+        admitted.endpoint,
         redact_source(path),
     )
 
     upstream_url = f"{provider.upstream}/{path}"
-    if request.url.query:
-        upstream_url = f"{upstream_url}?{request.url.query}"
+    if admitted.query:
+        upstream_url = f"{upstream_url}?{admitted.query}"
 
-    fwd_headers = forward_request_headers(list(request.headers.items()))
-    for header_name in [h for h in fwd_headers if h.lower() == "authorization"]:
-        del fwd_headers[header_name]
+    fwd_headers = forward_headers(api, request.headers.items())
+    if admitted.body is not None:
+        fwd_headers["content-type"] = "application/json"
     key_value = override.api_key.get_secret_value()
     fwd_headers[provider.auth_header] = f"{provider.auth_prefix}{key_value}"
 
     return await _forward_upstream(
-        request,
+        request.method,
         upstream_url,
         fwd_headers,
+        admitted.body,
         provider_name,
         profile,
+        lambda outcome: _audit(
+            profile, provider_name, admitted.endpoint, outcome, started, model=admitted.model
+        ),
     )
 
 
 async def _forward_upstream(
-    request: Request,
+    method: str,
     upstream_url: str,
     fwd_headers: dict[str, str],
+    body: bytes | None,
     provider_name: str,
     profile: Profile,
+    audit: Callable[[Outcome], None],
 ) -> Response:
-    """Send the (already-authorized, key-injected) request to the provider."""
-    has_body = request.method in ("POST", "PUT", "PATCH")
+    """Send the (already-admitted, key-injected) request to the provider."""
     client = _get_llm_client()
 
     try:
         resp = await client.send(
             client.build_request(
-                request.method,
+                method,
                 upstream_url,
                 headers=fwd_headers,
-                content=request.stream() if has_body else None,
+                content=body,
             ),
             stream=True,
         )
     except httpx.TimeoutException:
+        audit(Outcome.BACKEND_ERROR)
         return Response(
             content="LLM upstream timeout",
             status_code=504,
@@ -318,12 +475,19 @@ async def _forward_upstream(
             provider_name,
             exc_kind(exc),
         )
+        audit(Outcome.BACKEND_ERROR)
         return Response(
             content="LLM upstream unreachable",
             status_code=502,
             media_type=PLAIN_TEXT,
         )
 
+    if resp.status_code >= 500:
+        audit(Outcome.BACKEND_ERROR)
+    elif resp.status_code >= 400:
+        audit(Outcome.TOOL_ERROR)
+    else:
+        audit(Outcome.OK)
     return _streaming_response(resp, provider_name, profile)
 
 

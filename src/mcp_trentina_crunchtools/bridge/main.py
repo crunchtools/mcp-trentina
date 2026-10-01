@@ -196,6 +196,12 @@ def main(argv: list[str] | None = None) -> None:
         sys.stdout.write(f"{result}\n")
         return
     settings = BridgeSettings.from_env()
+    if args.command == "run":
+        from ..gateway.loader import secret_env_names
+        from ..posture import check_secret_sources, check_startup_posture
+
+        check_startup_posture()
+        check_secret_sources(secret_env_names())
     if args.command == "logout-device":
         asyncio.run(_logout_device(settings))
         return
