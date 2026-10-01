@@ -48,10 +48,14 @@ jobs:
           GEMINI_API_KEY: "test_key_for_ci"
 
   live-l3:
-    name: Live L3 Detection (Gemini)
+    name: Live L3 Detection (OpenRouter)
+    # Push to main only, as boundary-review-eval below: the test runs the
+    # checked-out code with the key in its environment, and a PR branch is the
+    # code nobody has reviewed yet.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
-      HAS_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
+      HAS_OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -69,15 +73,21 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --locked
 
-      # Runs the corpus attacks through live Gemini and fails only on a genuine
-      # detection regression. Skipped without the key (fork PRs); skips itself as
-      # inconclusive on a provider outage, so Google availability never reddens a PR.
+      # Runs the corpus attacks through a live model on OpenRouter, production's
+      # L3 provider, and fails only on a genuine detection regression. Without
+      # the key (fork PRs) it says so instead of passing silently; it skips
+      # itself as inconclusive on a provider outage.
+      - name: No key, no live L3
+        if: env.HAS_OPENROUTER_KEY != 'true'
+        run: echo "::warning::live L3 not run - OPENROUTER_API_KEY is not available to this run"
+
       - name: Run live L3 detection
-        if: env.HAS_GEMINI_KEY == 'true'
+        if: env.HAS_OPENROUTER_KEY == 'true'
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           TRENTINA_LIVE_L3: "1"
-          QUARANTINE_MODEL: "gemini-2.5-flash"
+          TRENTINA_LIVE_L3_PROVIDER: openrouter
+          QUARANTINE_MODEL: "google/gemini-2.5-flash"
         run: uv run pytest tests/test_l3_live.py -v
 
   boundary-review-eval:
@@ -154,8 +164,6 @@ jobs:
 
   build-container:
     runs-on: ubuntu-latest
-    env:
-      HAS_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -200,13 +208,14 @@ jobs:
             mcp-trentina:test-runner \
             -m pytest /tests/test_l2_integration.py -v
 
+      # The provider is mocked (fixture responses), so no real key: gating this
+      # on a Gemini secret the repo never had meant it never ran.
       - name: Run L3 integration tests in container
-        if: env.HAS_GEMINI_KEY == 'true'
         run: |
           docker run --rm \
             --entrypoint python \
             -v ${{ github.workspace }}/tests:/tests:ro \
-            -e GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
+            -e GEMINI_API_KEY="test_key_for_ci" \
             -e CLASSIFIER_MODEL_PATH="/models/prompt-guard-2-22m" \
             mcp-trentina:test-runner \
             -m pytest /tests/test_l3_integration.py -v
