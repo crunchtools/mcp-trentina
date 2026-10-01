@@ -308,11 +308,19 @@ _ENV_FILE_SUFFIX = "_FILE"
 #: every reload since. ``reload_profiles`` reads them again, so the startup
 #: scrub (``gateway/envscrub.py``) must never pop one of these.
 _profile_env_names: set[str] = set()
+# Every name read_secret_env was asked for, recorded or not: the startup
+# posture check asks which of them arrived in the environment (#268).
+_secret_env_names: set[str] = set()
 
 
 def profile_env_names() -> frozenset[str]:
     """The env var names profiles have resolved secrets from (see ``read_secret_env``)."""
     return frozenset(_profile_env_names)
+
+
+def secret_env_names() -> frozenset[str]:
+    """Every env var name a secret has been read from, by any caller."""
+    return frozenset(_secret_env_names)
 
 
 def _warn_on_loose_mode(path: Path, file_var: str) -> None:
@@ -362,6 +370,7 @@ def read_secret_env(env_var: str, *, record: bool = True) -> str:
     scrub leaves it for ``reload_profiles`` to read again. A caller reading a
     startup-only secret (the OAuth signing key) passes False.
     """
+    _secret_env_names.add(env_var)
     if record:
         _profile_env_names.add(env_var)
     file_var = f"{env_var}{_ENV_FILE_SUFFIX}"
