@@ -61,6 +61,14 @@ uv run mcp-trentina-crunchtools
 - `TRENTINA_FETCH_ALLOW_PRIVATE` — default false. Lifts the egress guard's
   address rule so fetch can reach non-global addresses; scheme, port and
   redirect rules still hold. Warns at startup. See `egress.py` (#260).
+- `TRENTINA_REQUIRE_HARDENED` — default false. On a network transport,
+  `posture.py` reads `/proc/self` at startup and WARNs each containment gap
+  (no-new-privileges, capabilities, seccomp, writable rootfs or import path,
+  a secret from the environment rather than `_FILE`); true refuses to start
+  on any. See `docs/deployment-hardening.md` (#268). The image sets
+  `PYTHONSAFEPATH=1` so the working directory is never on `sys.path`.
+  `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and
+  `OPENROUTER_API_KEY` take `_FILE` forms too.
 - `TRENTINA_RATE_LIMIT` — "off" disables limiting on the unauthenticated OAuth
   write paths (default on). An incident escape hatch, not a setting.
 - `TRENTINA_FORWARDED_ALLOW_IPS` — peer addresses whose `X-Forwarded-For` is

@@ -105,6 +105,16 @@ repeatable.
   `blocked_defense` with a `refused` D-Bus event, carrying the advisory in the
   refusal; they were successful results audited `ok`. A search provider
   outage is `backend_error`, an L0 canary leak `blocked_defense`.
+- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and
+  `OPENROUTER_API_KEY` take the `_FILE` form too, which wins (#268).
+- The image sets `PYTHONSAFEPATH=1` and `PYTHONDONTWRITEBYTECODE=1`. `python
+  -m` put the working directory (`/app`) first on `sys.path`, and the ML
+  libraries import lazily, so a file write there became code execution (#268).
+- A network transport checks its own containment at startup and WARNs each
+  gap: no-new-privileges, capabilities, seccomp, a writable rootfs or import
+  path, a secret taken from the environment. `TRENTINA_REQUIRE_HARDENED=true`
+  refuses to start on any. `docs/deployment-hardening.md` and
+  `contrib/quadlet/mcp-trentina.container` are the reference deployment (#268).
 
 ### Changed
 
