@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -37,7 +36,8 @@ class Provider(ABC):
 
     judge: tuple[str, str] = ("unknown", "unknown")
     key_fingerprint: str = "global"
-    """Which API key this instance sends, as a short hash (``key_fingerprint``).
+    """Which API key this instance sends: ``global`` for the env key, else
+    ``key<n>`` numbered by ``get_provider``, derived from nothing in the key.
     It keys the limiter with ``judge``: a provider throttles per key (#291)."""
     _model: str
 
@@ -67,11 +67,6 @@ class Provider(ABC):
         Returns:
             ProviderResult with the model's text output and token counts.
         """
-
-
-def key_fingerprint(api_key: str) -> str:
-    """A short, one-way name for an API key; the key itself is never kept here."""
-    return hashlib.sha256(api_key.encode()).hexdigest()[:12]
 
 
 def parse_retry_after(value: str | None, now: float | None = None) -> float | None:

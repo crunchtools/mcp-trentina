@@ -198,7 +198,9 @@ class TestL3LimiterKey:
     async def test_the_fingerprint_is_per_key_and_never_the_key(self) -> None:
         one = get_provider("openrouter", SecretStr("sk-or-alpha-secret"), "x/y")
         two = get_provider("openrouter", SecretStr("sk-or-beta-secret"), "x/y")
+        again = get_provider("openrouter", SecretStr("sk-or-alpha-secret"), "x/z")
         assert one.key_fingerprint != two.key_fingerprint
+        assert again.key_fingerprint == one.key_fingerprint
         assert "secret" not in one.key_fingerprint
         assert limiter_for(one.judge, one.key_fingerprint) is not limiter_for(
             two.judge, two.key_fingerprint

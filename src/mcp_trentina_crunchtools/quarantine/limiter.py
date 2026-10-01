@@ -272,9 +272,9 @@ _limiters: dict[tuple[str, str, str], AdaptiveLimiter] = {}
 def limiter_for(judge: tuple[str, str], key_fingerprint: str = "global") -> AdaptiveLimiter:
     """The one limiter for this (provider, model) on this key, created on first use.
 
-    ``key_fingerprint`` is ``Provider.key_fingerprint``: a short hash, never
-    the key. Two profiles holding the same key share a limiter, as they share
-    the provider's quota for it.
+    ``key_fingerprint`` is ``Provider.key_fingerprint``: an ordinal, never
+    the key nor anything derived from it. Two profiles holding the same key
+    share a limiter, as they share the provider's quota for it.
     """
     slot = (*judge, key_fingerprint)
     limiter = _limiters.get(slot)

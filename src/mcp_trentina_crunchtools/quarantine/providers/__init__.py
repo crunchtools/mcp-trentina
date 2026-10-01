@@ -8,7 +8,7 @@ from pydantic import SecretStr
 
 from ...config import get_config
 from ...errors import QuarantineAgentError
-from .base import Provider, ProviderResult, key_fingerprint
+from .base import Provider, ProviderResult
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,21 @@ def _openrouter(key_value: str, model: str) -> Provider:
         base_url=OPENROUTER_API_BASE,
         routing=OPENROUTER_ROUTING,
     )
+
+
+def _key_ordinal(key_value: str) -> str:
+    """The limiter's name for a key: the one an instance on it already has.
+
+    Read off the cache, which holds the key already, so no second copy is
+    kept and nothing is derived from it. A key not yet seen takes the next
+    ``key<n>``; the env key (``global``) keeps its own name.
+    """
+    if key_value == "global":
+        return key_value
+    for (_name, cached_key, _model), provider in _provider_cache.items():
+        if cached_key == key_value:
+            return provider.key_fingerprint
+    return f"key{len({k for _n, k, _m in _provider_cache if k != 'global'}) + 1}"
 
 
 def get_provider(
@@ -123,8 +138,7 @@ def get_provider(
             )
 
     provider.judge = (resolved_provider, provider.model)
-    # An override is a profile's own key; "global" is the env key, one per provider.
-    provider.key_fingerprint = key_fingerprint(api_key.get_secret_value()) if api_key else "global"
+    provider.key_fingerprint = _key_ordinal(cache_key[1])
     _provider_cache[cache_key] = provider
     logger.info(
         "provider: initialized %s (model=%s, key=%s)",
