@@ -23,7 +23,7 @@ Each gateway call writes one row to the `gateway_calls` table:
 | `bytes_arrived` / `bytes_delivered` | integer | response size before and after minifying |
 | `normalized` | text (JSON) | `{"feed_id": "dropped: below minimum 1"}`: arguments dropped before forwarding ([normalization](gateway.md#argument-normalization)) |
 | `destination` | text | `docs.example.org#1a2b3c4d5e6f7a8b`, `q#…`, `C0OPS`: where the call was pointed ([call destinations](profiles.md#call-destinations)). Never logged |
-| `destination_kind` | text | `fetch`, `search` or `param`; NULL when the tool names no destination |
+| `destination_kind` | text | `fetch`, `search`, `param` or `model`; NULL when the tool names no destination |
 
 ### Outcomes
 
@@ -52,6 +52,18 @@ catching more, not that anything is broken.
 
 `success` is derived (`outcome == "ok"`) rather than stored independently, so
 the legacy boolean can never disagree with the taxonomy.
+
+### LLM proxy calls
+
+Every `/llm/{provider}/...` request from an authenticated profile writes a
+row too (#297): `backend` is `llm:<provider>`, `tool` is the admitted
+endpoint (`messages`, `chat/completions`, `generateContent`, ...) or `-` when
+the request was refused before one was matched, and `destination` is the
+model the agent named (`destination_kind = model`). A refused request is
+`denied_guard` with the [reason code](llm-proxying.md#what-the-proxy-admits)
+in `error_message`; a profile with no key for the provider is
+`denied_allowlist`. An admitted call is `ok`, or `tool_error` / `backend_error`
+for a provider 4xx / 5xx.
 
 ## Accessing Audit Data
 

@@ -66,6 +66,22 @@ repeatable.
 
 ### Security
 
+- The LLM proxy admits a request instead of forwarding it (#297). It passed
+  the caller's path, query, raw body and every header but `Authorization`, so
+  an agent on `--network=none` could have its provider fetch or connect
+  anywhere: Anthropic's `web_fetch`/`web_search`/`mcp_servers`, OpenRouter's
+  `web` plugin and `:online` models, Gemini's grounding and `url_context`,
+  OpenAI's search models and Responses server tools. `gateway/llm_policy.py`
+  now allowlists endpoint, method, query, headers and body keys per API shape;
+  refuses provider-run tools, URL-fetched content, file ids, stored-state
+  references and self-searching models with a closed reason code; refuses
+  duplicate JSON keys and forwards the body re-serialized, so the provider
+  parses what was judged; caps it at 32 MiB. Every call from an authenticated
+  profile writes a `gateway_calls` row (`backend = llm:<provider>`, the model
+  as a `model` destination). `llm_providers` entries take `api` (required for
+  an upstream other than the four known hosts; startup fails without it) and
+  `allowed_models`. `docs/network-isolation.md` no longer claims the gateway
+  is the agent's only way out.
 - `llm_providers` keys take the `_FILE` form like every other secret, so a
   provider key no longer has to sit in the process environment (#268).
 

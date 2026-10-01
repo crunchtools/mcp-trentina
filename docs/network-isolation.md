@@ -75,7 +75,9 @@ For complete network isolation, combine with the [LLM key proxy](llm-proxying.md
 2. **LLM calls** → `http://trentina:8019/llm/<provider>/<path>`
 3. **Matrix** → `http://trentina:8019/matrix/<path>`
 
-The agent has no other network access. Every outbound request goes through Trentina's controlled, audited gateway.
+The agent has no other network access of its own. Every request it makes goes through Trentina and is audited, but a request is not the only way out: a model provider can fetch, search and connect to MCP servers on the caller's behalf (Anthropic's `web_fetch`, `web_search` and `mcp_servers`, OpenRouter's `web` plugin and `:online` models, Gemini's Google Search grounding and `url_context`). Until #297 the LLM proxy forwarded those untouched, so an agent on `--network=none` could still reach any host through its provider. The proxy now admits only completions with caller-run function tools and inline content, and refuses the rest ([what the proxy admits](llm-proxying.md#what-the-proxy-admits)).
+
+What remains is the provider itself: an agent can still put data in a prompt, and the provider receives it. Treat the provider as a destination the agent can write to.
 
 ## Related
 

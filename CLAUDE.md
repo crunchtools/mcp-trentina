@@ -441,6 +441,14 @@ skill's format.
     its `default`, which is only an annotation);
     reports a failing required one for the router to refuse. Never evaluates
     `pattern` (a backend's regex is a ReDoS here).
+  - `llm_policy.py` — what `/llm/<provider>/` admits (#297), per API shape
+    (`anthropic`, `openai`, `openrouter`, `gemini`; a provider's `api`,
+    inferred for the four known hosts, required otherwise). Allowlists
+    endpoint, query, headers and body keys; refuses provider-run tools,
+    `mcp_servers`, URL-fetched content and self-searching models. The body
+    goes upstream RE-SERIALIZED, never raw, so the provider parses what was
+    judged. A provider is a second way out of `--network=none`; a new
+    request key stays refused until someone reads what it does.
   - `ratelimit.py` — the token bucket and the ASGI guard on `/register`,
     `/authorize` and `/consent`. NOT on `/token`: that is reached with a code
     or refresh token this gateway issued, so it is not unauthenticated, and
