@@ -13,6 +13,13 @@ You don't give a human-supervised IDE agent the same permissions as an autonomou
 Profiles are defined in YAML, typically at `/etc/trentina/profiles.yaml` or wherever `TRENTINA_PROFILES_PATH` points:
 
 ```yaml
+llm_providers:              # every name under llm_keys must be one of these
+  gemini:
+    enabled: true
+    upstream: https://generativelanguage.googleapis.com
+    auth_header: x-goog-api-key
+    api_key_env: GEMINI_API_KEY
+
 profiles:
   agent2:
     role: operator          # default: agent (see Roles and operator.md)
