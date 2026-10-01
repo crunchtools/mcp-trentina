@@ -7,8 +7,8 @@ from typing import Any
 
 import httpx
 
-from ...errors import QuarantineAgentError
-from .base import Provider, ProviderResult, status_error
+from ...errors import MalformedResponseError, QuarantineAgentError
+from .base import Provider, ProviderResult, count, dig, envelope, status_error
 
 ANTHROPIC_API_BASE = "https://api.anthropic.com/v1"
 ANTHROPIC_TIMEOUT = 60.0
@@ -70,22 +70,22 @@ class AnthropicProvider(Provider):
                     },
                 )
                 resp.raise_for_status()
-                resp_json = resp.json()
+                resp_json = envelope(resp)
 
-            content_blocks = resp_json.get("content", [])
-            if not content_blocks:
+            if not dig(resp_json, "content", 0):
                 raise QuarantineAgentError("No content in Anthropic response")
 
-            text = content_blocks[0].get("text", "").strip()
+            text = dig(resp_json, "content", 0, "text")
+            if not isinstance(text, str):
+                raise MalformedResponseError("no text")
+            text = text.strip()
             if text.startswith("```"):
                 lines = text.split("\n")
                 text = "\n".join(lines[1:-1]).strip()
-            usage = resp_json.get("usage", {})
-
             return ProviderResult(
                 text=text,
-                input_tokens=usage.get("input_tokens", 0),
-                output_tokens=usage.get("output_tokens", 0),
+                input_tokens=count(dig(resp_json, "usage", "input_tokens")),
+                output_tokens=count(dig(resp_json, "usage", "output_tokens")),
             )
 
         except httpx.HTTPStatusError as exc:
