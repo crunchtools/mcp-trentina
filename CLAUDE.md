@@ -154,7 +154,8 @@ text, Matrix id, nor an exception's message (`logger.exception` and
 anything else; the audit DB holds the rest. `logsafe.install` holds uvicorn's
 access log, httpx and the SDKs to the same rule at every level.
 `tests/test_log_hygiene.py` enforces it: canaries at DEBUG through every tool,
-the HTTP edge, the bridge's refusal path and the proxies' failure paths, and
+the HTTP edge, the bridge's refusal path, the proxies' failure paths, the
+alert ingress, a refused reload and the OAuth store's CIMD path (#292), and
 an AST check over the whole package that only a call marked
 `# logsafe: ours` may print an exception.
 

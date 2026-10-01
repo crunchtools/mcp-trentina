@@ -192,7 +192,7 @@ class AuthConfig(BaseModel):
     `bearer_token` is resolved at load time and never serialized.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     bearer_token_env: str = Field(
         ..., description="Env var name whose value is the profile's bearer token"
@@ -218,7 +218,7 @@ class LlmKeyOverride(BaseModel):
     key at load time and is never serialized to logs/JSON.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     api_key_env: str | None = Field(
         default=None,
@@ -252,7 +252,7 @@ class LlmKeyOverride(BaseModel):
 class ParameterConstraint(BaseModel):
     """Allow/deny constraint on a single tool parameter's value."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     allow: list[str] = Field(
         default_factory=lambda: ["*"],
@@ -288,7 +288,7 @@ class ProcessorChainConfig(BaseModel):
     surface the registry needs and nothing else.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     processors: list[ProcessorName] = Field(
         default_factory=list,
@@ -401,7 +401,7 @@ class PreProcessConfig(ProcessorChainConfig):
 class ToolPreProcess(BaseModel):
     """Per-tool override. Every field is optional; unset inherits the profile."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     enabled: bool | None = None
     strategy: Literal["none", "chain", "best_of", "auto"] | None = None
@@ -429,7 +429,7 @@ MAX_L3_BRIEFING_CHARS = 2000
 class Backend(BaseModel):
     """Per-profile backend MCP server config."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     url: str = Field(
         ...,
@@ -661,7 +661,7 @@ class AlertIngressConfig(BaseModel):
     The token embedded in the URL is the sole authentication mechanism.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     @model_validator(mode="before")
     @classmethod
@@ -760,7 +760,7 @@ class DefenseConfig(BaseModel):
     `enforcement`, which is what a flag costs.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     enforcement: EnforcementMode = Field(
         default="flag",
@@ -858,7 +858,7 @@ class MatrixDecryptConfig(BaseModel):
     upstream ciphertext, untouched.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     enabled: bool = Field(
         default=False,
@@ -938,7 +938,7 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
     to load rather than resolving to something the operator did not write.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     min_coverage: float = Field(
         default=0.02,
@@ -986,7 +986,7 @@ class MatrixIngressConfig(BaseModel):
     the token as a path prefix.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     token_env: str = Field(
         ...,
@@ -1123,7 +1123,7 @@ class MatrixBridgeLocalConfig(BaseModel):
     see who said what without anyone on the remote side having an account here.
     """
 
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True, strict=True)
 
     homeserver: str = Field(..., description="The profile's Conduit, on a private network")
     server_name: str = Field(..., description="That Conduit's server_name")
@@ -1207,7 +1207,7 @@ class MatrixBridgeConfig(BaseModel):
     an inert block does not demand secrets nothing reads.
     """
 
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True, strict=True)
 
     enabled: bool = Field(default=False, description="Run this profile's bridge")
     public_user_id: str = Field(
@@ -1300,7 +1300,7 @@ class OAuthConfig(BaseModel):
     profile. See ``docs/authentication.md`` and RT #1502.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     enabled: bool = Field(
         default=False,
@@ -1550,7 +1550,7 @@ class OAuthConfig(BaseModel):
 class Profile(BaseModel):
     """One consumer profile: name, auth, backends, defense config."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     name: str = Field(..., description="Profile name (URL-safe slug)")
     auth: AuthConfig | None = Field(

@@ -25,7 +25,12 @@ import httpx
 from ..client import MAX_RESPONSE_SIZE
 from ..config import DEFAULT_SEARCH_MODEL, get_config
 from ..egress import open_guarded
-from ..errors import EgressRefusedError, MalformedResponseError, QuarantineAgentError
+from ..errors import (
+    EgressRefusedError,
+    MalformedResponseError,
+    QuarantineAgentError,
+    SearchCanaryLeakedError,
+)
 from ..l1.pipeline import run_l1
 from ..logsafe import exc_kind
 from .limiter import THROTTLE_STATUS, limited_generate, throttle_budget
@@ -655,7 +660,7 @@ async def quarantine_detect(
             "injection_detected": False,
             "l3_unavailable": True,
             "risk_level": "low",
-            "summary": f"Q-Agent detection failed: {exc}",
+            "summary": f"Q-Agent detection failed: {exc_kind(exc)}",
         }
     else:
         usage = parsed.pop("_usage", None)
@@ -947,7 +952,7 @@ def _parse_openrouter_search(raw: bytes, canary: str) -> dict[str, Any]:
     sources = _citation_sources(message)
     # Everything returned came from the same untrusted message, citations too.
     if canary in text or any(canary in value for src in sources for value in src.values()):
-        raise QuarantineAgentError("SECURITY: canary leaked in L0 search response")
+        raise SearchCanaryLeakedError()
     usage = resp_json.get("usage")
     if not isinstance(usage, dict):
         usage = {}
@@ -1065,7 +1070,7 @@ async def search_grounded(
             text = parts[0].get("text", "")
 
             if canary in text:
-                raise QuarantineAgentError("SECURITY: canary leaked in L0 search response")
+                raise SearchCanaryLeakedError()
 
             grounding = candidates[0].get("groundingMetadata", {})
             sources = _extract_grounding_sources(grounding)

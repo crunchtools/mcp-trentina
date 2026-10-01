@@ -35,6 +35,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ..config import int_env
+from ..logsafe import exc_kind, exc_where, redact_source
 
 logger = logging.getLogger(__name__)
 
@@ -135,13 +136,16 @@ async def promote_registration(client_store: Any, client_id: str) -> None:
             value=stored,
             ttl=promoted_ttl_seconds(),
         )
-    except Exception:
-        # nosemgrep: trentina-log-exception-text -- logsafe: ours
-        logger.warning(  # logsafe: ours — the store's error; client_id is server-issued
+    except Exception as exc:
+        # The id's fingerprint and the error's kind (#292): under CIMD the
+        # client_id is a URL the client chose, and a store error can quote
+        # the key it failed on.
+        logger.warning(
             "oauth-store: could not promote registration %s — it keeps its "
-            "provisional lifetime and the client will re-register",
-            client_id,
-            exc_info=True,
+            "provisional lifetime and the client will re-register: %s at %s",
+            redact_source(client_id),
+            exc_kind(exc),
+            exc_where(exc),
         )
         return
 
@@ -168,13 +172,14 @@ async def mark_provisional(client_store: Any, client_id: str) -> None:
             value=stored,
             ttl=PROVISIONAL_TTL_SECONDS,
         )
-    except Exception:
-        # nosemgrep: trentina-log-exception-text -- logsafe: ours
-        logger.warning(  # logsafe: ours — the store's error; client_id is server-issued
+    except Exception as exc:
+        # As in promote_registration: fingerprint and kind, never the text.
+        logger.warning(
             "oauth-store: could not set a provisional lifetime on "
-            "registration %s — it will not expire on its own",
-            client_id,
-            exc_info=True,
+            "registration %s — it will not expire on its own: %s at %s",
+            redact_source(client_id),
+            exc_kind(exc),
+            exc_where(exc),
         )
         return
 
@@ -257,9 +262,10 @@ async def cull_once(storage: Any) -> bool:
         return False
     try:
         await store.cull()
-    except Exception:
-        # nosemgrep: trentina-log-exception-text -- logsafe: ours
-        logger.warning("oauth-store: sweep failed", exc_info=True)  # logsafe: ours
+    except Exception as exc:
+        # A store error can name the record it failed on, whose key may be
+        # a client-chosen CIMD URL.
+        logger.warning("oauth-store: sweep failed: %s at %s", exc_kind(exc), exc_where(exc))
         return False
     return True
 
@@ -313,7 +319,9 @@ def _log_previous_sweeper_death() -> None:
         return
     exc = _cull_task.exception()
     if exc is not None:
-        logger.warning("oauth-store: sweeper died (%s) — restarting", exc)  # logsafe: ours
+        logger.warning(
+            "oauth-store: sweeper died (%s at %s) — restarting", exc_kind(exc), exc_where(exc)
+        )
 
 
 def reset_cull_task() -> None:

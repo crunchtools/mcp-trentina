@@ -16,10 +16,13 @@ from __future__ import annotations
 from typing import Any
 
 from ..defense import Provenance
-from ..errors import BlockedSourceError, QuarantineAgentError
+from ..errors import BlockedSourceError, QuarantineAgentError, SearchCanaryLeakedError
 from ..modes import Mode
 from ..quarantine.agent import resolve_grounding_urls, search_grounded
 from .judged import judge_and_deliver
+
+L0_CANARY_REASON = "L0 canary leaked"
+SEARCH_UNAVAILABLE = "search provider unavailable"
 
 
 def _document(text: str, sources: list[dict[str, Any]]) -> str:
@@ -36,8 +39,28 @@ async def web_search(
     """L0, redirect resolution, then the one judging path."""
     try:
         raw = await search_grounded(query, num_results)
+    except SearchCanaryLeakedError:
+        # The defense working: refused, audited blocked_defense. No mode
+        # would deliver an answer L0 wrote after leaking its prompt.
+        raise BlockedSourceError(
+            f"search:{query}",
+            L0_CANARY_REASON,
+            refusal={
+                "reason": L0_CANARY_REASON,
+                "mode": mode.value,
+                "flagged_by": "l0",
+                "alternatives": [],
+            },
+        ) from None
     except QuarantineAgentError as exc:
-        raise BlockedSourceError(f"search:{query}", str(exc)) from exc
+        # The provider breaking, audited backend_error (#292, #293). Until
+        # then it was a refusal whose reason was str(exc): provider and httpx
+        # text, an ollama base URL among it, handed to the agent and filed as
+        # the defense working. A constant, and `from None` so no traceback
+        # anywhere carries the original either.
+        raise QuarantineAgentError(
+            SEARCH_UNAVAILABLE, status_code=exc.status_code, retry_after=exc.retry_after
+        ) from None
 
     resolved = await resolve_grounding_urls(raw.get("sources", []))
     sources = [
