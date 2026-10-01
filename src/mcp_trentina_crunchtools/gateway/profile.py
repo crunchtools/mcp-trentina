@@ -1013,7 +1013,9 @@ class MatrixIngressConfig(BaseModel):
             "past the scan deadline, a required layer absent). withhold keeps "
             "every event where it is and strips its language, so the client "
             "stays in sync and the agent reads nothing unjudged. annotate "
-            "forwards the bytes with _trentina_warning, as before 0.43.0."
+            "forwards the bytes with _trentina_warning, as before 0.43.0, "
+            "except a body over the buffer or not a JSON object, which no "
+            "warning can ride on: both modes refuse that."
         ),
     )
     preprocess: MatrixPreProcessConfig = Field(
