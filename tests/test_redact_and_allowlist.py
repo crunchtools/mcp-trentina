@@ -112,7 +112,7 @@ class TestGrounding:
             "<body><div id='root'></div></body></html>"
         )
         with layers(env) as fakes:
-            fakes.fetch_url.return_value = (shell, "text/html")
+            fakes.fetch_url.return_value = (shell, "text/html", ())
             result = await call("fetch", Mode.REDACT, fakes)
         assert fakes.extract.await_count == 0
         assert "JavaScript" in result["content"]["nothing_to_extract"]
@@ -249,6 +249,39 @@ class TestAllowlist:
                 await call("read", Mode.BLOCK, fakes)
             assert fakes.classify.await_count == 0
             assert fakes.extract.await_count == 0
+
+    @pytest.mark.parametrize(
+        "hops",
+        [
+            ("https://evil.example.net/landing",),
+            ("https://evil.example.net/hop", "https://example.com/page2"),
+        ],
+    )
+    async def test_a_redirect_off_the_allowlist_is_not_allowlisted(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch, hops: tuple[str, ...]
+    ) -> None:
+        """#298: an open redirect on a trusted domain must not launder the page.
+
+        The trust check read only the URL the agent asked for, so a flagged
+        page served from anywhere was downgraded to redact and skipped the
+        blocklist. Every hop has to be on the allowlist now.
+        """
+        allowlist(env, monkeypatch)
+        with layers(env, detection=FLAGGED) as fakes:
+            fakes.fetch_url.return_value = (fakes.payload, "text/plain", hops)
+            with pytest.raises(BlockedSourceError):
+                await call("fetch", Mode.BLOCK, fakes)
+            assert fakes.extract.await_count == 0
+
+    async def test_a_redirect_within_the_allowlist_stays_allowlisted(
+        self, env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        allowlist(env, monkeypatch)
+        hops = ("https://www.example.com/moved", "https://example.com/page")
+        with layers(env, detection=FLAGGED) as fakes:
+            fakes.fetch_url.return_value = (fakes.payload, "text/plain", hops)
+            result = await call("fetch", Mode.BLOCK, fakes)
+        assert result["_trentina_warning"]["downgraded_to_redact"] is True
 
 
 class TestBlocklist:

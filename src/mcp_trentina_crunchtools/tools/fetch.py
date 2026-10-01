@@ -197,6 +197,23 @@ def _egress_refused(url: str, mode: Mode, exc: EgressRefusedError) -> BlockedSou
     )
 
 
+def _trusted_throughout(url: str, hops: tuple[str, ...]) -> bool:
+    """Whether the URL asked for AND every hop that answered it are trusted.
+
+    The allowlist was checked on the requested URL alone, so an open redirect
+    on a trusted domain laundered any page through it: flagged content went
+    to redact instead of a refusal and skipped the blocklist (#298). The body
+    comes from the last hop, which is the one that has to be trusted; every
+    hop is checked because an untrusted one chose where the fetch landed, and
+    the cost is one string comparison per redirect.
+    """
+    config = get_config()
+    # TRUST: allowlist(url, every hop) -> allowlisted=True. Tier: operator
+    # config (trust.json) over the egress guard's own record of each hop
+    # (egress.open_guarded), never a header or body the server wrote.
+    return all(config.is_trusted_domain(u) for u in (url, *hops))
+
+
 async def fetch_page(
     url: str, mode: Mode, prompt: str | None = None, preprocess: Any = None
 ) -> dict[str, Any]:
@@ -215,7 +232,7 @@ async def fetch_page(
     blocked = check_blocklist(url, mode)
 
     try:
-        content, content_type = await fetch_url(url)
+        content, content_type, hops = await fetch_url(url)
     except FetchError as exc:
         advisory = await _handle_fetch_error(url, exc)
         if advisory:
@@ -240,7 +257,7 @@ async def fetch_page(
         kind="url",
         ref=url,
         prompt=prompt,
-        allowlisted=get_config().is_trusted_domain(url),
+        allowlisted=_trusted_throughout(url, hops),
         blocklisted=blocked,
         domain=urlparse(url).hostname,
         provenance=page.provenance,
