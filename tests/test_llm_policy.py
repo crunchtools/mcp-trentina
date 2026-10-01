@@ -243,7 +243,9 @@ class TestUrlSourcesRefused:
 
 
 class TestStoredStateRefused:
-    @pytest.mark.parametrize("key", ["prompt", "conversation", "background"])
+    @pytest.mark.parametrize(
+        "key", ["prompt", "conversation", "background", "previous_response_id"]
+    )
     def test_responses(self, key: str) -> None:
         body = {"model": "gpt-5", "input": "x", key: {"id": "p"}}
         assert _reason(OA, "v1/responses", body) is Reason.STORED_STATE

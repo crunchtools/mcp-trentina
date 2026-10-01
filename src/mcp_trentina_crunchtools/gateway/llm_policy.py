@@ -19,8 +19,9 @@ anything unrecognized is refused, per API shape:
   keeps only the feature flags that change nothing about where data goes;
 - body keys are from a list, and a tool is a function the CALLER runs: any
   provider-run tool type, ``mcp_servers``, stored-state references
-  (``prompt``, ``conversation``, ``cachedContent``), and a content source the
-  provider would fetch by URL are refused with a closed reason code;
+  (``prompt``, ``conversation``, ``previous_response_id``,
+  ``cachedContent``), and a content source the provider would fetch by URL
+  are refused with a closed reason code;
 - a model that searches by itself (``:online``, ``*search*``, ``sonar``,
   ``perplexity/``, ``compound``) is refused, and a provider's
   ``allowed_models`` narrows the rest.
@@ -412,7 +413,6 @@ _RESPONSES_KEYS = frozenset(
         "max_tool_calls",
         "metadata",
         "parallel_tool_calls",
-        "previous_response_id",
         "reasoning",
         "service_tier",
         "store",
@@ -436,6 +436,9 @@ _RESPONSES_NAMED = {
     "prompt": Reason.STORED_STATE,
     "conversation": Reason.STORED_STATE,
     "background": Reason.STORED_STATE,
+    # Continues a response the provider stored; its context is not in this
+    # request, so it was never judged here.
+    "previous_response_id": Reason.STORED_STATE,
 }
 _RESPONSES_TOOLS = frozenset({"function", "custom"})
 _RESPONSES_ITEMS = frozenset(
