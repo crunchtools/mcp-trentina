@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any
 
-from ...errors import QuarantineAgentError
+from ...errors import MalformedResponseError, QuarantineAgentError
 
 if TYPE_CHECKING:
     import httpx
@@ -67,6 +68,43 @@ class Provider(ABC):
         Returns:
             ProviderResult with the model's text output and token counts.
         """
+
+
+def json_object(raw: bytes | str) -> dict[str, Any]:
+    """*raw* as a JSON object, or MalformedResponseError: never a parser exception.
+
+    An upstream that answers 200 with something else is a provider failure
+    like any other (#294), and the Q-Agent's fallback handles it as one.
+    """
+    try:
+        body = json.loads(raw)
+    except (ValueError, RecursionError) as exc:
+        raise MalformedResponseError("is not JSON") from exc
+    if not isinstance(body, dict):
+        raise MalformedResponseError("is not a JSON object")
+    return body
+
+
+def envelope(resp: httpx.Response) -> dict[str, Any]:
+    """A provider's response body as a JSON object. See ``json_object``."""
+    return json_object(resp.content)
+
+
+def dig(value: Any, *path: str | int) -> Any:
+    """``value[p0][p1]...``, or None the moment a step is the wrong shape."""
+    for step in path:
+        if isinstance(step, int):
+            if not isinstance(value, list) or not -len(value) <= step < len(value):
+                return None
+        elif not isinstance(value, dict):
+            return None
+        value = value[step] if isinstance(step, int) else value.get(step)
+    return value
+
+
+def count(value: Any) -> int:
+    """A token count from a usage block: an int, or 0."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
 def parse_retry_after(value: str | None, now: float | None = None) -> float | None:
