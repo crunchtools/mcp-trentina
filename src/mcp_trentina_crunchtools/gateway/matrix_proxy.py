@@ -14,13 +14,18 @@ through Trentina, unauthenticated and unattributed. Matrix's OWN auth (the
 access token in the Authorization header) still passes through untouched;
 this proxy never injects or reads Matrix credentials.
 
-**Scanning.** Message-bearing responses — ``/sync`` and room
-``/messages`` — are long-poll JSON, so they are buffered whole and judged
-by the shared pipeline (latency is noise against a 120s poll). Annotate
-mode: the body forwards byte-identical, a flagged response gains a root
+**Scanning.** Every 200 response is buffered whole and judged by the
+shared pipeline, except what ``_unscanned`` names (#296): the
+acknowledgements a write gets back, E2EE key traffic, and binary media.
+Deny by default, because the endpoints that carry prose are not the seven
+the proxy once listed: ``/members``, ``/state``, profiles and the room
+directory return display names, topics and names any user chose. A JSON
+body forwards byte-identical; a flagged one gains a root
 ``_trentina_warning`` key (Matrix clients ignore unknown root keys), and
-the flag is recorded as ``source_type="matrix_sync"``. Endpoints that
-carry no room content stream through untouched.
+the flag is recorded as ``source_type="matrix_sync"``. A body that is not
+JSON has no key to carry a warning: it is judged as text, and a flagged or
+unjudged one carries the ``X-Trentina-Warning`` header instead, or is
+refused when unjudged under ``withhold``.
 
 **Unjudged responses (#227).** A response no layer finished judging — over
 the admission cap, past the deadline, a required layer absent — is not a
@@ -43,6 +48,7 @@ import asyncio
 import hmac
 import json
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -54,10 +60,12 @@ from ..logsafe import exc_kind, exc_where, redact_source
 from ..matrix.keybackup import KeyBackupProvider
 from ..modes import gaps_of
 from ..preprocess import SelectionContext
+from ..quarantine.prompts import RISK_LEVELS
 from ..reserved import WARNING_KEY, strip_reserved, with_stripped
 from ..warning import build_warning
 from .context import profile_context
 from .drivers import build_preprocessors
+from .matrix_relation import withheld_relation
 from .proxy_utils import (
     PLAIN_TEXT,
     filter_response_headers,
@@ -92,23 +100,55 @@ MATRIX_HTTP_METHODS = [
     "OPTIONS",
 ]
 
-# Endpoints whose responses carry room content the agent will read. Event
-# and context fetches are exactly what reply-handling bots do; /search is a
-# POST that returns message bodies.
-_SCANNED_PATH_MARKERS = (
-    "/sync",
-    "/messages",
-    "/event/",
-    "/context/",
-    "/relations",
-    "/notifications",
-    "/search",
-)
+_CLIENT = r"_matrix/client/(?:v3|r0|v1|unstable(?:/[^/]+)?)/"
+_MEDIA = r"_matrix/(?:media/(?:v3|r0|v1)|client/v1/media)/"
 
-# Only buffer-and-scan bodies up to this size; a larger one forwards
-# unscanned WITH a logged warning rather than OOMing the gateway. /sync
-# responses are typically tens of KB; 32MB is far past any honest one.
+_ACKS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (method, re.compile(pattern))
+    for method, pattern in (
+        ("GET", r"_matrix/client/versions"),
+        ("PUT", _CLIENT + r"rooms/[^/]+/(?:send|state|redact|typing)/.+"),
+        ("PUT", _CLIENT + r"sendToDevice/[^/]+/[^/]+"),
+        ("PUT", _CLIENT + r"user/[^/]+/(?:rooms/[^/]+/)?(?:account_data|tags)/.+"),
+        ("PUT", _CLIENT + r"(?:profile|pushrules|directory)/.+"),
+        ("PUT", _CLIENT + r"presence/[^/]+/status"),
+        ("POST", _CLIENT + r"rooms/[^/]+/(?:receipt/.+|read_markers|join|leave|forget)"),
+        ("POST", _CLIENT + r"rooms/[^/]+/(?:invite|kick|ban|unban)"),
+        ("POST", _CLIENT + r"(?:join/[^/]+|createRoom|login|logout(?:/all)?|refresh)"),
+        ("POST", _CLIENT + r"keys/(?:upload|claim|signatures/upload|device_signing/upload)"),
+        ("POST", _CLIENT + r"user/[^/]+/filter"),
+        ("POST", _MEDIA + r"(?:upload|create)"),
+        ("PUT", _MEDIA + r"upload/.+"),
+        ("GET", _CLIENT + r"room_keys/.+"),
+        ("PUT", _CLIENT + r"room_keys/.+"),
+    )
+)
+"""Responses carrying nothing another user wrote, matched on the WHOLE path.
+
+The acknowledgement of a write (``{}``, or an event, room or content ID the
+homeserver minted), the auth flows, and one-time and backup keys
+(ciphertext: what it decrypts to is inside the agent's client, as the
+module docstring says). Anchored, so a room or event ID chosen to contain
+``/send/`` cannot carry a prose endpoint past the scan; a path not listed
+is judged. ``/keys/query`` is not here: its ``device_display_name`` is any
+user's choice. DELETE and OPTIONS are exempt by method: every DELETE in the
+Client-Server API answers ``{}`` or a count, and OPTIONS is CORS."""
+
+_MEDIA_DOWNLOAD = re.compile(_MEDIA + r"(?:download|thumbnail)/.+")
+
+_BINARY_TYPES = ("image/", "audio/", "video/", "application/octet-stream")
+"""Media types a media download forwards unjudged. No layer reads pixels or
+sound, and an E2EE attachment is ``application/octet-stream`` ciphertext. A
+text, JSON or markup attachment is judged like any other response."""
+
+# Only buffer-and-scan bodies up to this size; a larger one is refused,
+# under annotate too: it cannot be judged, stripped or annotated without
+# buffering it (#296). /sync responses are typically tens of KB; 32MB is
+# far past any honest one.
 _MAX_SCAN_BYTES = 32 * 1024 * 1024
+
+WARNING_HEADER = "x-trentina-warning"
+"""Where a non-JSON response's warning rides: a risk level, nothing else."""
 
 _FALLBACK_SCAN_DEADLINE_SECONDS = 20.0
 """Deadline used when a profile has no matrix_ingress config to read one from.
@@ -159,10 +199,6 @@ _CIPHER_KEYS = frozenset({"ciphertext", "session_key", "sender_key", "secret", "
 """The fields of an E2EE to-device event that hold ciphertext or key
 material. Only these, and everything under them, may exceed ``_TOKEN_MAX``;
 every other field of the event is walked like any other."""
-
-_RELATION_KEYS = ("rel_type", "event_id", "key", "m.in_reply_to", "is_falling_back")
-"""What a withheld event's ``m.relates_to`` keeps, so threads, replies and
-edits still point where they did."""
 
 _MAX_WALK_DEPTH = 64
 
@@ -253,8 +289,17 @@ def register_matrix_routes(
     )
 
 
-def _should_scan(method: str, path: str) -> bool:
-    return method in ("GET", "POST") and any(m in path for m in _SCANNED_PATH_MARKERS)
+def _unscanned(method: str, path: str, content_type: str) -> bool:
+    """Whether this response forwards unjudged. Everything else is judged."""
+    if method in ("DELETE", "OPTIONS"):
+        return True
+    if any(m == method and p.fullmatch(path) for m, p in _ACKS):
+        return True
+    return (
+        method == "GET"
+        and _MEDIA_DOWNLOAD.fullmatch(path) is not None
+        and content_type.strip().lower().startswith(_BINARY_TYPES)
+    )
 
 
 async def _proxy_matrix(
@@ -308,8 +353,10 @@ async def _proxy_matrix(
     resp_headers = filter_response_headers(list(resp.headers.items()))
     ct = resp.headers.get("content-type", "application/json")
 
-    if resp.status_code == 200 and _should_scan(request.method, path) and "json" in ct:
-        return await _scan_and_forward(resp, resp_headers, ct, profile, path)
+    if resp.status_code == 200 and not _unscanned(request.method, path, ct):
+        if "json" in ct.lower():
+            return await _scan_and_forward(resp, resp_headers, ct, profile, path)
+        return await _scan_text_and_forward(resp, resp_headers, ct, profile, path)
 
     async def stream_body() -> AsyncIterator[bytes]:
         try:
@@ -430,59 +477,34 @@ def reset_extractors() -> None:
     _PROVIDERS.clear()
 
 
-async def _buffer(
-    resp: httpx.Response,
-    headers: dict[str, str],
-    content_type: str,
-    profile: Profile,
-    path: str,
-) -> bytes | Response:
-    """The whole body, or the response to send instead when it is too big to judge."""
+async def _buffer(resp: httpx.Response, path: str) -> bytes | Response:
+    """The whole body, or the refusal to send when it is too big to judge.
+
+    Refused under annotate as well (#296). Forwarding it streamed, as this
+    once did, delivered bytes no layer read, with no warning on them and no
+    reserved key stripped: neither can be done to a body that is not held.
+    """
     chunks: list[bytes] = []
     size = 0
-    body_iter = resp.aiter_bytes()
-    async for chunk in body_iter:
-        size += len(chunk)
-        chunks.append(chunk)
-        if size > _MAX_SCAN_BYTES:
-            # Too big to judge: stop BUFFERING (the old guard kept
-            # accumulating and only skipped the scan — an OOM lever). Under
-            # withhold nothing unjudged forwards; under annotate, stream what
-            # we have plus the remainder and say so loudly.
-            if _withholds(profile):
+    try:
+        async for chunk in resp.aiter_bytes():
+            size += len(chunk)
+            if size > _MAX_SCAN_BYTES:
+                # Stop BUFFERING: the old guard kept accumulating and only
+                # skipped the scan, an OOM lever.
                 logger.warning(
                     "matrix_proxy: %s response exceeds %d bytes — refused, too large to judge",
                     redact_source(path),
                     _MAX_SCAN_BYTES,
                 )
-                await resp.aclose()
                 return Response(
                     content="Matrix response too large to judge",
                     status_code=502,
                     media_type=PLAIN_TEXT,
                 )
-            logger.warning(
-                "matrix_proxy: %s response exceeds %d bytes — forwarded unscanned",
-                redact_source(path),
-                _MAX_SCAN_BYTES,
-            )
-
-            async def passthrough() -> AsyncIterator[bytes]:
-                try:
-                    for buffered in chunks:
-                        yield buffered
-                    async for rest in body_iter:
-                        yield rest
-                finally:
-                    await resp.aclose()
-
-            return StreamingResponse(
-                passthrough(),
-                status_code=200,
-                headers=headers,
-                media_type=content_type,
-            )
-    await resp.aclose()
+            chunks.append(chunk)
+    finally:
+        await resp.aclose()
     return b"".join(chunks)
 
 
@@ -504,7 +526,7 @@ async def _scan_and_forward(
     """
     headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
 
-    buffered = await _buffer(resp, headers, content_type, profile, path)
+    buffered = await _buffer(resp, path)
     if isinstance(buffered, Response):
         return buffered
     body = buffered
@@ -587,9 +609,11 @@ async def _scan_and_forward(
     except Exception as exc:
         # A parse failure here is attacker-reachable (any room member can
         # ship pathological JSON), so "scan failed" must not mean "clean":
-        # fall back to judging the raw bytes as TEXT — L1/L2 still read a
-        # plaintext payload buried beside the poison — and forward with the
-        # failure on the record.
+        # the raw bytes are judged as TEXT for the record — L1/L2 still read
+        # a plaintext payload buried beside the poison — and what forwards
+        # is unjudged (#296): stripped and warned under annotate, withheld
+        # under withhold, and nothing at all when there is no object, since
+        # no client can parse that and nothing can be stripped from it.
         logger.error(  # the message may carry the payload (#262)
             "matrix_proxy: structured scan failed for %s — text-mode fallback: %s at %s",
             redact_source(path),
@@ -597,8 +621,17 @@ async def _scan_and_forward(
             exc_where(exc),
         )
         await _text_fallback_scan(body, profile, path)
-        # No events to withhold, and no client can parse it either.
-        return _respond(None, body, headers, content_type, None, withhold=_withholds(profile))
+        restripped = await _restrip(payload)
+        if restripped is None:
+            return _refused()
+        return _respond(
+            restripped,
+            body,
+            headers,
+            content_type,
+            with_stripped({"risk_level": "unknown", "scan_failed": True}, stripped),
+            withhold=_withholds(profile),
+        )
 
     extras = describe(view, cfg) if (view is not None and cfg is not None) else {}
     warning = with_stripped(build_warning(verdict, extras=extras), stripped)
@@ -632,6 +665,88 @@ async def _scan_and_forward(
         warning,
         withhold=gaps.blocking() and _withholds(profile),
     )
+
+
+def _refused() -> Response:
+    return Response(
+        content="Matrix response could not be judged", status_code=502, media_type=PLAIN_TEXT
+    )
+
+
+async def _restrip(payload: Any) -> dict[str, Any] | None:
+    """``payload`` with its reserved keys certainly gone, or None.
+
+    The failure being handled may have been the strip itself, so it runs
+    again; failing twice leaves nothing that may be forwarded.
+    """
+    if not isinstance(payload, dict):
+        return None
+    try:
+        await asyncio.to_thread(strip_reserved, payload)
+    except Exception as exc:
+        logger.error(
+            "matrix_proxy: reserved-key strip failed: %s at %s", exc_kind(exc), exc_where(exc)
+        )
+        return None
+    return payload
+
+
+async def _scan_text_and_forward(
+    resp: httpx.Response,
+    resp_headers: dict[str, str],
+    content_type: str,
+    profile: Profile,
+    path: str,
+) -> Response:
+    """Judge a body that is not JSON as text, then forward or refuse it.
+
+    No key in it can carry a warning, so a header does, holding only a risk
+    level. Flagged forwards, as a flagged JSON body does; unjudged forwards
+    only under annotate.
+    """
+    headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
+    buffered = await _buffer(resp, path)
+    if isinstance(buffered, Response):
+        return buffered
+    ingress = profile.matrix_ingress
+    deadline = (
+        ingress.preprocess.deadline_seconds
+        if ingress is not None
+        else _FALLBACK_SCAN_DEADLINE_SECONDS
+    )
+    flagged, unjudged, risk = False, True, "unknown"
+    try:
+        async with asyncio.timeout(deadline):
+            verdict = await defend(
+                buffered.decode("utf-8", errors="replace"),
+                source=f"matrix:{profile.name}:{path}",
+                source_type="matrix_sync",
+                defense=profile.defense,
+                stop_on_partial=_withholds(profile),
+            )
+        flagged, unjudged = verdict.flagged, gaps_of(verdict).blocking()
+        # A closed set, never L3 prose.
+        risk = verdict.risk_level if verdict.risk_level in RISK_LEVELS else "unknown"
+    except Exception as exc:
+        # TimeoutError too: either way no verdict was reached.
+        logger.error(  # the message may carry the payload (#262)
+            "matrix_proxy: text scan failed for %s: %s at %s",
+            redact_source(path),
+            exc_kind(exc),
+            exc_where(exc),
+        )
+    if unjudged and _withholds(profile):
+        return _refused()
+    if flagged or unjudged:
+        logger.warning(
+            "matrix_proxy: %s non-JSON response %s for profile=%s risk=%s",
+            "flagged" if flagged else "unjudged",
+            redact_source(path),
+            profile.name,
+            risk,
+        )
+        headers[WARNING_HEADER] = risk
+    return Response(content=buffered, status_code=200, headers=headers, media_type=content_type)
 
 
 def _withholds(profile: Profile) -> bool:
@@ -668,11 +783,10 @@ def _rebuild_room_event(node: dict[str, Any]) -> int:
     if not (isinstance(content, dict) and isinstance(node.get("type"), str)):
         return 0
     if "state_key" not in node and isinstance(node.get("event_id"), str):
-        relation = content.get("m.relates_to")
+        relation = withheld_relation(content.get("m.relates_to"))
         node["content"] = {"msgtype": "m.notice", "body": WITHHELD}
-        if isinstance(relation, dict):
-            kept = {k: relation[k] for k in _RELATION_KEYS if k in relation}
-            node["content"]["m.relates_to"] = kept
+        if relation is not None:
+            node["content"]["m.relates_to"] = relation
         if node["type"] == "m.room.encrypted":
             node["type"] = "m.room.message"
     return 1
@@ -761,11 +875,7 @@ def _respond(
     """
     if withhold:
         if not isinstance(payload, dict):
-            return Response(
-                content="Matrix response could not be judged",
-                status_code=502,
-                media_type=PLAIN_TEXT,
-            )
+            return _refused()
         warning = {**(warning or {}), "withheld_events": _withhold_events(payload)}
     if warning is not None and isinstance(payload, dict):
         payload[WARNING_KEY] = warning

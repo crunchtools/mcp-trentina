@@ -351,6 +351,33 @@ class TestUndecryptable:
         assert "could not be decrypted" in notice["content"]["body"]
         assert bridge._pending == {}
 
+    @pytest.mark.parametrize("how", ["left", "evicted", "gone"])
+    async def test_one_parked_in_a_room_no_longer_held_is_dropped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str
+    ) -> None:
+        """#296: parked before the room was refused or left, it is not
+        forwarded when its key arrives, nor as a notice after the deadline."""
+        seen: list[dict[str, Any]] = []
+
+        def gateway(request: httpx.Request) -> httpx.Response:
+            seen.append(json.loads(request.content))
+            return httpx.Response(200)
+
+        nio = FakeNio()
+        bridge = _bridge(tmp_path, nio, gateway)
+        await bridge.handle(ROOM, _megolm())
+        if how == "left":
+            bridge._left.add(ROOM)
+        elif how == "evicted":
+            bridge._evict.add(ROOM)
+        else:
+            nio.rooms.pop(ROOM)
+        nio.decrypted = _text_event()
+        monkeypatch.setattr(client_mod, "UNDECRYPTABLE_AFTER", -1.0)
+        await bridge._retry_pending()
+        assert seen == []
+        assert bridge._pending == {}
+
 
 class TestImportMautrix:
     """An adopted device keeps its identity and the keys it held."""
