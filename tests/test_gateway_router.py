@@ -18,7 +18,7 @@ from mcp_trentina_crunchtools.gateway.context import (
     get_current_profile,
     profile_context,
 )
-from mcp_trentina_crunchtools.gateway.errors import BackendCallError, BackendNotInProfileError
+from mcp_trentina_crunchtools.gateway.errors import BackendCallError
 from mcp_trentina_crunchtools.gateway.profile import (
     AuthConfig,
     Backend,
@@ -187,19 +187,21 @@ class TestRouter:
         assert resp["error"]["code"] == -32602
 
     async def test_tools_call_rejects_unknown_backend(self) -> None:
-        with pytest.raises(BackendNotInProfileError):
-            await route_jsonrpc(
-                _profile(),
-                {
-                    "jsonrpc": "2.0",
-                    "id": 7,
-                    "method": "tools/call",
-                    "params": {
-                        "name": f"mcp-unknown{NAMESPACE_SEP}some_tool",
-                        "arguments": {},
-                    },
+        # Refused like any unknown name (#293), not raised past the audit.
+        resp = await route_jsonrpc(
+            _profile(),
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {
+                    "name": f"mcp-unknown{NAMESPACE_SEP}some_tool",
+                    "arguments": {},
                 },
-            )
+            },
+        )
+        assert resp["error"]["code"] == -32602
+        assert resp["error"]["message"].startswith("Unknown tool")
 
     async def test_tools_list_aggregates_http_and_internal(self) -> None:
         """Mixed-backend tools/list: http + internal both filtered and namespaced."""

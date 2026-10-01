@@ -341,17 +341,47 @@ class TestSearchThroughTheOneJudgingPath:
     lives in test_mode_parity / test_mode_gaps; these are search's own edges."""
 
     @pytest.mark.parametrize("mode", ["block", "flag", "redact"])
-    async def test_an_l0_failure_refuses_in_every_mode(self, env: Path, mode: str) -> None:
-        """redact_search used to return {"error": ...} instead."""
+    async def test_an_l0_failure_raises_in_every_mode(self, env: Path, mode: str) -> None:
+        """redact_search used to return {"error": ...} instead.
+
+        A provider failure is the provider breaking, not the defense working
+        (#293): it raises as one, with none of the provider's text (#292).
+        """
         with layers(env) as fakes:
-            fakes.search_grounded.side_effect = QuarantineAgentError("HTTP 503")
+            fakes.search_grounded.side_effect = QuarantineAgentError(
+                "HTTP 503 from http://ollama.internal:11434", status_code=503
+            )
             call = {
                 "block": lambda: block_search("q"),
                 "flag": lambda: flag_search("q"),
                 "redact": lambda: redact_search("q", "Summarize."),
             }[mode]
-            with pytest.raises(BlockedSourceError):
+            with pytest.raises(QuarantineAgentError) as failed:
                 await call()
+        assert not isinstance(failed.value, BlockedSourceError)
+        assert str(failed.value) == "Q-Agent error: search provider unavailable"
+        assert failed.value.status_code == 503
+        assert failed.value.__cause__ is None
+
+    @pytest.mark.parametrize("mode", ["block", "flag", "redact"])
+    async def test_an_l0_canary_leak_refuses_in_every_mode(self, env: Path, mode: str) -> None:
+        from mcp_trentina_crunchtools.errors import SearchCanaryLeakedError
+
+        with layers(env) as fakes:
+            fakes.search_grounded.side_effect = SearchCanaryLeakedError()
+            call = {
+                "block": lambda: block_search("q"),
+                "flag": lambda: flag_search("q"),
+                "redact": lambda: redact_search("q", "Summarize."),
+            }[mode]
+            with pytest.raises(BlockedSourceError) as refused:
+                await call()
+        assert refused.value.refusal == {
+            "reason": "L0 canary leaked",
+            "mode": mode,
+            "flagged_by": "l0",
+            "alternatives": [],
+        }
 
     async def test_l0_output_is_recorded_as_model_output(self, env: Path) -> None:
         with (
