@@ -41,7 +41,7 @@ $ENGINE run -d --name td-gateway --network $NET --network-alias trentina --tmpfs
     -e QUARANTINE_MODEL=google/gemini-2.5-flash \
     "$IMAGE" --transport streamable-http --host 0.0.0.0 --port 8019 >/dev/null
 
-$ENGINE build -q -t trentina-demo-vhs "$DEMO" >/dev/null
+$ENGINE build -q -f "$DEMO/Containerfile" -t trentina-demo-vhs "$DEMO" >/dev/null
 VHS=( $ENGINE run --rm --network $NET -v "$DEMO:/demo:ro,z" -v "$OUT:/out:z"
       -e TQ_URL=http://trentina:8019/gateway/assistant/mcp -e TQ_TOKEN=demo-token )
 
