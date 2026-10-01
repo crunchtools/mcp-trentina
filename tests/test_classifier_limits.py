@@ -435,3 +435,42 @@ class TestAdmissionHelpers:
         """Bytes, not characters: two CJK characters are six bytes."""
         assert estimate_tokens("你好") == 6
         assert estimate_tokens("ab") == 2
+
+
+class TestSingleWindowEdge:
+    """A window holds WINDOW_CONTENT_TOKENS of content, not WINDOW_TOKENS (#298)."""
+
+    @pytest.mark.parametrize("extra", [1, WINDOW_SPECIAL_TOKENS])
+    def test_the_last_tokens_of_a_full_window_are_read(self, extra: int) -> None:
+        """511 and 512 tokens used to take the one-window path and lose 1-2."""
+        token_count = WINDOW_CONTENT_TOKENS + extra
+        seen: list[int] = []
+
+        import numpy as np
+
+        def record(_names: object, inputs: dict[str, Any]) -> list[object]:
+            seen.extend(int(i) for i in inputs["input_ids"][0])
+            return [np.array([[5.0, -5.0, -5.0]])]
+
+        def tokenize(_text: str, **kwargs: Any) -> dict[str, list[int]]:
+            """Truncate like the real tokenizer does when asked to."""
+            ids = list(range(token_count))
+            if kwargs.get("truncation") and kwargs.get("max_length"):
+                ids = [1, *ids[: int(kwargs["max_length"]) - WINDOW_SPECIAL_TOKENS], 2]
+            return {"input_ids": ids, "attention_mask": [1] * len(ids)}
+
+        with mocked_model(token_count=token_count) as session:
+            patch_tokenizer = patch(f"{_C}._tokenizer.side_effect", tokenize)
+            session.run.side_effect = record
+            with patch_tokenizer:
+                result = classify("x")
+
+        assert result is not None
+        assert result.truncated is False
+        assert set(range(token_count)) <= set(seen), "content tokens were never scanned"
+
+    def test_empty_text_still_gets_one_pass(self) -> None:
+        with mocked_model(token_count=0) as session:
+            result = classify("")
+        assert result is not None
+        assert session.run.call_count == 1
