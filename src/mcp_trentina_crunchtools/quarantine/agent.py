@@ -566,7 +566,9 @@ async def _output_flagged(strings: dict[str, str]) -> bool:
     from .classifier import classify_async
 
     for text in strings.values():
-        l1 = run_l1(text)
+        # Turn 2's output is as long as the model chose to make it; L1 on the
+        # loop stalls every profile for that long (#295).
+        l1 = await asyncio.to_thread(run_l1, text)
         if l1.stats.total_detections() and l1.stats.risk_level() in _BLOCKING_RISKS:
             return True
         reads = [text]
@@ -740,6 +742,8 @@ async def quarantine_generate(
 SEARCH_GROUNDING_TOOL: dict[str, Any] = {"google_search": {}}
 
 REDIRECT_TIMEOUT = 5.0
+# Wall clock for one redirect's HEAD, all hops (#295).
+REDIRECT_DEADLINE = 10.0
 GROUNDING_REDIRECT_HOSTS = frozenset({"vertexaisearch.cloud.google.com"})
 """Where grounding citations redirect from, matched on the exact hostname.
 
@@ -1142,9 +1146,11 @@ async def resolve_grounding_urls(
             resolved.append(source)
             continue
         try:
-            async with open_guarded("HEAD", uri, timeout=REDIRECT_TIMEOUT) as resp:
+            async with open_guarded(
+                "HEAD", uri, timeout=REDIRECT_TIMEOUT, deadline=REDIRECT_DEADLINE
+            ) as resp:
                 final_url = str(resp.url)
-        except (httpx.HTTPError, EgressRefusedError):
+        except (httpx.HTTPError, EgressRefusedError, TimeoutError):
             resolved.append({**source, "redirect_failed": "true"})
             continue
         resolved.append(

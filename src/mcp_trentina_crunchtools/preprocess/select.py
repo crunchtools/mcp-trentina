@@ -53,6 +53,7 @@ nested in an array.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from ..channels import Channel, Kind
@@ -86,7 +87,9 @@ class SelectProcessor:
         self.skip_sample_bytes = skip_sample_bytes
 
     async def extract(self, payload: Any, _ctx: SelectionContext) -> Selection:
-        return self.select(iter_leaves(payload))
+        # Linear in the payload, but a whole sync response on the loop stalls
+        # every profile for its length (#295).
+        return await asyncio.to_thread(lambda: self.select(iter_leaves(payload)))
 
     def select(
         self,

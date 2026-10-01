@@ -32,6 +32,7 @@ from mcp_trentina_crunchtools.gateway.profile import (
     AuthConfig,
     Profile,
 )
+from mcp_trentina_crunchtools.httpbody import MAX_BODY_BYTES
 from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
 
 
@@ -488,3 +489,16 @@ class TestBodyCap:
 
         assert resp.status_code == 413
         assert not calls
+
+    def test_an_oversized_forward_reply_is_refused_not_relayed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The forward target's reply is read under the same cap (#295)."""
+        _mock_forward_http(monkeypatch, body=b"x" * (MAX_BODY_BYTES + 1))
+        profile = _make_profile("alpha", alert_token="tok")
+        client = TestClient(_alert_app({"alpha": profile}))
+
+        resp = client.post("/alert/tok", json={"host": "web1", "output": "disk ok"})
+
+        assert resp.status_code == 502
+        assert resp.content == b"forward reply refused"

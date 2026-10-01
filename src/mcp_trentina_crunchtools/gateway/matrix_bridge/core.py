@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -36,7 +37,8 @@ import httpx
 
 from ...database import record_gateway_call
 from ...defense import defend_json
-from ...logsafe import redact_source
+from ...httpbody import request_capped
+from ...logsafe import exc_kind, redact_source
 from ...modes import gaps_of, refusal_reason
 from ...outcomes import Outcome
 from ...reserved import WARNING_KEY, strip_reserved, with_stripped
@@ -70,6 +72,8 @@ MEMBERS_UNREPORTED = "room members not reported"
 _AUDIT_BACKEND = "matrix_bridge"
 
 _BRIDGE_TIMEOUT = httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0)
+# Wall clock for one bridge call, the reply included (#295).
+_BRIDGE_DEADLINE = 90.0
 
 # An event slower than this is logged at WARNING, which production runs at, so
 # a stalled turn shows where its time went without turning on INFO.
@@ -579,18 +583,26 @@ class ProfileBridge:
         return True
 
     async def _bridge(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        # The bridge process is untrusted: its reply is read under the #267
+        # cap and a deadline (#295), and none of its text goes into the
+        # error, which callers log.
         try:
-            resp = await self._client.post(
+            resp, raw = await request_capped(
+                self._client,
+                "POST",
                 f"{self.cfg.bridge_url}{path}",
+                deadline=_BRIDGE_DEADLINE,
                 json=body,
                 headers={"Authorization": f"Bearer {self._bridge_token}"},
             )
-        except httpx.HTTPError as exc:
-            raise BridgeUnavailableError(f"bridge {path}: {exc}") from exc
+        except (httpx.HTTPError, TimeoutError, ValueError) as exc:
+            raise BridgeUnavailableError(f"bridge {path}: {exc_kind(exc)}") from exc
         if resp.status_code != 200:
-            raise BridgeUnavailableError(f"bridge {path} -> {resp.status_code} {resp.text[:200]}")
+            raise BridgeUnavailableError(f"bridge {path} -> {resp.status_code}")
         try:
-            reply: dict[str, Any] = resp.json()
+            reply = json.loads(raw)
         except ValueError as exc:
             raise BridgeUnavailableError(f"bridge {path}: not JSON") from exc
+        if not isinstance(reply, dict):
+            raise BridgeUnavailableError(f"bridge {path}: not a JSON object")
         return reply

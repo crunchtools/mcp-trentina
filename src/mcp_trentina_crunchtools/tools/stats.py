@@ -13,6 +13,7 @@ act on: ``classifier_model_path`` is an operator field.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from ..config import get_config
@@ -22,6 +23,8 @@ from ..database import (
     get_fanout,
     get_gateway_call_stats,
     get_recent_destinations,
+    opened_path,
+    snapshot_reader,
 )
 from ..gateway.errors import ScopeError
 from ..gateway.scope import CallerScope, require_caller
@@ -102,11 +105,22 @@ async def get_trentina_stats() -> dict[str, Any]:
     """
     try:
         scope = require_caller("quarantine_stats")
-        if not scope.is_operator:
-            return _agent_stats(scope)
     except ScopeError as exc:
         return {"scope": "none", "error": str(exc)}
+    # Every number below is a SQLite aggregate over the audit tables, about
+    # 2.7 s per million rows; on the loop that stalls every profile, and a
+    # denied call is a cheap way to add rows (#295).
+    return await asyncio.to_thread(_snapshot, scope, opened_path())
 
+
+def _snapshot(scope: CallerScope, path: str) -> dict[str, Any]:
+    """The caller's view, read on this worker's own connection."""
+    with snapshot_reader(path):
+        return _agent_stats(scope) if not scope.is_operator else _gateway_stats()
+
+
+def _gateway_stats() -> dict[str, Any]:
+    """The operator's gateway-wide view. Runs in a worker thread."""
     config = get_config()
     return {
         "scope": "gateway",
