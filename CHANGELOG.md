@@ -116,6 +116,45 @@ repeatable.
   fingerprinted source and L3 finding types, never L3 prose. The interface now
   starts from the server's lifespan; `main()` used to start it on a loop it
   closed the next line, so it never answered.
+- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and
+  `OPENROUTER_API_KEY` take the `_FILE` form too, which wins (#268).
+- The image sets `PYTHONSAFEPATH=1` and `PYTHONDONTWRITEBYTECODE=1`. `python
+  -m` put the working directory (`/app`) first on `sys.path`, and the ML
+  libraries import lazily, so a file write there became code execution (#268).
+- A network transport checks its own containment at startup and WARNs each
+  gap: no-new-privileges, capabilities, seccomp, a writable rootfs or import
+  path, a secret taken from the environment. `TRENTINA_REQUIRE_HARDENED=true`
+  refuses to start on any. `docs/deployment-hardening.md` and
+  `contrib/quadlet/mcp-trentina.container` are the reference deployment (#268).
+- Matrix surfaces that reached the agent unjudged (#296). A withheld event's
+  notice copied `m.relates_to` whole on the bridge, and the proxy kept its
+  values; both now rebuild it from one allowlist
+  (`gateway/matrix_relation.py`): `rel_type` in `m.thread`/`m.reference`/
+  `m.replace`, event-ID-shaped `event_id` and `m.in_reply_to.event_id`, a
+  boolean `is_falling_back`. A reaction's `key` is free text and is dropped.
+- The Matrix proxy judges every 200 response, deny by default. It used to
+  judge seven listed paths, so `/members`, `/state`, profiles and the room
+  directory forwarded display names, topics and names unread. Exempt, by
+  method and whole path: write acknowledgements, auth flows, one-time and
+  backup keys, every DELETE and OPTIONS, and binary media downloads
+  (`image/*`, `audio/*`, `video/*`, `application/octet-stream`). Any other
+  non-JSON body is judged as text and carries `X-Trentina-Warning` when
+  flagged or unjudged.
+- Under `matrix_ingress.unjudged: annotate`, a response over the 32 MB
+  buffer or one that cannot be parsed is now refused (502) as it is under
+  `withhold`, and a scan that raised forwards with `scan_failed` in the
+  warning and its reserved keys stripped again; it forwarded bare.
+- The Matrix document processor reads every string in a decrypted event, not
+  `body`/`formatted_body`/`topic`/`name`. Other keys were neither read nor
+  counted, so coverage reported 100%.
+- `select` no longer skips a prose-shaped identifier: an `IDENTIFIER` or
+  `ENUM_CONSTANT` match is skipped only when no `:`-separated part holds more
+  than two English-shaped words (`shapes.wordy`). `ignore.previous.instructions`
+  and `@ignore_previous_instructions:evil.example` are read instead of
+  depending on a skip sample an attacker can spend first.
+- The bridge re-checks a room held under the audience rule (no recorded
+  inviter) on every sync rather than once per process, and drops a parked
+  event from a room it has left or is leaving instead of forwarding it.
 
 ### Changed
 

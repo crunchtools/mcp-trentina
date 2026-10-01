@@ -108,6 +108,13 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if args.transport != "stdio":
+        # A network listener is a deployment; a stdio child of a desktop
+        # client is not, and none of the container checks apply to it.
+        from .posture import check_startup_posture
+
+        check_startup_posture()
+
     from .database import get_db
     from .server import mcp
 
@@ -339,7 +346,12 @@ def _ready_to_serve(llm_providers: Mapping[str, Any]) -> None:
     and why ``/proc/self/environ`` still holds them all.
     """
     from .gateway.envscrub import scrub_startup_secrets
+    from .gateway.loader import secret_env_names
+    from .posture import FILE_FORM_SECRETS, check_secret_sources
 
+    # Before the scrub, which reads nothing back, and after every secret has
+    # been read, so the names are complete.
+    check_secret_sources(secret_env_names() - set(FILE_FORM_SECRETS))
     _warm_classifier()
     scrub_startup_secrets(provider.api_key_env for provider in llm_providers.values())
 
