@@ -68,6 +68,16 @@ repeatable.
 
 - `llm_providers` keys take the `_FILE` form like every other secret, so a
   provider key no longer has to sit in the process environment (#268).
+- Cross-profile channels, second sweep (#291). Each was shared state one
+  profile could move and another could time or read: the proxied-response
+  verdict cache is keyed on the profile; DNS lookups take one of the
+  caller's 4 slots as well as one of 64 gateway-wide (was 16, shared); an
+  agent's `reconnect_backend` rebuilds only its own aggregate; session
+  counts in the journal are the subject profile's own, and the stale-session
+  explanation is scoped to the route's profile; the L3 limiter is keyed by
+  (provider, model, key fingerprint); and L2 hands a freed slot to waiting
+  profiles in turn instead of one FIFO. The residuals and their rates are
+  in `docs/profiles.md`.
 
 ### Changed
 

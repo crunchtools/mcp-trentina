@@ -490,7 +490,7 @@ async def _handle_get(
             "gateway: SSE stream rejected — session=%s profile=%s not found: %s [%s]",
             redact_source(session_id),
             profile_name,
-            sessions.explain_missing(session_id, None),
+            sessions.explain_missing(session_id, profile_name),
             _client_desc(request),
         )
         return _session_gone(sessions, session_id, profile_name, None)
@@ -577,7 +577,7 @@ async def _handle_delete(
             "gateway: DELETE rejected — session=%s profile=%s not found: %s [%s]",
             redact_source(session_id),
             profile_name,
-            sessions.explain_missing(session_id, None),
+            sessions.explain_missing(session_id, profile_name),
             _client_desc(request),
         )
         return _session_gone(sessions, session_id, profile_name, None)
@@ -652,20 +652,20 @@ async def _handle_post(
                 "gateway: re-initialize over stale session=%s profile=%s: %s [%s]",
                 redact_source(session_id),
                 profile_name,
-                sessions.explain_missing(session_id, None),
+                sessions.explain_missing(session_id, profile_name),
                 _client_desc(request),
             )
             session_id = ""
         elif session is None:
             logger.warning(
                 "gateway: DISCONNECT — session=%s profile=%s rejected on "
-                "method=%s: %s [%s] census=%s",
+                "method=%s: %s [%s] active=%d",
                 redact_source(session_id),
                 profile_name,
                 redact_source(body.get("method", "")),
-                sessions.explain_missing(session_id, None),
+                sessions.explain_missing(session_id, profile_name),
                 _client_desc(request),
-                sessions.census(),
+                sessions.active(profile_name),
             )
             return _session_gone(sessions, session_id, profile_name, body.get("id"))
         elif session is not None and session.profile_name != profile_name:

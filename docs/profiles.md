@@ -219,6 +219,36 @@ the per-URL tool-list cache, which profiles share, alone and returns a
 constant body. It used to report which of the caller's backends were still
 cached, and one profile could set that pattern for another to read.
 
+The second sweep (#291) closed five more, each shared state one profile
+could move and another could time or read:
+
+- The proxied-response verdict cache is keyed on the profile. A hit answers
+  in milliseconds and a miss in seconds, so a shared key told B which of N
+  objects A had fetched.
+- DNS lookups for fetch take one of the caller's 4 slots as well as one of
+  64 gateway-wide. One profile pointing lookups at a black-holed name server
+  used to fill all 16 and refuse every profile's fetch.
+- An agent's `reconnect_backend` refreshes the backend's tool list in place
+  and rebuilds only its own aggregate. It used to drop every profile's
+  aggregate on that URL, which moved their `surface.built_at`.
+- Session counts in the journal are the subject profile's own. Every
+  session event used to log every profile's count, and the roster with it.
+- The L3 limiter is per (provider, model, key fingerprint), because a
+  provider throttles per key. One profile driving its own key into 429s
+  paused every profile on that model, and block refused their content.
+- L2 hands a freed scan slot to waiting profiles in turn. One FIFO queue
+  made every other profile wait behind one agent's whole backlog.
+
+What remains, with its rate:
+
+| Residual | Bound |
+|---|---|
+| Circuit breaker, healed by any profile holding the URL (#263) | 1 bit per probe, only for profiles sharing that backend |
+| Tool-description verdicts, shared across profiles | 0: the text is the backend's tools/list, which no agent writes through the gateway |
+| DNS backstop | Takes 16 profiles stalling 4 lookups each; then 1 bit per stalled lookup's lifetime (the OS resolver timeout) |
+| L2 turn-taking | A backlog delays another profile by at most one scan per profile waiting, each under `admission_tokens`; under 1 bit per scan, and noisy |
+| L3 provider quota on a shared key | Profiles given the same `llm_keys` value share the provider's quota for it, which no gateway can split. Give each agent its own key |
+
 Two things a role does not change. Evicting a cache or resetting a circuit is
 keyed by backend URL, so doing it to a backend you do hold is felt by every
 profile that shares it — that is correctness, not disclosure, and it costs a

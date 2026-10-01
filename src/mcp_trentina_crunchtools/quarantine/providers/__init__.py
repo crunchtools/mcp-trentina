@@ -8,7 +8,7 @@ from pydantic import SecretStr
 
 from ...config import get_config
 from ...errors import QuarantineAgentError
-from .base import Provider, ProviderResult
+from .base import Provider, ProviderResult, key_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,8 @@ def get_provider(
             )
 
     provider.judge = (resolved_provider, provider.model)
+    # An override is a profile's own key; "global" is the env key, one per provider.
+    provider.key_fingerprint = key_fingerprint(api_key.get_secret_value()) if api_key else "global"
     _provider_cache[cache_key] = provider
     logger.info(
         "provider: initialized %s (model=%s, key=%s)",
