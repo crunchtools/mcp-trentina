@@ -15,7 +15,8 @@ The reviewer sees the fixture as ``case_NN.py`` with no path: the real file
 name says which cases are controls, and the history (which issue fixed what)
 lives in EVAL.yml's ``source``, never in the fixture.
 
-Exits 0 when every case passes, 1 on any miss or any control flagged, and 2
+Exits 0 when every case passes; 1 on any miss, a flagged control, a spurious
+or ungraded finding on a known-bad case, or a line outside the file; and 2
 when it cannot run (no ``ANTHROPIC_API_KEY``, bad EVAL.yml). httpx only; no
 SDK dependency. Not collected by pytest: it spends money, so CI runs it as its
 own job, and only when the key is set.
