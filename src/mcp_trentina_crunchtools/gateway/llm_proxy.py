@@ -78,7 +78,7 @@ async def close_llm_client() -> None:
 class LlmProvider(BaseModel):
     """One LLM provider driver entry."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     enabled: bool = Field(default=False)
     upstream: str = Field(

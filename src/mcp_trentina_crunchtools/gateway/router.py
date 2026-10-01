@@ -18,6 +18,7 @@ forwards. Only a name tools/list serves resolves: since 0.43.0 the
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import copy
 import functools
 import json
@@ -62,7 +63,7 @@ from .compress import (
 )
 from .context import profile_context
 from .destination import Destination, destination_of
-from .errors import BackendCallError, BackendNotInProfileError, BackendResponseTooLargeError
+from .errors import BackendCallError, BackendResponseTooLargeError
 from .filter import filter_tools
 from .guards import check_parameter_guards, check_response_guards
 from .ingress_defense import scan_tool_list, scan_tool_response
@@ -116,6 +117,14 @@ _rebuild_task: asyncio.Future[None] | None = None
 # Per profile, not global (#137): one counter meant a tenant's cache_flush
 # discarded every neighbour's in-flight build as well.
 _cache_generation: dict[str, int] = {}
+
+# Whether the tools/call running in this task has written its audit row.
+# ``_route_tools_call`` answers an exception that escaped every audited path
+# with a gateway_error row (#293), and must not write a second row for a call
+# whose own path recorded it before re-raising.
+_call_audited: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "trentina_call_audited", default=False
+)
 
 
 def _bump(profile_name: str) -> None:
@@ -214,6 +223,7 @@ def _audit(
     normalized: dict[str, str] | None = None,
     destination: Destination | None = None,
 ) -> None:
+    _call_audited.set(True)
     # The audit must never fail the call it records, and sqlite3.Error is not
     # all a write can raise (a closed connection, a thread-affinity
     # ProgrammingError, a full disk surfacing as OSError). A lost row is
@@ -283,6 +293,11 @@ def _refusal_text(refusal: dict[str, Any]) -> str:
         if alternatives
         else "No other mode is available under your policy."
     )
+    advisory = refusal.get("security_advisory")
+    if isinstance(advisory, dict) and advisory.get("do_not"):
+        # A fetch advisory's instruction is the point of it (#293): a client
+        # that drops error.data must still read it.
+        tail = f"{tail} {advisory['do_not']}"
     return f"[TRENTINA] Refused ({refusal.get('reason', 'defense')}). {tail}"
 
 
@@ -323,12 +338,19 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
         JSON-RPC 2.0 response body.
 
     Raises:
-        BackendNotInProfileError: tools/call targets a backend not present in
-            the profile. The caller maps this to a JSON-RPC error -32602.
+        Exception: only what ``_route_tools_call`` re-raises after auditing
+            it as a gateway_error; the caller answers it with a 500.
     """
     method = request.get("method", "")
     req_id = request.get("id")
-    params = request.get("params") or {}
+    # Only an absent (or null) params defaults: `[]` or `0` is a malformed
+    # call, and `or {}` would have quietly made it a well-formed one.
+    params = request.get("params")
+    if params is None:
+        params = {}
+    if not isinstance(params, dict) and method != "tools/call":
+        # tools/call answers this itself, so the refusal is audited (#293).
+        return _err(req_id, JSONRPC_INVALID_PARAMS, "params must be an object")
 
     if method == "initialize":
         # The mode explanation is said here once, not on every tool (#198).
@@ -534,16 +556,76 @@ async def _build_profile_tools(
     return aggregated
 
 
-async def _route_tools_call(
-    profile: Profile, req_id: Any, params: dict[str, Any]
-) -> dict[str, Any]:
+async def _route_tools_call(profile: Profile, req_id: Any, params: Any) -> dict[str, Any]:
+    """``_tools_call``, with one audit row guaranteed for every call (#293).
+
+    Every path inside writes its own row. An exception that escapes them all
+    is ours, so it is recorded as gateway_error before it propagates to the
+    HTTP edge's 500: a probe that crashes the router is the probe the audit
+    most needs to see.
+    """
+    if not isinstance(params, dict):
+        _audit(profile.name, "", "", Outcome.DENIED_GUARD, 0, "params must be an object")
+        return _err(req_id, JSONRPC_INVALID_PARAMS, "params must be an object")
+    token = _call_audited.set(False)
+    t0 = time.monotonic()
+    try:
+        return await _tools_call(profile, req_id, params)
+    except Exception as exc:
+        if not _call_audited.get():
+            _audit(
+                profile.name,
+                "",
+                redact_source(params.get("name")),
+                Outcome.GATEWAY_ERROR,
+                int((time.monotonic() - t0) * 1000),
+                f"unhandled: {exc_kind(exc)}",
+            )
+        raise
+    finally:
+        _call_audited.reset(token)
+
+
+def _resolve_target(profile: Profile, served_name: object) -> tuple[str, str, Backend] | None:
+    """The (backend name, tool, backend) a served name routes to in this profile."""
+    if not isinstance(served_name, str):
+        return None
+    resolved = resolve_name(profile, served_name)
+    if resolved is None or not resolved[1]:
+        return None
+    backend_name, tool_name = resolved
+    # None for an issued short name whose backend has since left the profile.
+    backend = profile.backends.get(backend_name)
+    return (backend_name, tool_name, backend) if backend is not None else None
+
+
+def _unknown_tool(profile: Profile, req_id: Any, served_name: object) -> dict[str, Any]:
+    """Refuse a name this profile was never served, and audit it (#269, #293).
+
+    One answer for every way a name fails to resolve — never issued, a long
+    form naming a backend outside the profile, an issued name whose backend
+    has since left it — so the refusal says nothing about which. The name is
+    the caller's, so the row carries its fingerprint, not its text.
+    """
+    _audit(
+        profile.name,
+        "",
+        redact_source(served_name),
+        Outcome.DENIED_ALLOWLIST,
+        0,
+        "unknown tool",
+    )
+    return _err(req_id, JSONRPC_INVALID_PARAMS, f"Unknown tool {served_name!r}")
+
+
+async def _tools_call(profile: Profile, req_id: Any, params: dict[str, Any]) -> dict[str, Any]:
     """Parse the namespaced tool name, validate routing, forward to the backend.
 
     Re-applies the allowlist on call as defense in depth: even if a consumer
     somehow learned about a tool name, calling it must still match the filter
     that produced their tools/list view.
 
-    Every path here is audited, including the two denials. Leaving those
+    Every path here is audited, including every denial. Leaving those
     unrecorded made a consumer probing tools outside its allowlist, or
     repeatedly tripping parameter guards, completely invisible — the exact
     signal you want for spotting a misbehaving or hijacked consumer, and the
@@ -558,32 +640,13 @@ async def _route_tools_call(
     column with tool-level errors.
     """
     served_name = params.get("name", "")
-    arguments = params.get("arguments") or {}
+    # Only an absent or null `arguments` defaults; a falsy `[]` stays malformed.
+    arguments = {} if params.get("arguments") is None else params["arguments"]
 
-    resolved = resolve_name(profile, served_name)
-    if resolved is None and not profile.short_names and NAMESPACE_SEP in served_name:
-        # A long-form name, as this profile serves them, for a backend it does not hold.
-        raise BackendNotInProfileError(
-            f"backend {served_name.partition(NAMESPACE_SEP)[0]!r} not in profile {profile.name!r}"
-        )
-    if resolved is None or not resolved[1]:
-        # Audited like a denial (#269): a consumer probing for names it was
-        # never served is the signal the #87 denial rows exist for. The name
-        # is the caller's, so the row carries its fingerprint, not its text.
-        _audit(
-            profile.name,
-            "",
-            redact_source(served_name),
-            Outcome.DENIED_ALLOWLIST,
-            0,
-            "unknown tool",
-        )
-        return _err(req_id, JSONRPC_INVALID_PARAMS, f"Unknown tool {served_name!r}")
-    backend_name, tool_name = resolved
-
-    backend = profile.backends.get(backend_name)
-    if backend is None:
-        raise BackendNotInProfileError(f"backend {backend_name!r} not in profile {profile.name!r}")
+    target = _resolve_target(profile, served_name)
+    if target is None:
+        return _unknown_tool(profile, req_id, served_name)
+    backend_name, tool_name, backend = target
 
     # From the arguments as sent, so a call refused below still records where
     # it was pointed (#266): an agent probing destinations is the signal.
@@ -600,6 +663,14 @@ async def _route_tools_call(
             message,
             destination=dest,
         )
+        return _err(req_id, JSONRPC_INVALID_PARAMS, message)
+
+    if not isinstance(arguments, dict):
+        # After the allowlist, so a probe of a forbidden tool still audits as
+        # that. Every guard below reads a mapping; before #293 a list here
+        # raised AttributeError and came back a 500 with no row.
+        message = "arguments must be an object"
+        _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, message)
         return _err(req_id, JSONRPC_INVALID_PARAMS, message)
 
     # The mode resolves BEFORE any guard reads it: an omitted mode becomes
@@ -827,7 +898,7 @@ async def _deliver(
             tool_name,
             Outcome.GATEWAY_ERROR,
             int((time.monotonic() - t0) * 1000),
-            f"assembly failed: {exc}",
+            f"assembly failed: {exc_kind(exc)}",
             destination=destination,
         )
         raise

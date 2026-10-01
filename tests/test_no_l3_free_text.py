@@ -95,10 +95,12 @@ async def test_the_4xx_advisory_carries_no_l3_prose(env: Path) -> None:
                 "https://example.com/", "gone", status_code=404, error_body=PAGE
             ),
         ),
+        pytest.raises(BlockedSourceError) as refused,
     ):
-        result = await flag_fetch("https://example.com/")
-    assert "security_advisory" in result
-    assert ECHO not in json.dumps(result)
+        await flag_fetch("https://example.com/")
+    assert "security_advisory" in refused.value.refusal
+    assert ECHO not in json.dumps(refused.value.refusal)
+    assert ECHO not in str(refused.value)
 
 
 async def test_the_gateway_warning_carries_no_l3_prose(env: Path) -> None:

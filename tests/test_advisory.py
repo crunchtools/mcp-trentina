@@ -1,8 +1,8 @@
 """Tests for the security advisory system.
 
-Validates that suspicious HTTP patterns are converted to advisory
-responses instead of errors, preventing the agent from falling back
-to less-secure tools like curl/wget.
+Validates that suspicious HTTP patterns become a refusal carrying an
+advisory, which tells the agent not to fall back to curl/wget, and which
+the gateway audits as ``blocked_defense`` (#293), never ``ok``.
 """
 
 from __future__ import annotations
@@ -13,7 +13,11 @@ import httpx
 import pytest
 
 from mcp_trentina_crunchtools.client import fetch_url
-from mcp_trentina_crunchtools.errors import FetchError, UnsupportedContentTypeError
+from mcp_trentina_crunchtools.errors import (
+    BlockedSourceError,
+    FetchError,
+    UnsupportedContentTypeError,
+)
 from mcp_trentina_crunchtools.tools.fetch import (
     _build_advisory,
     _handle_content_type_error,
@@ -103,9 +107,8 @@ class TestHandleFetchError:
         )
         result = await _handle_fetch_error("https://evil.com/", exc)
         assert result is not None
-        assert result["security_advisory"]["pattern"] == "suspicious_http_415"
-        assert result["content"] is None
-        assert "curl" in result["security_advisory"]["do_not"]
+        assert result["pattern"] == "suspicious_http_415"
+        assert "curl" in result["do_not"]
 
     @pytest.mark.asyncio
     async def test_406_returns_advisory(self) -> None:
@@ -117,7 +120,7 @@ class TestHandleFetchError:
         )
         result = await _handle_fetch_error("https://evil.com/", exc)
         assert result is not None
-        assert result["security_advisory"]["pattern"] == "suspicious_http_406"
+        assert result["pattern"] == "suspicious_http_406"
 
     @pytest.mark.asyncio
     async def test_404_returns_none(self) -> None:
@@ -169,7 +172,7 @@ class TestHandleFetchError:
             }
             result = await _handle_fetch_error("https://evil.com/", exc)
             assert result is not None
-            assert result["security_advisory"]["pattern"] == ("adversarial_trajectory_guidance")
+            assert result["pattern"] == "adversarial_trajectory_guidance"
 
     @pytest.mark.asyncio
     async def test_403_with_clean_body_returns_none(self) -> None:
@@ -212,15 +215,13 @@ class TestHandleContentTypeError:
                 },
             ],
         )
-        result = _handle_content_type_error("https://evil.com/", exc)
-        assert result["security_advisory"]["pattern"] == "redirect_to_binary"
-        advisory = result["security_advisory"]
+        advisory = _handle_content_type_error(exc)
+        assert advisory["pattern"] == "redirect_to_binary"
         assert advisory["redirect_hops"] == 2
         # The hops are counted, never echoed: the URLs and content type are
         # attacker-chosen and would reach the agent unscanned.
         assert "evil.com/payload.zip" not in str(advisory)
         assert "redirect_chain" not in advisory
-        assert result["content"] is None
 
 
 class TestScanErrorBody:
@@ -297,20 +298,11 @@ class TestBuildAdvisory:
     """Verify advisory response structure."""
 
     def test_advisory_shape(self) -> None:
-        result = _build_advisory(
-            "https://evil.com/",
+        advisory = _build_advisory(
             pattern="test_pattern",
             what_happened="Something bad.",
             why_suspicious="Because it is.",
         )
-        assert result["content"] is None
-        assert result["scan"]["disposition"] == "refused"
-        assert result["scan"]["layers"] == {
-            "l1": "not_applicable",
-            "l2": "not_applicable",
-            "l3": "not_applicable",
-        }, "the URL was refused on its shape; no layer ever saw it"
-        advisory = result["security_advisory"]
         assert advisory["level"] == "critical"
         assert advisory["pattern"] == "test_pattern"
         assert "curl" in advisory["do_not"]
@@ -318,21 +310,20 @@ class TestBuildAdvisory:
 
     def test_advisory_includes_pipeline_scan(self) -> None:
         scan = {"l2_label": "MALICIOUS", "l2_score": 0.9}
-        result = _build_advisory(
-            "https://evil.com/",
+        advisory = _build_advisory(
             pattern="test",
             what_happened="test",
             why_suspicious="test",
             pipeline_scan=scan,
         )
-        assert result["security_advisory"]["pipeline_scan"] == scan
+        assert advisory["pipeline_scan"] == scan
 
 
 class TestSafeFetchAdvisory:
-    """Verify block_fetch returns advisories instead of errors."""
+    """block_fetch refuses with the advisory, rather than failing or delivering."""
 
     @pytest.mark.asyncio
-    async def test_415_returns_advisory_not_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_415_refuses_with_the_advisory(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _mock_http_status(monkeypatch, status=415, body=b"Unsupported")
 
         with (
@@ -352,10 +343,16 @@ class TestSafeFetchAdvisory:
             mock_config.return_value.has_api_key = False
             mock_config.return_value.is_trusted_domain.return_value = False
 
-            result = await block_fetch("https://evil.example.com/")
+            with pytest.raises(BlockedSourceError) as refused:
+                await block_fetch("https://evil.example.com/")
 
-            assert result["content"] is None
-            assert result["security_advisory"]["pattern"] == "suspicious_http_415"
+        refusal = refused.value.refusal
+        assert refusal["reason"] == "security advisory (suspicious_http_415)"
+        assert refusal["flagged_by"] == "advisory"
+        assert refusal["alternatives"] == []
+        assert refusal["security_advisory"]["pattern"] == "suspicious_http_415"
+        # A client reading only the text still gets the instruction.
+        assert "curl" in str(refused.value)
 
     @pytest.mark.asyncio
     async def test_404_still_raises_error(self, monkeypatch: pytest.MonkeyPatch) -> None:

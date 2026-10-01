@@ -33,13 +33,12 @@ from .auth import verify_bearer, verify_oauth
 from .errors import (
     AuthError,
     BackendCallError,
-    BackendNotInProfileError,
     GatewayError,
     OAuthForbiddenError,
     ProfileNotFoundError,
 )
 from .google_verifier import token_digest
-from .router import JSONRPC_INTERNAL_ERROR, JSONRPC_INVALID_PARAMS, route_jsonrpc
+from .router import JSONRPC_INTERNAL_ERROR, route_jsonrpc
 from .sessions import SessionRegistry, session_registry
 
 if TYPE_CHECKING:
@@ -673,14 +672,6 @@ async def _handle_post(
 
     try:
         response = await route_jsonrpc(profile, body)
-    except BackendNotInProfileError as exc:
-        return JSONResponse(
-            {
-                "jsonrpc": "2.0",
-                "id": body.get("id"),
-                "error": {"code": JSONRPC_INVALID_PARAMS, "message": str(exc)},
-            }
-        )
     except ProfileNotFoundError:
         return _plain(404, "Not Found")
     except BackendCallError as exc:

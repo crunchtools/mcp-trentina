@@ -92,6 +92,23 @@ class TestTheCoverageChange:
         assert view.skipped_chars.get(SkipReason.OPAQUE, 0) > 0
 
 
+    async def test_every_key_of_a_decrypted_event_is_read(self) -> None:
+        """#296: not only body, formatted_body, topic and name. A key outside
+        that list was neither read nor counted, so coverage said 100%."""
+        v = Vectors()
+        event = v.encrypted_event(
+            "hi",
+            extra={
+                "m.relates_to": {"rel_type": "m.thread", "event_id": "$r", "note": INJECTION},
+                "org.example.ext": {"text": INJECTION.upper()},
+            },
+        )
+        view = await _extractor(await _provider(v)).extract(v.sync_response(event), CTX)
+        assert INJECTION in view.segments
+        assert INJECTION.upper() in view.segments
+        assert view.accounts()
+
+
 class TestTheGapIsReported:
     async def test_unreadable_events_are_recorded_by_identity(self) -> None:
         v = Vectors()

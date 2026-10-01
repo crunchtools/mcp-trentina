@@ -256,6 +256,13 @@ re-probe. And a profile can never apply its **own** role change: an agent
 reload that finds its `role` moved on disk refuses and changes nothing, so a
 promotion costs an operator reload or a restart.
 
+A reload refused because the file does not validate tells an agent only
+`profiles file did not validate; ask the operator` (#292). The parse error
+quotes the file, other profiles included, so only the operator gets it. The
+journal gets the error's class and where it was raised, never its message, and
+the profile models are built with pydantic's `hide_input_in_errors`, so not
+even the operator's copy echoes an inline value such as an `llm_keys` secret.
+
 Because every profile model is `extra="forbid"`, a `role:` key against a
 gateway older than this feature is a hard load error. Upgrade the gateway
 first — everything defaults to `agent` — then add the key.

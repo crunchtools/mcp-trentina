@@ -110,6 +110,24 @@ calls the gateway refused. A consumer repeatedly probing tools outside its
 allowlist is a signal worth alerting on — it can indicate a misconfigured
 client or a hijacked agent. These were previously not recorded at all.
 
+Every `tools/call` writes exactly one row (#293), including the ones that
+never reach a backend:
+
+- A name the profile was never served, a `<backend>__<tool>` naming a backend
+  outside it, and an issued short name whose backend has since left it are
+  all `denied_allowlist`, with `backend` empty and `tool` the name's
+  fingerprint (`sha256:<12> len=<n>`), never its text. The caller gets the
+  same `Unknown tool` refusal for each, so it cannot tell which.
+- `params` or `arguments` that are not a JSON object are `denied_guard`.
+- An exception that escapes every audited path is `gateway_error`, with
+  `error_message` naming its class only, before the HTTP edge answers 500.
+
+A fetch advisory (a suspicious 415/406, a 4xx body the pipeline flags, a
+redirect to a binary) is a refusal and audits as `blocked_defense`; until
+#293 it was a successful result with no content, audited `ok`. A search whose
+provider failed is `backend_error`; one whose L0 leaked its canary is
+`blocked_defense`.
+
 `denied_response_guard` is the one denial that still costs an upstream call:
 the backend answered and the answer was withheld here. A rising rate on it
 means an agent keeps asking for material its profile forbids — see

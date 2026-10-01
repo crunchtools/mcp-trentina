@@ -56,7 +56,8 @@ sender's display name and the room's name and topic. A redaction is mirrored
 without being judged, because it carries nothing across: its reason text is
 dropped, and it only removes an event that was judged when it arrived. Under `block` a flagged or incompletely judged event becomes a
 `[trentina] withheld: <reason>` notice from the appservice bot, keeping its
-thread or reply; a withheld reaction is dropped. Under `flag` it is delivered
+thread or reply through an allowlisted copy of its relation, never the
+relation as sent (#296); a withheld reaction is dropped. Under `flag` it is delivered
 with `_trentina_warning` in its content. **Outbound**, only the agent's own
 events are carried; a refused one is not sent, and the agent gets a notice.
 
@@ -103,7 +104,8 @@ rule: one whose recorded inviter is not allowed, and one with no record (a
 room joined before #264) unless everyone else in it, joined or invited, is an
 allowed inviter. nio keeps no trace of an inviter after the join, so the
 audience is the only evidence left for those rooms; a stranger in the room is
-enough to leave it. An allowed inviter gets a left room back by inviting the
+enough to leave it. An audience changes, so such a room is checked again on
+every sync, before anything from it is forwarded (#296). An allowed inviter gets a left room back by inviting the
 bridge again, which records the inviter. Empty or unset, the list refuses
 every invite and leaves every room, and the bridge logs a warning saying so
 at startup. For a bridge that answers only Scott:
@@ -191,7 +193,8 @@ the gateway: taken, or refused for good. A 5xx, a connection failure, a 401,
 rather than the event's; any other 4xx (a malformed or oversized event) is
 logged at ERROR and dropped, so one bad event cannot stall the room. Events whose keys have not arrived are parked (`pending.json`), their
 keys requested, and after ten minutes forwarded as a
-`[trentina] could not be decrypted` notice.
+`[trentina] could not be decrypted` notice. One parked in a room the bridge
+has since left, or is leaving, is dropped instead (#296).
 
 ### Adopting a mautrix device
 
