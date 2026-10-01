@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import json
+import sqlite3
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +14,8 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
+from mcp_trentina_crunchtools import config as config_mod
+from mcp_trentina_crunchtools import database as database_mod
 from mcp_trentina_crunchtools.gateway import llm_proxy
 from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
 from mcp_trentina_crunchtools.gateway.llm_proxy import (
@@ -30,6 +34,33 @@ from mcp_trentina_crunchtools.gateway.proxy_utils import normalize_proxy_path
 if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
+
+
+@pytest.fixture(autouse=True)
+def audit_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Every proxied call writes an audit row (#297); keep it out of the real DB."""
+    path = tmp_path / "trentina.db"
+    monkeypatch.setenv("QUARANTINE_DB", str(path))
+    config_mod._config = None
+    database_mod._db = None
+    yield path
+    database_mod._db = None
+    config_mod._config = None
+
+
+def _rows(path: Path) -> list[sqlite3.Row]:
+    """Read the audit on this thread; the app wrote it on TestClient's."""
+    if not path.exists():
+        return []
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        return conn.execute(
+            "SELECT profile, backend, tool, outcome, error_message, destination, "
+            "destination_kind FROM gateway_calls ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
 
 
 class TestProxyPathNormalization:
@@ -126,6 +157,7 @@ class TestLoadLlmProviders:
             "test": {
                 "enabled": True,
                 "upstream": "https://example.com",
+                "api": "openai",
                 "auth_header": "Authorization",
                 "api_key_env": "MISSING_KEY_FOR_TEST",
             }
@@ -252,6 +284,8 @@ class _FakeClient:
     def __init__(self) -> None:
         self.captured_headers: dict[str, str] = {}
         self.captured_url: str = ""
+        self.captured_body: bytes | None = None
+        self.sent = False
 
     def build_request(
         self,
@@ -262,9 +296,11 @@ class _FakeClient:
     ) -> Any:
         self.captured_url = url
         self.captured_headers = headers or {}
+        self.captured_body = content
         return object()
 
     async def send(self, request: Any, stream: bool = False) -> _FakeUpstreamResp:
+        self.sent = True
         return _FakeUpstreamResp()
 
 
@@ -345,7 +381,7 @@ class TestProxyLlm:
         client = self._client(providers, profiles)
 
         client.post(
-            "/llm/gemini/v1/x",
+            "/llm/gemini/v1beta/models/gemini-2.5-flash:generateContent",
             headers={"authorization": "Bearer agent3-tok"},
             content=b"{}",
         )
@@ -359,3 +395,203 @@ class TestProxyLlm:
             headers={"authorization": "Bearer agent1-tok"},
         )
         assert resp.status_code == 400
+
+
+def _anthropic_provider() -> LlmProvider:
+    provider = LlmProvider(
+        enabled=True,
+        upstream="https://api.anthropic.com",
+        auth_header="x-api-key",
+        api_key_env="GLOBAL_ANTHROPIC_KEY",
+    )
+    provider.api_key = SecretStr("global-key")
+    return provider
+
+
+_PLAIN: dict[str, Any] = {
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 64,
+    "messages": [{"role": "user", "content": "hi"}],
+}
+
+
+class TestProxyAdmission:
+    """#297: a provider-run tool never reaches the provider, and every call is audited."""
+
+    def _client(self, fake: _FakeClient, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+        monkeypatch.setattr(llm_proxy, "_get_llm_client", lambda: fake)
+        providers = {"anthropic": _anthropic_provider()}
+        profiles = {"agent1": _profile("agent1", "agent1-tok", {"anthropic": "agent1-key"})}
+
+        async def endpoint(request: Request) -> Response:
+            return await _proxy_llm(request, providers, profiles)
+
+        app = Starlette(
+            routes=[Route("/llm/{provider}/{path:path}", endpoint, methods=["GET", "POST"])]
+        )
+        return TestClient(app)
+
+    def _post(self, client: TestClient, body: dict[str, Any], **headers: str) -> Any:
+        return client.post(
+            "/llm/anthropic/v1/messages",
+            headers={"authorization": "Bearer agent1-tok", **headers},
+            content=json.dumps(body).encode(),
+        )
+
+    def test_mcp_servers_refused_and_audited(
+        self, monkeypatch: pytest.MonkeyPatch, audit_db: Path
+    ) -> None:
+        fake = _FakeClient()
+        client = self._client(fake, monkeypatch)
+        body = {
+            **_PLAIN,
+            "mcp_servers": [{"type": "url", "url": "https://evil.example/mcp", "name": "x"}],
+        }
+        resp = self._post(client, body, **{"anthropic-beta": "mcp-client-2025-04-04"})
+        assert resp.status_code == 403
+        assert resp.json()["error"]["reason"] == "mcp_servers"
+        assert not fake.sent
+        [row] = _rows(audit_db)
+        assert row["profile"] == "agent1"
+        assert row["backend"] == "llm:anthropic"
+        assert row["outcome"] == "denied_guard"
+        assert row["error_message"] == "mcp_servers"
+
+    def test_web_fetch_tool_refused_and_audited(
+        self, monkeypatch: pytest.MonkeyPatch, audit_db: Path
+    ) -> None:
+        fake = _FakeClient()
+        client = self._client(fake, monkeypatch)
+        body = {**_PLAIN, "tools": [{"type": "web_fetch_20250910", "name": "web_fetch"}]}
+        resp = self._post(client, body)
+        assert resp.status_code == 403
+        assert resp.json()["error"]["reason"] == "server_tool"
+        assert not fake.sent
+        [row] = _rows(audit_db)
+        assert (row["outcome"], row["error_message"]) == ("denied_guard", "server_tool")
+
+    def test_plain_completion_passes_and_is_audited(
+        self, monkeypatch: pytest.MonkeyPatch, audit_db: Path
+    ) -> None:
+        fake = _FakeClient()
+        client = self._client(fake, monkeypatch)
+        body = {**_PLAIN, "tools": [{"name": "read_file", "input_schema": {"type": "object"}}]}
+        resp = self._post(client, body)
+        assert resp.status_code == 200
+        assert fake.sent
+        assert fake.captured_url == "https://api.anthropic.com/v1/messages"
+        assert json.loads(fake.captured_body or b"") == body
+        [row] = _rows(audit_db)
+        assert row["tool"] == "messages"
+        assert row["outcome"] == "ok"
+        assert row["error_message"] is None
+        assert (row["destination"], row["destination_kind"]) == ("claude-sonnet-4-5", "model")
+
+    def test_headers_are_allowlisted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake = _FakeClient()
+        client = self._client(fake, monkeypatch)
+        self._post(
+            client,
+            _PLAIN,
+            **{
+                "anthropic-version": "2023-06-01",
+                "anthropic-beta": "mcp-client-2025-04-04, interleaved-thinking-2025-05-14",
+                "openai-organization": "org-elsewhere",
+                "x-stainless-lang": "python",
+            },
+        )
+        sent = {k.lower(): v for k, v in fake.captured_headers.items()}
+        assert sent["anthropic-version"] == "2023-06-01"
+        assert sent["anthropic-beta"] == "interleaved-thinking-2025-05-14"
+        assert "openai-organization" not in sent
+        assert "x-stainless-lang" not in sent
+        assert "authorization" not in sent
+        assert sent["x-api-key"] == "agent1-key"
+
+    def test_duplicate_key_refused_before_upstream(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Raw bytes would let the provider's parser read the other ``tools``."""
+        fake = _FakeClient()
+        client = self._client(fake, monkeypatch)
+        raw = (
+            b'{"model":"claude-sonnet-4-5","max_tokens":8,"messages":[],'
+            b'"tools":[{"type":"web_search_20250305","name":"web_search"}],"tools":[]}'
+        )
+        resp = client.post(
+            "/llm/anthropic/v1/messages",
+            headers={"authorization": "Bearer agent1-tok"},
+            content=raw,
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"]["reason"] == "malformed_body"
+        assert not fake.sent
+
+    def test_unlisted_endpoint_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake = _FakeClient()
+        client = self._client(fake, monkeypatch)
+        resp = client.post(
+            "/llm/anthropic/v1/files",
+            headers={"authorization": "Bearer agent1-tok"},
+            content=b"{}",
+        )
+        assert resp.status_code == 403
+        assert resp.json()["error"]["reason"] == "endpoint_not_allowed"
+        assert not fake.sent
+
+    def test_oversize_body_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(llm_proxy, "MAX_LLM_REQUEST_BYTES", 64)
+        fake = _FakeClient()
+        client = self._client(fake, monkeypatch)
+        resp = self._post(client, {**_PLAIN, "system": "x" * 200})
+        assert resp.status_code == 413
+        assert not fake.sent
+
+    def test_refusal_detail_is_not_logged(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The refused type is the caller's own text: back to it, never to the journal."""
+        fake = _FakeClient()
+        client = self._client(fake, monkeypatch)
+        canary = "canary_tool_type_7f3a"
+        with caplog.at_level("DEBUG"):
+            resp = self._post(client, {**_PLAIN, "tools": [{"type": canary}]})
+        assert resp.json()["error"]["detail"] == canary
+        assert canary not in caplog.text
+
+    def test_no_key_is_audited(self, audit_db: Path) -> None:
+        providers = {"anthropic": _anthropic_provider()}
+        profiles = {"agent2": _profile("agent2", "agent2-tok", {})}
+
+        async def endpoint(request: Request) -> Response:
+            return await _proxy_llm(request, providers, profiles)
+
+        app = Starlette(routes=[Route("/llm/{provider}/{path:path}", endpoint, methods=["POST"])])
+        resp = TestClient(app).post(
+            "/llm/anthropic/v1/messages", headers={"authorization": "Bearer agent2-tok"}
+        )
+        assert resp.status_code == 502
+        [row] = _rows(audit_db)
+        assert row["outcome"] == "denied_allowlist"
+
+
+class TestProviderApi:
+    """The API shape decides the admission policy, so it is never guessed."""
+
+    def test_known_host_infers_api(self) -> None:
+        assert _anthropic_provider().api == "anthropic"
+
+    def test_unknown_host_without_api_fails_closed(self) -> None:
+        with pytest.raises(ValidationError, match="api must be set"):
+            LlmProvider(
+                upstream="https://api.groq.com/openai",
+                auth_header="Authorization",
+                api_key_env="K",
+            )
+
+    def test_unknown_host_with_api_loads(self) -> None:
+        provider = LlmProvider(
+            upstream="https://api.groq.com/openai",
+            api="openai",
+            auth_header="Authorization",
+            api_key_env="K",
+        )
+        assert provider.api == "openai"

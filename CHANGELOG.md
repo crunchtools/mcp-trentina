@@ -71,6 +71,27 @@ repeatable.
   `$localpart:server` form could still carry words. An ID that reads as words
   (`shapes.wordy`) is no longer kept.
 
+- The LLM proxy admits a request instead of forwarding it (#297). It passed
+  the caller's path, query, raw body and every header but `Authorization`, so
+  an agent on `--network=none` could have its provider fetch or connect
+  anywhere: Anthropic's `web_fetch`/`web_search`/`mcp_servers`, OpenRouter's
+  `web` plugin and `:online` models, Gemini's grounding and `url_context`,
+  OpenAI's search models and Responses server tools. `gateway/llm_policy.py`
+  now allowlists endpoint, method, query, headers and body keys per API shape;
+  refuses provider-run tools, URL-fetched content, file ids, stored-state
+  references and self-searching models with a closed reason code; refuses
+  duplicate JSON keys and forwards the body re-serialized, so the provider
+  parses what was judged; caps it at 32 MiB. Every call from an authenticated
+  profile writes a `gateway_calls` row (`backend = llm:<provider>`, the model
+  as a `model` destination). `llm_providers` entries take `api` (required for
+  an upstream other than the four known hosts; startup fails without it) and
+  `allowed_models`. `docs/network-isolation.md` no longer claims the gateway
+  is the agent's only way out. The Anthropic allowlist tracks the current
+  Messages API (`output_config` with `effort`/`format`/`task_budget` only,
+  `cache_control`, `inference_geo`, `speed`, `diagnostics`, `fallbacks`,
+  `compaction`/`fallback` blocks, mid-conversation `system` messages), and
+  every `fallbacks` model passes the same model checks as `model`. Chat
+  Completions `store: true` is refused as stored state.
 - Every L3 answer is checked against the schema it was asked for, at the
   provider-response boundary (#294). An answer without a boolean
   `injection_detected` used to count as a complete, clean verdict; an
