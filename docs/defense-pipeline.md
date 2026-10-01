@@ -104,6 +104,7 @@ A hardened Gemini Flash Lite instance that receives the **original, unmodified c
 - **No memory** — can't be poisoned across sessions
 - **No SDK** — raw httpx calls to the Gemini REST API, no dependency surface
 - **Small model** — less capable models are harder to socially engineer
+- **Schema-checked answers** — the judge reads the content it judges, so its answer is checked against the schema it was asked for (`quarantine/schema.py`, #294) whatever the provider promises: only Gemini and OpenAI enforce one, Anthropic gets it as a hint and Ollama only `format: json`. A missing or non-boolean `injection_detected`, an off-set `risk_level`, a non-string extraction field, or a body that is not a JSON object is `MalformedResponseError`: asked once more, then `l3_unavailable` (redact: `t2_unavailable`/`t3_unavailable`), never clean. Undeclared keys are dropped and strings cut to their `maxLength`. A finding's `type` off the enum becomes `other` rather than refusing — it carries no verdict, and judges drift there.
 
 **What it catches:** Social engineering, data exfiltration intent, authority-based attacks, subtle semantic manipulation — everything that requires understanding *meaning*, not just *pattern*.
 

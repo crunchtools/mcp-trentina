@@ -6,8 +6,8 @@ from typing import Any
 
 import httpx
 
-from ...errors import QuarantineAgentError
-from .base import Provider, ProviderResult, status_error
+from ...errors import MalformedResponseError, QuarantineAgentError
+from .base import Provider, ProviderResult, count, dig, envelope, status_error
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_TIMEOUT = 60.0
@@ -70,23 +70,22 @@ class GeminiProvider(Provider):
                     },
                 )
                 resp.raise_for_status()
-                resp_json = resp.json()
+                resp_json = envelope(resp)
 
-            candidates = resp_json.get("candidates", [])
-            if not candidates:
+            if not dig(resp_json, "candidates", 0):
                 raise QuarantineAgentError("No candidates in Gemini response")
 
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if not parts:
+            if not dig(resp_json, "candidates", 0, "content", "parts", 0):
                 raise QuarantineAgentError("No parts in Gemini response")
 
-            text = parts[0].get("text", "")
-            usage = resp_json.get("usageMetadata", {})
+            text = dig(resp_json, "candidates", 0, "content", "parts", 0, "text")
+            if not isinstance(text, str):
+                raise MalformedResponseError("no text")
 
             return ProviderResult(
                 text=text,
-                input_tokens=usage.get("promptTokenCount", 0),
-                output_tokens=usage.get("candidatesTokenCount", 0),
+                input_tokens=count(dig(resp_json, "usageMetadata", "promptTokenCount")),
+                output_tokens=count(dig(resp_json, "usageMetadata", "candidatesTokenCount")),
             )
 
         except httpx.HTTPStatusError as exc:
