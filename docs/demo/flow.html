@@ -130,9 +130,13 @@ const SCENES = [
   [12.0, 14.5, "What survives is minified before the agent reads it"],
   [14.5, 18.0, "One gateway: assistant, coding agent, swarm"],
 ];
-const DURATION = 18.0;
+// The scene times above are in story seconds; SLOW stretches them so the
+// moving labels can be read (2.5 = a box crosses in about 6 s, not 2.4 s).
+const SLOW = 2.5;
+const DURATION = 18.0 * SLOW;
 
-function render(t) {
+function render(wall) {
+  const t = wall / SLOW;
   moving.replaceChildren();
   const active = [], pillars = [false, false, false, false, false];
 
