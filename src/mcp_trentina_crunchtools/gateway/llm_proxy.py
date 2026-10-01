@@ -38,6 +38,7 @@ from pydantic import (
     ConfigDict,
     Field,
     SecretStr,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -146,10 +147,14 @@ class LlmProvider(BaseModel):
 
     @model_validator(mode="after")
     def api_must_be_known(self) -> LlmProvider:
-        """An upstream we cannot name a shape for has no admission policy."""
+        """An upstream we cannot name a shape for has no admission policy.
+
+        Only an enabled provider needs one: a disabled entry is never loaded,
+        and refusing to start over it took a working gateway down on upgrade.
+        """
         if self.api is None:
             self.api = API_BY_HOST.get(urlsplit(self.upstream).hostname or "")
-        if self.api is None:
+        if self.api is None and self.enabled:
             raise ValueError(
                 "api must be set (anthropic, openai, openrouter or gemini) "
                 "for an upstream other than the four known hosts",
@@ -176,7 +181,14 @@ def load_llm_providers(
             raise ProfileConfigError(
                 f"llm_providers.{name}: must be a mapping",
             )
-        provider = LlmProvider(**body)
+        try:
+            provider = LlmProvider(**body)
+        except ValidationError as exc:
+            # Name the entry and field: pydantic's message says which rule only.
+            reasons = "; ".join(
+                f"{'.'.join(map(str, e['loc'])) or 'entry'}: {e['msg']}" for e in exc.errors()
+            )
+            raise ProfileConfigError(f"llm_providers.{name}: {reasons}") from exc
         if not provider.enabled:
             continue
         key = read_secret_env(provider.api_key_env)
