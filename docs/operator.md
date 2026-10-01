@@ -70,6 +70,13 @@ service identity: centralized model calls run as operator profile=ops provider=g
 ## Declaring one
 
 ```yaml
+llm_providers:              # every name under llm_keys must be one of these
+  gemini:
+    enabled: true
+    upstream: https://generativelanguage.googleapis.com
+    auth_header: x-goog-api-key
+    api_key_env: GEMINI_API_KEY
+
 profiles:
   ops:
     role: operator
