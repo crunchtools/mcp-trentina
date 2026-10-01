@@ -10,10 +10,29 @@ under that name.
 
 ## [Unreleased]
 
-Review tooling for the trust boundary (#90, #269). The #90 audit found every
-real bug by hand while Bandit, public Semgrep rules and CodeQL
-`security-extended` found none; this makes the checks that found them
-repeatable.
+## [0.49.0] - 2026-10-01
+
+The trust-boundary review tooling (#90, #269), and the ten findings its first
+run produced: cross-profile channels (#291), journal and refusal leaks (#292),
+audit gaps (#293), unvalidated L3 answers (#294), liveness (#295), unjudged
+Matrix surfaces (#296), provider-run tools through the LLM proxy (#297), authz
+and trust edges (#298), the shadow scan outside fd confinement (#287), and
+the process's own containment (#268). The #90 audit found every real bug by
+hand while Bandit, public Semgrep rules and CodeQL `security-extended` found
+none; the tooling makes those checks repeatable.
+
+**Upgrade:**
+
+- OAuth proxy tokens are bound to one profile (#298). Every token issued
+  before 0.49.0 is refused once and its client signs in again. With more than
+  one proxied profile, a client must send an RFC 8707 `resource` indicator.
+- An `llm_providers` entry whose upstream is not Anthropic, OpenAI,
+  OpenRouter or Gemini must set `api` (#297). The proxy now admits requests
+  by an allowlist per API shape; set `allowed_models` to pin models.
+- D-Bus is restricted to root and the `trentina` group (#298).
+- `gateway_calls` is pruned for the first time (`TRENTINA_AUDIT_RETENTION_DAYS`,
+  default 90), in batches of 500 (#295).
+- New: `TRENTINA_REQUIRE_HARDENED` (#268), `TRENTINA_FETCH_CONCURRENCY` (#295).
 
 ### Added
 
