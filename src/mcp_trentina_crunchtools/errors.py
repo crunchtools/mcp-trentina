@@ -104,7 +104,7 @@ class MalformedResponseError(QuarantineAgentError):
     """
 
     def __init__(self, detail: str = "not JSON") -> None:
-        super().__init__(f"Invalid JSON in provider response: {detail}")
+        super().__init__(f"Malformed provider response: {detail}")
 
 
 class SearchCanaryLeakedError(QuarantineAgentError):

@@ -9,7 +9,8 @@ verdict that withheld the body. One rule for the bridge's notice
 (``matrix_bridge/core.py``) and the proxy's (``matrix_proxy.py``).
 
 Kept: ``rel_type`` from a closed set, ``event_id``, ``m.in_reply_to.event_id``
-and a boolean ``is_falling_back``. Every ID must have an event ID's shape.
+and a boolean ``is_falling_back``. Every ID must have an event ID's shape
+and not read as words.
 ``m.annotation`` is not kept, and neither is its ``key``: a reaction key is
 free text the sender chose, and a notice is not a reaction.
 """
@@ -19,6 +20,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..preprocess.shapes import wordy
+
 _REL_TYPES = frozenset({"m.thread", "m.reference", "m.replace"})
 
 # One sigil, then printable ASCII with no whitespace, as long as an ID may be.
@@ -26,7 +29,11 @@ _EVENT_ID = re.compile(r"\$[\x21-\x7e]{1,254}")
 
 
 def _event_id(value: Any) -> str | None:
-    return value if isinstance(value, str) and _EVENT_ID.fullmatch(value) else None
+    # The shape alone admits `$ignore.all.previous.instructions:x`; a legacy
+    # ID's localpart is free text, so one that reads as words is not kept.
+    if not isinstance(value, str) or not _EVENT_ID.fullmatch(value) or wordy(value[1:]):
+        return None
+    return value
 
 
 def withheld_relation(relation: Any) -> dict[str, Any] | None:

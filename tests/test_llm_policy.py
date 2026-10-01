@@ -357,6 +357,11 @@ class TestCurrentAnthropicParams:
     def test_fallbacks_default(self) -> None:
         assert _admit(A, "v1/messages", {**_CLAUDE, "fallbacks": "default"}).model
 
+    def test_fallbacks_default_refused_under_allowed_models(self) -> None:
+        body = {**_CLAUDE, "fallbacks": "default"}
+        reason = _reason(A, "v1/messages", body, allowed_models=["claude-*"])
+        assert reason is Reason.MODEL_NOT_ALLOWED
+
     def test_fallbacks_list_checked_against_allowed_models(self) -> None:
         body = {**_CLAUDE, "fallbacks": [{"model": "claude-opus-4-1"}]}
         assert _admit(A, "v1/messages", body, allowed_models=["claude-*"]).model
@@ -458,3 +463,22 @@ class TestCurrentOpenAiChatParams:
     def test_store_refused_on_openrouter_too(self) -> None:
         body = {**_ROUTER, "store": True}
         assert _reason(R, "v1/chat/completions", body) is Reason.STORED_STATE
+
+
+@pytest.mark.parametrize(
+    ("api", "path", "body"),
+    [
+        (
+            LlmApi.ANTHROPIC,
+            "v1/messages",
+            {**_CLAUDE, "messages": [{"role": "user", "content": [{"type": ["text"]}]}]},
+        ),
+        (
+            LlmApi.OPENAI,
+            "v1/chat/completions",
+            {"model": "gpt-x", "messages": [{"role": "user", "content": [{"type": ["x"]}]}]},
+        ),
+    ],
+)
+def test_an_unhashable_type_is_refused_not_a_crash(api: LlmApi, path: str, body: Any) -> None:
+    assert _reason(api, path, body) is Reason.MALFORMED

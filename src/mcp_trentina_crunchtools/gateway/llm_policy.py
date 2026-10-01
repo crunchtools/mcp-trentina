@@ -408,6 +408,10 @@ def _models(body: dict[str, Any], allowed_models: Iterable[str]) -> None:
     for model in _seq(body.get("models"), "models"):
         check_model(model, patterns)
     fallbacks = body.get("fallbacks")
+    # "default" lets the provider pick the fallback model, which no pattern
+    # can check; with allowed_models set that is the bypass it exists to stop.
+    if fallbacks == "default" and patterns:
+        raise LlmRefusedError(Reason.MODEL_NOT_ALLOWED, "fallbacks")
     if isinstance(fallbacks, list):
         for raw in fallbacks:
             check_model(_obj(raw, "fallbacks").get("model"), patterns)
@@ -808,8 +812,13 @@ def admit(
         return Admitted(endpoint.label, rebuilt_query, None, None)
 
     parsed = _parse(body)
-    endpoint.validate(parsed)
-    _models(parsed, patterns)
+    try:
+        endpoint.validate(parsed)
+        _models(parsed, patterns)
+    except (TypeError, AttributeError) as exc:
+        # A shape no validator expected, e.g. a list where a type name goes
+        # (unhashable in a set test). Refused, never a 500 that skips audit.
+        raise LlmRefusedError(Reason.MALFORMED, status=400) from exc
     check_model(path_model, patterns)
     model = path_model or parsed.get("model")
     serialized = json.dumps(parsed, ensure_ascii=True, separators=(",", ":"))

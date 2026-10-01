@@ -75,6 +75,11 @@ repeatable.
 
 ### Security
 
+- A withheld Matrix event's notice dropped every relation key but the
+  allowlisted ones (#296), but an `event_id` of the legacy
+  `$localpart:server` form could still carry words. An ID that reads as words
+  (`shapes.wordy`) is no longer kept.
+
 - `dir_tool`'s stdlib-shadow scan re-listed the directory by path and opened
   each shadow by path, following symlinks: `json.py -> /anywhere` was read
   past `TRENTINA_READ_ROOTS` and the denylist. It now scans the entries the

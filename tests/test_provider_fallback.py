@@ -235,7 +235,7 @@ class TestCallWithFallback:
                 result, _ = await call
                 assert result["extracted_text"] == "hello world"
             else:
-                with pytest.raises(QuarantineAgentError, match="Invalid JSON"):
+                with pytest.raises(QuarantineAgentError, match="Malformed provider response"):
                     await call
         assert mock.await_count == 2
 
