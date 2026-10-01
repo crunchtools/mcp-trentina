@@ -57,6 +57,15 @@ repeatable.
 
 ### Fixed
 
+- `TRENTINA_REQUIRE_L2=false` and `TRENTINA_REQUIRE_L3=false` warn at startup,
+  as `TRENTINA_FETCH_ALLOW_PRIVATE` does (#298).
+- A reload reports a changed proxy-mode `oauth` field (`enabled`, `client_id`,
+  `client_secret_env`, `client_redirect_uris`, `allowed_redirect_uris`) as
+  restart-only, on both the operator and the agent path, instead of claiming it
+  applied (#298).
+- L2 read only the first 510 tokens of a 511- or 512-token input and reported
+  the scan untruncated: the single-window path checked the window width, not
+  the content it carries. The window loop now handles every length (#298).
 - A `tools/call` for a name the profile was never served returned before
   writing its audit row, so a consumer probing for tool names left no trace.
   It is now audited as `denied_allowlist`, with the name's fingerprint rather
@@ -68,6 +77,31 @@ repeatable.
 
 - `llm_providers` keys take the `_FILE` form like every other secret, so a
   provider key no longer has to sit in the process environment (#268).
+- An OAuth proxy token answers to one profile (#298). Every proxied profile
+  shared one JWT audience, so a token issued for an agent seat verified at an
+  operator seat that allowlisted the same email. The RFC 8707 `resource` sent
+  to `/authorize` is now bound to the flow, then to the issued token's
+  lineage (refreshes keep it), and `verify_oauth` challenges a token at any
+  other profile. With more than one proxied profile, `/authorize` without a
+  resource is refused `invalid_target`. **Breaking for sessions:** tokens
+  issued before this release carry no binding and are challenged once; their
+  clients re-authorize. The divergent-allowlist startup warning is gone, since
+  its premise no longer holds.
+- `fetch_tool`'s allowlist is checked on every redirect hop, not only the URL
+  asked for (#298). An open redirect on a trusted domain downgraded a flagged
+  page from anywhere to redact and skipped the blocklist. `client.fetch_url`
+  returns a `Fetched` (content, content type, hops).
+- An agent reload holds its own `defense` block (modes, enforcement,
+  `l2_threshold`, audit, judge provider and model) and reports it under
+  `not_applied.operator_only` (#298). The whole block rather than "tighten
+  only", which would need an order on every field and on every field added
+  later.
+- The D-Bus policy lets only root and the `trentina` group own
+  `com.crunchtools.Trentina1`, call it or receive its signals; the default
+  context could do all three (#298). Every event on the bus carries a
+  fingerprinted source and L3 finding types, never L3 prose. The interface now
+  starts from the server's lifespan; `main()` used to start it on a loop it
+  closed the next line, so it never answered.
 
 ### Changed
 

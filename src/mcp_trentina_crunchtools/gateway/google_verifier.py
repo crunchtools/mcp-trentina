@@ -186,6 +186,17 @@ class GoogleTokeninfoVerifier:
             raise _UnreachableError("tokeninfo returned a non-object body")
         return parsed
 
+    async def bound_profile(self, token: str) -> str | None:
+        """The profile a token this verifier accepted belongs to: its own.
+
+        The audience pin is the binding in delegated mode: one audience per
+        profile, enforced unique at startup, so a token that verified here was
+        minted for this profile. ``verify_oauth`` asks every verifier, and a
+        proxied token answers through the proxy's binding store instead.
+        """
+        del token  # bound by the audience verify_token already checked
+        return self.profile_name
+
     async def verify_token(self, token: str) -> Any | None:
         """Return an AccessToken for a valid token, else None.
 

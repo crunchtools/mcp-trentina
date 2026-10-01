@@ -823,31 +823,6 @@ def _allowed_redirect_uris(profiles: Mapping[str, Profile], proxied: list[str]) 
     return unique
 
 
-def _warn_on_divergent_allowlists(profiles: Mapping[str, Profile], proxied: list[str]) -> None:
-    """Warn when proxied profiles are authorized differently.
-
-    Every token this proxy issues carries the same audience whichever profile
-    asked for it, so the audience cannot tell two seats apart. The allowlist
-    can — but only while the allowlists agree. Identical ones (one operator,
-    several clients) are the intended shape. Differing ones mean someone
-    believes these seats are isolated from each other, and they are not.
-    """
-    if len(proxied) < 2:
-        return
-    allowlists = set()
-    for name in proxied:
-        oauth = profiles[name].oauth
-        allowlists.add(frozenset(oauth.allowed_emails or ()) if oauth else frozenset())
-    if len(allowlists) > 1:
-        logger.warning(
-            "gateway: OAuth profiles %s have different allowed_emails, but one "
-            "token audience covers all of them — anyone allowed on any of these "
-            "profiles can present that token to the others. Give them the same "
-            "allowlist, or split them across gateways.",
-            sorted(proxied),
-        )
-
-
 def _build_proxy_provider(
     profiles: Mapping[str, Profile],
     proxied: list[str],
@@ -889,9 +864,10 @@ def _build_proxy_provider(
         )
     from fastmcp.server.auth.providers.google import GoogleProvider
 
+    from .gateway.oauth_binding import BindTokensToProfile, profile_resources
     from .gateway.oauth_store import PromoteOnExchange
 
-    class _GatewayGoogleProvider(PromoteOnExchange, GoogleProvider):
+    class _GatewayGoogleProvider(BindTokensToProfile, PromoteOnExchange, GoogleProvider):
         """GoogleProvider whose protected-resource URL is the gateway endpoint.
 
         FastMCP derives the RFC 8707 resource (the audience of issued tokens and
@@ -931,14 +907,16 @@ def _build_proxy_provider(
             the parameter is only stored on the transaction and forwarded to
             Google, which implements no RFC 8707 and ignores it.
 
-            What this does NOT do is give each profile its own token audience.
-            The JWT stays bound to the single pinned resource (proxy.py:785), so
-            a token minted for one seat verifies at another. The boundary
-            between profiles is therefore `allowed_emails` plus the tool
-            allowlist, not the audience — which is why differing allowlists get
-            a startup warning. See RT #1502.
+            The JWT audience stays the single pinned resource (proxy.py:785),
+            so the audience cannot tell two seats apart. The profile the
+            indicator names is bound to the flow here instead, and from there
+            to the token (``gateway/oauth_binding.py``); ``verify_oauth``
+            refuses a token at any other profile (#298). A flow naming no
+            profile is refused when there is more than one it could mean.
             """
+            requested = getattr(params, "resource", None)
             _clear_known_resource(params, self.gateway_resources)
+            await self.bind_authorization(client, params, requested)
             return await super().authorize(client, params)
 
         def set_mcp_path(self, mcp_path: str | None) -> None:
@@ -1096,14 +1074,10 @@ def _build_proxy_provider(
     resource_url = f"{base_url}/gateway/{resource_profile}/mcp"
     gateway_resources = frozenset(f"{base_url}/gateway/{name}/mcp" for name in proxied)
     _GatewayGoogleProvider.gateway_resources = gateway_resources
-
     # The audience of every issued token is `resource_url`, whichever profile
-    # asked for it, so it cannot tell two seats apart. What can is the per-
-    # profile allowlist — but only while the allowlists actually differ in
-    # membership. Identical allowlists (one operator, several clients) are the
-    # intended shape; differing ones mean someone believes the seats are
-    # isolated from each other, and they are not.
-    _warn_on_divergent_allowlists(profiles, proxied)
+    # asked for it, so the audience cannot tell two seats apart; the binding
+    # can (gateway/oauth_binding.py, #298).
+    _GatewayGoogleProvider.gateway_profiles = profile_resources(base_url, proxied)
 
     # Provisioned confidential clients are resolved by get_client ahead of the
     # DCR store, and their presence is what turns on the client_secret_post

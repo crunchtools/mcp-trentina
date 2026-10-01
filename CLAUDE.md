@@ -299,8 +299,20 @@ operator; a live gateway with no bound caller is refused.
   Validates the whole file before swapping (a bad edit keeps the running
   config) and leaves the perimeter verdict cache alone so nothing is re-judged.
   Agent: applies its own section only, and cannot apply a change to its own
-  `role`. Operator: the whole file, plus what it could not apply —
-  `llm_providers`, `matrix`, and ingress routes bind at startup.
+  `role` or `defense` block (held, reported as `operator_only`, #298).
+  Operator: the whole file, plus what it could not apply — `llm_providers`,
+  `matrix`, ingress routes and proxy-mode `oauth` clients/redirects bind at
+  startup.
+
+## OAuth token binding (#298)
+
+The proxy has one JWT audience for every proxied profile, so the audience
+cannot separate seats. `gateway/oauth_binding.py` binds the profile the
+`/authorize` resource names to the flow (keyed on client id + PKCE
+challenge), then to the token's upstream lineage at `/token`; a refresh keeps
+it. `verify_oauth` asks the verifier's `bound_profile` and challenges any
+answer but the profile being called; a verifier without `bound_profile` is
+refused. Delegated verifiers answer their own profile (audience pin).
 
 ## Development
 

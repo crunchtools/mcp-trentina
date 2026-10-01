@@ -118,6 +118,25 @@ It is also re-checked on **every request**, not once at login. Removing an
 address cuts that person off at their next call, even though the token they
 already hold is still cryptographically valid for up to another hour.
 
+### A token belongs to one profile
+
+Every proxied profile shares one token audience: FastMCP's proxy holds a single
+resource URL. Until 0.49.0 that meant a token issued for one seat verified at
+every other seat whose `allowed_emails` held the same person, so an agent
+holding its own seat's token could present it at an operator seat (#298).
+
+Now the RFC 8707 `resource` a client sends to `/authorize` decides which
+profile the token is for. Trentina records it against the flow, moves it onto
+the issued token at `/token`, keeps it across refreshes, and refuses the token
+at any other profile with a 401 challenge, which sends the client to
+re-authorize for the profile it is actually calling. With more than one proxied
+profile, an `/authorize` that names no resource is refused (`invalid_target`),
+because the token would have no profile to belong to. With one, it is bound to
+that one. Claude, Gemini and the MCP SDK clients all send the indicator.
+
+A token issued before 0.49.0 has no binding and is challenged once; its client
+signs in again.
+
 ### Why this beats a static bearer
 
 | | Static bearer | OAuth proxy |
