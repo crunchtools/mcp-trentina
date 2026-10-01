@@ -119,7 +119,7 @@ def audit_db(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setenv("QUARANTINE_DB", str(tmp_path / "trentina.db"))
     config_mod._config = None
     database._db = None
-    database._last_sweep = 0.0
+    database._last_sweep = None
     yield database.get_db()
     database._db = None
     config_mod._config = None
@@ -189,10 +189,19 @@ class TestRetention:
         _audit_rows(audit_db, database.SWEEP_BATCH + 5, 400)
         database.record_gateway_call("alpha", "b", "t", "ok", 0)
         assert _count(audit_db) == 6  # one batch gone, five old rows and the new one left
-        assert database._last_sweep == 0.0  # a full batch leaves it due
+        assert database._last_sweep is None  # a full batch leaves it due
         database.record_gateway_call("alpha", "b", "t", "ok", 0)
         assert _count(audit_db) == 2
-        assert database._last_sweep > 0.0
+        assert database._last_sweep is not None
+
+    def test_the_first_call_sweeps_on_a_host_up_under_an_hour(
+        self, audit_db: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`time.monotonic()` counts from boot; a 0.0 sentinel never came due."""
+        monkeypatch.setattr(database.time, "monotonic", lambda: 10.0)
+        _audit_rows(audit_db, 3, 400)
+        database.record_gateway_call("alpha", "b", "t", "ok", 0)
+        assert _count(audit_db) == 1
 
     def test_the_blocklist_sweep_is_batched_too(self, audit_db: Any) -> None:
         then = "2000-01-01T00:00:00+00:00"

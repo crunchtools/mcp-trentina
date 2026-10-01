@@ -230,7 +230,9 @@ def _block_cutoff() -> str:
 
 
 _SWEEP_INTERVAL_SECONDS = 3600.0
-_last_sweep = 0.0
+# None until the first sweep. It was 0.0, compared with `time.monotonic()`,
+# which counts from boot: on a host up less than an hour nothing was swept.
+_last_sweep: float | None = None
 
 # Rows one sweep pass deletes. The sweeps run on the event loop, inside the
 # call that triggered them, so a pass is bounded rather than "everything
@@ -290,7 +292,7 @@ def _maybe_sweep(db: sqlite3.Connection) -> None:
     first call after start.
     """
     global _last_sweep
-    if time.monotonic() - _last_sweep < _SWEEP_INTERVAL_SECONDS:
+    if _last_sweep is not None and time.monotonic() - _last_sweep < _SWEEP_INTERVAL_SECONDS:
         return
     removed = max(sweep_expired_blocks(db), sweep_old_gateway_calls(db))
     if removed < SWEEP_BATCH:

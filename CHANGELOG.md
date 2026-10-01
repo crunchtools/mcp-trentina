@@ -98,6 +98,9 @@ repeatable.
   - `gateway_calls` was never pruned. `TRENTINA_AUDIT_RETENTION_DAYS`
     (default 90, 0 keeps all) is swept hourly; that sweep and the blocklist's
     delete at most 500 rows a pass instead of everything in one statement.
+    The blocklist sweep never ran on a host up for less than an hour: its
+    "never swept" sentinel was 0.0 against `time.monotonic()`, which counts
+    from boot.
   - A fetch had a per-read timeout and no wall clock: a server dripping a byte
     inside it held the call open for as long as it liked. Every fetch now has
     60 s for every hop and the body (`open_guarded` requires a `deadline`;
