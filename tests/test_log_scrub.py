@@ -226,10 +226,7 @@ def test_an_extra_field_is_scrubbed(logger_name: str) -> None:
         logger.warning("call", extra={"cred": SECRET, "ctx": {"token": SECRET}, "n": 7})
     finally:
         logger.removeHandler(handler)
-    (line,) = handler.lines
-    assert SECRET not in line
-    assert line.startswith(f"call {MARK} ")
-    assert line.endswith(" 7")
+    assert handler.lines == [f"call {MARK} {{'token': '{MARK}'}} 7"]
 
 
 def test_an_unreadable_extra_field_is_cut() -> None:
@@ -311,19 +308,62 @@ def test_a_secret_too_short_to_hold_is_said_so(monkeypatch: pytest.MonkeyPatch) 
     assert again.lines == []
 
 
+@pytest.mark.parametrize(
+    "written",
+    [
+        "tok%2Fwith%2Breserved%3Dchars%26more",
+        "tok%2fwith%2breserved%3dchars%26more",
+        "tok%2fwith%2Breserved%3Dchars%26more",
+    ],
+    ids=["upper", "lower", "mixed"],
+)
+def test_percent_escapes_are_held_in_any_case(written: str) -> None:
+    """``%2f`` and ``%2F`` are the same byte to a server, and a client may
+    write either, or both."""
+    logsafe.hold("tok/with+reserved=chars&more", NAME)
+    assert logsafe.scrub(f"GET /hook/{written}/x") == f"GET /hook/{MARK}/x"
+
+
+def test_a_secret_that_spells_anothers_encoding_is_still_held() -> None:
+    """``tok%2Fabcd`` is how ``tok/abcd`` encodes, and is a secret of its own:
+    it gets its own encoded form, and neither hides the other."""
+    logsafe.hold("tok/abcd", "FIRST")
+    logsafe.hold("tok%2Fabcd", "SECOND")
+    assert logsafe.held_count() == 2
+    assert logsafe.scrub("x tok%252Fabcd y") == "x [REDACTED:SECOND] y"
+    assert logsafe.scrub("x tok/abcd y") == "x [REDACTED:FIRST] y"
+
+
+def test_a_structured_value_keeps_its_shape() -> None:
+    """A JSON formatter is handed a mapping, not the text of one."""
+    logsafe.hold(SECRET, NAME)
+    value = {"token": SECRET, "n": 7, "tags": ["a", SECRET], "pair": (1, SECRET), "ok": True}
+    assert logsafe._scrub_arg(value) == {
+        "token": MARK,
+        "n": 7,
+        "tags": ["a", MARK],
+        "pair": (1, MARK),
+        "ok": True,
+    }
+    deep: object = SECRET
+    for _ in range(logsafe._MAX_DEPTH + 3):
+        deep = [deep]
+    assert SECRET not in str(logsafe._scrub_arg(deep))
+
+
 def test_many_held_secrets_stay_cheap() -> None:
     """A deployment holds a secret per profile, backend and provider. A line
     that carries none is a substring test per value, and nothing is compiled
     until a line carries one."""
     for index in range(500):
         logsafe.hold(f"held-secret-number-{index:04d}-{'q' * 24}", f"NAME_{index}")
-    assert logsafe._held_re is None
+    assert logsafe._held_compiled is None
     line = "gateway: call_tool failed backend=mail tool=read_mail err=BackendCallError status=502"
     start = time.perf_counter()
     for _ in range(2000):
         assert logsafe.scrub(line) == line
     assert time.perf_counter() - start < 2.0
-    assert logsafe._held_re is None
+    assert logsafe._held_compiled is None
     assert logsafe.scrub(f"x held-secret-number-0042-{'q' * 24}") == "x [REDACTED:NAME_42]"
 
 
@@ -447,6 +487,8 @@ _HOSTILE = [
     "eyJaaaaaaaa.eyJaaaaaaaa.",
     "ya29.",
     "xoxb-",
+    "%2f",
+    "%2",
 ]
 
 

@@ -31,6 +31,7 @@ site, in a library, or in a traceback is then harmless rather than a leak.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import logging
 import os
@@ -231,13 +232,34 @@ _ANY_SHAPE = re.compile(
 )
 
 _held_lock = threading.Lock()
-#: Secret value (and its percent-encoded form) to the name it is held under.
-#: Nothing is ever dropped: a key rotated out is not known to be revoked.
+#: The secrets as they were given, which is what makes one "already held".
+_held_raw: set[str] = set()
+#: Each form a secret can take in a line (itself, and percent-encoded with
+#: uppercase hex) to the name it is held under. Nothing is ever dropped: a
+#: key rotated out is not known to be revoked.
 _held: dict[str, str] = {}
-#: The same values, longest first: a secret that contains another must win.
+#: The same forms, longest first: a secret that contains another must win.
 _held_forms: tuple[str, ...] = ()
-#: Their alternation, compiled when a line first contains one of them.
-_held_re: re.Pattern[str] | None = None
+#: The alternation of one ``_held_forms`` snapshot, and that snapshot;
+#: compiled when a line first contains one of them.
+_held_compiled: tuple[tuple[str, ...], re.Pattern[str]] | None = None
+
+#: A percent-escape, whose two hex digits a writer may case either way:
+#: ``%2f`` and ``%2F`` are the same byte to a server. ``_held`` is keyed on
+#: the uppercase spelling, which ``_UPPER_ESCAPES(text)`` produces.
+_PERCENT_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
+_UPPER_ESCAPES = functools.partial(_PERCENT_ESCAPE.sub, lambda m: m.group(0).upper())
+
+
+def _either_case(form: str) -> str:
+    """A regex for ``form`` that takes its percent-escapes in any case."""
+    out, last = [], 0
+    for match in _PERCENT_ESCAPE.finditer(form):
+        out.append(re.escape(form[last : match.start()]))
+        out.append("%" + "".join(f"[{c.upper()}{c.lower()}]" for c in match.group(0)[1:]))
+        last = match.end()
+    out.append(re.escape(form[last:]))
+    return "".join(out)
 
 
 def hold(value: object, name: str, *, minimum: int = MIN_HELD_CHARS) -> bool:
@@ -251,40 +273,47 @@ def hold(value: object, name: str, *, minimum: int = MIN_HELD_CHARS) -> bool:
     Returns False for a value under ``minimum`` characters, which is not
     held; the caller decides whether that is worth a warning.
     """
-    global _held_forms, _held_re
+    global _held_forms
     text = value if isinstance(value, str) else str(value)
     text = text.strip()
     if len(text) < minimum:
         return False
     with _held_lock:
-        if text not in _held:
-            for form in (text, quote(text, safe="")):
+        if text not in _held_raw:
+            _held_raw.add(text)
+            for form in (_UPPER_ESCAPES(text), quote(text, safe="")):
                 _held.setdefault(form, name)
             _held_forms = tuple(sorted(_held, key=len, reverse=True))
-            _held_re = None
     return True
 
 
 def _held_pattern(forms: tuple[str, ...]) -> re.Pattern[str]:
-    global _held_re
-    with _held_lock:
-        if _held_re is None or forms is not _held_forms:
-            _held_re = re.compile("|".join(re.escape(v) for v in _held_forms))
-        return _held_re
+    """The alternation of exactly ``forms``, cached for that snapshot."""
+    global _held_compiled
+    compiled = _held_compiled
+    if compiled is None or compiled[0] is not forms:
+        compiled = (forms, re.compile("|".join(_either_case(v) for v in forms)))
+        _held_compiled = compiled
+    return compiled[1]
+
+
+def _name_of(match: re.Match[str]) -> str:
+    return f"[REDACTED:{_held.get(_UPPER_ESCAPES(match.group(0)), 'SECRET')}]"
 
 
 def held_count() -> int:
-    """How many distinct forms are held; a number for startup logs and tests."""
-    return len(_held)
+    """How many secrets are held; a number for startup logs and tests."""
+    return len(_held_raw)
 
 
 def _forget_all() -> None:
     """Drop every held value. For tests only: production never un-holds."""
-    global _held_forms, _held_re
+    global _held_forms, _held_compiled
     with _held_lock:
+        _held_raw.clear()
         _held.clear()
         _held_forms = ()
-        _held_re = None
+        _held_compiled = None
 
 
 def scrub(text: str) -> str:
@@ -293,10 +322,10 @@ def scrub(text: str) -> str:
     # A substring test per value is C speed and the common answer is "none";
     # the alternation, which Python's engine walks per character, is built
     # and run only for a line that holds one.
-    if forms and any(form in text for form in forms):
-        text = _held_pattern(forms).sub(
-            lambda m: f"[REDACTED:{_held.get(m.group(0), 'SECRET')}]", text
-        )
+    if forms:
+        probe = _UPPER_ESCAPES(text) if "%" in text else text
+        if any(form in probe for form in forms):
+            text = _held_pattern(forms).sub(_name_of, text)
     if _ANY_SHAPE.search(text) is None:
         return text
     text = _QUERY_SECRET.sub(rf"\1{REDACTED}", text)
@@ -305,12 +334,32 @@ def scrub(text: str) -> str:
     return _KEY_SHAPE.sub(REDACTED, text)
 
 
-def _scrub_arg(arg: object) -> object:
-    """One format argument, replaced only if scrubbing changed its text, so
-    a number stays a number and the tuple keeps the shape filters expect."""
+#: How far into nested containers a value is scrubbed with its shape kept.
+_MAX_DEPTH = 6
+
+
+def _scrub_arg(arg: object, depth: int = 0) -> object:
+    """One value, with its type and shape kept wherever that is possible.
+
+    A number stays a number and a format tuple keeps its length, which the
+    httpx and access-log filters rely on; a mapping or a sequence is rebuilt
+    with clean leaves, so a structured formatter still gets the structure.
+    Anything else is replaced by its scrubbed text, and only when scrubbing
+    changed that text.
+    """
     if arg is None or isinstance(arg, (bool, int, float)):
         return arg
-    text = arg if isinstance(arg, str) else str(arg)
+    if isinstance(arg, str):
+        return scrub(arg)
+    # Exact types only: a subclass may not rebuild from its own contents.
+    if depth < _MAX_DEPTH:
+        if type(arg) is dict:
+            return {_scrub_arg(k, depth + 1): _scrub_arg(v, depth + 1) for k, v in arg.items()}
+        if type(arg) is list:
+            return [_scrub_arg(item, depth + 1) for item in arg]
+        if type(arg) is tuple:
+            return tuple(_scrub_arg(item, depth + 1) for item in arg)
+    text = str(arg)
     cleaned = scrub(text)
     return arg if cleaned == text else cleaned
 
