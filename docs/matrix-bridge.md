@@ -205,7 +205,7 @@ python -m mcp_trentina_crunchtools.bridge.main run
 | `BRIDGE_RECOVERY_KEY` | `sign-device` only: the account's secret-storage recovery key |
 | `BRIDGE_DEVICE_NAME` | name for a new device (default `Trentina bridge`) |
 | `BRIDGE_ALLOWED_INVITERS` | comma-separated Matrix user IDs whose invites are accepted; empty or unset accepts none and leaves every room (see above) |
-| `BRIDGE_LOG_LEVEL` | default `WARNING` |
+| `BRIDGE_LOG_LEVEL` | default `WARNING`; an unknown name falls back to it. Same format and secret redaction as the gateway's log |
 
 Every secret, and `BRIDGE_ALLOWED_INVITERS`, also reads from `<NAME>_FILE`.
 A malformed entry in the list is fatal at startup. After the first start the session

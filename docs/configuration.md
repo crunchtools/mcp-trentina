@@ -30,7 +30,7 @@ these variables control the process itself. Profile tokens
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TRENTINA_LOG_LEVEL` | `INFO` | Application log level, sent to stderr. Any standard Python level name. |
+| `TRENTINA_LOG_LEVEL` | `INFO` | Application log level, sent to stderr. Any standard Python level name. No level prints a secret: a configured key appears as `[REDACTED:<VARIABLE>]`, and credential-shaped text as `[REDACTED]`. |
 | `TRENTINA_GATEWAY_ENABLED` | unset (disabled) | Turns on the MCP gateway (profiles, auth, allowlists, audit). See [MCP Gateway](gateway.md). |
 | `TRENTINA_PROFILES_PATH` | `/etc/trentina/profiles.yaml` | Path to the gateway's profile YAML file. See [Per-Agent Profiles](profiles.md). |
 | `TRENTINA_LEGACY_MCP` | unset (disabled) | Restores the pre-gateway unguarded `/mcp` endpoint. **Bypasses auth, allowlists and audit** — migration aid only. See [MCP Gateway](gateway.md). |

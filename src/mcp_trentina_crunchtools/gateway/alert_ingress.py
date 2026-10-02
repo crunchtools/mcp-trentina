@@ -57,7 +57,7 @@ from ..httpbody import (
     request_capped,
 )
 from ..l1.pipeline import risk_level_for_count
-from ..logsafe import exc_kind, redact_source
+from ..logsafe import exc_kind, redact_source, safe_url
 from ..reserved import WARNING_KEY, strip_reserved, with_stripped
 from .context import profile_context
 
@@ -283,7 +283,7 @@ async def _forward(profile: Profile, cfg: AlertIngressConfig, forward_body: byte
 
     logger.info(
         "alert_ingress: forwarded to %s for profile %s (status=%d)",
-        forward_url,
+        safe_url(forward_url),
         profile.name,
         resp.status_code,
     )

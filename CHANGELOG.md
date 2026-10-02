@@ -10,11 +10,42 @@ under that name.
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-10-02
+
+### Security
+- No log record carries a secret, whoever built it (#341). A record factory
+  installed when the package is imported replaces every configured secret
+  with `[REDACTED:<VARIABLE>]` and credential-shaped text (a `?key=` or
+  `access_token=` query value, a `Bearer` value, URL userinfo, `sk-…`,
+  `AIza…` and JWT shapes) with `[REDACTED]`, in messages, arguments,
+  `extra` fields and tracebacks, from every logger. A configured secret
+  under 4 characters cannot be redacted and is warned about by name. Before this the only defense was that no
+  call site logged one, and the httpx filter was installed by the gateway's
+  entry point alone: the bridge process and anything importing the package
+  had none.
+- The alert ingress no longer logs its forward URL, nor the Matrix proxy its
+  upstream, beyond `scheme://host:port`: a webhook URL carries its secret in
+  the path or query.
+- A mis-set boolean or integer variable, and a bad
+  `TRENTINA_ENFORCEMENT_OVERRIDE`, log a fingerprint of the value instead of
+  the value: a key pasted into the wrong variable used to print.
+- peewee's DEBUG log, which prints the bridge's crypto-store rows as
+  statement parameters, is held at INFO.
+
 ### Changed
+- One logging setup, `logsafe.configure`, for the gateway and the bridge.
+  The bridge's lines now use the gateway's format
+  (`%(asctime)s %(levelname)-8s %(name)s: %(message)s`), and an unknown
+  `BRIDGE_LOG_LEVEL` falls back to `WARNING` instead of failing startup.
 - Constitution is now a v1.18.0 manifest: only repo-specific facts remain;
   fleet and profile rules apply by reference.
 - Constitution validation is pinned via `.github/workflows/constitution.yml`.
 - Dependabot auto-merges GitHub Actions minor and patch updates.
+
+### Upgrading
+- If you ran a build older than 0.27.2 with `GEMINI_API_KEY` set and httpx
+  logging at INFO, that key is in your logs (`…:generateContent?key=…`).
+  Rotate it.
 
 ## [0.53.0] - 2026-10-02
 

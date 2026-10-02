@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from pydantic import SecretStr
 
+from .logsafe import redact_source
+
 logger = logging.getLogger(__name__)
 
 _config: Config | None = None
@@ -65,7 +67,11 @@ def bool_env(name: str, default: bool) -> bool:
     if raw in ("0", "false", "no", "off"):
         return False
     if raw:
-        logger.warning("config: %s=%r is not a boolean — using %s", name, raw, default)
+        # The value is not printed: a key pasted into the wrong variable
+        # would be (#341). Its fingerprint and length tell a typo from that.
+        logger.warning(
+            "config: %s (%s) is not a boolean — using %s", name, redact_source(raw), default
+        )
     return default
 
 
@@ -90,9 +96,9 @@ def int_env(name: str, default: int, *, minimum: int | None = None) -> int:
         value = int(raw)
     except ValueError:
         logger.warning(
-            "config: %s=%r is not an integer — using %d",
+            "config: %s (%s) is not an integer — using %d",
             name,
-            raw,
+            redact_source(raw),
             default,
         )
         return default if minimum is None else max(minimum, default)

@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from . import logsafe
 
+# Before anything else in this process can log (#341).
+logsafe.guard()
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -22,73 +25,19 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.53.0"
+__version__ = "0.54.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
-_LOG_LEVELS = {
-    "CRITICAL": logging.CRITICAL,
-    "ERROR": logging.ERROR,
-    "WARNING": logging.WARNING,
-    "INFO": logging.INFO,
-    "DEBUG": logging.DEBUG,
-}
-
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 
-def _configure_logging() -> str:
-    """Send application logs to stderr at ``TRENTINA_LOG_LEVEL`` (default INFO).
-
-    Without this the root logger sits at WARNING and every ``logger.info`` in
-    the gateway — session lifecycle above all — is silently discarded, leaving
-    only uvicorn's access log to diagnose from.
-
-    Returns the resolved level name so callers can forward it to
-    ``mcp.run(log_level=...)``. FastMCP defaults uvicorn's own log level
-    independently of the root logger, and uvicorn re-applies that level to
-    ``uvicorn.access``/``uvicorn.error`` *after* its own dictConfig runs — so
-    setting the root logger alone never quiets uvicorn's access log. httpx's
-    logger is clamped here directly since it sits outside uvicorn's logging
-    config entirely.
-
-    The returned name is always one of ``_LOG_LEVELS``' five known keys, all
-    of which uvicorn's ``Config(log_level=...)`` recognizes. Anything else —
-    typos, or names that happen to collide with an unrelated attribute of the
-    ``logging`` module (e.g. ``NOTSET``, or internals like ``_STYLES``) —
-    falls back to ``INFO`` instead of being forwarded and crashing server
-    startup. Deliberately does not use ``getattr(logging, level_name, ...)``:
-    that resolves *any* uppercase module attribute, not just level constants.
-    """
-    level_name = os.environ.get("TRENTINA_LOG_LEVEL", "INFO").strip().upper()
-    if level_name not in _LOG_LEVELS:
-        level_name = "INFO"
-    level = _LOG_LEVELS[level_name]
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-    )
-    # Tracks `level` exactly, including DEBUG — #73 decided an operator who
-    # asks for DEBUG gets it, and that decision stands. It is only safe to
-    # stand because httpx logs full request URLs at INFO and NOTHING here puts
-    # a credential in one any more: the Gemini key moved to the
-    # `x-goog-api-key` header (see providers/gemini.py) and tokeninfo has
-    # always been a POST with the token in the body (see google_verifier.py).
-    # A new upstream that takes a secret in the query string would re-open the
-    # leak here, so it belongs in a header — not behind a clamped logger.
-    logging.getLogger("httpx").setLevel(level)
-    # uvicorn's access log, httpx and the SDKs' DEBUG write request data
-    # verbatim; logsafe holds them to the #262 rule at every level.
-    logsafe.install(level)
-    return level_name
-
-
 def main() -> None:
     """Entry point for mcp-trentina-crunchtools."""
-    log_level = _configure_logging()
+    log_level = logsafe.configure("TRENTINA_LOG_LEVEL")
     parser = argparse.ArgumentParser(
         prog="mcp-trentina-crunchtools",
         description="MCP gateway: injection defense, token savings, policy and auth for AI agents",

@@ -1,4 +1,4 @@
-"""Tests for _configure_logging — TRENTINA_LOG_LEVEL must reach uvicorn and
+"""Tests for logsafe.configure — TRENTINA_LOG_LEVEL must reach uvicorn and
 httpx, not just the root logger.
 
 Note: logging.basicConfig() is a no-op once the root logger already has
@@ -6,7 +6,7 @@ handlers, which is always true under pytest (it attaches its own capture
 handlers). So these tests don't assert on logging.getLogger().level —
 that would test pytest's logging setup, not ours. They assert on the
 resolved level name (what callers forward to mcp.run(log_level=...)) and
-on the httpx logger, which _configure_logging sets directly via an
+on the httpx logger, which logsafe.configure sets directly via an
 unconditional setLevel() call rather than through basicConfig.
 """
 
@@ -18,13 +18,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools import DEFAULT_PORT, _configure_logging, _run_with_gateway, main
+from mcp_trentina_crunchtools import DEFAULT_PORT, _run_with_gateway, logsafe, main
 from mcp_trentina_crunchtools.gateway.loader import GatewayConfig
 
 
 @pytest.fixture(autouse=True)
 def _restore_httpx_logger_level() -> Iterator[None]:
-    """_configure_logging mutates the shared httpx logger; restore it after each test."""
+    """logsafe.configure mutates the shared httpx logger; restore it after each test."""
     previous = logging.getLogger("httpx").level
     yield
     logging.getLogger("httpx").setLevel(previous)
@@ -32,17 +32,17 @@ def _restore_httpx_logger_level() -> Iterator[None]:
 
 def test_configure_logging_defaults_to_info(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TRENTINA_LOG_LEVEL", raising=False)
-    assert _configure_logging() == "INFO"
+    assert logsafe.configure("TRENTINA_LOG_LEVEL") == "INFO"
 
 
 def test_configure_logging_resolves_requested_level(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TRENTINA_LOG_LEVEL", "warning")
-    assert _configure_logging() == "WARNING"
+    assert logsafe.configure("TRENTINA_LOG_LEVEL") == "WARNING"
 
 
 def test_configure_logging_is_case_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TRENTINA_LOG_LEVEL", "Debug")
-    assert _configure_logging() == "DEBUG"
+    assert logsafe.configure("TRENTINA_LOG_LEVEL") == "DEBUG"
 
 
 def test_configure_logging_invalid_level_falls_back_to_info(
@@ -52,7 +52,7 @@ def test_configure_logging_invalid_level_falls_back_to_info(
     passed through verbatim — mcp.run(log_level=...) hands this straight to
     uvicorn.Config, which raises KeyError on anything outside its known set."""
     monkeypatch.setenv("TRENTINA_LOG_LEVEL", "bogus")
-    assert _configure_logging() == "INFO"
+    assert logsafe.configure("TRENTINA_LOG_LEVEL") == "INFO"
 
 
 def test_configure_logging_notset_falls_back_to_info(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,7 +61,7 @@ def test_configure_logging_notset_falls_back_to_info(monkeypatch: pytest.MonkeyP
     KeyError at server startup instead of just being ignored like it would
     have been before this level was forwarded anywhere."""
     monkeypatch.setenv("TRENTINA_LOG_LEVEL", "NOTSET")
-    assert _configure_logging() == "INFO"
+    assert logsafe.configure("TRENTINA_LOG_LEVEL") == "INFO"
 
 
 def test_configure_logging_rejects_non_level_module_attributes(
@@ -74,7 +74,7 @@ def test_configure_logging_rejects_non_level_module_attributes(
     names must be checked against a fixed allowlist before ever touching
     getattr, not validated after the fact."""
     monkeypatch.setenv("TRENTINA_LOG_LEVEL", "_styles")
-    assert _configure_logging() == "INFO"
+    assert logsafe.configure("TRENTINA_LOG_LEVEL") == "INFO"
 
 
 def test_configure_logging_clamps_httpx_logger(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,7 +82,7 @@ def test_configure_logging_clamps_httpx_logger(monkeypatch: pytest.MonkeyPatch) 
     it needs its own explicit level — root-logger configuration alone never
     reaches it in practice (see issue #73)."""
     monkeypatch.setenv("TRENTINA_LOG_LEVEL", "WARNING")
-    _configure_logging()
+    logsafe.configure("TRENTINA_LOG_LEVEL")
     assert logging.getLogger("httpx").level == logging.WARNING
 
 
@@ -90,7 +90,7 @@ def test_configure_logging_httpx_tracks_requested_level(monkeypatch: pytest.Monk
     """DEBUG should restore full httpx verbosity, not stay clamped to WARNING —
     the fix must not hardcode a floor that fights an operator's explicit ask."""
     monkeypatch.setenv("TRENTINA_LOG_LEVEL", "DEBUG")
-    _configure_logging()
+    logsafe.configure("TRENTINA_LOG_LEVEL")
     assert logging.getLogger("httpx").level == logging.DEBUG
 
 
@@ -101,7 +101,7 @@ def test_run_with_gateway_forwards_log_level_to_uvicorn() -> None:
     to uvicorn.access/error *after* its own dictConfig runs — so nothing short
     of an explicit log_level reaching mcp_server.run() fixes it. This exercises
     the gateway-mode path from the deployment described in issue #73, where
-    resolving the right string in _configure_logging() alone would not have
+    resolving the right string in logsafe.configure alone would not have
     caught a regression in the plumbing that forwards it."""
     empty_config = GatewayConfig(profiles={})
     mock_server = MagicMock()

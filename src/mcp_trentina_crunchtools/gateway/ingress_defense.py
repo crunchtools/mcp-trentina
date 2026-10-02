@@ -54,7 +54,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..defense import Provenance, defend
 from ..l1.pipeline import run_l1
-from ..logsafe import exc_kind, exc_where
+from ..logsafe import exc_kind, exc_where, redact_source
 from ..modes import (
     Gaps,
     Mode,
@@ -93,16 +93,16 @@ def effective_mode(profile: Profile, mode: Mode | None = None) -> Mode:
     if override in _OVERRIDE_VALUES:
         if override != "flag":
             logger.warning(
-                "%s=%r is an old spelling of 'flag'; honouring it",
+                "%s (%s) is an old spelling of 'flag'; honouring it",
                 _OVERRIDE_ENV,
-                override,
+                redact_source(override),
             )
         return Mode(_OVERRIDE_VALUES[override])
     if override:
         logger.error(
-            "%s=%r is not a valid override (only 'flag' is); ignoring",
+            "%s (%s) is not a valid override (only 'flag' is); ignoring",
             _OVERRIDE_ENV,
-            override,
+            redact_source(override),
         )
     return mode if mode is not None else Mode(profile.defense.enforcement)
 

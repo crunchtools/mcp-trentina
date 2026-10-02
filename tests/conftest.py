@@ -10,6 +10,7 @@ import pytest
 
 from mcp_trentina_crunchtools import config as config_mod
 from mcp_trentina_crunchtools import database as database_mod
+from mcp_trentina_crunchtools import logsafe
 from mcp_trentina_crunchtools import perimeter_db as perimeter_db_mod
 from mcp_trentina_crunchtools.gateway.backend import reset_tool_list_cache
 from mcp_trentina_crunchtools.gateway.circuit import breaker
@@ -67,6 +68,17 @@ def _isolated_perimeter_store(tmp_path: pathlib.Path, monkeypatch: pytest.Monkey
     # state directories (#261), and tests read files they wrote to tmp_path.
     monkeypatch.setenv("TRENTINA_PERIMETER_DB", str(tmp_path / "state" / "perimeter.db"))
     config_mod._config = None
+
+
+@pytest.fixture(autouse=True)
+def _nothing_held() -> Iterator[None]:
+    """No test inherits another's secrets (#341). ``logsafe`` holds every
+    secret the loader reads for the life of the process, and a fake token
+    that is also a word ("kage", "slack") would be cut from a later test's
+    log lines."""
+    logsafe._forget_all()
+    yield
+    logsafe._forget_all()
 
 
 @pytest.fixture(autouse=True)

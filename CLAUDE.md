@@ -181,6 +181,24 @@ alert ingress, a refused reload and the OAuth store's CIMD path (#292), and
 an AST check over the whole package that only a call marked
 `# logsafe: ours` may print an exception.
 
+The backstop (#341) does not depend on call sites. `logsafe.guard()` runs
+when the package is imported and installs a `LogRecord` factory every record
+from every logger passes through: a value `logsafe.hold(value, name)` knows
+prints as `[REDACTED:<NAME>]`, and credential-shaped text nobody registered
+(a `?key=`/`access_token=` query value, a `Bearer` value, URL userinfo,
+`sk-…`/`AIza…`/JWT shapes) prints as `[REDACTED]`. `read_secret_env` holds
+every secret it returns, so a new secret is read THERE and nowhere else (one
+under 4 characters cannot be held and is warned about by name); `guard()`
+also holds any environment variable named `*_KEY`, `*_TOKEN`, `*_SECRET` or
+`*_PASSWORD` of 8 characters or more. `extra=` fields are merged after the
+factory returns, so `guard()` wraps `Logger.makeRecord` for those. A
+traceback is rendered in the factory only when an exception's own text
+carries something to cut: rendering frames reads source files, and doing it
+on every `exc_info` stalls the caller. `logsafe.configure` is the only `basicConfig` in
+the package (gateway and bridge both call it), and an AST test in
+`tests/test_log_scrub.py` fails a second one or a second record factory. A
+new pattern goes into that file's attack, benign and linearity tables.
+
 ## Endpoints
 
 - `GET /health` — unauthenticated liveness probe returning `{status, classifier, profiles}`.

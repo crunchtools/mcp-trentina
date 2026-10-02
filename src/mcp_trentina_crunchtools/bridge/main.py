@@ -33,6 +33,7 @@ import httpx
 import uvicorn
 from nio.store import SqliteStore
 
+from .. import logsafe
 from ..gateway.loader import read_secret_env
 from ..matrix.recovery_key import RecoveryKeyError
 from .api import build_app
@@ -173,10 +174,7 @@ def _device_keys(settings: BridgeSettings, session: dict[str, str]) -> dict[str,
 
 
 def main(argv: list[str] | None = None) -> None:
-    logging.basicConfig(
-        level=os.environ.get("BRIDGE_LOG_LEVEL", "WARNING"),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    logsafe.configure("BRIDGE_LOG_LEVEL", default="WARNING")
     parser = argparse.ArgumentParser(prog="mcp-trentina-bridge")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("run", help="run the bridge")
