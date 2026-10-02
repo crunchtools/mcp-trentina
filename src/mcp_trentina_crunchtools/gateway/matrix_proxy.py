@@ -60,7 +60,7 @@ from starlette.responses import Response, StreamingResponse
 
 from ..channels import Channel
 from ..defense import defend, defend_selection
-from ..logsafe import exc_kind, exc_where, redact_source
+from ..logsafe import exc_kind, exc_where, redact_source, safe_url
 from ..matrix.keybackup import KeyBackupProvider
 from ..modes import gaps_of
 from ..preprocess import SelectionContext
@@ -316,7 +316,7 @@ def register_matrix_routes(
 
     logger.info(
         "matrix_proxy: registered /matrix/{path} → %s for %d profile(s): %s",
-        upstream,
+        safe_url(upstream),
         len(matrix_profiles),
         ", ".join(matrix_profiles) or "(none)",
     )

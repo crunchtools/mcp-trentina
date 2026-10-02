@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools import _build_oauth_context
+from mcp_trentina_crunchtools import _build_oauth_context, logsafe
 from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
 from mcp_trentina_crunchtools.gateway.loader import GatewayConfig
 from mcp_trentina_crunchtools.gateway.profile import (
@@ -234,8 +234,13 @@ class TestStartupLogsCarryNoSecrets:
             **extra,
         }
 
-    def _secrets(self) -> list[str]:
-        return [self.UPSTREAM_SECRET, self.SIGNING_KEY, self.BEARER]
+    def _assert_no_secret(self, text: str) -> None:
+        """Neither a secret nor a redaction marker: since #341 a secret a
+        call site logged would print as ``[REDACTED:…]``, and that call site
+        is still the bug these tests exist to catch."""
+        for secret in (self.UPSTREAM_SECRET, self.SIGNING_KEY, self.BEARER):
+            assert secret not in text
+        assert "[REDACTED" not in text
 
     def test_proxy_startup_logs_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:
         profile = _proxy_profile()
@@ -244,16 +249,14 @@ class TestStartupLogsCarryNoSecrets:
             ctx = _build({"agent2": profile}, self._env())
             assert ctx is not None
             ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
-        for secret in self._secrets():
-            assert secret not in caplog.text
+        self._assert_no_secret(caplog.text)
 
     def test_delegated_startup_logs_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:
         profile = _delegated_profile()
         profile.auth.bearer_token = SecretStr(self.BEARER)
         with caplog.at_level("DEBUG"):
             assert _build({"gemini-app": profile}, self._env()) is not None
-        for secret in self._secrets():
-            assert secret not in caplog.text
+        self._assert_no_secret(caplog.text)
 
     def test_mixed_startup_logs_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:
         """Exercises the multi-proxy warning and the operator-role warning too."""
@@ -269,12 +272,16 @@ class TestStartupLogsCarryNoSecrets:
             )
             assert ctx is not None
             ctx.provider.set_mcp_path("/mcp-internal-deadbeef")
-        for secret in self._secrets():
-            assert secret not in caplog.text
+        self._assert_no_secret(caplog.text)
 
     def test_the_guard_would_catch_a_real_leak(self, caplog: pytest.LogCaptureFixture) -> None:
         """A canary: the assertion above only means something if caplog is
-        actually capturing this logger."""
+        actually capturing this logger. A logged secret arrives as its
+        marker (#341), which is what ``_assert_no_secret`` refuses."""
+        logsafe.hold(self.UPSTREAM_SECRET, "TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET")
         with caplog.at_level("DEBUG"):
             logging.getLogger("mcp_trentina_crunchtools").info("canary %s", self.UPSTREAM_SECRET)
-        assert self.UPSTREAM_SECRET in caplog.text
+        assert self.UPSTREAM_SECRET not in caplog.text
+        assert "[REDACTED:TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET]" in caplog.text
+        with pytest.raises(AssertionError):
+            self._assert_no_secret(caplog.text)

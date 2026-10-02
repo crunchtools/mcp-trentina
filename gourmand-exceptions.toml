@@ -722,3 +722,11 @@ path = "tests/test_incident_replay.py"
 pattern = "_profile"
 justification = "Not single-use: called from the cross-profile blocklist replay and the forged-marker replay, verified by grep. The same per-class undercount as the tests/test_gateway_router.py `_profile` entry."
 classification = "gourmand_bug"
+
+# --- logsafe: the one stdlib hook that has no extension point (#341) ---
+[[exceptions]]
+check = "lint_suppression"
+path = "src/mcp_trentina_crunchtools/logsafe.py"
+pattern = "noqa: B010"
+justification = "logging merges `extra` into a record after the record factory returns and offers no hook after that, so Logger.makeRecord is wrapped; plain assignment to a method fails mypy and setattr with a literal trips B010"
+classification = "by_design"

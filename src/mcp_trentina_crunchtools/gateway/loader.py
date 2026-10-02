@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 import yaml
 from pydantic import SecretStr, ValidationError
 
+from .. import logsafe
 from ..channels import Channel
 from .drivers import build_preprocessors
 from .errors import ProfileConfigError
@@ -387,8 +388,28 @@ def read_secret_env(env_var: str, *, record: bool = True) -> str:
                 f"{file_var}: cannot read the secret file it names ({exc.strerror or exc})"
             ) from exc
         _warn_on_loose_mode(path, file_var)
-        return raw.strip()
-    return os.environ.get(env_var, "")
+        return _held(raw.strip(), env_var)
+    return _held(os.environ.get(env_var, ""), env_var)
+
+
+_short_secret_warned: set[str] = set()
+
+
+def _held(value: str, env_var: str) -> str:
+    """``value``, now one no log record can carry (``logsafe.hold``, #341).
+
+    A secret too short to hold is said so once, by name: it cannot be told
+    from ordinary text in a log line, which is also why it is no secret.
+    """
+    held = logsafe.hold(value, env_var, minimum=logsafe.MIN_DECLARED_CHARS)
+    if value and not held and env_var not in _short_secret_warned:
+        _short_secret_warned.add(env_var)
+        logger.warning(
+            "%s is under %d characters: too short to redact from logs, and too short a secret",
+            env_var,
+            logsafe.MIN_DECLARED_CHARS,
+        )
+    return value
 
 
 def _require_env(name: str, env_var: str, what: str) -> SecretStr:
