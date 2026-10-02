@@ -81,7 +81,7 @@ operator policy; `posture.py` checks the container's own containment.
 
 The quarantined LLM's security comes from architectural constraints, not prompt engineering:
 
-1. **No tools**: no provider's request body is built with tool declarations. The Gemini path also refuses one at runtime (`_enforce_quarantine`).
+1. **No tools**: no provider's request body may carry a tool, function, plugin, provider-run search or MCP key. Every driver refuses one at runtime before sending (`providers/base.py` `enforce_no_tools`, #318).
 2. **No SDK**: raw httpx REST calls, so no SDK can configure a tool by accident.
 3. **No memory**: each request is stateless.
 4. **No write access**: its answer is parsed and schema-checked by deterministic code (`quarantine/schema.py`). It cannot write to the blocklist or any other state, and none of its text is delivered to an agent.

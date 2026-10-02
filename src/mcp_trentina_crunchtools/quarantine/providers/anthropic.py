@@ -8,7 +8,15 @@ from typing import Any
 import httpx
 
 from ...errors import MalformedResponseError, QuarantineAgentError
-from .base import Provider, ProviderResult, count, dig, envelope, status_error
+from .base import (
+    Provider,
+    ProviderResult,
+    count,
+    dig,
+    enforce_no_tools,
+    envelope,
+    status_error,
+)
 
 ANTHROPIC_API_BASE = "https://api.anthropic.com/v1"
 ANTHROPIC_TIMEOUT = 60.0
@@ -54,6 +62,8 @@ class AnthropicProvider(Provider):
             ],
             "temperature": temperature,
         }
+
+        enforce_no_tools(request_body)
 
         try:
             # nosemgrep: trentina-httpx-client-outside-egress -- fixed or operator URL

@@ -7,7 +7,15 @@ from typing import Any
 import httpx
 
 from ...errors import MalformedResponseError, QuarantineAgentError
-from .base import Provider, ProviderResult, count, dig, envelope, status_error
+from .base import (
+    Provider,
+    ProviderResult,
+    count,
+    dig,
+    enforce_no_tools,
+    envelope,
+    status_error,
+)
 
 DEFAULT_BASE_URL = "http://localhost:11434"
 DEFAULT_MODEL = "qwen2.5:0.5b"
@@ -50,6 +58,8 @@ class OllamaProvider(Provider):
 
         if response_schema is not None:
             request_body["format"] = "json"
+
+        enforce_no_tools(request_body)
 
         try:
             # nosemgrep: trentina-httpx-client-outside-egress -- operator URL

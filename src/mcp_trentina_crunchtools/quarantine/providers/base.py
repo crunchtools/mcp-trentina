@@ -70,6 +70,36 @@ class Provider(ABC):
         """
 
 
+# Every key, across the four request shapes the drivers speak, that would let
+# the provider call something on the model's behalf: function/tool calling,
+# OpenRouter plugins (its `web` plugin fetches pages), provider-run search and
+# MCP. L3 reads hostile content by design; what keeps that safe is that its
+# answer can do nothing, so no request may carry one of these (#318).
+TOOL_KEYS = frozenset(
+    {
+        "tools",
+        "tool_choice",
+        "functionDeclarations",
+        "functions",
+        "function_call",
+        "plugins",
+        "web_search_options",
+        "mcp_servers",
+    }
+)
+
+
+def enforce_no_tools(request_body: dict[str, Any]) -> None:
+    """Refuse a request body that gives the model a way to act.
+
+    A security invariant, not a debug assertion: it survives ``python -O``.
+    Every driver calls it immediately before posting.
+    """
+    found = TOOL_KEYS.intersection(request_body)
+    if found:
+        raise QuarantineAgentError(f"SECURITY: {', '.join(sorted(found))} in provider request")
+
+
 def json_object(raw: bytes | str) -> dict[str, Any]:
     """*raw* as a JSON object, or MalformedResponseError: never a parser exception.
 

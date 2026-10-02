@@ -7,7 +7,15 @@ from typing import Any
 import httpx
 
 from ...errors import MalformedResponseError, QuarantineAgentError
-from .base import Provider, ProviderResult, count, dig, envelope, status_error
+from .base import (
+    Provider,
+    ProviderResult,
+    count,
+    dig,
+    enforce_no_tools,
+    envelope,
+    status_error,
+)
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_TIMEOUT = 60.0
@@ -53,8 +61,7 @@ class GeminiProvider(Provider):
             "generationConfig": gen_config,
         }
 
-        if "tools" in request_body or "functionDeclarations" in request_body:
-            raise QuarantineAgentError("SECURITY: tools in provider request")
+        enforce_no_tools(request_body)
 
         try:
             # nosemgrep: trentina-httpx-client-outside-egress -- fixed or operator URL
