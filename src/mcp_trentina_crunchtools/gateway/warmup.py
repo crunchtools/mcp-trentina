@@ -7,6 +7,11 @@ through the same single-flight build a client's ``tools/list`` uses
 (``router.ensure_profile_build``), so a client connecting mid-warm-up joins
 the work in flight instead of starting its own.
 
+Before it builds anything it refetches every tool list that was loaded from
+SQLite (#335), so the aggregates, and the schemas arguments are checked
+against, are what the backends list now and not what they listed before the
+restart.
+
 It runs as background L3 work: user-facing scans are granted limiter slots
 first, and it may wait out a provider's throttling far longer than a user
 call would, because nobody is waiting on it.
@@ -22,9 +27,10 @@ from typing import TYPE_CHECKING, Any
 
 from ..logsafe import exc_kind, exc_where
 from ..quarantine.limiter import Priority, all_limiters, l3_priority, l3_throttle_budget
+from .backend import revalidate_backend_tools
 from .ingress_defense import perimeter_counts
 from .loader import get_active_config
-from .router import ensure_profile_build
+from .router import ensure_profile_build, invalidate_profile_cache_for_backend
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -47,11 +53,38 @@ async def warm_all() -> None:
         return
     priority = l3_priority.set(Priority.BACKGROUND)
     budget = l3_throttle_budget.set(WARMUP_THROTTLE_BUDGET)
+    profiles = list(active.config.profiles.values())
     try:
-        await _warm(list(active.config.profiles.values()))
+        await _revalidate_tool_lists(profiles)
+        await _warm(profiles)
     finally:
         l3_priority.reset(priority)
         l3_throttle_budget.reset(budget)
+
+
+async def _revalidate_tool_lists(profiles: list[Profile]) -> None:
+    """Refetch each backend's persisted tool list, once per URL, all at once.
+
+    A client that listed tools while this ran was served the persisted list;
+    its aggregate is dropped when the backend's list turned out to differ.
+    """
+    backends = {
+        backend.url: (name, backend)
+        for profile in profiles
+        for name, backend in profile.backends.items()
+        if not backend.is_internal
+    }
+    changed = await asyncio.gather(
+        *(revalidate_backend_tools(name, backend) for name, backend in backends.values())
+    )
+    stale = [url for url, differs in zip(backends, changed, strict=True) if differs]
+    for url in stale:
+        invalidate_profile_cache_for_backend(url)
+    logger.warning(
+        "warm-up: revalidated the tool lists of %d backends, %d changed since they were cached",
+        len(backends),
+        len(stale),
+    )
 
 
 async def _warm(profiles: list[Profile]) -> None:

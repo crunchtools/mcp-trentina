@@ -263,6 +263,19 @@ def cached_tool_schema(url: str, tool_name: str) -> dict[str, Any] | None:
     return None
 
 
+def cached_tool_read_only(url: str, tool_name: str) -> bool:
+    """Whether the backend annotated *tool_name* ``readOnlyHint`` in its cached list.
+
+    Unlisted, unannotated or anything but ``true`` is False: a tool that did
+    not say it only reads may write.
+    """
+    for tool in _tool_list_cache.get(url, ()):
+        if tool.get("name") == tool_name:
+            annotations = tool.get("annotations")
+            return isinstance(annotations, dict) and annotations.get("readOnlyHint") is True
+    return False
+
+
 #: MCP's tool-name charset. A listed name outside it could forge a log line.
 _TOOL_NAME = re.compile(r"[A-Za-z0-9_.\-]{1,128}")
 
@@ -390,6 +403,24 @@ async def refresh_backend_tools(
         inflight = asyncio.ensure_future(_single_flight_fetch(backend_name, backend))
         _inflight[backend.url] = inflight
     return await inflight
+
+
+async def revalidate_backend_tools(backend_name: str, backend: Backend) -> bool:
+    """Refetch a list loaded from SQLite at startup; True when it changed (#335).
+
+    The persisted list survives a restart so a backend that is down still has
+    its last-known-good one. It also outlived every backend upgrade until
+    someone ran ``reconnect_backend``, and arguments were judged against the
+    schema of a tool that had since changed. A backend with nothing cached is
+    left to the first build, and one that cannot be reached keeps its list.
+    """
+    before = _tool_list_cache.get(backend.url)
+    if before is None:
+        return False
+    try:
+        return await refresh_backend_tools(backend_name, backend) != before
+    except BackendCallError:
+        return False
 
 
 async def _single_flight_fetch(

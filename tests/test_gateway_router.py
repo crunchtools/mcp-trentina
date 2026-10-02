@@ -1250,7 +1250,19 @@ _LUNA_SCHEMAS: dict[str, dict[str, Any]] = {
         "properties": {"to": {"type": "string"}, "cc": {"type": "string"}},
         "required": ["to"],
     },
+    # mcp-podman's image_prune, the call in #335: both optionals narrow it.
+    "image_prune_tool": {
+        "properties": {
+            "all": {"type": "boolean", "default": False},
+            "filters": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+        },
+    },
+    "list_files": {
+        "properties": {"kind": {"type": "string", "enum": ["doc", "sheet"]}},
+    },
 }
+# What the backend annotated ``readOnlyHint``. The rest said nothing.
+_LUNA_READ_ONLY = {"list_entries_tool", "list_files"}
 
 
 class TestArgumentHygiene:
@@ -1289,7 +1301,12 @@ class TestArgumentHygiene:
             return SimpleNamespace(blocked=False, extraction=None, warning=warning)
 
         _tool_list_cache[backend.url] = [
-            {"name": name, "inputSchema": schema} for name, schema in _LUNA_SCHEMAS.items()
+            {
+                "name": name,
+                "inputSchema": schema,
+                "annotations": {"readOnlyHint": name in _LUNA_READ_ONLY},
+            }
+            for name, schema in _LUNA_SCHEMAS.items()
         ]
         try:
             with (
@@ -1399,6 +1416,54 @@ class TestArgumentHygiene:
         assert seen is None
         assert resp["error"]["code"] == -32602
         assert json.loads(row["normalized"]) == {"run_id": "dropped: empty"}
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            {"all": "true", "filters": '{"until": "720h"}'},
+            {"all": True, "filters": '{"until": "720h"}'},
+        ],
+    )
+    async def test_a_narrowing_argument_that_fails_refuses_the_call(
+        self, tmp_path: Any, arguments: dict[str, Any]
+    ) -> None:
+        """Forwarded without its filter, the prune removes everything (#335)."""
+        url = "http://luna:8000/mcp"
+        breaker.reset(url)
+        resp, seen, row = await self._call(tmp_path, "image_prune_tool", arguments)
+
+        assert seen is None
+        assert resp["error"]["code"] == -32602
+        assert "filters matches no allowed form" in resp["error"]["message"]
+        assert "720h" not in resp["error"]["message"]
+        assert row["outcome"] == "tool_error"
+        assert breaker._get(url).consecutive_failures == 0
+
+    async def test_zero_is_a_value_to_a_tool_that_writes(self, tmp_path: Any) -> None:
+        """``feed_id: 0`` is a placeholder, ``limit: 0`` is not; the schema says neither."""
+        schema = {"properties": {"limit": {"type": "integer", "minimum": 1}}}
+        with patch.dict(_LUNA_SCHEMAS, {"delete_entries": schema}):
+            resp, seen, _row = await self._call(tmp_path, "delete_entries", {"limit": 0})
+
+        assert seen is None
+        assert "limit below minimum 1" in resp["error"]["message"]
+
+    async def test_empty_optionals_on_a_writing_tool_are_still_dropped(self, tmp_path: Any) -> None:
+        resp, seen, row = await self._call(
+            tmp_path, "image_prune_tool", {"all": True, "filters": None}
+        )
+
+        assert seen == {"all": True}
+        assert "result" in resp
+        assert json.loads(row["normalized"]) == {"filters": "dropped: empty"}
+
+    async def test_a_read_only_tool_still_drops_what_fails(self, tmp_path: Any) -> None:
+        resp, seen, row = await self._call(tmp_path, "list_files", {"kind": "all"})
+
+        assert seen == {}
+        dropped = {"kind": "dropped: is not an allowed value"}
+        assert resp["result"]["_trentina_warning"] == {"normalized": dropped}
+        assert row["outcome"] == "ok"
 
     async def test_a_guard_refusal_outranks_a_schema_refusal(self, tmp_path: Any) -> None:
         guarded = Backend(

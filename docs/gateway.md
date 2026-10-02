@@ -99,7 +99,7 @@ call is forwarded, the gateway checks each argument against the tool's cached
 | Argument | Value | Result |
 |---|---|---|
 | optional | `""` or `null` | dropped |
-| optional | provably fails the schema | dropped |
+| optional | provably fails the schema | dropped when the tool is annotated `readOnlyHint`; otherwise refused with `-32602` |
 | required | provably fails the schema, or is absent | refused with `-32602`; the backend is not called |
 
 "Provably" means the gateway checks only `type`, `enum`, `const`, length,
@@ -108,13 +108,33 @@ range, item count and the `date`/`date-time` formats, through `anyOf`,
 is dropped on a guess. `pattern` is never evaluated, since a backend's regex
 run on the gateway is a ReDoS. With no cached schema, nothing changes.
 
-Dropping an optional cannot widen a call. The result is the call the agent
-would have made by omitting the argument, which is always permitted.
+Dropping `""` or `null` cannot widen a call: the caller said nothing by it, so
+the result is the call it would have made by omitting the argument. Dropping a
+value can (0.53.0, #335). An optional often narrows the action, and
+`image_prune(all=true, filters=<malformed>)` forwarded without its filter
+removes every unused image and reports success. So a value that fails its
+schema refuses the call, naming the argument and the rule, never the value.
+That includes `0` under a minimum: `feed_id: 0` is a placeholder and
+`limit: 0` on a delete is not, and the schema cannot tell them apart. The one
+exception is a tool its backend annotates `readOnlyHint: true`, where the
+wider call is only a wider read: there the value is dropped and reported. A
+backend that publishes no annotations gets the refusal on every tool, so
+annotate the read tools of a backend whose clients send placeholders.
+
 A value equal to the schema's `default` is forwarded: it is valid, and
 `default` is only an annotation, so a backend may not apply it on omission.
 Parameter guards judge the arguments as forwarded. Each drop is reported to
 the agent in `_trentina_warning.normalized` and recorded in the audit row.
 Internal tools are exempt, since they already read an empty value as unset.
+
+The schema is the backend's tool list, which the gateway caches and persists
+so a backend that is down at boot still has its last-known-good list. Since
+0.53.0 every persisted list is refetched when the gateway starts, before the
+warm-up builds anything, and a backend that cannot be reached keeps the one it
+had. Until then a list outlived every backend upgrade until someone ran
+`reconnect_backend`, and arguments were judged against a schema the tool no
+longer had. A backend upgraded while the gateway runs still needs
+`reconnect_backend`.
 
 The normalization is only as good as the backend's schema. An ID declared
 `int | None` with no `minimum` cannot show that `0` is invalid. The crunchtools

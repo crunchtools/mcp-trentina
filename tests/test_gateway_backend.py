@@ -19,8 +19,10 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 from mcp_trentina_crunchtools.gateway.backend import (
     _connect_streamable_http,
     _tool_list_cache,
+    cached_tool_read_only,
     call_backend_tool,
     list_backend_tools,
+    revalidate_backend_tools,
 )
 from mcp_trentina_crunchtools.gateway.circuit import State, breaker
 from mcp_trentina_crunchtools.gateway.errors import BackendCallError
@@ -496,3 +498,68 @@ class TestHeaderedBackendHttpTimeouts:
         assert client.headers["Authorization"] == "Bearer x"
         assert client.timeout.read == MCP_DEFAULT_SSE_READ_TIMEOUT
         assert client.timeout.connect == MCP_DEFAULT_TIMEOUT
+
+
+class TestRevalidatePersistedList:
+    """A list loaded from SQLite is refetched at boot (#335)."""
+
+    async def test_a_changed_list_replaces_the_persisted_one(self) -> None:
+        _tool_list_cache[URL] = [{"name": "old_tool", "description": "", "inputSchema": {}}]
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
+            return_value=_tools_result(["new_tool"]),
+        ):
+            changed = await revalidate_backend_tools("rotv", _backend())
+
+        assert changed is True
+        assert [t["name"] for t in _tool_list_cache[URL]] == ["new_tool"]
+
+    async def test_an_unchanged_list_reports_no_change(self) -> None:
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
+            return_value=_tools_result(),
+        ):
+            await list_backend_tools("rotv", _backend())
+            changed = await revalidate_backend_tools("rotv", _backend())
+
+        assert changed is False
+
+    async def test_an_unreachable_backend_keeps_its_persisted_list(self) -> None:
+        persisted = [{"name": "old_tool", "description": "", "inputSchema": {}}]
+        _tool_list_cache[URL] = persisted
+
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
+            side_effect=ConnectionError("down"),
+        ):
+            changed = await revalidate_backend_tools("rotv", _backend())
+
+        assert changed is False
+        assert _tool_list_cache[URL] is persisted
+
+    async def test_a_backend_with_nothing_persisted_is_not_fetched(self) -> None:
+        with patch(
+            "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
+            side_effect=AssertionError("fetched"),
+        ):
+            assert await revalidate_backend_tools("rotv", _backend()) is False
+
+
+class TestCachedToolReadOnly:
+    @pytest.mark.parametrize(
+        ("tool", "read_only"),
+        [
+            ({"name": "t", "annotations": {"readOnlyHint": True}}, True),
+            ({"name": "t", "annotations": {"readOnlyHint": False}}, False),
+            ({"name": "t", "annotations": {"readOnlyHint": "true"}}, False),
+            ({"name": "t", "annotations": {"destructiveHint": False}}, False),
+            ({"name": "t"}, False),
+            ({"name": "other", "annotations": {"readOnlyHint": True}}, False),
+        ],
+    )
+    def test_only_an_explicit_true_counts(self, tool: dict[str, Any], read_only: bool) -> None:
+        """A tool that did not say it only reads may write."""
+        _tool_list_cache[URL] = [tool]
+
+        assert cached_tool_read_only(URL, "t") is read_only
