@@ -483,9 +483,11 @@ skill's format.
   both directions and is the only writer into the agent's Conduit (appservice).
 - `gateway/` — Per-consumer MCP gateway proxy with tool allowlists, parameter guards, and defense pipeline
   - `args.py` — schema-driven argument normalization (#241): drops an
-    optional that is empty or provably fails its schema (never one equal to
-    its `default`, which is only an annotation);
-    reports a failing required one for the router to refuse. Never evaluates
+    optional that is `""` or `null`, never one equal to its `default`, which
+    is only an annotation. An optional that provably fails its schema is
+    dropped only on a `readOnlyHint` tool and otherwise reported, like a
+    failing required one, for the router to refuse (#335: the call without it
+    can do more than was asked). Never evaluates
     `pattern` (a backend's regex is a ReDoS here).
   - `llm_policy.py` — what `/llm/<provider>/` admits (#297), per API shape
     (`anthropic`, `openai`, `openrouter`, `gemini`; a provider's `api`,

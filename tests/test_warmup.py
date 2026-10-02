@@ -16,7 +16,7 @@ import pytest
 
 from mcp_trentina_crunchtools.gateway import ingress_defense as ing
 from mcp_trentina_crunchtools.gateway import router, warmup
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, DefenseConfig, Profile
+from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, DefenseConfig, Profile
 from mcp_trentina_crunchtools.quarantine.limiter import (
     Priority,
     l3_priority,
@@ -169,6 +169,64 @@ class TestWarmUp:
             await warmup.warm_all()
 
         assert router._profile_inflight == {}
+
+
+class TestPersistedListsAreRevalidated:
+    """Boot refetches what SQLite remembered, before anything is built (#335)."""
+
+    @staticmethod
+    def _sharing(name: str) -> Profile:
+        profile = _profile(name)
+        profile.backends = {
+            "feeds": Backend(url="http://feeds:8000/mcp"),
+            "wiki": Backend(url="http://wiki:8000/mcp"),
+            "web": Backend(url="internal://web"),
+        }
+        return profile
+
+    async def test_each_url_once_and_changed_ones_are_invalidated(self) -> None:
+        order: list[str] = []
+
+        async def revalidate(name: str, _backend: Backend) -> bool:
+            order.append(name)
+            return name == "feeds"
+
+        async def build(profile: Profile, _generation: int | None = None) -> list[Any]:
+            order.append(f"build:{profile.name}")
+            return []
+
+        with (
+            patch.object(
+                warmup,
+                "get_active_config",
+                return_value=_active(self._sharing("a"), self._sharing("b")),
+            ),
+            patch.object(warmup, "revalidate_backend_tools", revalidate),
+            patch.object(warmup, "invalidate_profile_cache_for_backend") as invalidate,
+            patch.object(router, "_build_profile_tools", build),
+        ):
+            await warmup.warm_all()
+
+        # Two profiles share both URLs; the internal backend has no list to refetch.
+        assert order == ["feeds", "wiki", "build:a", "build:b"]
+        invalidate.assert_called_once_with("http://feeds:8000/mcp")
+
+    async def test_nothing_changed_invalidates_nothing(self) -> None:
+        async def revalidate(_name: str, _backend: Backend) -> bool:
+            return False
+
+        async def build(_profile: Profile, _generation: int | None = None) -> list[Any]:
+            return []
+
+        with (
+            patch.object(warmup, "get_active_config", return_value=_active(self._sharing("a"))),
+            patch.object(warmup, "revalidate_backend_tools", revalidate),
+            patch.object(warmup, "invalidate_profile_cache_for_backend") as invalidate,
+            patch.object(router, "_build_profile_tools", build),
+        ):
+            await warmup.warm_all()
+
+        invalidate.assert_not_called()
 
 
 class TestLifespan:

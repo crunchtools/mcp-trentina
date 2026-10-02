@@ -49,6 +49,7 @@ from ..reserved import (
 )
 from .args import Normalized, normalize_arguments
 from .backend import (
+    cached_tool_read_only,
     cached_tool_schema,
     call_backend_tool,
     list_backend_tools,
@@ -698,7 +699,7 @@ async def _tools_call(profile: Profile, req_id: Any, params: dict[str, Any]) -> 
         backend,
         tool_name,
         {**forwarded, MODE_PARAM: mode.value, PROMPT_PARAM: prompt},
-        normalized.invalid_required,
+        normalized,
     )
     if refused is not None:
         outcome, message = refused
@@ -811,21 +812,29 @@ def _oversize_refusal(mode: Mode, policy: ModePolicy) -> dict[str, Any]:
 
 
 def _refuse_arguments(
-    backend: Backend, tool_name: str, judged: dict[str, Any], invalid_required: dict[str, str]
+    backend: Backend, tool_name: str, judged: dict[str, Any], normalized: Normalized
 ) -> tuple[Outcome, str] | None:
     """The parameter guards' refusal, else the schema's, else None.
 
     Guards first, so a probe a guard refuses still audits as one. A required
     argument that fails its schema would be refused by the backend too;
     answering here spares the round trip, and the breaker never sees a call
-    the backend never received.
+    the backend never received. An optional one is refused because the call
+    without it is not the call that was asked for (#335).
     """
     guard_err = check_parameter_guards(tool_name, judged, backend)
     if guard_err:
         return Outcome.DENIED_GUARD, guard_err
-    if invalid_required:
+    if normalized.invalid_required:
         return Outcome.TOOL_ERROR, "Invalid required arguments: " + "; ".join(
-            f"{name} {reason}" for name, reason in invalid_required.items()
+            f"{name} {reason}" for name, reason in normalized.invalid_required.items()
+        )
+    if normalized.invalid_optional:
+        return Outcome.TOOL_ERROR, (
+            "Invalid optional arguments: "
+            + "; ".join(f"{name} {reason}" for name, reason in normalized.invalid_optional.items())
+            + ". Correct or omit them: this tool is not marked read-only, so the call"
+            " was not forwarded without them."
         )
     return None
 
@@ -843,7 +852,11 @@ def _normalize_arguments(
     """
     if backend.is_internal:
         return Normalized(forwarded)
-    normalized = normalize_arguments(forwarded, cached_tool_schema(backend.url, tool_name))
+    normalized = normalize_arguments(
+        forwarded,
+        cached_tool_schema(backend.url, tool_name),
+        read_only=cached_tool_read_only(backend.url, tool_name),
+    )
     if normalized.dropped:
         # How many and why, never which: a name is the caller's (#262).
         logger.info(

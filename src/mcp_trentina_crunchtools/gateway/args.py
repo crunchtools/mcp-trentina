@@ -11,12 +11,21 @@ and ``unread_only: false`` are legitimate. For each argument, the first rule
 that matches:
 
 1. optional and ``""`` or ``null``  -> dropped
-2. optional and provably invalid    -> dropped
+2. optional and provably invalid    -> dropped if the tool is read-only;
+                                       else reported; the router refuses
 3. required and provably invalid    -> reported; the router refuses
 4. required and absent              -> reported; the router refuses
 
-Dropping an optional cannot widen a call. The result is the call the agent
-would have made by omitting it, and omitting an optional is always permitted.
+Dropping ``""`` or ``null`` cannot widen a call: the caller said nothing, so
+the result is the call it would have made by omitting the argument.
+
+Dropping a value can (#335). An optional often narrows the action:
+``image_prune(all=true, filters=<malformed>)`` forwarded without its filter
+removes every unused image and reports success. So rule 2 drops only for a
+tool its backend annotates ``readOnlyHint``, where the wider call is a wider
+read. For any other tool the argument is reported, and the router refuses the
+call. That includes ``0`` under a minimum: ``feed_id: 0`` is a placeholder,
+``limit: 0`` on a delete is not, and the schema cannot tell them apart.
 
 A value equal to the schema's ``default`` is forwarded. It is valid, so the
 backend accepts it, and ``default`` is only an annotation: a backend may not
@@ -66,6 +75,7 @@ class Normalized:
     arguments: dict[str, Any]
     dropped: dict[str, str] = field(default_factory=dict)
     invalid_required: dict[str, str] = field(default_factory=dict)
+    invalid_optional: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -76,14 +86,18 @@ class _Walk:
     visits: int = _MAX_VISITS
 
 
-def normalize_arguments(arguments: dict[str, Any], schema: dict[str, Any] | None) -> Normalized:
+def normalize_arguments(
+    arguments: dict[str, Any], schema: dict[str, Any] | None, *, read_only: bool = False
+) -> Normalized:
     """Apply the module's four rules to *arguments*, a tools/call's, under *schema*.
 
-    *schema* is the tool's ``inputSchema`` as the backend listed it. The result
+    *schema* is the tool's ``inputSchema`` as the backend listed it, and
+    *read_only* whether it annotated the tool ``readOnlyHint``. The result
     carries ``arguments``, what to forward; ``dropped``, each removed optional
-    and the rule that removed it; and ``invalid_required``, each required
-    argument that fails its schema or is absent, for the router to refuse. A
-    required argument is always left in ``arguments``.
+    and the rule that removed it; ``invalid_required``, each required argument
+    that fails its schema or is absent; and ``invalid_optional``, each optional
+    that fails its schema and may not be dropped. The router refuses either.
+    A reported argument is always left in ``arguments``.
 
     With no schema nothing changes: an unknown parameter may be required, and
     forwarding it unchanged is the old behaviour. The caller's dict is never
@@ -119,8 +133,11 @@ def normalize_arguments(arguments: dict[str, Any], schema: dict[str, Any] | None
         drop = "empty" if empty else _violation(value, prop, _Walk(defs), 0)
         if drop is None:
             result.arguments[key] = value
-        else:
+        elif empty or read_only:
             result.dropped[key] = f"dropped: {drop}"
+        else:
+            result.invalid_optional[key] = drop
+            result.arguments[key] = value
     for key in sorted(required - arguments.keys()):
         result.invalid_required[key] = "is missing"
     if not result.dropped:

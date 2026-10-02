@@ -10,6 +10,30 @@ under that name.
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-10-02
+
+### Security
+- An optional argument that fails its schema no longer falls out of a call
+  that can change something (#335). Argument normalization dropped it and
+  forwarded the rest, so `image_prune(all=true, filters=<malformed>)` would
+  have run with no filter and reported success. Such a call is now refused
+  with `-32602`, naming the argument and the rule. `""` and `null` are still
+  dropped on every tool. A tool its backend annotates `readOnlyHint: true`
+  keeps the old behaviour, drop and report.
+
+### Fixed
+- Persisted tool lists are refetched at startup (#335). The list a backend
+  gave was kept in SQLite across restarts and replaced only by
+  `reconnect_backend` or `cache_flush`, so after a backend upgrade the gateway
+  went on serving, and checking arguments against, the old schemas. A backend
+  that is unreachable at boot keeps its persisted list.
+
+**Upgrade:** a call that used to succeed with a warning in
+`_trentina_warning.normalized` can now be refused: one that passes an invalid
+optional value, `feed_id: 0` included, to a tool not annotated `readOnlyHint`.
+Backends that publish no annotations are treated as able to write on every
+tool; annotate read tools `readOnlyHint: true` to keep the lenient drop there.
+
 ## [0.52.0] - 2026-10-01
 
 ### Security

@@ -28,7 +28,21 @@ SCHEMA: dict[str, Any] = {
 }
 
 
+def _read(arguments: dict[str, Any], schema: dict[str, Any] | None) -> Any:
+    """As for a read-only tool, where every provable failure is a drop.
+
+    Most tests here are about what the validator proves, and ``dropped`` is
+    where a read-only tool shows it.
+    """
+    return normalize_arguments(arguments, schema, read_only=True)
+
+
 def _norm(**args: Any) -> Any:
+    return _read({"query": "q", "id": 1, **args}, SCHEMA)
+
+
+def _norm_write(**args: Any) -> Any:
+    """The same call on a tool that did not say it only reads."""
     return normalize_arguments({"query": "q", "id": 1, **args}, SCHEMA)
 
 
@@ -77,7 +91,7 @@ def test_enum_membership_is_json_equality(allowed: Any, value: Any, dropped: boo
     """``true`` is not ``1``; ``20.0`` is ``20``."""
     schema = {"properties": {"x": {"enum": [allowed]}}}
 
-    assert ("x" in normalize_arguments({"x": value}, schema).dropped) is dropped
+    assert ("x" in _read({"x": value}, schema).dropped) is dropped
 
 
 @pytest.mark.parametrize(
@@ -117,8 +131,8 @@ def test_an_optional_that_fails_its_schema_is_dropped(key: str, value: Any, reas
 def test_the_remaining_keywords(prop: dict[str, Any], bad: Any, good: Any, reason: str) -> None:
     schema = {"properties": {"x": prop}}
 
-    assert normalize_arguments({"x": bad}, schema).dropped == {"x": f"dropped: {reason}"}
-    assert normalize_arguments({"x": good}, schema).dropped == {}
+    assert _read({"x": bad}, schema).dropped == {"x": f"dropped: {reason}"}
+    assert _read({"x": good}, schema).dropped == {}
 
 
 @pytest.mark.parametrize(
@@ -133,7 +147,7 @@ def test_the_remaining_keywords(prop: dict[str, Any], bad: Any, good: Any, reaso
 )
 def test_a_type_list(declared: list[str], value: Any, dropped: bool) -> None:
     """Any listed type passes; bool is not integer; an unknown name judges nothing."""
-    result = normalize_arguments({"x": value}, {"properties": {"x": {"type": declared}}})
+    result = _read({"x": value}, {"properties": {"x": {"type": declared}}})
 
     assert ("x" in result.dropped) is dropped
 
@@ -141,15 +155,13 @@ def test_a_type_list(declared: list[str], value: Any, dropped: bool) -> None:
 def test_a_huge_integer_is_judged_not_crashed() -> None:
     schema = {"properties": {"n": {"type": "integer", "maximum": 100}}}
 
-    assert normalize_arguments({"n": 10**400}, schema).dropped == {
-        "n": "dropped: above maximum 100"
-    }
+    assert _read({"n": 10**400}, schema).dropped == {"n": "dropped: above maximum 100"}
 
 
 def test_a_single_branch_reports_its_own_reason() -> None:
     schema = {"properties": {"id": {"anyOf": [{"type": "integer", "minimum": 1}]}}}
 
-    assert normalize_arguments({"id": 0}, schema).dropped == {"id": "dropped: below minimum 1"}
+    assert _read({"id": 0}, schema).dropped == {"id": "dropped: below minimum 1"}
 
 
 def test_a_local_ref_is_followed() -> None:
@@ -158,7 +170,7 @@ def test_a_local_ref_is_followed() -> None:
         "$defs": {"Kind": {"type": "string", "enum": ["a", "b"]}},
     }
 
-    assert "kind" in normalize_arguments({"kind": "c"}, schema).dropped
+    assert "kind" in _read({"kind": "c"}, schema).dropped
 
 
 @pytest.mark.parametrize(
@@ -174,7 +186,7 @@ def test_a_local_ref_is_followed() -> None:
 )
 def test_what_the_validator_cannot_judge_is_kept(prop: dict[str, Any]) -> None:
     """Never drop on a guess. ``pattern`` is skipped: a backend's regex is a ReDoS."""
-    result = normalize_arguments({"x": "NOT valid 123"}, {"properties": {"x": prop}})
+    result = _read({"x": "NOT valid 123"}, {"properties": {"x": prop}})
 
     assert result.arguments == {"x": "NOT valid 123"}
     assert result.dropped == {}
@@ -185,19 +197,19 @@ def test_deep_nesting_is_bounded() -> None:
     for _ in range(50):
         prop = {"anyOf": [prop]}
 
-    assert normalize_arguments({"x": 0}, {"properties": {"x": prop}}).dropped == {}
+    assert _read({"x": 0}, {"properties": {"x": prop}}).dropped == {}
 
 
 def test_an_unresolved_ref_leaves_its_siblings_in_force() -> None:
     schema = {"properties": {"n": {"$ref": "https://x/y.json", "type": "integer", "minimum": 1}}}
 
-    assert normalize_arguments({"n": 0}, schema).dropped == {"n": "dropped: below minimum 1"}
+    assert _read({"n": 0}, schema).dropped == {"n": "dropped: below minimum 1"}
 
 
 def test_a_wide_all_of_stops_at_the_budget() -> None:
     parts: list[Any] = [{"type": "integer"}] * 500 + [{"minimum": 1}]
 
-    assert normalize_arguments({"n": 0}, {"properties": {"n": {"allOf": parts}}}).dropped == {}
+    assert _read({"n": 0}, {"properties": {"n": {"allOf": parts}}}).dropped == {}
 
 
 def test_a_wide_schema_exhausts_the_budget_and_proves_nothing() -> None:
@@ -206,18 +218,18 @@ def test_a_wide_schema_exhausts_the_budget_and_proves_nothing() -> None:
     for _ in range(4):
         prop = {"anyOf": [prop] * 8}
 
-    assert normalize_arguments({"x": 0}, {"properties": {"x": prop}}).dropped == {}
+    assert _read({"x": 0}, {"properties": {"x": prop}}).dropped == {}
 
 
 def test_a_required_argument_that_fails_is_reported_not_dropped() -> None:
-    result = normalize_arguments({"query": "q", "id": 0}, SCHEMA)
+    result = _read({"query": "q", "id": 0}, SCHEMA)
 
     assert result.arguments == {"query": "q", "id": 0}
     assert result.invalid_required == {"id": "below minimum 1"}
 
 
 def test_a_missing_required_argument_is_reported() -> None:
-    result = normalize_arguments({"query": "q"}, SCHEMA)
+    result = _read({"query": "q"}, SCHEMA)
 
     assert result.invalid_required == {"id": "is missing"}
 
@@ -227,7 +239,7 @@ def test_a_missing_required_argument_is_reported() -> None:
     [{"anyOf": [{"type": "integer"}, {"type": "null"}]}, {"type": ["integer", "null"]}],
 )
 def test_a_required_null_the_schema_allows_is_forwarded(prop: dict[str, Any]) -> None:
-    result = normalize_arguments({"n": None}, {"properties": {"n": prop}, "required": ["n"]})
+    result = _read({"n": None}, {"properties": {"n": prop}, "required": ["n"]})
 
     assert result.arguments == {"n": None}
     assert result.invalid_required == {}
@@ -235,7 +247,7 @@ def test_a_required_null_the_schema_allows_is_forwarded(prop: dict[str, Any]) ->
 
 def test_a_required_empty_string_the_schema_allows_is_forwarded() -> None:
     """The backend, not the gateway, says whether an allowed value is missing."""
-    result = normalize_arguments({"query": "", "id": 1}, SCHEMA)
+    result = _read({"query": "", "id": 1}, SCHEMA)
 
     assert result.arguments == {"query": "", "id": 1}
     assert result.invalid_required == {}
@@ -244,7 +256,7 @@ def test_a_required_empty_string_the_schema_allows_is_forwarded() -> None:
 def test_no_schema_means_nothing_changes() -> None:
     args = {"published_after": "", "feed_id": 0}
 
-    result = normalize_arguments(args, None)
+    result = _read(args, None)
 
     assert result.arguments is args
     assert result.dropped == {}
@@ -261,21 +273,69 @@ def test_a_reason_never_carries_the_value() -> None:
 def test_all_of_fails_when_any_part_fails() -> None:
     schema = {"properties": {"n": {"allOf": [{"type": "integer"}, {"maximum": 5}]}}}
 
-    assert normalize_arguments({"n": 9}, schema).dropped == {"n": "dropped: above maximum 5"}
-    assert normalize_arguments({"n": 3}, schema).dropped == {}
+    assert _read({"n": 9}, schema).dropped == {"n": "dropped: above maximum 5"}
+    assert _read({"n": 3}, schema).dropped == {}
 
 
 def test_one_of_is_as_lenient_as_any_of() -> None:
     """Two matching branches are not proof of anything we can check; keep it."""
     schema = {"properties": {"n": {"oneOf": [{"type": "integer"}, {"minimum": 0}]}}}
 
-    assert normalize_arguments({"n": 3}, schema).dropped == {}
-    assert normalize_arguments({"n": "x"}, schema).dropped == {}
-    assert "n" in normalize_arguments({"n": -1.5}, schema).dropped
+    assert _read({"n": 3}, schema).dropped == {}
+    assert _read({"n": "x"}, schema).dropped == {}
+    assert "n" in _read({"n": -1.5}, schema).dropped
 
 
 def test_the_callers_dict_is_not_mutated() -> None:
     args = {"query": "q", "id": 1, "run_id": "", "feed_id": 0}
-    normalize_arguments(args, SCHEMA)
+    _read(args, SCHEMA)
 
     assert args == {"query": "q", "id": 1, "run_id": "", "feed_id": 0}
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "reason"),
+    [
+        ("feed_id", "x", "matches no allowed form"),
+        ("feed_id", 0, "below minimum 1"),
+        ("published_after", "yesterday", "is not a date-time"),
+        ("state", "all", "is not an allowed value"),
+        ("limit", 500, "above maximum 100"),
+        ("unread_only", "true", "is not boolean"),
+        ("tags", [], "has fewer than minItems 1 items"),
+    ],
+)
+def test_a_value_that_says_something_is_reported_not_dropped(
+    key: str, value: Any, reason: str
+) -> None:
+    """Without it the call is not the one asked for (#335), so the router refuses."""
+    result = _norm_write(**{key: value})
+
+    assert result.invalid_optional == {key: reason}
+    assert result.dropped == {}
+    assert result.arguments[key] == value
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "reason"),
+    [
+        ("run_id", "", "dropped: empty"),
+        ("run_id", None, "dropped: empty"),
+        ("feed_id", None, "dropped: empty"),
+    ],
+)
+def test_an_empty_optional_is_dropped_whatever_the_tool(key: str, value: Any, reason: str) -> None:
+    """A client that sends every optional said nothing by it (RT #1505)."""
+    result = _norm_write(**{key: value})
+
+    assert result.dropped == {key: reason}
+    assert result.invalid_optional == {}
+    assert key not in result.arguments
+
+
+def test_a_reported_optional_reason_never_carries_the_value() -> None:
+    result = _norm_write(state="hunter2-secret", limit=10**9)
+
+    assert set(result.invalid_optional) == {"state", "limit"}
+    assert "hunter2" not in str(result.invalid_optional)
+    assert "1000000000" not in str(result.invalid_optional)
