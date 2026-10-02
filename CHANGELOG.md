@@ -10,6 +10,20 @@ under that name.
 
 ## [Unreleased]
 
+## [0.49.3] - 2026-10-01
+
+### Security
+- L3's no-tools invariant is enforced for every provider, not just Gemini
+  (#318). `enforce_no_tools` refuses a request body carrying `tools`,
+  `tool_choice`, `functionDeclarations`, `functions`, `function_call`,
+  `plugins`, `web_search_options` or `mcp_servers`, and the OpenAI-shaped
+  driver (OpenRouter, production's L3), Anthropic and Ollama now call it
+  before every send.
+
+### Changed
+- CI's live L3 check runs on OpenRouter, production's provider, on push to
+  main; the mocked in-container L3 tests run on every build (#327).
+
 ### Added
 - The README demo (#256): `docs/demo/`. An animated flow (`flow.html`)
   followed by a VHS recording (`trentina.tape`) of a real gateway in front of a
