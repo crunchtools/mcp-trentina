@@ -185,6 +185,15 @@ def _refused(status: int, errcode: str, error: str) -> JSONResponse:
 _registered: list[ProfileBridge] = []
 
 
+def outbound_refused() -> int | None:
+    """The agents' events refused outbound since start, every bridge summed;
+    None when no bridge is running. For /health, so a monitoring check can
+    alert on a paging path that stopped delivering (#317)."""
+    if not _registered:
+        return None
+    return sum(b.outbound_refused for b in _registered)
+
+
 async def close_bridges() -> None:
     """Close every registered bridge's clients and store. Called on shutdown."""
     while _registered:

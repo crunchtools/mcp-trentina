@@ -10,7 +10,25 @@ under that name.
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-10-01
+
+### Fixed
+- A room the Matrix bridge leaves no longer swallows the agent's messages
+  (#317). The bridge tells the gateway before it leaves, and the gateway
+  retires the agent's mirror: a notice saying why, the name prefixed
+  `(unbridged)`, the agent kicked and the mapping rows dropped, so the
+  agent's next send there fails at its own homeserver instead of vanishing
+  behind a WARNING. The gateway logs the retired room's local ID.
+
+**Upgrade:** update the bridge and the gateway together; an older bridge
+sends no report and an older gateway skips one. A room left before 0.50.0
+was never reported, so its mirror is not retired: have the agent leave it
+and re-point anything that delivers there.
+
 ### Added
+- `/health` reports `matrix_bridge.outbound_refused`, the agents' events
+  refused outbound since start, so monitoring can alert on a paging path
+  that stopped delivering (#317).
 - Logo (#256): `docs/images/trentina-logo.png` and a 256 px mark, the
   1377 trentino: a ship held offshore while each crate is inspected.
 

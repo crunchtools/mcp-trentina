@@ -436,6 +436,81 @@ class AppService:
             as_user=sender,
         )
 
+    async def retire(self, room: Room, body: str, txn_id: str) -> None:
+        """Take the agent out of a mirror whose upstream room the bridge left.
+
+        Without this the agent keeps sending into a room nothing relays out of,
+        and every send looks delivered from its side (#317). It is told why in
+        the room, the room is renamed where it has a name, and then it is
+        kicked, so its next send there fails at its own homeserver. Every
+        step up to the kick must succeed: a kick refused for want of power,
+        tolerated, would drop the mapping with the agent still in the room,
+        which is the silent loss this exists to end. A failure raises, and
+        the bridge reports the room again. Only once the agent is out is the
+        room recorded as retired, and only that record lets a retry treat the
+        owner's absence as its own earlier leave.
+        """
+        actor = self.actor(room)
+        self._rooms.pop(room.remote_id, None)
+        self._rooms_by_local.pop(room.local_id, None)
+        # Its membership entries stay until they age out: nothing looks up a
+        # retired local room again, and a new mirror has a new local ID.
+        retired = f"retired:{room.local_id}"
+        if not await self._mapping.seen(retired):
+            await self._tell_and_remove(room, actor, body, txn_id)
+            await self._mapping.mark(retired)
+        await self._call(
+            "POST",
+            "rooms",
+            room.local_id,
+            "leave",
+            as_user=actor,
+            ok_errcodes=frozenset({"M_FORBIDDEN"}),  # left before a restart
+        )
+
+    async def _tell_and_remove(self, room: Room, actor: str, body: str, txn_id: str) -> None:
+        """The notice, the rename and the kick, each required to succeed."""
+        await self._call(
+            "PUT",
+            "rooms",
+            room.local_id,
+            "send",
+            "m.room.message",
+            txn_id,
+            as_user=actor,
+            body={"msgtype": "m.notice", "body": body},
+        )
+        if not room.owner:
+            await self._call(
+                "PUT",
+                "rooms",
+                room.local_id,
+                "state",
+                "m.room.name",
+                "",
+                as_user=actor,
+                body={"name": f"(unbridged) {room.name}".rstrip()},
+            )
+        member = await self._call(
+            "GET",
+            "rooms",
+            room.local_id,
+            "state",
+            "m.room.member",
+            self.agent_id,
+            as_user=actor,
+            ok_errcodes=frozenset({"M_NOT_FOUND"}),  # never invited
+        )
+        if member.get("membership") in {"join", "invite", "knock"}:
+            await self._call(
+                "POST",
+                "rooms",
+                room.local_id,
+                "kick",
+                as_user=actor,
+                body={"user_id": self.agent_id, "reason": "no longer bridged"},
+            )
+
     async def notice(self, room: Room, body: str, txn_id: str) -> str:
         """A message from the gateway itself, sent by the room's owner."""
         return await self.send(

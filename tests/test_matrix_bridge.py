@@ -23,7 +23,7 @@ import pytest
 from pydantic import SecretStr
 
 from mcp_trentina_crunchtools import database
-from mcp_trentina_crunchtools.bridge.client import ROOM_ANNOUNCE
+from mcp_trentina_crunchtools.bridge.client import ROOM_ANNOUNCE, ROOM_LEFT
 from mcp_trentina_crunchtools.defense import DefenseVerdict, Layer
 from mcp_trentina_crunchtools.gateway.matrix_bridge import appservice as appservice_mod
 from mcp_trentina_crunchtools.gateway.matrix_bridge import core
@@ -101,6 +101,11 @@ class FakeConduit:
     user_in_use: bool = False
     power_levels: dict[str, Any] = field(default_factory=dict)
     bot_left: bool = False
+    # Path endings Conduit answers M_FORBIDDEN, as to a user without power.
+    forbidden: tuple[str, ...] = ()
+    agent_membership: str = "join"
+    # Path endings that fail at the transport, as a Conduit restarting does.
+    unavailable: tuple[str, ...] = ()
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         assert request.headers["authorization"] == "Bearer as-secret"
@@ -108,23 +113,29 @@ class FakeConduit:
         as_user = request.url.params.get("user_id")
         body = json.loads(request.content) if request.content else {}
         self.calls.append((request.method, path, as_user))
+        if path.endswith(self.unavailable):
+            raise httpx.ConnectError("conduit down")
+        if path.endswith(self.forbidden) or (path.endswith("/leave") and self.bot_left):
+            return httpx.Response(403, json={"errcode": "M_FORBIDDEN"})
         if path == "/createRoom":
             self.rooms += 1
             self.created.append(body)
             return httpx.Response(200, json={"room_id": f"!local{self.rooms}:agent1.local"})
         if path.endswith("/joined_members"):
             return httpx.Response(200, json={"joined": {self.agent: {}} if self.agent else {}})
-        if path.endswith("/leave") and self.bot_left:
-            return httpx.Response(403, json={"errcode": "M_FORBIDDEN"})
         if path == "/register" and self.user_in_use:
             return httpx.Response(400, json={"errcode": "M_USER_IN_USE"})
         if "/send/" in path:
-            _, room, _, event_type, txn = path.split("/", 4)
+            _, _, room, _, event_type, txn = path.split("/", 5)
             self.sent.append(
                 {"room": room, "type": event_type, "txn": txn, "as": as_user, "content": body}
             )
             return httpx.Response(200, json={"event_id": f"$local{len(self.sent)}"})
-        state = self.power_levels if path.endswith("/state/m.room.power_levels/") else {}
+        state: dict[str, Any] = {}
+        if path.endswith("/state/m.room.power_levels/"):
+            state = self.power_levels
+        elif "/state/m.room.member/" in path:
+            state = {"membership": self.agent_membership}
         return httpx.Response(200, json=state)
 
 
@@ -1262,8 +1273,144 @@ class TestBothBotsInOneRoom:
 
         assert nio.left == [ROOM]
         assert nio.forgotten == [ROOM]
-        assert await rig.bridge.mapping.agent_present(ROOM) is True
-        # The agent's reply, should one come before the leave lands upstream.
+        # Left upstream, so the mirror is retired: the agent is out of it (#317).
+        assert ("POST", "/rooms/!local1:agent1.local/kick", BOT) in rig.conduit.calls
+        assert await rig.bridge.mapping.room_by_remote(ROOM) is None
+        # A reply already queued in the agent's homeserver goes nowhere.
         await rig.bridge.outbound("t1", [_agent_event()])
         assert rig.upstream.sent == []
-        assert AGENT_IN_ROOM in rig.conduit.sent[-1]["content"]["body"]
+
+
+def _left(stamp: int = 1) -> dict[str, Any]:
+    return BridgeEvent.model_validate(
+        {
+            "room_id": ROOM,
+            "event_id": f"left:{ROOM}:{stamp}",
+            "sender": REMOTE_AGENT,
+            "type": ROOM_LEFT,
+        }
+    ).model_dump()
+
+
+class TestLeftRoomIsRetired:
+    """#317: a room the bridge leaves stops taking the agent's messages loudly."""
+
+    async def test_the_agent_is_told_renamed_out_and_the_rows_go(
+        self, rig_factory: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(_message())
+        with caplog.at_level(logging.WARNING):
+            assert await rig.bridge.inbound(_left()) == "retired"
+        local = "!local1:agent1.local"
+        notice = rig.conduit.sent[-1]
+        assert notice["room"] == local
+        assert "no longer bridged" in notice["content"]["body"]
+        assert notice["content"]["msgtype"] == "m.notice"
+        calls = [(m, p, u) for m, p, u in rig.conduit.calls]
+        assert ("PUT", f"/rooms/{local}/state/m.room.name/", BOT) in calls
+        kick = calls.index(("POST", f"/rooms/{local}/kick", BOT))
+        assert calls.index(("POST", f"/rooms/{local}/leave", BOT)) > kick
+        assert await rig.bridge.mapping.room_by_remote(ROOM) is None
+        assert await rig.bridge.mapping.agent_present(ROOM) is None
+        assert await rig.bridge.appservice.room_for_local(local) is None
+        # The operator re-points deliveries by the local ID; the upstream one stays out.
+        assert local in caplog.text
+        assert ROOM not in caplog.text
+
+    async def test_a_dm_is_retired_by_its_owner_and_not_renamed(self, rig_factory: Any) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(_direct())
+        await rig.bridge.inbound(_left() | {"room_id": "!dm:matrix.org"})
+        retiring = [c for c in rig.conduit.calls if c[1].endswith(("/kick", "/m.room.name/"))]
+        assert [c[1].rsplit("/", 1)[-1] for c in retiring] == ["kick"]
+        assert retiring[0][2] != BOT, "the DM's stand-in owner acts"
+
+    async def test_an_unmapped_room_is_skipped(self, rig_factory: Any) -> None:
+        rig = rig_factory()
+        assert await rig.bridge.inbound(_left()) == "skipped"
+        assert rig.conduit.calls == []
+
+    async def test_a_retirement_cut_short_after_the_kick_is_finished(
+        self, rig_factory: Any
+    ) -> None:
+        """The owner's leave failed; the retry leaves without a second kick."""
+        rig = rig_factory()
+        await rig.bridge.inbound(_message())
+        rig.conduit.unavailable = ("/leave",)
+        with pytest.raises(ConduitError):
+            await rig.bridge.inbound(_left(1))
+        assert await rig.bridge.mapping.room_by_remote(ROOM) is not None
+        rig.conduit.unavailable = ()
+        before = len(rig.conduit.calls)
+        assert await rig.bridge.inbound(_left(2)) == "retired"
+        assert [c[1].rsplit("/", 1)[-1] for c in rig.conduit.calls[before:]] == ["leave"]
+        assert await rig.bridge.mapping.room_by_remote(ROOM) is None
+
+    async def test_an_owner_gone_before_the_kick_is_not_taken_as_done(
+        self, rig_factory: Any
+    ) -> None:
+        """A DM handover cut short leaves no owner in the room; the agent is
+        still in it, so nothing short of the kick retires it."""
+        rig = rig_factory()
+        await rig.bridge.inbound(_message())
+        # The owner is not in the room, so its first act is refused.
+        rig.conduit.forbidden = (core._txn("rt", "!local1:agent1.local"),)
+        with pytest.raises(ConduitError):
+            await rig.bridge.inbound(_left())
+        assert await rig.bridge.mapping.room_by_remote(ROOM) is not None
+
+    async def test_an_agent_already_out_is_not_kicked(self, rig_factory: Any) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(_message())
+        rig.conduit.agent_membership = "leave"
+        assert await rig.bridge.inbound(_left()) == "retired"
+        ends = [c[1].rsplit("/", 1)[-1] for c in rig.conduit.calls]
+        assert "kick" not in ends
+        assert ends[-1] == "leave"
+
+    async def test_a_refused_kick_keeps_the_mapping_and_asks_for_a_retry(
+        self, rig_factory: Any
+    ) -> None:
+        """Tolerated, the agent would stay in a room nothing relays out of."""
+        rig = rig_factory()
+        await rig.bridge.inbound(_message())
+        rig.conduit.forbidden = ("/kick",)
+        with pytest.raises(ConduitError):
+            await rig.bridge.inbound(_left())
+        assert await rig.bridge.mapping.room_by_remote(ROOM) is not None
+
+    async def test_a_room_joined_again_gets_a_fresh_mirror(self, rig_factory: Any) -> None:
+        rig = rig_factory()
+        await rig.bridge.inbound(_message("$e1"))
+        await rig.bridge.inbound(_left())
+        await rig.bridge.inbound(_announce([SCOTT], "again"))
+        assert len(rig.conduit.created) == 2
+        assert await rig.bridge.mapping.room_by_remote(ROOM) == Room(
+            ROOM, "!local2:agent1.local", "Ops", "", ""
+        )
+
+
+class TestOutboundRefusedCount:
+    async def test_every_refusal_counts_and_health_sums_them(
+        self, rig_factory: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rig = rig_factory(reported=False)
+        await rig.bridge.inbound(_message())
+        await rig.bridge.outbound("t1", [_agent_event("$a1")])  # members unreported
+        rig.bridge.mapping._write_now(
+            "INSERT INTO room_audience (remote_id, agent_present, reported) VALUES (?, 0, 0)",
+            (ROOM,),
+            False,
+        )
+        rig.verdicts.append(_verdict(flagged_by=Layer.L2))
+        await rig.bridge.outbound("t2", [_agent_event("$a2")])  # withheld by the judge
+        await rig.bridge.outbound("t3", [_agent_event("$a3")])  # sent
+        assert rig.bridge.outbound_refused == 2
+
+        from mcp_trentina_crunchtools.gateway import app as app_mod
+
+        assert "matrix_bridge" not in json.loads(app_mod._health_payload({}).body)
+        monkeypatch.setattr(routes_mod, "_registered", [rig.bridge])
+        health = json.loads(app_mod._health_payload({}).body)
+        assert health["matrix_bridge"] == {"outbound_refused": 2}

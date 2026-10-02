@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools.bridge.client import ROOM_ANNOUNCE
+from mcp_trentina_crunchtools.bridge.client import ROOM_ANNOUNCE, ROOM_LEFT
 from mcp_trentina_crunchtools.bridge.settings import BridgeSettings, SettingsError
 
 from .test_bridge_process import ROOM as UPSTREAM_ROOM
@@ -41,6 +41,11 @@ def _gateway_log() -> tuple[list[dict[str, Any]], Any]:
     return seen, gateway
 
 
+def _left_reports(seen: list[dict[str, Any]]) -> list[str]:
+    """The rooms the gateway was told the bridge is leaving (#317)."""
+    return [p["room_id"] for p in seen if p["type"] == ROOM_LEFT]
+
+
 def _set_members(nio: _FakeNio, room_id: str, *members: str) -> None:
     nio.rooms[room_id].users = dict.fromkeys((BRIDGE_USER, *members))
 
@@ -60,10 +65,12 @@ class TestInvites:
     async def test_a_strangers_invite_is_not_joined(self, tmp_path: Path) -> None:
         nio = _FakeNio()
         nio.invited_rooms[NEW_ROOM] = SimpleNamespace(inviter=STRANGER)
-        await _bridge(tmp_path, nio).process(_sync(), first=False)
+        seen, gateway = _gateway_log()
+        await _bridge(tmp_path, nio, gateway).process(_sync(), first=False)
         assert nio.joined == []
         assert nio.left == [NEW_ROOM]
         assert nio.forgotten == [NEW_ROOM]
+        assert seen == [], "a rejected invite has no mirror to retire"
 
     async def test_an_invite_that_names_no_inviter_is_not_joined(self, tmp_path: Path) -> None:
         nio = _FakeNio()
@@ -138,7 +145,8 @@ class TestStartupVetting:
         await _started(tmp_path, nio, gateway).process(_sync(), first=True)
         assert nio.left == [UPSTREAM_ROOM]
         assert nio.forgotten == [UPSTREAM_ROOM]
-        assert seen == [], "a room that fails the rule is not announced"
+        assert _left_reports(seen) == [UPSTREAM_ROOM], "only its leaving is reported"
+        assert len(seen) == 1, "a room that fails the rule is not announced"
         assert json.loads((tmp_path / "inviters.json").read_text()) == {}
 
     async def test_a_room_an_allowed_inviter_opened_stays(self, tmp_path: Path) -> None:
@@ -175,7 +183,8 @@ class TestStartupVetting:
         _set_members(nio, UPSTREAM_ROOM, SCOTT, STRANGER)
         await bridge.process(_sync(_text_event(), next_batch="s3"), first=False)
         assert nio.left == [UPSTREAM_ROOM]
-        assert len(seen) == announced, "nothing from it is forwarded"
+        assert _left_reports(seen[announced:]) == [UPSTREAM_ROOM]
+        assert len(seen) == announced + 1, "nothing from it but its leaving is forwarded"
 
     async def test_a_room_with_a_recorded_inviter_is_not_left_for_a_new_member(
         self, tmp_path: Path
@@ -204,7 +213,8 @@ class TestStartupVetting:
         await bridge.process(_sync(), first=True)
         await bridge.process(_sync(_text_event(), next_batch="s3"), first=False)
         assert nio.left == [UPSTREAM_ROOM], "left once, not again every sync"
-        assert seen == [], "and nothing from it is forwarded"
+        assert _left_reports(seen) == [UPSTREAM_ROOM]
+        assert len(seen) == 1, "and nothing from it is forwarded"
 
     async def test_nothing_is_forwarded_from_a_room_being_left(self, tmp_path: Path) -> None:
         (tmp_path / "inviters.json").write_text(json.dumps({UPSTREAM_ROOM: STRANGER}))
@@ -215,8 +225,11 @@ class TestStartupVetting:
 
         nio = Stuck()
         seen, gateway = _gateway_log()
-        await _started(tmp_path, nio, gateway).process(_sync(_text_event()), first=False)
-        assert seen == []
+        bridge = _started(tmp_path, nio, gateway)
+        await bridge.process(_sync(_text_event()), first=False)
+        await bridge.process(_sync(_text_event(), next_batch="s3"), first=False)
+        assert _left_reports(seen) == [UPSTREAM_ROOM], "a stuck leave is reported once"
+        assert len(seen) == 1
 
     async def test_no_matrix_id_reaches_the_log(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -272,6 +285,27 @@ class TestMembershipReports:
         await bridge.process(_sync(_text_event()), first=False)
         assert nio.left == [UPSTREAM_ROOM]
         assert nio.forgotten == [UPSTREAM_ROOM]
+
+    async def test_the_gateway_hears_before_the_room_is_left(self, tmp_path: Path) -> None:
+        """#317: told after, a crash in between loses the report for good."""
+        order: list[str] = []
+
+        class Recording(_FakeNio):
+            async def room_leave(self, room_id: str) -> Any:
+                order.append("leave")
+                return await super().room_leave(room_id)
+
+        def gateway(request: httpx.Request) -> httpx.Response:
+            payload = json.loads(request.content)
+            order.append(payload["type"])
+            outcome = "refused" if payload["type"] == ROOM_ANNOUNCE else "retired"
+            return httpx.Response(200, json={"outcome": outcome})
+
+        nio = Recording()
+        bridge = _bridge(tmp_path, nio, gateway)
+        bridge._announced.clear()
+        await bridge.process(_sync(), first=False)
+        assert order == [ROOM_ANNOUNCE, ROOM_LEFT, "leave"]
 
 
 class TestInviterSettings:
