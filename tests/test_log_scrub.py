@@ -586,7 +586,7 @@ def test_configure_takes_effect_after_an_implicit_basicconfig(
     root = logging.getLogger()
     implicit = logging.StreamHandler()
     implicit.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
-    theirs = _Capture()
+    theirs = logging.StreamHandler()
     theirs.setFormatter(logging.Formatter("theirs %(message)s"))
     monkeypatch.setattr(root, "handlers", [implicit, theirs])
     monkeypatch.setenv("BRIDGE_LOG_LEVEL", "debug")
