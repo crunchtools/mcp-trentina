@@ -124,7 +124,7 @@ def test_a_matrix_sync(
     from starlette.testclient import TestClient
 
     from mcp_trentina_crunchtools.gateway import matrix_proxy
-    from tests.test_matrix_proxy import _FakeUpstream, _matrix_app
+    from tests.test_matrix_proxy import AGENT_NET, AGENT_PEER, _FakeUpstream, _matrix_app
 
     sync = {
         "rooms": {
@@ -140,10 +140,9 @@ def test_a_matrix_sync(
     monkeypatch.setattr(
         matrix_proxy, "_get_matrix_client", lambda: _FakeUpstream(json.dumps(sync).encode())
     )
-    profile = _profile(matrix_ingress=MatrixIngressConfig(token_env="MTOK"))
-    assert profile.matrix_ingress is not None
-    profile.matrix_ingress.token = SecretStr("sekrit")
-    TestClient(_matrix_app({"agent1": profile})).get("/matrix/sekrit/_matrix/client/v3/sync")
+    profile = _profile(matrix_ingress=MatrixIngressConfig(source_networks=[AGENT_NET]))
+    client = TestClient(_matrix_app({"agent1": profile}), client=AGENT_PEER)
+    assert client.get("/matrix/_matrix/client/v3/sync").status_code == 200
     _only_own(judged)
 
 

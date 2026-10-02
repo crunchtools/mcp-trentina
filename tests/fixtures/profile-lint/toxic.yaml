@@ -3,7 +3,7 @@
 profiles:
   toxic:
     auth: {bearer_token_env: TOKEN_X}
-    matrix_ingress: {token_env: MATRIX_TOKEN}
+    matrix_ingress: {source_networks: ["10.89.1.0/24"]}
     backends:
       web: {url: "internal://web", tools_allow: ["*"]}
       gmail:
@@ -27,7 +27,7 @@ profiles:
             channel: {allow: ["*"]}
   guarded:
     auth: {bearer_token_env: TOKEN_G}
-    matrix_ingress: {token_env: MATRIX_TOKEN_G}
+    matrix_ingress: {source_networks: ["10.89.2.0/24"]}
     backends:
       web:
         url: "internal://web"

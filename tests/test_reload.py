@@ -87,7 +87,7 @@ BETA_MATRIX_YAML = BASE_YAML.replace(
     "  beta:\n    auth:\n      bearer_token_env: TEST_BETA_TOKEN\n",
     "  beta:\n    auth:\n      bearer_token_env: TEST_BETA_TOKEN\n"
     "    matrix_ingress:\n"
-    "      token_env: TEST_BETA_TOKEN\n"
+    "      source_networks: ['10.89.2.0/24']\n"
     "      preprocess:\n"
     "        processors: []\n"
     "        deadline_seconds: 20.0\n",
@@ -529,6 +529,29 @@ class TestPerimeterIsOperatorOnly:
         held = result["not_applied"]["operator_only"]
         assert "matrix_ingress.preprocess.processors" in held
 
+    async def test_agent_cannot_move_its_own_matrix_network(self, profiles_path: Path) -> None:
+        """#330: the network is the proxy's credential; moved, an agent could
+        answer for another agent's network."""
+        profiles_path.write_text(BETA_MATRIX_YAML, encoding="utf-8")
+        await _reload_as("alpha")
+
+        profiles_path.write_text(
+            BETA_MATRIX_YAML.replace("10.89.2.0/24", "10.89.0.0/16"), encoding="utf-8"
+        )
+        result = await _reload_as("beta")
+
+        assert [str(n) for n in _registry()["beta"].matrix_ingress.source_networks] == [
+            "10.89.2.0/24"
+        ]
+        assert "matrix_ingress.source_networks" in result["not_applied"]["operator_only"]
+
+    async def test_agent_cannot_give_itself_a_matrix_ingress(self, profiles_path: Path) -> None:
+        profiles_path.write_text(BETA_MATRIX_YAML, encoding="utf-8")
+        result = await _reload_as("beta")
+
+        assert _registry()["beta"].matrix_ingress is None
+        assert "matrix_ingress" in result["not_applied"]["operator_only"]
+
     async def test_operator_reload_applies_it(self, profiles_path: Path) -> None:
         profiles_path.write_text(BETA_MATRIX_YAML, encoding="utf-8")
         await _reload_as("alpha")
@@ -743,11 +766,10 @@ llm_providers:
         self, profiles_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A matrix_ingress is inert while matrix.enabled is off."""
-        monkeypatch.setenv("TEST_MATRIX_TOKEN", "matrix-secret")
         profiles_path.write_text(
             BASE_YAML.replace(
                 "  beta:\n",
-                "  beta:\n    matrix_ingress:\n      token_env: TEST_MATRIX_TOKEN\n",
+                "  beta:\n    matrix_ingress:\n      source_networks: ['10.89.2.0/24']\n",
             ),
             encoding="utf-8",
         )

@@ -1,18 +1,22 @@
 """Matrix Client-Server API reverse proxy — authenticated, scanned.
 
-Forwards requests from ``/matrix/{token}/{path}`` to the configured Matrix
+Forwards requests from ``/matrix/_matrix/...`` to the configured Matrix
 homeserver. Agents on the internal network point their homeserver URL at
-``http://trentina:PORT/matrix/<token>`` instead of directly at matrix.org;
-the Matrix client's own path segments (``_matrix/client/...``) follow the
-prefix untouched, so the client needs no changes beyond the URL.
+``http://trentina:PORT/matrix`` instead of directly at matrix.org; the
+Matrix client's own path segments (``_matrix/client/...``) follow the prefix
+untouched, so the client needs no changes beyond the URL.
 
-**Auth.** The token is the gateway's, not Matrix's: it resolves to a
-profile (constant-time compare, mirroring the alert ingress) and requests
-with no valid token get 401. Before this existed the proxy was an open
-relay — anything that could reach the port could proxy to the homeserver
-through Trentina, unauthenticated and unattributed. Matrix's OWN auth (the
-access token in the Authorization header) still passes through untouched;
-this proxy never injects or reads Matrix credentials.
+**Auth.** The caller's address resolves the profile: each profile's
+``matrix_ingress.source_networks`` is the network its agent is on, no two
+overlap, and a caller in none gets 401. Nothing secret is in the URL. Until
+0.51.0 a token in the path did this, and a client prints the URL in every
+timeout, so the token reached agent logs and model context (#330). The
+address is uvicorn's ``scope["client"]``, which it rewrites from
+``X-Forwarded-For`` for a trusted peer, so a request carrying that header is
+refused (``_caller_address``). Before
+any of this the proxy was an open relay. Matrix's OWN auth (the access token
+in the Authorization header) still passes through untouched; this proxy
+never injects or reads Matrix credentials.
 
 **Scanning.** Every 200 response is buffered whole and judged by the
 shared pipeline, except what ``_judgement`` exempts (#296): the
@@ -45,7 +49,7 @@ claim otherwise.
 from __future__ import annotations
 
 import asyncio
-import hmac
+import ipaddress
 import json
 import logging
 import re
@@ -221,20 +225,47 @@ async def close_matrix_client() -> None:
         _matrix_client = None
 
 
-def _resolve_profile_by_matrix_token(
-    token: str,
+def _resolve_profile_by_address(
+    host: str | None,
     profiles: dict[str, Profile],
 ) -> Profile | None:
-    token_bytes = token.encode("utf-8")
-    match: Profile | None = None
+    """The profile whose ``source_networks`` hold ``host``, or None.
+
+    The loader guarantees at most one does. A host that is not an address
+    (Starlette's test client, a unix socket) matches nothing.
+    """
+    try:
+        address = ipaddress.ip_address(host or "")
+    except ValueError:
+        return None
     for profile in profiles.values():
         ingress = profile.matrix_ingress
-        if ingress is None or ingress.token is None:
-            continue
-        expected = ingress.token.get_secret_value().encode("utf-8")
-        if hmac.compare_digest(token_bytes, expected) and match is None:
-            match = profile
-    return match
+        if ingress is not None and any(address in net for net in ingress.source_networks):
+            return profile
+    return None
+
+
+def _caller_address(request: Request) -> str | None:
+    """The address that connected, or None when it may not be that.
+
+    uvicorn replaces ``scope["client"]`` with an ``X-Forwarded-For`` entry
+    when the peer is in its trusted list, and only when that header is
+    present (``ProxyHeadersMiddleware``). A request carrying the header may
+    therefore hold an address someone named rather than one that connected,
+    and the address is the credential: it is refused. An agent on its own
+    network calls the gateway directly and sends no such header.
+    """
+    # TRUST: the peer address picks the profile (#330)
+    #   untrusted: every header the caller sends
+    #   judged-by: nothing; an address is resolved, not judged
+    #   on-failure: fail-closed; with X-Forwarded-For present, no profile
+    #   owner: matrix_proxy._caller_address
+    #   evidence: T2 uvicorn ProxyHeadersMiddleware rewrites scope["client"]
+    #     only from x-forwarded-for; T3 loader._check_matrix_networks (one
+    #     profile per address)
+    if "x-forwarded-for" in request.headers:
+        return None
+    return request.client.host if request.client else None
 
 
 def register_matrix_routes(
@@ -243,12 +274,13 @@ def register_matrix_routes(
     *,
     upstream: str = _DEFAULT_UPSTREAM,
 ) -> None:
-    """Wire ``/matrix/{token}/{path:path}`` onto the FastMCP server.
+    """Wire ``/matrix/{path:path}`` onto the FastMCP server.
 
-    An old-style unauthenticated request (``/matrix/_matrix/client/...``)
-    lands here with ``_matrix`` parsed as the token, resolves to no
-    profile, and gets 401 — the open-relay shape fails closed by
-    construction.
+    Only ``_matrix/...`` paths are served. A URL from before 0.51.0, with a
+    token ahead of ``_matrix``, gets 404 and the token is not echoed.
+
+    Raises:
+        ValueError: an upstream that is not https.
     """
     if not upstream.startswith("https://"):
         raise ValueError(
@@ -259,13 +291,14 @@ def register_matrix_routes(
     matrix_profiles = [name for name, p in profiles.items() if p.matrix_ingress is not None]
     if not matrix_profiles:
         logger.warning(
-            "matrix_proxy: matrix.enabled is set but no profile has a "
-            "matrix_ingress token — every request will 401",
+            "matrix_proxy: matrix.enabled is set but no profile has "
+            "matrix_ingress — every request will 401",
         )
 
     async def matrix_proxy_endpoint(request: Request) -> Response:
-        token = request.path_params.get("token", "")
-        profile = _resolve_profile_by_matrix_token(token, profiles)
+        if not request.path_params.get("path", "").startswith("_matrix/"):
+            return Response(content="not found", status_code=404, media_type=PLAIN_TEXT)
+        profile = _resolve_profile_by_address(_caller_address(request), profiles)
         if profile is None:
             return Response(
                 content="unauthorized",
@@ -277,12 +310,12 @@ def register_matrix_routes(
             return await _proxy_matrix(request, upstream, profile)
 
     mcp_server.custom_route(
-        "/matrix/{token}/{path:path}",
+        "/matrix/{path:path}",
         methods=MATRIX_HTTP_METHODS,
     )(matrix_proxy_endpoint)
 
     logger.info(
-        "matrix_proxy: registered /matrix/{token}/{path} → %s for %d profile(s): %s",
+        "matrix_proxy: registered /matrix/{path} → %s for %d profile(s): %s",
         upstream,
         len(matrix_profiles),
         ", ".join(matrix_profiles) or "(none)",
