@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/crunchtools/mcp-trentina/main/docs/images/trentina-logo.png" alt="trentina: a Ragusan merchant ship anchored offshore while an inspector in a rowboat checks each crate of code before it reaches the harbor gate" width="320">
+</p>
+
 # Trentina
 
 <!-- mcp-name: io.github.crunchtools/trentina -->

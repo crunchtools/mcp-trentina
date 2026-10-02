@@ -10,6 +10,10 @@ under that name.
 
 ## [Unreleased]
 
+### Added
+- Logo (#256): `docs/images/trentina-logo.png` and a 256 px mark, the
+  1377 trentino: a ship held offshore while each crate is inspected.
+
 ## [0.49.3] - 2026-10-01
 
 ### Security
