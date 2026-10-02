@@ -21,6 +21,10 @@ one is dropped, a room announced with one in it is refused (the bridge leaves
 it), and nothing is relayed into a room unless its members were reported and
 none of them is another agent. That holds for a room an allowed inviter
 opened too: the inviter rule is the bridge's, this one is the gateway's.
+
+A room the bridge leaves, by either rule, is retired here (#317): the agent
+is told in it and removed from it, so a send into it fails where the agent
+sees it instead of being dropped where only the log does.
 """
 
 from __future__ import annotations
@@ -60,6 +64,12 @@ _CARRIED = frozenset({"m.room.message", "m.reaction", "m.sticker"})
 _REDACTION = "m.room.redaction"
 # The bridge process announcing a room it is in (bridge/client.py).
 _ROOM_ANNOUNCE = "org.crunchtools.trentina.room"
+# The bridge process leaving a room it was in (#317).
+_ROOM_LEFT = "org.crunchtools.trentina.room_left"
+_RETIRED = (
+    "[trentina] this room is no longer bridged: the upstream room was left. "
+    "Nothing sent here is delivered; send from a room that is still bridged."
+)
 
 # The one answer the bridge acts on: leave this room (bridge/client.py).
 ROOM_REFUSED = "refused"
@@ -155,6 +165,9 @@ class ProfileBridge:
         self._other_agents = frozenset(a.casefold() for a in other_agents) - {
             cfg.public_user_id.casefold()
         }
+        # The agent's events refused since start, by the agent rule or the
+        # judge: each is a message it believes it sent (#317). /health sums it.
+        self.outbound_refused = 0
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -219,7 +232,9 @@ class ProfileBridge:
 
         Fails closed: a room whose members the bridge never reported is
         refused like one known to hold another agent. The bridge reports
-        every room it is in on each start, so this lasts until then.
+        every room it is in on each start, so for a room it is in this lasts
+        until then. A room it left is retired rather than left to refuse
+        here for good (#317).
         """
         present = await self.mapping.agent_present(remote_room)
         if present is None:
@@ -347,6 +362,8 @@ class ProfileBridge:
         """
         if event_type == _ROOM_ANNOUNCE:
             return await self._inbound_room(event, remote_room)
+        if event_type == _ROOM_LEFT:
+            return await self._inbound_left(remote_room)
         reason = await self._inbound_agent_refusal(str(event.get("sender") or ""), remote_room)
         if reason is not None:
             self._refuse("inbound", reason, str(event["event_id"]))
@@ -456,6 +473,33 @@ class ProfileBridge:
             )
         return "mapped"
 
+    async def _inbound_left(self, remote_room: str) -> str:
+        """Retire the mirror of a room the bridge is leaving (#317).
+
+        The local room ID is logged: the agent's homeserver minted it, nobody
+        upstream chose it, and it is what an operator re-points a delivery
+        away from.
+        """
+        # TRUST: the bridge process's word that it left a room retires the mirror
+        #   untrusted: which room (the bridge chooses remote_room)
+        #   judged-by: nothing; the event carries no text into the agent's room
+        #   on-failure: fail-closed; it can only remove the agent from a mirror,
+        #     which a bridge that left or withheld the room already achieves
+        #   owner: core.ProfileBridge._inbound_left
+        #   evidence: T3 core module docstring (the bridge is untrusted; it can
+        #     withhold, never write); T3 preprocess/base.py invariant 1
+        room = await self.mapping.room_by_remote(remote_room)
+        if room is None:
+            return "skipped"
+        await self.appservice.retire(room, _RETIRED, _txn("rt", room.local_id))
+        await self.mapping.forget_room(room)
+        logger.warning(
+            "matrix_bridge: retired %s's room %s: the bridge left it upstream",
+            self.profile.name,
+            room.local_id,
+        )
+        return "retired"
+
     async def _inbound_redaction(self, event: dict[str, Any], remote_room: str) -> str:
         """Mirror a redaction. Only removes: its reason text is not carried.
 
@@ -522,6 +566,7 @@ class ProfileBridge:
         stages.lap("judge")
         reason = self._refusal(verdict)
         if reason is not None:
+            self.outbound_refused += 1
             logger.warning(
                 "matrix_bridge: withheld outbound %s for %s: %s",
                 event_id,
@@ -576,6 +621,7 @@ class ProfileBridge:
         refusal = await self._relay_refusal(room.remote_id)
         if refusal is None:
             return False
+        self.outbound_refused += 1
         self._refuse("outbound", refusal, event_id)
         await self.appservice.notice(
             room, f"[trentina] your message was not sent: {refusal}", _txn("wo", event_id)

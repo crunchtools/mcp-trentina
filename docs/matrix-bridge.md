@@ -146,6 +146,29 @@ a redacted event ID and a fixed reason, never a Matrix ID, and audited in
 `gateway_calls` as backend `matrix_bridge`, tool `inbound`, `outbound` or
 `room`, outcome `denied_guard`, with the reason in `error_message`.
 
+### A room the bridge leaves is retired (#317)
+
+Whichever rule leaves a room, the bridge first tells the gateway
+(`org.crunchtools.trentina.room_left`), and the gateway retires the agent's
+mirror of it: a notice in the room saying it is no longer bridged, the name
+prefixed `(unbridged)` (a DM keeps none), the agent kicked, and the bot or
+the DM's stand-in leaving. The mapping, audience and member rows go with it,
+so an invite back into the same upstream room gets a fresh mirror. The
+agent's next send there fails at its own homeserver, where its runtime sees
+it, instead of being dropped at the gateway with only a log line. The
+gateway logs `retired <profile>'s room <local room id>`: that ID is minted by
+the agent's homeserver, and it is what to re-point a delivery or home room
+away from. A rejected invite has no mirror and is not reported.
+
+### Monitoring outbound refusals
+
+`GET /health` carries `{"matrix_bridge": {"outbound_refused": N}}` when a
+bridge runs: the agents' events refused outbound since start, by the agent
+rule or the judge, summed so the unauthenticated probe names no profile. Each
+is a message the agent believes it sent, so alert when it rises. Which
+profile is in `quarantine_stats` → `gateway_audit`, backend `matrix_bridge`,
+tool `outbound`.
+
 Endpoints, on the gateway's port:
 
 | path | caller | auth |

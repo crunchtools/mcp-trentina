@@ -22,7 +22,9 @@ and are kept.
 an upstream room holds another bridged agent, as the bridge last reported its
 members or as an event from one proved. A room with no row has never had its
 members reported, and outbound refuses it. Losing the table costs a refused
-reply until the bridge next announces the room, which it does on every start.
+reply until the bridge next announces the room, which it does on every start
+for every room it is still in. A room it leaves is reported as left instead,
+and its rows go with the mirror it retires (#317).
 """
 
 from __future__ import annotations
@@ -168,6 +170,24 @@ class BridgeMapping:
     async def set_owner(self, remote_id: str, owner: str) -> None:
         """Record the stand-in that now owns a room, after a handover."""
         await self._write("UPDATE rooms SET owner = ? WHERE remote_id = ?", owner, remote_id)
+
+    def _forget_room_now(self, remote_id: str, local_id: str) -> None:
+        with self._lock:
+            self._db.execute("BEGIN")
+            try:
+                self._db.execute("DELETE FROM rooms WHERE remote_id = ?", (remote_id,))
+                self._db.execute("DELETE FROM room_audience WHERE remote_id = ?", (remote_id,))
+                self._db.execute("DELETE FROM members WHERE local_room = ?", (local_id,))
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+            self._db.execute("COMMIT")
+
+    async def forget_room(self, room: Room) -> None:
+        """Drop a retired room: its mapping, its audience and its members
+        (#317). A later invite into the same upstream room gets a new mirror,
+        not the one the agent was removed from."""
+        await asyncio.to_thread(self._forget_room_now, room.remote_id, room.local_id)
 
     async def put_room(
         self, remote_id: str, local_id: str, name: str, topic: str, owner: str = ""

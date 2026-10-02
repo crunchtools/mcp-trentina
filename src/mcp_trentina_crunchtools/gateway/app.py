@@ -38,6 +38,7 @@ from .errors import (
     ProfileNotFoundError,
 )
 from .google_verifier import token_digest
+from .matrix_bridge.routes import outbound_refused
 from .router import JSONRPC_INTERNAL_ERROR, route_jsonrpc
 from .sessions import SessionRegistry, session_registry
 
@@ -405,13 +406,17 @@ def _health_payload(registry: dict[str, Profile]) -> Response:
     blocked.  During the 2026-08-22 incident an unbounded classifier scan
     wedged the loop for 90 minutes with no way to detect it from outside.
     """
-    return JSONResponse(
-        {
-            "status": "ok",
-            "classifier": classifier_status(),
-            "profiles": len(registry),
-        }
-    )
+    body: dict[str, Any] = {
+        "status": "ok",
+        "classifier": classifier_status(),
+        "profiles": len(registry),
+    }
+    # Summed, so the unauthenticated probe names no profile; which one is
+    # in quarantine_stats' gateway_audit (backend matrix_bridge, #317).
+    refused = outbound_refused()
+    if refused is not None:
+        body["matrix_bridge"] = {"outbound_refused": refused}
+    return JSONResponse(body)
 
 
 def register_with_fastmcp(

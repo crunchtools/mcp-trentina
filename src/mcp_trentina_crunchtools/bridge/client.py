@@ -68,6 +68,9 @@ logger = logging.getLogger(__name__)
 REDACTION = "m.room.redaction"
 # Not a Matrix event: the bridge's own notice that it is in a room.
 ROOM_ANNOUNCE = "org.crunchtools.trentina.room"
+# Nor this: the bridge is leaving a room it was in, so the gateway retires the
+# agent's mirror of it (#317).
+ROOM_LEFT = "org.crunchtools.trentina.room_left"
 FORWARDED = frozenset({"m.room.message", "m.reaction", "m.sticker", REDACTION})
 UNDECRYPTABLE_AFTER = 600.0
 # The gateway's answer to a room announcement it will not relay (#264).
@@ -143,6 +146,9 @@ class Bridge:
         self._vetted: set[str] = set()
         self._evict: set[str] = set()
         self._left: set[str] = set()
+        # Rooms being left that the gateway was told of, so a leave that keeps
+        # failing is reported once, not every sync.
+        self._reported_left: set[str] = set()
         self.ready = asyncio.Event()
         if not settings.allowed_inviters:
             logger.warning(
@@ -473,8 +479,27 @@ class Bridge:
 
         A failed leave keeps the room marked, so the next sync tries again.
         The forget is best effort: leaving is what ends the channel.
+
+        A room the bridge was in has a mirror in the agent's homeserver, and
+        the agent keeps sending into it (#317). The gateway is told first, so
+        it retires the mirror and the agent's next send there fails where the
+        agent sees it; told after, a crash in between would lose the notice
+        for good, because a left room is never seen again. An invite being
+        rejected has no mirror and is not reported.
         """
         self._evict.add(room_id)
+        if room_id in self.client.rooms and room_id not in self._reported_left:
+            await self.forward(
+                {
+                    **self._payload(room_id, {"sender": self.client.user_id}),
+                    # Unique per attempt: a room left, re-joined and left
+                    # again must not be swallowed by the gateway's dedupe.
+                    "event_id": f"left:{room_id}:{time.time_ns()}",
+                    "type": ROOM_LEFT,
+                    "content": {},
+                }
+            )
+            self._reported_left.add(room_id)
         left = await self.client.room_leave(room_id)
         if not isinstance(left, RoomLeaveResponse):
             logger.warning(
@@ -494,6 +519,7 @@ class Bridge:
                 type(forgot).__name__,
             )
         self._evict.discard(room_id)
+        self._reported_left.discard(room_id)
         self._vetted.discard(room_id)
         self._announced.pop(room_id, None)
         self._left.add(room_id)
