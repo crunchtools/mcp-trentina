@@ -504,7 +504,7 @@ def test_scrub_stays_linear(unit: str) -> None:
 
 @pytest.fixture
 def logging_state() -> Iterator[None]:
-    names = ("httpx", "httpcore", "mcp", "fastmcp", "peewee", "uvicorn", "uvicorn.access")
+    names = ("", "httpx", "httpcore", "mcp", "fastmcp", "peewee", "uvicorn", "uvicorn.access")
     saved = {
         n: (
             logging.getLogger(n).level,
@@ -576,6 +576,71 @@ def test_configure_uses_the_default_when_the_variable_is_unset(
 
 
 @pytest.mark.usefixtures("logging_state")
+@pytest.mark.usefixtures("logging_state")
+def test_configure_takes_effect_after_an_implicit_basicconfig(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A library that logs on the root logger at import leaves it a default
+    handler, after which ``basicConfig`` is a no-op: the level and the format
+    have to be set directly, and a handler that is not ours is left alone."""
+    root = logging.getLogger()
+    implicit = logging.StreamHandler()
+    implicit.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
+    theirs = _Capture()
+    theirs.setFormatter(logging.Formatter("theirs %(message)s"))
+    monkeypatch.setattr(root, "handlers", [implicit, theirs])
+    monkeypatch.setenv("BRIDGE_LOG_LEVEL", "debug")
+    assert logsafe.configure("BRIDGE_LOG_LEVEL", default="WARNING") == "DEBUG"
+    assert root.level == logging.DEBUG
+    assert implicit.formatter is not None
+    assert implicit.formatter._fmt == logsafe.LOG_FORMAT
+    assert theirs.formatter is not None
+    assert theirs.formatter._fmt == "theirs %(message)s"
+
+
+@pytest.mark.usefixtures("env_names")
+def test_a_setting_read_like_a_secret_is_not_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bridge's profile name takes the ``_FILE`` form and is no secret:
+    holding it cut it from every bridge log line (#344)."""
+    monkeypatch.setenv("BRIDGE_PROFILE", "takeda-profile")
+    assert loader.read_env_or_file("BRIDGE_PROFILE") == "takeda-profile"
+    assert logsafe.held_count() == 0
+    assert "BRIDGE_PROFILE" not in loader.secret_env_names()
+    line = "bridge[takeda-profile]: resumed"
+    assert logsafe.scrub(line) == line
+
+
+@pytest.mark.usefixtures("env_names")
+def test_bridge_settings_hold_the_secrets_and_not_the_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp_trentina_crunchtools.bridge.settings import BridgeSettings
+
+    for name, value in {
+        "BRIDGE_PROFILE": "takeda-profile",
+        "BRIDGE_USER_ID": "@agent:matrix.example.org",
+        "BRIDGE_GATEWAY_URL": "http://gateway.internal:8019",
+        "BRIDGE_ALLOWED_INVITERS": "@owner:matrix.example.org",
+        "BRIDGE_PICKLE_KEY": "pickle-" + "k" * 24,
+        "BRIDGE_INGRESS_TOKEN": "ingress-" + "t" * 24,
+        "BRIDGE_TOKEN": "bridge-" + "t" * 24,
+        "BRIDGE_PASSWORD": "password-" + "p" * 24,
+    }.items():
+        monkeypatch.setenv(name, value)
+        monkeypatch.delenv(f"{name}_FILE", raising=False)
+    monkeypatch.delenv("BRIDGE_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "mcp_trentina_crunchtools.bridge.settings.private_url", lambda value: value.rstrip("/")
+    )
+    settings = BridgeSettings.from_env()
+    assert (
+        logsafe.scrub(f"bridge[{settings.profile}]: resumed") == "bridge[takeda-profile]: resumed"
+    )
+    for held in ("pickle_key", "ingress_token", "bridge_token", "password", "user_id"):
+        assert logsafe.scrub(f"x {getattr(settings, held)} y").startswith("x [REDACTED:BRIDGE_")
+    assert "gateway.internal" not in logsafe.scrub(f"posting to {settings.gateway_url}/bridge")
+
+
 def test_install_clamps_peewee() -> None:
     """peewee's DEBUG prints each statement with its parameters: in the
     bridge, rows of the crypto store."""

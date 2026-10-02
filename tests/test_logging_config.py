@@ -26,8 +26,10 @@ from mcp_trentina_crunchtools.gateway.loader import GatewayConfig
 def _restore_httpx_logger_level() -> Iterator[None]:
     """logsafe.configure mutates the shared httpx logger; restore it after each test."""
     previous = logging.getLogger("httpx").level
+    root = logging.getLogger().level
     yield
     logging.getLogger("httpx").setLevel(previous)
+    logging.getLogger().setLevel(root)
 
 
 def test_configure_logging_defaults_to_info(monkeypatch: pytest.MonkeyPatch) -> None:

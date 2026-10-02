@@ -11,11 +11,15 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from ..gateway.errors import ProfileConfigError
-from ..gateway.loader import read_secret_env
+from ..gateway.loader import read_env_or_file, read_secret_env
 from ..gateway.profile import is_matrix_user_id, private_url
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 DEFAULT_HOMESERVER = "https://matrix-client.matrix.org"
 DEFAULT_PORT = 8471
@@ -25,11 +29,14 @@ class SettingsError(RuntimeError):
     """A required setting is missing. Fatal at startup."""
 
 
-def _secret(name: str) -> str:
-    """A secret from ``NAME`` or ``NAME_FILE``, with one error type for every
-    way it can be unusable."""
+def _read(name: str, reader: Callable[[str], str] = read_secret_env) -> str:
+    """A value from ``NAME`` or ``NAME_FILE``, with one error type for every
+    way it can be unusable. The profile name, which every log line carries
+    on purpose, passes ``read_env_or_file`` so it is not held out of the log
+    (#344). The Matrix IDs and the gateway URL stay held: the #262 rule keeps
+    them out of the log anyway, and holding them backs that up."""
     try:
-        return read_secret_env(name)
+        return reader(name)
     except ProfileConfigError as exc:
         raise SettingsError(str(exc)) from exc
 
@@ -64,8 +71,8 @@ def _private_gateway(value: str) -> str:
         raise SettingsError(f"BRIDGE_GATEWAY_URL: {exc}") from exc
 
 
-def _required(name: str) -> str:
-    value = _secret(name)
+def _required(name: str, reader: Callable[[str], str] = read_secret_env) -> str:
+    value = _read(name, reader)
     if not value:
         raise SettingsError(f"{name} (or {name}_FILE) is required")
     return value
@@ -77,7 +84,7 @@ def _inviters() -> frozenset[str]:
     ``_FILE`` form like one so a unit can mount it. Empty is legal and means
     no invite is accepted; a malformed entry is fatal rather than skipped,
     because a typo would otherwise shut out the one person meant to get in."""
-    raw = _secret("BRIDGE_ALLOWED_INVITERS")
+    raw = _read("BRIDGE_ALLOWED_INVITERS")
     ids = {part.strip() for part in raw.split(",") if part.strip()}
     bad = sum(1 for user in ids if not is_matrix_user_id(user, historical=True))
     if bad:
@@ -110,7 +117,7 @@ class BridgeSettings:
     @classmethod
     def from_env(cls) -> BridgeSettings:
         return cls(
-            profile=_required("BRIDGE_PROFILE"),
+            profile=_required("BRIDGE_PROFILE", read_env_or_file),
             homeserver=_http_url(
                 "BRIDGE_HOMESERVER", os.environ.get("BRIDGE_HOMESERVER", DEFAULT_HOMESERVER)
             ),
@@ -124,7 +131,7 @@ class BridgeSettings:
             listen_port=_port(os.environ.get("BRIDGE_LISTEN_PORT", str(DEFAULT_PORT))),
             device_name=os.environ.get("BRIDGE_DEVICE_NAME", "Trentina bridge"),
             device_id=os.environ.get("BRIDGE_DEVICE_ID", ""),
-            access_token=_secret("BRIDGE_ACCESS_TOKEN"),
-            password=_secret("BRIDGE_PASSWORD"),
+            access_token=_read("BRIDGE_ACCESS_TOKEN"),
+            password=_read("BRIDGE_PASSWORD"),
             allowed_inviters=_inviters(),
         )

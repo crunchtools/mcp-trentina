@@ -558,6 +558,17 @@ def configure(level_env: str, *, default: str = "INFO") -> str:
         resolved = default
     level = LOG_LEVELS[resolved]
     logging.basicConfig(level=level, format=LOG_FORMAT)
+    # basicConfig does nothing once the root logger has a handler, and a
+    # library that logs on the root logger at import gives it one (petit
+    # does, in the bridge): the level and the format were both ignored
+    # (#344). Set them directly. Only a plain stream handler is reformatted,
+    # which is what an implicit basicConfig creates; anyone else's handler
+    # keeps its own formatter.
+    root = logging.getLogger()
+    root.setLevel(level)
+    for handler in root.handlers:
+        if type(handler) is logging.StreamHandler:
+            handler.setFormatter(logging.Formatter(LOG_FORMAT))
     logging.getLogger("httpx").setLevel(level)
     install(level)
     return resolved
