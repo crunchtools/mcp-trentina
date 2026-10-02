@@ -1,12 +1,16 @@
 """Alert webhook ingress for agent profiles.
 
-Receives POST requests at ``/alert/{token}``, validates the token
-against profile ``alert_ingress`` configurations (constant-time),
-and forwards the JSON payload to the profile's ``forward_url``.
-
-The token embedded in the URL is the sole authentication — no
-headers required.  Designed for monitoring systems such as Nagios
+Receives POST requests at ``/alert`` with ``Authorization: Bearer
+<token>``, validates the token against profile ``alert_ingress``
+configurations (constant-time), and forwards the JSON payload to the
+profile's ``forward_url``. Designed for monitoring systems such as Nagios
 that need to page an agent (e.g. a Hermes agent) through Trentina.
+
+Until 0.52.0 the token was the last path segment, ``/alert/{token}``. Every
+web server and reverse proxy between the sender and the gateway writes the
+request line to its access log, so the credential sat in every one of them
+(#333, the same shape as the Matrix proxy's #330). A request to the old
+shape now gets 404 and the token is not echoed.
 
 Before forwarding, the payload runs through the same three-layer
 defense used elsewhere: string leaves in the JSON go through L1,
@@ -113,7 +117,7 @@ def register_alert_routes(
     mcp_server: Any,
     profiles: dict[str, Profile],
 ) -> None:
-    """Wire ``POST /alert/{token}`` onto the FastMCP server."""
+    """Wire ``POST /alert`` onto the FastMCP server."""
     alert_profiles = [name for name, p in profiles.items() if p.alert_ingress is not None]
     if not alert_profiles:
         logger.info("alert_ingress: no profiles configured, skipping")
@@ -122,10 +126,10 @@ def register_alert_routes(
     async def alert_endpoint(request: Request) -> Response:
         return await _handle_alert(request, profiles)
 
-    mcp_server.custom_route("/alert/{token}", methods=["POST"])(alert_endpoint)
+    mcp_server.custom_route("/alert", methods=["POST"])(alert_endpoint)
 
     logger.info(
-        "alert_ingress: registered /alert/{token} for %d profile(s): %s",
+        "alert_ingress: registered /alert for %d profile(s): %s",
         len(alert_profiles),
         ", ".join(alert_profiles),
     )
@@ -135,7 +139,8 @@ async def _handle_alert(
     request: Request,
     profiles: dict[str, Profile],
 ) -> Response:
-    token = request.path_params.get("token", "")
+    header = request.headers.get("authorization", "")
+    token = header[7:].strip() if header.lower().startswith("bearer ") else ""
     if not token:
         return Response(
             content="missing token",

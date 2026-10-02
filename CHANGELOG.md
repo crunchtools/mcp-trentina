@@ -10,6 +10,19 @@ under that name.
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-10-01
+
+### Security
+- The alert ingress takes its token from `Authorization: Bearer`, at
+  `POST /alert`, not from the URL path (#333). The path form put the
+  credential in every web server and reverse-proxy access log between the
+  sender and the gateway. Same reasoning as #330.
+
+**Upgrade:** breaking, with no deprecation window. Point every sender at
+`https://<gateway>/alert` and send `Authorization: Bearer <token>`; the old
+`/alert/<token>` shape gets 404. Rotate the token while you are there: it has
+been in access logs.
+
 ## [0.51.0] - 2026-10-01
 
 ### Security
