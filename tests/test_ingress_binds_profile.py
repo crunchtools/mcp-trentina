@@ -106,7 +106,7 @@ async def test_an_llm_completion(judged: list[tuple[str, str | None]]) -> None:
 def test_an_alert(judged: list[tuple[str, str | None]], monkeypatch: pytest.MonkeyPatch) -> None:
     from starlette.testclient import TestClient
 
-    from tests.test_alert_ingress import _alert_app, _mock_forward_http
+    from tests.test_alert_ingress import AUTH, _alert_app, _mock_forward_http
 
     _mock_forward_http(monkeypatch)
     profile = _profile(
@@ -114,7 +114,8 @@ def test_an_alert(judged: list[tuple[str, str | None]], monkeypatch: pytest.Monk
     )
     assert profile.alert_ingress is not None
     profile.alert_ingress.token = SecretStr("tok")
-    TestClient(_alert_app({"agent1": profile})).post("/alert/tok", json={"output": PAYLOAD})
+    client = TestClient(_alert_app({"agent1": profile}), headers=AUTH)
+    assert client.post("/alert", json={"output": PAYLOAD}).status_code == 200
     _only_own(judged)
 
 

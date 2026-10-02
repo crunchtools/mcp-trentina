@@ -205,7 +205,7 @@ def _unapplied(active: ActiveConfig, new_config: GatewayConfig) -> list[str]:
         p.alert_ingress is not None for p in new_config.profiles.values()
     ):
         notes.append(
-            "alert_ingress added but /alert/{token} was not registered at "
+            "alert_ingress added but /alert was not registered at "
             "startup (no profile had one) — restart to serve it"
         )
     if not active.matrix_route_registered and any(

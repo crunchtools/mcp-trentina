@@ -656,9 +656,10 @@ class Backend(BaseModel):
 class AlertIngressConfig(BaseModel):
     """Per-profile alert webhook ingress.
 
-    Receives external alert POSTs (e.g. from Nagios) at ``/alert/{token}``
+    Receives external alert POSTs (e.g. from Nagios) at ``/alert``
     and forwards the JSON payload to ``forward_url`` (e.g. a Hermes webhook).
-    The token embedded in the URL is the sole authentication mechanism.
+    The sender presents the token as ``Authorization: Bearer``, never in the
+    URL, which every access log on the way records (#333).
     """
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
