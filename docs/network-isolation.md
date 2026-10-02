@@ -52,6 +52,42 @@ MATRIX_HOMESERVER=https://matrix.org
 MATRIX_HOMESERVER=http://trentina:8019/matrix
 ```
 
+### Which profile a request belongs to
+
+The caller's network decides. Each profile that uses the proxy names the
+network its agent is on, and a request from an address in none of them gets
+401:
+
+```yaml
+profiles:
+  hermes:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_HERMES_TOKEN
+    matrix_ingress:
+      source_networks: ["10.89.1.0/24"]   # the agent's own podman network
+```
+
+There is no secret in the homeserver URL. Until 0.51.0 a token in the path
+(`/matrix/<token>`) picked the profile, and every Matrix client prints the
+request URL in a timeout or connection error, so the token landed in agent
+logs, and from there in model context whenever the agent read its own logs
+(#330). `matrix_ingress.token_env` now fails startup with a message naming
+its replacement.
+
+Three rules keep the address trustworthy:
+
+- One agent per network. No two profiles' `source_networks` may overlap; the
+  file does not load if they do.
+- A host prefix is refused (`10.89.1.5/24` is a typo for `10.89.1.0/24`).
+- A request carrying `X-Forwarded-For` is refused. uvicorn replaces the
+  client address with that header's for a peer in
+  `TRENTINA_FORWARDED_ALLOW_IPS`, so the address could be one somebody named.
+  An agent calls the gateway directly from its own network and sends none;
+  the Matrix proxy is not reachable through a reverse proxy.
+
+An agent may not change its own `source_networks` by `reload_profiles`; the
+operator's reload applies them.
+
 All Matrix Client-Server API operations (`/sync`, `/rooms`, `/send`, etc.) are forwarded, and every response but a write's acknowledgement, E2EE key traffic and binary media is judged first (see [Defense Pipeline](defense-pipeline.md)).
 
 ### Architecture
@@ -75,7 +111,7 @@ For complete network isolation, combine with the [LLM key proxy](llm-proxying.md
 
 1. **MCP tools** → `http://trentina:8019/gateway/<profile>/mcp`
 2. **LLM calls** → `http://trentina:8019/llm/<provider>/<path>`
-3. **Matrix** → `http://trentina:8019/matrix/<path>`
+3. **Matrix** → `http://trentina:8019/matrix/_matrix/<path>`, from the agent's own network
 
 The agent has no other network access of its own. Every request it makes goes through Trentina and is audited, but a request is not the only way out: a model provider can fetch, search and connect to MCP servers on the caller's behalf (Anthropic's `web_fetch`, `web_search` and `mcp_servers`, OpenRouter's `web` plugin and `:online` models, Gemini's Google Search grounding and `url_context`). Until #297 the LLM proxy forwarded those untouched, so an agent on `--network=none` could still reach any host through its provider. The proxy now admits only completions with caller-run function tools and inline content, and refuses the rest ([what the proxy admits](llm-proxying.md#what-the-proxy-admits)).
 

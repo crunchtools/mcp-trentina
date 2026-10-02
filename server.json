@@ -7,12 +7,12 @@
     "url": "https://github.com/crunchtools/mcp-trentina",
     "source": "github"
   },
-  "version": "0.50.0",
+  "version": "0.51.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mcp-trentina-crunchtools",
-      "version": "0.50.0",
+      "version": "0.51.0",
       "transport": {
         "type": "stdio"
       }

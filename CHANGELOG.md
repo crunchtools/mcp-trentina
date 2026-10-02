@@ -10,6 +10,24 @@ under that name.
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-10-01
+
+### Security
+- The Matrix proxy no longer carries its credential in the URL (#330). The
+  caller's address resolves the profile: `matrix_ingress.source_networks`
+  lists the agent's network, and the agent's homeserver URL is
+  `http://<gateway>:<port>/matrix` with nothing secret in it. The path token
+  reached agent logs and model context through every client's timeout
+  messages. No two profiles' networks may overlap; a request carrying
+  `X-Forwarded-For` is refused, since uvicorn would let a trusted peer name
+  the address; and an agent reload cannot change its own networks.
+
+**Upgrade:** breaking, with no deprecation window. `matrix_ingress.token_env`
+fails startup. For each profile, replace it with `source_networks: [<the
+agent's network CIDR>]`, point the agent's homeserver at
+`http://<gateway>:<port>/matrix`, and retire the token's env var and secret.
+A request to the old `/matrix/<token>/...` shape gets 404.
+
 ## [0.50.0] - 2026-10-01
 
 ### Fixed

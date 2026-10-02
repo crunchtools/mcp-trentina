@@ -387,6 +387,7 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
     if after.matrix_bridge != before.matrix_bridge:
         after.matrix_bridge = before.matrix_bridge
         held.append("matrix_bridge")
+    held.extend(_hold_matrix_networks(before, after))
     b = before.matrix_ingress
     a = after.matrix_ingress
     if b is None or a is None:
@@ -399,6 +400,24 @@ def _hold_perimeter_fields(before: Profile, after: Profile) -> list[str]:
             setattr(a.preprocess, field_name, old)
             held.append(f"matrix_ingress.preprocess.{field_name}")
     return held
+
+
+def _hold_matrix_networks(before: Profile, after: Profile) -> list[str]:
+    """Hold an agent's own Matrix proxy networks, which are its credential.
+
+    The caller's address picks the profile (#330), so an agent able to add,
+    drop or widen its own ``source_networks`` could answer for an address
+    the operator never gave it.
+    """
+    if (after.matrix_ingress is None) != (before.matrix_ingress is None):
+        after.matrix_ingress = before.matrix_ingress
+        return ["matrix_ingress"]
+    if before.matrix_ingress is None or after.matrix_ingress is None:
+        return []
+    if after.matrix_ingress.source_networks == before.matrix_ingress.source_networks:
+        return []
+    after.matrix_ingress.source_networks = before.matrix_ingress.source_networks
+    return ["matrix_ingress.source_networks"]
 
 
 def _lost_destination_rules(before: Profile, after: Profile) -> list[str]:

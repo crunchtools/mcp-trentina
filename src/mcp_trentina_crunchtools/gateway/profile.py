@@ -977,25 +977,36 @@ class MatrixPreProcessConfig(ProcessorChainConfig):
 class MatrixIngressConfig(BaseModel):
     """Per-profile access to the Matrix reverse proxy.
 
-    The proxy at ``/matrix/{token}/{path}`` forwards to the homeserver only
-    for a token that resolves to a profile. Before this existed the proxy
-    was an open relay: anything that could reach the port could use
-    Trentina as a Matrix client proxy, unauthenticated and unattributed.
-    Token-in-path mirrors the alert ingress and costs the Matrix client
-    nothing — the homeserver URL configured in the agent simply includes
-    the token as a path prefix.
+    The proxy at ``/matrix/_matrix/...`` forwards to the homeserver only for
+    a caller whose address is in one profile's ``source_networks``: the
+    network the operator put that agent on (``docs/network-isolation.md``).
+    Nothing secret is on the wire. Until 0.51.0 a token in the URL path
+    resolved the profile, and clients print request URLs in every timeout
+    and connection error, so the credential reached agent logs and from
+    there model context (#330). ``token_env`` is refused with a message
+    saying what replaced it.
     """
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
-    token_env: str = Field(
+    @model_validator(mode="before")
+    @classmethod
+    def _token_removed(cls, block: Any) -> Any:
+        if isinstance(block, dict) and "token_env" in block:
+            raise ValueError(
+                "matrix_ingress.token_env is not accepted since 0.51.0 (#330): the token rode "
+                "in every request URL, and clients log URLs. Set source_networks to the "
+                "agent's network and point its homeserver URL at http://<gateway>:<port>/matrix"
+            )
+        return block
+
+    source_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = Field(
         ...,
-        description="Env var name whose value is the Matrix proxy token",
-    )
-    token: SecretStr | None = Field(
-        default=None,
-        exclude=True,
-        description="Resolved token (load-time only)",
+        min_length=1,
+        description=(
+            "CIDRs the agent's requests come from; the peer address resolves the "
+            "profile. One agent per network, so no two profiles may overlap."
+        ),
     )
     # Deliberately NO `enforcement` here, unlike alert_ingress. This path
     # forwards a STREAMED /sync response, and refusing one does not drop a

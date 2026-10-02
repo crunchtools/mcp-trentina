@@ -270,7 +270,12 @@ class TestMatrixAnnotate:
         from starlette.testclient import TestClient
 
         from mcp_trentina_crunchtools.gateway import matrix_proxy
-        from tests.test_matrix_proxy import _FakeUpstream, _matrix_app, _matrix_profile
+        from tests.test_matrix_proxy import (
+            AGENT_PEER,
+            _FakeUpstream,
+            _matrix_app,
+            _matrix_profile,
+        )
 
         sync = {
             "rooms": {
@@ -299,8 +304,10 @@ class TestMatrixAnnotate:
         monkeypatch.setattr(f"{AGENT}.get_current_profile", lambda: None)
         monkeypatch.setattr(f"{AGENT}.get_provider", lambda *a, **k: _provider("null", "null"))
 
-        client = TestClient(_matrix_app({"agent1": _matrix_profile(unjudged="annotate")}))
-        body = client.get("/matrix/sekrit/_matrix/client/v3/sync").json()
+        client = TestClient(
+            _matrix_app({"agent1": _matrix_profile(unjudged="annotate")}), client=AGENT_PEER
+        )
+        body = client.get("/matrix/_matrix/client/v3/sync").json()
 
         warning = body.pop("_trentina_warning")
         assert warning["l3_unavailable"] is True

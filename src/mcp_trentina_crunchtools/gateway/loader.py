@@ -12,7 +12,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import yaml
@@ -24,6 +24,9 @@ from .errors import ProfileConfigError
 from .filter import filter_tools
 from .profile import AlertIngressConfig, MatrixIngressConfig, Profile, is_matrix_user_id
 from .transform import resolve
+
+if TYPE_CHECKING:
+    import ipaddress
 
 
 @dataclass(frozen=True)
@@ -404,8 +407,6 @@ def _require_env(name: str, env_var: str, what: str) -> SecretStr:
 
 
 def _resolve_matrix_ingress_secrets(name: str, matrix_ingress: MatrixIngressConfig) -> None:
-    matrix_ingress.token = _require_env(name, matrix_ingress.token_env, "matrix_ingress")
-
     decrypt = matrix_ingress.preprocess.decrypt
     if decrypt is not None and decrypt.enabled:
         decrypt.access_token = _require_env(
@@ -523,6 +524,27 @@ def matrix_other_agents(matrix: dict[str, Any]) -> frozenset[str]:
     return frozenset(raw)
 
 
+def _check_matrix_networks(registry: dict[str, Profile]) -> None:
+    """No two profiles' ``matrix_ingress.source_networks`` overlap (#330).
+
+    The caller's address is the only thing that picks its profile, so an
+    address two profiles both claim would be one agent able to act as the
+    other, whichever the proxy happened to try first.
+    """
+    seen: list[tuple[str, ipaddress.IPv4Network | ipaddress.IPv6Network]] = []
+    for name, profile in sorted(registry.items()):
+        if profile.matrix_ingress is None:
+            continue
+        for net in profile.matrix_ingress.source_networks:
+            for other, prior in seen:
+                if net.version == prior.version and net.overlaps(prior):
+                    raise ProfileConfigError(
+                        f"Profiles {other!r} and {name!r}: matrix_ingress.source_networks "
+                        f"overlap ({prior} and {net}); one agent per network"
+                    )
+            seen.append((name, net))
+
+
 def load_profiles(path: Path | str) -> GatewayConfig:
     """Load gateway configuration from YAML.
 
@@ -561,6 +583,7 @@ def load_profiles(path: Path | str) -> GatewayConfig:
     }
     _check_operator(registry)
     _check_judges(registry)
+    _check_matrix_networks(registry)
 
     logger.info(
         "gateway: loaded %d profile(s): %s",
