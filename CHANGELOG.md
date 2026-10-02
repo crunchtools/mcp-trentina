@@ -10,6 +10,19 @@ under that name.
 
 ## [Unreleased]
 
+## [0.54.1] - 2026-10-02
+
+### Fixed
+- The bridge's log lines no longer print `[REDACTED:BRIDGE_PROFILE]` where
+  the profile name belongs (#344). 0.54.0 held everything `read_secret_env`
+  returned, and the bridge reads `BRIDGE_PROFILE` through it for its `_FILE`
+  form. It is now read with `read_env_or_file`: not held, and no longer
+  listed by the posture check as a secret from the environment.
+- `BRIDGE_LOG_LEVEL` and the log format take effect in the bridge. A library
+  logging on the root logger at import left it a default handler, after
+  which `logging.basicConfig` does nothing, so the bridge had always logged
+  at WARNING in Python's default format whatever was set.
+
 ## [0.54.0] - 2026-10-02
 
 ### Security

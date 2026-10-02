@@ -188,7 +188,9 @@ prints as `[REDACTED:<NAME>]`, and credential-shaped text nobody registered
 (a `?key=`/`access_token=` query value, a `Bearer` value, URL userinfo,
 `sk-…`/`AIza…`/JWT shapes) prints as `[REDACTED]`. `read_secret_env` holds
 every secret it returns, so a new secret is read THERE and nowhere else (one
-under 4 characters cannot be held and is warned about by name); `guard()`
+under 4 characters cannot be held and is warned about by name; a setting that
+only shares the `_FILE` form, like `BRIDGE_PROFILE`, is read with
+`read_env_or_file` instead, #344); `guard()`
 also holds any environment variable named `*_KEY`, `*_TOKEN`, `*_SECRET` or
 `*_PASSWORD` of 8 characters or more. `extra=` fields are merged after the
 factory returns, so `guard()` wraps `Logger.makeRecord` for those. A

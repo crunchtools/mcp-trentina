@@ -730,3 +730,9 @@ path = "src/mcp_trentina_crunchtools/logsafe.py"
 pattern = "noqa: B010"
 justification = "logging merges `extra` into a record after the record factory returns and offers no hook after that, so Logger.makeRecord is wrapped; plain assignment to a method fails mypy and setattr with a literal trips B010"
 classification = "by_design"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/gateway/matrix_bridge/routes.py"
+justification = "register_bridge_routes is reported as 100% similar to logsafe.configure. They share no code: one registers Starlette routes for the Matrix bridge, the other sets the process's log level and formatter. The match is on statement shape alone (assign, early return, a few calls, a for loop, a call, a return), verified by reading both."
+classification = "gourmand_bug"

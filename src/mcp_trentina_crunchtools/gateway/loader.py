@@ -373,10 +373,21 @@ def read_secret_env(env_var: str, *, record: bool = True) -> str:
     ``record`` notes ``env_var`` as one a profile depends on, so the startup
     scrub leaves it for ``reload_profiles`` to read again. A caller reading a
     startup-only secret (the OAuth signing key) passes False.
+
+    What comes back is held out of every log record (``logsafe.hold``). A
+    setting that only shares the ``_FILE`` form, like the bridge's profile
+    name, is read with ``read_env_or_file`` instead: holding it cut the name
+    from every bridge log line (#344).
     """
     _secret_env_names.add(env_var)
     if record:
         _profile_env_names.add(env_var)
+    return _held(read_env_or_file(env_var), env_var)
+
+
+def read_env_or_file(env_var: str) -> str:
+    """The value of ``FOO``, or the contents of the file ``FOO_FILE`` names,
+    which wins. Not held and not counted as a secret: see ``read_secret_env``."""
     file_var = f"{env_var}{_ENV_FILE_SUFFIX}"
     path_value = os.environ.get(file_var, "").strip()
     if path_value:
@@ -388,8 +399,8 @@ def read_secret_env(env_var: str, *, record: bool = True) -> str:
                 f"{file_var}: cannot read the secret file it names ({exc.strerror or exc})"
             ) from exc
         _warn_on_loose_mode(path, file_var)
-        return _held(raw.strip(), env_var)
-    return _held(os.environ.get(env_var, ""), env_var)
+        return raw.strip()
+    return os.environ.get(env_var, "")
 
 
 _short_secret_warned: set[str] = set()
