@@ -58,5 +58,7 @@ async def test_every_driver_checks_the_body_it_sends(
         await make().generate("system", "content", response_schema={"type": "object"})
     assert len(seen) == 1
     assert "content" in str(seen[0])
-    # What each driver really sends passes the guard: it refuses tools, not L3.
+    # What each driver really sends passes the real guard: it refuses tools,
+    # not L3. A guard that refused everything would raise here.
     assert TOOL_KEYS.isdisjoint(seen[0])
+    enforce_no_tools(seen[0])
