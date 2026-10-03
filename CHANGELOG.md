@@ -10,6 +10,20 @@ under that name.
 
 ## [Unreleased]
 
+## [0.54.2] - 2026-10-02
+
+### Security
+- fastmcp's and the MCP SDK's OAuth code no longer write what an OAuth
+  client sent into the log (#343): an unknown authorization code, a refresh
+  token's client id, a `resource` indicator, an exception or validation
+  error echoing the request. The journal is agent-readable, so each was a
+  #262 message board. Records from `fastmcp.server.auth` and
+  `mcp.server.auth` now keep only what the library wrote as a literal; every
+  interpolated value becomes a `redact_source` fingerprint, a message built
+  at run time is fingerprinted whole, and a traceback is reduced to its
+  class and frames. Done in the record factory rather than a logger filter,
+  which a child logger's records never pass through.
+
 ## [0.54.1] - 2026-10-02
 
 ### Fixed

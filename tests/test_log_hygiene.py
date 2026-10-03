@@ -29,18 +29,21 @@ from unittest.mock import patch
 import httpx
 import pytest
 from pydantic import SecretStr
+from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
+from mcp_trentina_crunchtools import _build_oauth_context, logsafe
 from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools import logsafe
 from mcp_trentina_crunchtools.errors import FetchError, UnsupportedContentTypeError
 from mcp_trentina_crunchtools.gateway import backend as backend_mod
 from mcp_trentina_crunchtools.gateway import internal
 from mcp_trentina_crunchtools.gateway.app import gateway_app
 from mcp_trentina_crunchtools.gateway.errors import BackendCallError
+from mcp_trentina_crunchtools.gateway.loader import GatewayConfig
 from mcp_trentina_crunchtools.gateway.profile import (
     AuthConfig,
     Backend,
+    OAuthConfig,
     ParameterConstraint,
     Profile,
 )
@@ -509,6 +512,123 @@ class TestOAuthStore:
         assert len(lines) == 2
         assert all(logsafe.redact_source(client_id) in line for line in lines)
         assert all("RuntimeError at " in line for line in lines)
+
+
+# ------------------------------------------------------------ OAuth proxy
+
+
+class TestOAuthProxy:
+    """fastmcp's OAuth proxy logs what the client sent (#343): an unknown
+    authorization code, a resource indicator, a refresh token's lineage.
+
+    Driven through the provider the gateway builds, at its own routes, with
+    the canary as the code, the refresh token and the resource.
+    """
+
+    REDIRECT = "http://localhost:4567/callback"
+
+    @pytest.fixture
+    def client(self, tmp_path: Path) -> Iterator[TestClient]:
+        profile = Profile(
+            name="oauthp",
+            auth=AuthConfig(bearer_token_env="A"),
+            oauth=OAuthConfig(enabled=True, allowed_emails=["alice@example.com"]),
+        )
+        env = {
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",
+            "TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET": "secret-value",
+            "TRENTINA_OAUTH_BASE_URL": "https://gw.example.org",
+            "HOME": str(tmp_path),
+        }
+        with patch.dict("os.environ", env, clear=False):
+            ctx = _build_oauth_context(GatewayConfig(profiles={"oauthp": profile}))
+        assert ctx is not None
+        app = Starlette(routes=ctx.provider.get_routes("/mcp-internal-test"))
+        with TestClient(app, base_url="https://gw.example.org") as client:
+            yield client
+
+    def _register(self, client: TestClient) -> str:
+        resp = client.post(
+            "/register",
+            json={
+                "redirect_uris": [self.REDIRECT],
+                "token_endpoint_auth_method": "none",
+                "grant_types": ["authorization_code", "refresh_token"],
+                "response_types": ["code"],
+            },
+        )
+        assert resp.status_code == 201, resp.text
+        return str(resp.json()["client_id"])
+
+    def test_canary_code_refresh_token_and_resource(
+        self, client: TestClient, captured: _Capture
+    ) -> None:
+        # The clamp keeps fastmcp at INFO, which is what hides the DEBUG line
+        # naming an unknown code. Lifted here: the filter alone must hold.
+        for name in ("fastmcp", "mcp"):
+            logging.getLogger(name).setLevel(logging.DEBUG)
+        client_id = self._register(client)
+        resource = f"https://{CANARY}.example/{CANARY}"
+        authorize = client.get(
+            "/authorize",
+            params={
+                "client_id": client_id,
+                "redirect_uri": self.REDIRECT,
+                "response_type": "code",
+                "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+                "code_challenge_method": "S256",
+                "state": CANARY,
+                "resource": resource,
+            },
+            follow_redirects=False,
+        )
+        assert authorize.status_code in {302, 400}
+        for form in (
+            {
+                "grant_type": "authorization_code",
+                "code": CANARY,
+                "redirect_uri": self.REDIRECT,
+                "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+                "resource": resource,
+            },
+            {"grant_type": "refresh_token", "refresh_token": CANARY, "resource": resource},
+            {"grant_type": "refresh_token", "refresh_token": f"eyJ{CANARY}.eyJ{CANARY}.x"},
+        ):
+            resp = client.post("/token", data={"client_id": client_id, **form})
+            assert resp.status_code in {400, 401}, resp.text
+
+    def test_library_lines_are_fingerprinted(self, captured: _Capture) -> None:
+        """Every argument becomes a fingerprint; a literal message stays."""
+        auth_log = logging.getLogger("fastmcp.server.auth.oauth_proxy.proxy")
+        auth_log.warning(
+            "Resource mismatch: client requested %s but server is %s", CANARY, "https://x"
+        )
+        auth_log.warning(f"interpolated {CANARY}")
+
+        def fail() -> None:
+            raise ValueError(CANARY)
+
+        try:
+            fail()
+        except ValueError:
+            logging.getLogger("mcp.server.auth.handlers.authorize").exception("Unexpected error")
+        lines = {r.getMessage() for r in captured.records}
+        assert (
+            "Resource mismatch: client requested "
+            f"{logsafe.redact_source(CANARY)} but server is {logsafe.redact_source('https://x')}"
+        ) in lines
+        assert "Unexpected error" in lines
+        [exc] = [r for r in captured.records if r.name.startswith("mcp.server.auth")]
+        assert exc.exc_text is not None and exc.exc_text.startswith("ValueError at ")
+
+    def test_library_templates_stay_readable(self) -> None:
+        """The proxy's own format strings are literals, so only values are cut."""
+        from fastmcp.server.auth.oauth_proxy import proxy
+
+        literals = logsafe._literals(proxy.__file__)
+        assert "Authorization code not found in client codes: %s" in literals
+        assert "Refresh token client_id mismatch: expected %s, got %s" in literals
+        assert "Forwarding to client callback for transaction " not in literals
 
 
 # ------------------------------------------------------------ HTTP edge

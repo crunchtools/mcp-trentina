@@ -186,7 +186,11 @@ when the package is imported and installs a `LogRecord` factory every record
 from every logger passes through: a value `logsafe.hold(value, name)` knows
 prints as `[REDACTED:<NAME>]`, and credential-shaped text nobody registered
 (a `?key=`/`access_token=` query value, a `Bearer` value, URL userinfo,
-`sk-…`/`AIza…`/JWT shapes) prints as `[REDACTED]`. `read_secret_env` holds
+`sk-…`/`AIza…`/JWT shapes) prints as `[REDACTED]`. A record from
+`fastmcp.server.auth` or `mcp.server.auth` keeps only the library's literal
+format string; every value, any run-time message and any traceback text is
+fingerprinted (#343), since an OAuth client's code or `resource` is not
+credential-shaped. `read_secret_env` holds
 every secret it returns, so a new secret is read THERE and nowhere else (one
 under 4 characters cannot be held and is warned about by name; a setting that
 only shares the `_FILE` form, like `BRIDGE_PROFILE`, is read with
