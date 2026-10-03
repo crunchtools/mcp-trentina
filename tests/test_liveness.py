@@ -93,25 +93,33 @@ class TestL1OffTheLoop:
         assert threading.get_ident() not in threads
 
     async def test_a_whitespace_flood_does_not_stall_the_loop(self) -> None:
-        """60k tabs stalled every profile for ~20 s under defend_json."""
-        ticks = 0
+        """60k tabs stalled every profile for ~20 s under defend_json.
+
+        Measured as the longest the loop went without running a 10 ms
+        heartbeat, end of the call included. Counting ticks instead failed
+        on a call that simply finished before the first one was due. That
+        the work runs off the loop at all is pinned by
+        ``test_defend_json_runs_l1_in_a_worker``; this bounds its cost."""
+        last = time.perf_counter()
+        longest = 0.0
 
         async def heartbeat() -> None:
-            nonlocal ticks
+            nonlocal last, longest
             while True:
                 await asyncio.sleep(0.01)
-                ticks += 1
+                now = time.perf_counter()
+                longest, last = max(longest, now - last), now
 
         beat = asyncio.create_task(heartbeat())
         try:
             with patch.object(defense, "defend", new_callable=AsyncMock):
                 start = time.perf_counter()
                 await defense.defend_json({"body": "\t" * 60_000}, source="s", source_type="t")
-                elapsed = time.perf_counter() - start
+                end = time.perf_counter()
         finally:
             beat.cancel()
-        assert elapsed < 2.0
-        assert ticks > 0 or elapsed < 0.02
+        assert end - start < 2.0
+        assert max(longest, end - last) < 0.5
 
 
 @pytest.fixture
