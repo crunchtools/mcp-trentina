@@ -97,6 +97,26 @@ def resolve_model(model_path: str, threshold_override: float | None = None) -> M
     guessing a polarity wrong would report every attack as clean, so L2 is
     absent instead and ``TRENTINA_REQUIRE_L2`` decides. The indices are
     checked against the session's output width when it loads.
+
+    Args:
+        model_path: The model directory: ``config.json``, optionally
+            ``trentina-model.json``, beside the ``model.onnx`` the caller loads.
+        threshold_override: ``CLASSIFIER_THRESHOLD``. When set it replaces the
+            manifest's threshold; None keeps the manifest's, or
+            ``DEFAULT_CLASSIFIER_THRESHOLD`` with no manifest.
+
+    Returns:
+        The model's id (manifest, else the directory name), revision
+        (manifest, else an ``unpinned-<size>-<mtime>`` stand-in), threshold
+        in force, and the sorted output indices whose probabilities sum to
+        the malicious score.
+
+    Raises:
+        ModelManifestError: polarity unknown or degenerate, a manifest label
+            ``config.json`` lacks, a negative index, or a threshold outside
+            (0, 1].
+        OSError, ValueError: ``config.json`` or the manifest is missing or
+            not JSON.
     """
     root = Path(model_path)
     config = json.loads((root / "config.json").read_text())

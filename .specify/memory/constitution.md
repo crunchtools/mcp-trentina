@@ -63,8 +63,10 @@ per layer (see `docs/defense-pipeline.md`):
   (`CLASSIFIER_MODEL`, #350): Horizon-Labs' prompt-injection-guard-small by
   default, Llama Prompt Guard 2 86M also shipped, each exported from a pinned
   revision with a manifest that states its polarity and threshold. A model
-  whose polarity cannot be read does not load; L2 is then absent, never
-  guessed.
+  an operator brings through `CLASSIFIER_MODEL_PATH` without a manifest
+  loads only when every label in its `config.json` is a known benign or
+  malicious name, at the 0.5 default. A model whose polarity cannot be read
+  does not load; L2 is then absent, never guessed.
 - **L3 (judge):** a quarantined LLM (`quarantine/agent.py`): no tools, no
   memory, no SDK, per-request canary.
 
