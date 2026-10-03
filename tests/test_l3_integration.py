@@ -1,8 +1,9 @@
 """Layer 3 integration tests — Q-Agent detection with mocked Gemini responses.
 
 These tests verify that the Q-Agent catches semantic/contextual attacks
-that pass both Layer 1 (no structural detections) and Layer 2 (Prompt Guard
-scores below 0.5 threshold).
+that pass Layer 1 (no structural detections). They were chosen because
+Prompt Guard 2 missed them; whether the L2 model in force does is not
+asserted here (#350), since L3 judges every call whatever L2 concluded.
 
 Gemini API calls are mocked with static fixture responses captured from
 real one-off Gemini calls (2026-03-10, RT#1408). This prevents CI failures
@@ -22,13 +23,7 @@ import pytest
 
 from mcp_trentina_crunchtools.l1.pipeline import run_l1
 from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
-from mcp_trentina_crunchtools.quarantine.classifier import (
-    classify,
-    is_classifier_available,
-)
 from tests.adversarial_corpus import CORPUS, Case
-
-_has_classifier = is_classifier_available()
 
 _DETECTOR_META_CASES = [c for c in CORPUS if c.category == "detector_meta"]
 
@@ -344,7 +339,7 @@ BENIGN = [
 
 
 class TestL3UniqueCatches:
-    """Attacks that bypass L1 and L2 but are caught by the Q-Agent.
+    """Attacks that bypass L1 and are caught by the Q-Agent.
 
     Q-Agent responses are mocked with static fixtures captured from real
     Gemini API calls. This validates the same assertions without hitting
@@ -358,18 +353,6 @@ class TestL3UniqueCatches:
         total_detections = sum(result.stats.to_flat_dict().values())
         assert total_detections == 0, (
             f"L1 detected {total_detections} vectors — expected 0 for L3-only attack"
-        )
-
-    @pytest.mark.parametrize("payload", L3_CATCHES)
-    def test_l2_does_not_catch(self, payload: str) -> None:
-        """Verify Layer 2 classifier does not flag these (if model available)."""
-        if not _has_classifier:
-            pytest.skip("Prompt Guard model not available")
-        result = classify(payload)
-        assert result is not None
-        assert result.label == "BENIGN", (
-            f"L2 unexpectedly caught this (score={result.score:.4f}). "
-            f"If Prompt Guard improved, move this to L2 tests."
         )
 
     @pytest.mark.asyncio

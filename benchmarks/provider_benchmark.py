@@ -59,11 +59,10 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from benchmarks import external_corpus, l2_sweep
-from mcp_trentina_crunchtools.config import get_config
+from mcp_trentina_crunchtools.config import DEFAULT_CLASSIFIER_THRESHOLD, get_config
 from mcp_trentina_crunchtools.defense import _stage_one
-from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
 from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
-from mcp_trentina_crunchtools.quarantine.classifier import is_classifier_available
+from mcp_trentina_crunchtools.quarantine.classifier import is_classifier_available, model_info
 from mcp_trentina_crunchtools.quarantine.prompts import DETECTION_SYSTEM_PROMPT
 from tests.adversarial_corpus import CORPUS, RISK_ORDER, Case
 
@@ -257,7 +256,14 @@ class ProviderReport:
         return (sum(r.cost_usd for r in scored) / len(scored)) * 1000
 
 
-L2_DEFAULT_THRESHOLD: float = DefenseConfig.model_fields["l2_threshold"].default
+def l2_threshold_in_force() -> float:
+    """The cut the loaded L2 model flags at (#350), the sweep's bold row.
+
+    A profile's ``l2_threshold`` is unset by default, so the model's own
+    threshold, from its manifest or ``CLASSIFIER_THRESHOLD``, is what decides.
+    """
+    model = model_info()
+    return model.threshold if model is not None else DEFAULT_CLASSIFIER_THRESHOLD
 
 
 async def score_l2(cases: list[Case]) -> dict[str, float | None]:
@@ -271,7 +277,7 @@ async def score_l2(cases: list[Case]) -> dict[str, float | None]:
     rather than aborting the run.
     """
     if not await asyncio.to_thread(is_classifier_available):
-        print("warning: Prompt Guard 2 not loaded; L2 scores omitted", file=sys.stderr)
+        print("warning: no L2 model loaded; L2 scores omitted", file=sys.stderr)
         return {c.id: None for c in cases}
 
     async def _one(case: Case) -> tuple[str, float | None]:
@@ -301,7 +307,8 @@ def l2_payload(cases: list[Case], scores: dict[str, float | None]) -> dict[str, 
     pairs, _ = _scored_pairs(cases, scores)
     top = l2_sweep.best(pairs)
     return {
-        "current_threshold": L2_DEFAULT_THRESHOLD,
+        "current_threshold": l2_threshold_in_force(),
+        "model": None if (m := model_info()) is None else f"{m.id}@{m.revision}",
         "scores": {c.id: scores.get(c.id) for c in cases},
         "best_threshold": None if top is None else top.threshold,
         "sweep": [asdict(p) for p in l2_sweep.sweep(pairs)],
@@ -316,7 +323,7 @@ def render_l2_markdown(
     Unscored cases are counted, not swept.
     """
     pairs, unscored = _scored_pairs(cases, scores)
-    return l2_sweep.render_markdown(pairs, L2_DEFAULT_THRESHOLD, unscored, corpus=corpus)
+    return l2_sweep.render_markdown(pairs, l2_threshold_in_force(), unscored, corpus=corpus)
 
 
 CORPORA = ("internal", "external")

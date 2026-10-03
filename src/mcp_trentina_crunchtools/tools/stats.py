@@ -30,7 +30,7 @@ from ..gateway.errors import ScopeError
 from ..gateway.scope import CallerScope, require_caller
 from ..gateway.surface import TOKEN_NOTE, surface_profiles, surface_report
 from ..logsafe import redact_source
-from ..quarantine.classifier import is_classifier_available
+from ..quarantine.classifier import is_classifier_available, model_info
 
 GATEWAY_AUDIT_LOOKBACK_DAYS = 30
 
@@ -57,6 +57,22 @@ RECENT_DESTINATIONS = 20
 NOT_BUILT = {"error": "tool list not built yet; it is measured on the first tools/list"}
 
 
+def _classifier() -> dict[str, Any]:
+    """Whether L2 is up, and which model at which threshold (#350).
+
+    The model's id and revision are no host path, so an agent sees them too:
+    they say what its L2 verdicts mean.
+    """
+    available = is_classifier_available()
+    model = model_info() if available else None
+    return {
+        "available": available,
+        "model": model.id if model else None,
+        "revision": model.revision if model else None,
+        "threshold": model.threshold if model else None,
+    }
+
+
 def _agent_stats(scope: CallerScope) -> dict[str, Any]:
     """One profile's own numbers, and the settings it actually runs under.
 
@@ -74,7 +90,7 @@ def _agent_stats(scope: CallerScope) -> dict[str, Any]:
             "enforcement": defense.enforcement if defense else None,
             "modes": defense.modes if defense else None,
         },
-        "classifier": {"available": is_classifier_available()},
+        "classifier": _classifier(),
         "blocklist": get_blocklist_stats(profile=scope.name),
         "gateway_audit": {
             **get_gateway_call_stats(profile=scope.name, days=GATEWAY_AUDIT_LOOKBACK_DAYS),
@@ -131,14 +147,11 @@ def _gateway_stats() -> dict[str, Any]:
             "admission_tokens": config.admission_tokens,
             "provider": config.provider,
             "llm_available": config.has_llm,
+            "classifier_model": config.classifier_model,
             "classifier_threshold": config.classifier_threshold,
             "classifier_model_path": config.classifier_model_path,
         },
-        "classifier": {
-            "available": is_classifier_available(),
-            "model_path": config.classifier_model_path,
-            "threshold": config.classifier_threshold,
-        },
+        "classifier": {**_classifier(), "model_path": config.classifier_model_path},
         "blocklist": get_blocklist_stats(),
         "gateway_audit": {
             **get_gateway_call_stats(days=GATEWAY_AUDIT_LOOKBACK_DAYS),

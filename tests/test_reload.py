@@ -601,7 +601,7 @@ class TestDefenseIsOperatorOnly:
         assert defense.enforcement == "block"
         assert defense.modes == ["block"]
         assert defense.audit is True
-        assert defense.l2_threshold == 0.5
+        assert defense.l2_threshold is None
         held = result["not_applied"]["operator_only"]
         for field in ("enforcement", "modes", "audit", "l2_threshold"):
             assert f"defense.{field}" in held

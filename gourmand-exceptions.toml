@@ -715,3 +715,9 @@ check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/bridge/main.py"
 justification = "main builds the bridge's argparse CLI; logsafe.configure sets log levels. Both are straight runs of single calls, which is all the match is on — they share no logic, and main already calls configure rather than repeating it."
 classification = "gourmand_bug"
+
+[[exceptions]]
+check = "hidden_env_config"
+path = "tests/test_l2_integration.py"
+justification = "TRENTINA_REQUIRE_L2_MODEL is a test-only switch that turns 'no L2 model loaded' from a skip into a failure, set by CI's in-container L2 runs (#350): until it existed, a wrong model path made every L2 integration test skip silently. It is not part of the deployed application's configuration surface; CLAUDE.md's Development section documents it."
+classification = "by_design"

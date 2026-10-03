@@ -31,7 +31,7 @@ This document describes the security architecture of mcp-trentina-crunchtools, t
 | **Encoded payloads** | Base64/hex instruction injection | L1 detects; L2 and L3 judge |
 | **Exfiltration URLs** | Markdown images with data in query params | L1 detects; the egress guard refuses non-global addresses |
 | **LLM delimiter spoofing** | Fake im_start, INST, Human: | L1 detects known delimiters |
-| **Instruction override** | "Ignore previous instructions" and kin | L2 (Prompt Guard 2) |
+| **Instruction override** | "Ignore previous instructions" and kin | L2 (local classifier) |
 | **Semantic injection** | Instructions disguised as text, social engineering | L3 quarantined LLM, best effort |
 | **LLM laundering** | P-LLM rephrases quarantined content | Not defended (requires CaMeL $VAR tokens) |
 
@@ -52,7 +52,7 @@ on. Details and measured catch rates: [docs/defense-pipeline.md](docs/defense-pi
 | - Exact directive patterns, plus evasion undoing         |
 | - Normalizes a COPY for L2; never modifies delivery      |
 +---------------------------------------------------------+
-| Layer 2: Prompt Guard 2 86M classifier (local ONNX)      |
+| Layer 2: local ONNX classifier; the model is a setting   |
 | - Reads the original and, when L1 changed it, the copy   |
 +---------------------------------------------------------+
 | Layer 3: Quarantined LLM, briefed with L1 and L2         |

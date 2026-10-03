@@ -1,8 +1,8 @@
 # mcp-trentina-crunchtools Constitution
 
-> **Version:** 1.5.0
+> **Version:** 1.6.0
 > **Ratified:** 2026-09-22
-> **Amended:** 2026-10-02
+> **Amended:** 2026-10-03
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.18.0
 > **Profile:** MCP Server
@@ -58,8 +58,15 @@ per layer (see `docs/defense-pipeline.md`):
 - **L1 (deterministic):** `l1/` counts obfuscation, hidden markup, encoded
   blobs, exfiltration URLs, delimiters and directives, and builds a
   normalized copy for L2. It never modifies what the agent receives.
-- **L2 (classifier):** Prompt Guard 2, local ONNX
-  (`quarantine/classifier.py`).
+- **L2 (classifier):** a local ONNX prompt-injection classifier
+  (`quarantine/classifier.py`). The model is an operator setting
+  (`CLASSIFIER_MODEL`, #350): Horizon-Labs' prompt-injection-guard-small by
+  default, Llama Prompt Guard 2 86M also shipped, each exported from a pinned
+  revision with a manifest that states its polarity and threshold. A model
+  an operator brings through `CLASSIFIER_MODEL_PATH` without a manifest
+  loads only when every label in its `config.json` is a known benign or
+  malicious name, at the 0.5 default. A model whose polarity cannot be read
+  does not load; L2 is then absent, never guessed.
 - **L3 (judge):** a quarantined LLM (`quarantine/agent.py`): no tools, no
   memory, no SDK, per-request canary.
 
@@ -177,3 +184,4 @@ justification in `gourmand-exceptions.toml`.
 | 1.4.0 | 2026-09-27 | File rule scoped to the file tools; process-owned state named. Matrix bridge credential split added (#162) |
 | 1.4.1 | 2026-09-27 | Bridge operator commands read the bridge's own store; `import-mautrix` named as the one read of a foreign store |
 | 1.5.0 | 2026-10-02 | Manifest under constitution v1.18.0: profile restatement removed, repo-specific security design kept under its own headings; the stale `block_`/`warn_`/`clean_` tool-prefix wording replaced by the per-call `trentina_mode` |
+| 1.6.0 | 2026-10-03 | L2 is a pluggable local classifier (#350): Horizon-Labs prompt-injection-guard-small by default, Prompt Guard 2 86M selectable, polarity and threshold from a pinned-model manifest |

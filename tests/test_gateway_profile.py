@@ -212,7 +212,7 @@ class TestProfileModel:
         assert d.enforcement == "flag"
         assert d.audit is True
         assert d.audit is True
-        assert 0.0 <= d.l2_threshold <= 1.0
+        assert d.l2_threshold is None  # the model's own threshold (#350)
 
     def test_defense_threshold_bounds(self) -> None:
         with pytest.raises(ValidationError):

@@ -5,7 +5,8 @@ named for a property no content in this system ever has. Content that crossed
 the perimeter is untrusted, permanently, because the layers are DETECTORS and
 a detector finding nothing has not made anything safe. It has failed to find
 something, and the gap between those two claims is the false-negative rate:
-L2 misses social engineering 40% of the time and exfiltration intent 20%, and
+Prompt Guard 2 missed social engineering 40% of the time and exfiltration
+intent 20% (the default L2 model since 0.55.0 misses fewer, not none), and
 L3 on the default model catches 86% of attacks written to evade L1 and L2,
 dropping to 33% on attacks aimed at the detector itself.
 

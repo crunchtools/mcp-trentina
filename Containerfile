@@ -1,5 +1,5 @@
 # MCP Trentina CrunchTools Container
-# Three-layer defense: deterministic sanitization + Prompt Guard 2 classifier + quarantined LLM
+# Three-layer defense: deterministic checks + a local classifier (L2) + quarantined LLM
 # Built entirely on Hummingbird Python images (Red Hat hardened, minimal)
 #
 # Build: the GHA pipeline, and only the GHA pipeline.
@@ -7,7 +7,7 @@
 # Do NOT build this image by hand — building outside the pipeline causes drift.
 #
 # The model-builder stage below needs HF_TOKEN to reach the GATED Meta Prompt Guard
-# repo. That credential belongs in GitHub secrets and nowhere else; it must never be
+# repo (one of the two L2 models; the default, Horizon-Labs', is ungated). That credential belongs in GitHub secrets and nowhere else; it must never be
 # copied to a workstation, because no local build path legitimately needs it.
 #
 # GitHub keeps Actions secrets and Dependabot secrets in SEPARATE stores, and a run
@@ -52,13 +52,36 @@ RUN pip install --no-cache-dir \
     transformers \
     sentencepiece
 
-# Download and convert the official Meta Prompt Guard 2 86M model to ONNX
-# Requires HF_TOKEN to access meta-llama gated model
+# Both L2 models, each exported to ONNX from a PINNED revision of its
+# safetensors, with the trentina-model.json manifest the classifier reads
+# for its identity, polarity and threshold (#350). CLASSIFIER_MODEL picks one.
+# Bumping a revision is a model change: re-run the L2 benchmark and update
+# the expectations in tests/test_l2_integration.py.
+COPY scripts/export_l2_model.py /usr/local/bin/export_l2_model.py
+
+# Default: Horizon-Labs/prompt-injection-guard-small (Apache-2.0, ungated).
+ARG HORIZON_REVISION=3215a27edd62c5ba0bd786c57a9d243b2158e70e
+RUN python /usr/local/bin/export_l2_model.py \
+      --repo Horizon-Labs/prompt-injection-guard-small \
+      --revision "${HORIZON_REVISION}" \
+      --out /models/prompt-injection-guard-small \
+      --id prompt-injection-guard-small \
+      --license Apache-2.0 \
+      --threshold 0.7 \
+      --malicious-labels INJECTION
+
+# Llama Prompt Guard 2 86M. Gated: requires HF_TOKEN. Its config.json names
+# no labels, so the manifest names the malicious output by index.
 ARG HF_TOKEN
-RUN HF_TOKEN="${HF_TOKEN}" python -m optimum.exporters.onnx \
-      --model meta-llama/Llama-Prompt-Guard-2-86M \
-      --task text-classification \
-      /models/prompt-guard-2-86m/
+ARG PG2_REVISION=a8ded8e697ce7c355e395a0df51f94adb4a2fd27
+RUN HF_TOKEN="${HF_TOKEN}" python /usr/local/bin/export_l2_model.py \
+      --repo meta-llama/Llama-Prompt-Guard-2-86M \
+      --revision "${PG2_REVISION}" \
+      --out /models/prompt-guard-2-86m \
+      --id prompt-guard-2-86m \
+      --license "Llama 4 Community License Agreement" \
+      --threshold 0.5 \
+      --malicious-indices 1
 
 # ============================================================
 # Stage 2: pip install (builder variant — has shell for RUN)
@@ -131,14 +154,17 @@ LABEL name="mcp-trentina-crunchtools" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later" \
       com.meta.llama.built-with="Built with Llama" \
       com.meta.llama.model="Llama-Prompt-Guard-2-86M" \
-      com.meta.llama.license="Llama 4 Community License Agreement"
+      com.meta.llama.license="Llama 4 Community License Agreement" \
+      com.crunchtools.l2.default="Horizon-Labs/prompt-injection-guard-small (Apache-2.0)"
 
 WORKDIR /app
 
 # Copy libstdc++ from model-builder — required by onnxruntime/numpy C extensions
 COPY --from=model-builder /usr/lib64/libstdc++.so.6* /usr/lib64/
 
-# Copy ONNX model files from model-builder (no PyTorch in final image)
+# Copy ONNX model files from model-builder (no PyTorch in final image).
+# Both L2 models ship; CLASSIFIER_MODEL selects one (#350).
+COPY --from=model-builder /models/prompt-injection-guard-small/ /models/prompt-injection-guard-small/
 COPY --from=model-builder /models/prompt-guard-2-86m/ /models/prompt-guard-2-86m/
 
 # Copy installed Python packages from pip-builder (pure Python + native C extensions)
@@ -149,7 +175,7 @@ COPY --from=pip-builder /usr/lib64/python3.14/site-packages/ /usr/lib64/python3.
 COPY --from=pip-builder /etc/machine-id.seed /etc/machine-id
 
 ENV QUARANTINE_DB=/data/quarantine.db
-ENV CLASSIFIER_MODEL_PATH=/models/prompt-guard-2-86m
+ENV CLASSIFIER_MODEL=prompt-injection-guard-small
 # The OAuth proxy's DCR registrations and token metadata live under
 # FASTMCP_HOME. Baked in so a deploy that forgets the operator env-file does
 # not silently fall back to ephemeral storage and drop every web client's

@@ -433,10 +433,14 @@ async def defend(
         )
 
     # Either leg flags: the model's own MALICIOUS label (global threshold),
-    # or the profile's stricter l2_threshold.
+    # or the profile's stricter l2_threshold when it sets one (#350).
     l2_flagged = classification is not None and (
         classification.label == "MALICIOUS"
-        or (defense is not None and classification.score >= defense.l2_threshold)
+        or (
+            defense is not None
+            and defense.l2_threshold is not None
+            and classification.score >= defense.l2_threshold
+        )
     )
 
     l3_assessment: dict[str, Any] | None = None

@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS verdict_cache (
 );
 """
 
-PERIMETER_VERSION = "4"
+PERIMETER_VERSION = "5"
 """Bump whenever a change could alter what a scan CONCLUDES: a new detector, a
 retuned L3 prompt, a different L2 model or threshold set. Rows stamped with any
 other value are swept on load, so an older perimeter's verdict is unusable
@@ -52,7 +52,36 @@ rather than merely old.
 
 "3" (0.23.0): petit frames before it groups, so different bytes survive
 reduction. "4" (0.31.0): L2 reads the arrived bytes plus L1's normalized copy,
-L3 is briefed with L2's result, and warnings carry L3's finding types."""
+L3 is briefed with L2's result, and warnings carry L3's finding types.
+"5" (0.55.0): L3's caveat about L2 no longer quotes Prompt Guard 2's miss
+rates (#350).
+
+The L2 model and its threshold are no longer bumped here: they are an
+operator setting since 0.55.0 (#350), so :func:`perimeter_stamp` carries them."""
+
+
+def perimeter_stamp() -> str:
+    """``PERIMETER_VERSION`` plus the L2 model, revision, threshold and polarity.
+
+    Switching ``CLASSIFIER_MODEL`` or ``CLASSIFIER_THRESHOLD`` changes what a
+    scan concludes as surely as a code change does, so a verdict reached under
+    another model is swept on load like one from an older perimeter. Read from
+    the selected model's manifest, the same resolution the classifier makes,
+    without loading the model; one that does not resolve stamps as absent.
+    """
+    from .config import get_config
+    from .quarantine.classifier import resolve_model
+
+    config = get_config()
+    try:
+        model = resolve_model(config.classifier_model_path, config.classifier_threshold)
+    except (OSError, ValueError):
+        return f"{PERIMETER_VERSION}:l2-absent"
+    polarity = ",".join(str(i) for i in model.malicious)
+    return (
+        f"{PERIMETER_VERSION}:{model.id}@{model.revision or 'unpinned'}"
+        f":{model.threshold:g}:{polarity}"
+    )
 
 
 def get_perimeter_db(db_path: str | None = None) -> sqlite3.Connection:

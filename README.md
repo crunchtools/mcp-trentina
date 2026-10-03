@@ -26,9 +26,11 @@ commerce keeps flowing, and nothing dangerous gets in.
 1. **Security.** Untrusted content gets the same three independent layers at
    every ingress: tool responses, tool descriptions, web pages, Matrix
    messages, LLM completions and alerts. L1 is deterministic checks, L2 is a
-   local Prompt Guard 2 classifier and L3 is a quarantined LLM with no tools.
-   On 1,306 external rows, L2 alone catches 93.7% of attacks at a 0.2%
-   false-positive rate. L3 picks up the semantic attacks L2 is blind to.
+   local classifier and L3 is a quarantined LLM with no tools. L2's model is
+   a setting: Horizon-Labs' prompt-injection-guard-small by default, Prompt
+   Guard 2 86M one variable away. On our attacks planted inside long
+   documents the default catches 26 of 39 where Prompt Guard 2 catches 5,
+   2.9x faster on CPU. L3 reads everything L2 lets through.
    Around the layers sit an egress guard, file confinement and a startup
    containment check. [Defense Pipeline](docs/defense-pipeline.md) ·
    [Benchmark](docs/benchmark.md)
@@ -141,7 +143,7 @@ commerce keeps flowing, and nothing dangerous gets in.
 ## Quick Start
 
 ```bash
-# Container (includes the Prompt Guard 2 86M classifier)
+# Container (ships two L2 classifiers; CLASSIFIER_MODEL picks one)
 podman run -d -p 127.0.0.1:8019:8019 \
     -v ./profiles.yaml:/config/profiles.yaml:ro,Z \
     -e TRENTINA_GATEWAY_ENABLED=true \

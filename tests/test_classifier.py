@@ -1,4 +1,4 @@
-"""Tests for the Layer 2 Prompt Guard 2 classifier module."""
+"""Tests for the Layer 2 classifier module."""
 
 from __future__ import annotations
 
@@ -8,15 +8,19 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mcp_trentina_crunchtools.config import (
-    DEFAULT_CLASSIFIER_MODEL_PATH,
+    DEFAULT_CLASSIFIER_MODEL,
     DEFAULT_CLASSIFIER_THRESHOLD,
 )
 from mcp_trentina_crunchtools.quarantine.classifier import (
     ClassifierResult,
+    ModelInfo,
     classify,
     is_classifier_available,
     reset_classifier,
 )
+
+THREE_CLASS = ModelInfo(id="three-class", revision="", threshold=0.5, malicious=(1, 2))
+"""A benign/injection/jailbreak head: the mocked logits below are three wide."""
 
 
 @pytest.fixture(autouse=True)
@@ -45,16 +49,19 @@ class TestClassifierConfig:
     def test_default_threshold(self) -> None:
         assert DEFAULT_CLASSIFIER_THRESHOLD == 0.5
 
-    def test_default_model_path(self) -> None:
-        assert DEFAULT_CLASSIFIER_MODEL_PATH == "/models/prompt-guard-2-86m"
+    def test_default_model(self) -> None:
+        assert DEFAULT_CLASSIFIER_MODEL == "prompt-injection-guard-small"
 
     def test_config_has_classifier_fields(self) -> None:
-        with patch.dict("os.environ", {}, clear=False):
+        unset = {"CLASSIFIER_THRESHOLD": "", "CLASSIFIER_MODEL": "", "CLASSIFIER_MODEL_PATH": ""}
+        with patch.dict("os.environ", unset, clear=False):
             from mcp_trentina_crunchtools.config import Config
 
             config = Config()
-            assert config.classifier_threshold == 0.5
-            assert config.classifier_model_path == "/models/prompt-guard-2-86m"
+            # Unset: the model's manifest decides (#350).
+            assert config.classifier_threshold is None
+            assert config.classifier_model == "prompt-injection-guard-small"
+            assert config.classifier_model_path == "/models/prompt-injection-guard-small"
 
     def test_config_respects_env_vars(self) -> None:
         env = {
@@ -155,6 +162,7 @@ class TestClassifyWithMockedModel:
                 "mcp_trentina_crunchtools.quarantine.classifier._loaded",
                 True,
             ),
+            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
             patch(
                 "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
                 True,
@@ -193,6 +201,7 @@ class TestClassifyWithMockedModel:
                 "mcp_trentina_crunchtools.quarantine.classifier._loaded",
                 True,
             ),
+            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
             patch(
                 "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
                 True,
@@ -230,6 +239,7 @@ class TestClassifyWithMockedModel:
                 "mcp_trentina_crunchtools.quarantine.classifier._loaded",
                 True,
             ),
+            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
             patch(
                 "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
                 True,
@@ -272,6 +282,7 @@ class TestSegmentSplitting:
                 "mcp_trentina_crunchtools.quarantine.classifier._loaded",
                 True,
             ),
+            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
             patch(
                 "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
                 True,
@@ -318,6 +329,7 @@ class TestSegmentSplitting:
                 "mcp_trentina_crunchtools.quarantine.classifier._loaded",
                 True,
             ),
+            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
             patch(
                 "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
                 True,
@@ -370,6 +382,7 @@ class TestSegmentSplitting:
                 "mcp_trentina_crunchtools.quarantine.classifier._loaded",
                 True,
             ),
+            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
             patch(
                 "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
                 True,
@@ -403,6 +416,7 @@ class TestStatsReportsClassifier:
             mock_config.return_value.admission_tokens = 32_768
             mock_config.return_value.has_api_key = True
             mock_config.return_value.classifier_threshold = 0.5
+            mock_config.return_value.classifier_model = "prompt-guard-2-86m"
             mock_config.return_value.classifier_model_path = "/models/prompt-guard-2-86m"
 
             from mcp_trentina_crunchtools.tools.stats import get_trentina_stats
@@ -411,6 +425,9 @@ class TestStatsReportsClassifier:
 
             assert "classifier" in result
             assert result["classifier"]["available"] is False
-            assert result["classifier"]["threshold"] == 0.5
+            # No model loaded, so no threshold in force; the override is config.
+            assert result["classifier"]["threshold"] is None
+            assert result["classifier"]["model"] is None
             assert result["classifier"]["model_path"] == "/models/prompt-guard-2-86m"
             assert result["config"]["classifier_threshold"] == 0.5
+            assert result["config"]["classifier_model"] == "prompt-guard-2-86m"

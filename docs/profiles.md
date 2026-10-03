@@ -43,7 +43,6 @@ profiles:
         # compact_schemas: true   (default — see compression.md#schema-compaction)
     defense:
       enforcement: flag
-      l2_threshold: 0.5
 
   agent1:
     auth:
@@ -62,7 +61,7 @@ profiles:
     defense:
       enforcement: block      # the default mode: flagged content is refused
       modes: [block, redact]   # what the agent may choose per call; no flag
-      l2_threshold: 0.5       # below 0.5 flags what L2 itself labels BENIGN
+      # l2_threshold: 0.6     # unset: the L2 model's own threshold decides
 ```
 
 ## Content modes
@@ -330,11 +329,11 @@ Each profile configures its defense **policy** — never the layers' existence. 
 |---------|------|---------|-------------|
 | `enforcement` | string | `flag` | The default mode — what a flagged response becomes when the call does not choose: `flag` (delivered intact + warning) or `block` (refused). Cannot be `redact` |
 | `modes` | list | `[enforcement]` | The modes the agent may choose per call — see [Content modes](#content-modes) |
-| `l2_threshold` | float | `0.5` | L2 score at/above which content is flagged, in addition to the model's own MALICIOUS label. Lower is more sensitive: more content is flagged, whatever the mode then does with a flag. Below 0.5 it flags content the classifier itself labels BENIGN, so lower it knowingly. Above `CLASSIFIER_THRESHOLD` (0.5) it changes nothing: the model's own label already flags there. 0.5 is measured, not a midpoint; see `docs/benchmark.md`. |
+| `l2_threshold` | float | unset | L2 score at/above which content is flagged, in addition to the model's own MALICIOUS label. Unset, the L2 model's own threshold decides (0.7 for the default model, 0.5 for Prompt Guard 2; `CLASSIFIER_THRESHOLD` overrides it gateway-wide). Below that threshold it flags content the classifier itself labels BENIGN, so set it knowingly; at or above it, it changes nothing. The thresholds are measured, not midpoints; see `docs/benchmark.md`. |
 | `audit` | bool | `true` | Write detection rows to SQLite |
 | `provider` | string | `null` | LLM provider override (`gemini`, `openai`, `anthropic`, `ollama`, `openrouter`) |
 
-An autonomous agent runs `enforcement: block`; a human-supervised agent runs `flag`. The mode decides what a flag costs and `l2_threshold` decides how readily L2 flags, so make an agent stricter through its mode. Below 0.5 the threshold flags content Prompt Guard labels BENIGN, and under `block` each of those is a refused call (#204). `TRENTINA_ENFORCEMENT_OVERRIDE=flag` is the global kill switch for the night a block threshold misfires.
+An autonomous agent runs `enforcement: block`; a human-supervised agent runs `flag`. The mode decides what a flag costs and `l2_threshold` decides how readily L2 flags, so make an agent stricter through its mode. Below the model's own threshold, `l2_threshold` flags content the classifier labels BENIGN, and under `block` each of those is a refused call (#204). `TRENTINA_ENFORCEMENT_OVERRIDE=flag` is the global kill switch for the night a block threshold misfires.
 
 `warn` and `clean`, the pre-0.35.0 spellings of `flag` and `redact` ([why](quarantine-tools.md#the-names-are-openrouters)), were removed in 0.36.0; a profile carrying one fails to load. `annotate` and `extract`, the pre-0.25.0 spellings, were removed in 0.29.0.
 
