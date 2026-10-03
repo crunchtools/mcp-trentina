@@ -1090,6 +1090,9 @@ def _build_proxy_provider(
     # normalized (email/profile -> full googleapis URIs). Captured so our
     # protected-resource document names the identical list. See OAuthContext.
     scopes = tuple(provider.required_scopes or [])
+    # The proxy's modules are loaded now; read their format strings here,
+    # off the request path, so its log lines keep them (#343).
+    logsafe.warm_library_literals()
     logger.info(
         "gateway: Google OAuth proxy built for %d profile(s): %s (base_url=%s issuer=%s scopes=%s)",
         len(proxied),

@@ -18,7 +18,8 @@ under that name.
   token's client id, a `resource` indicator, an exception or validation
   error echoing the request. The journal is agent-readable, so each was a
   #262 message board. Records from `fastmcp.server.auth` and
-  `mcp.server.auth` now keep only what the library wrote as a literal; every
+  `mcp.server.auth` now keep only what the library wrote as a literal (read
+  from its source once, when the OAuth provider is built); every
   interpolated value becomes a `redact_source` fingerprint, a message built
   at run time is fingerprinted whole, and a traceback is reduced to its
   class and frames. Done in the record factory rather than a logger filter,

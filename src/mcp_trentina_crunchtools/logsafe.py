@@ -38,6 +38,7 @@ import hashlib
 import logging
 import os
 import re
+import sys
 import threading
 import traceback
 from collections.abc import Callable, Mapping
@@ -376,13 +377,17 @@ def _is_library_auth(name: str) -> bool:
     return any(name == p or name.startswith(f"{p}.") for p in _LIBRARY_AUTH)
 
 
-@functools.cache
-def _literals(pathname: str) -> frozenset[str]:
+#: Each warmed library module's file to the string constants written in it.
+#: Filled at startup by ``warm_library_literals``; a record never reads a file.
+_library_literals: dict[str, frozenset[str]] = {}
+
+
+def _read_literals(pathname: str) -> frozenset[str]:
     """The string constants written in ``pathname``, f-string pieces excluded.
 
     A message that is one of them was written by the library's author; any
     other message was assembled at run time (an f-string, a ``str(exc)``)
-    and may hold anything. Read once per module, on its first record.
+    and may hold anything.
     """
     try:
         with open(pathname, encoding="utf-8") as source:
@@ -402,6 +407,22 @@ def _literals(pathname: str) -> frozenset[str]:
     )
 
 
+def warm_library_literals() -> int:
+    """Read the literals of every library auth module loaded so far.
+
+    Called once the OAuth provider is built, before a request can arrive: a
+    record is made on the caller's thread, which for the proxy is the event
+    loop, so parsing a source file there would stall it. A module loaded
+    after this is not warmed, and its messages are fingerprinted whole.
+    Returns how many modules are warm.
+    """
+    for name, module in list(sys.modules.items()):
+        path = getattr(module, "__file__", None)
+        if _is_library_auth(name) and path and path not in _library_literals:
+            _library_literals[path] = _read_literals(path)
+    return len(_library_literals)
+
+
 def _fingerprint_value(arg: object) -> object:
     return arg if arg is None or isinstance(arg, (bool, int, float)) else redact_source(arg)
 
@@ -413,7 +434,8 @@ def _fingerprint_library(record: logging.LogRecord) -> None:
     everything the library did not write itself: a canary sent as a code is
     not credential-shaped, and the journal is agent-readable (#262).
     """
-    if not (isinstance(record.msg, str) and record.msg in _literals(record.pathname)):
+    literals = _library_literals.get(record.pathname, frozenset())
+    if not (isinstance(record.msg, str) and record.msg in literals):
         record.msg, record.args = "%s", (redact_source(record.getMessage()),)
     elif isinstance(record.args, tuple):
         record.args = tuple(_fingerprint_value(a) for a in record.args)

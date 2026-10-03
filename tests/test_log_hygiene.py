@@ -597,8 +597,11 @@ class TestOAuthProxy:
             resp = client.post("/token", data={"client_id": client_id, **form})
             assert resp.status_code in {400, 401}, resp.text
 
-    def test_library_lines_are_fingerprinted(self, captured: _Capture) -> None:
+    def test_library_lines_are_fingerprinted(
+        self, captured: _Capture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Every argument becomes a fingerprint; a literal message stays."""
+        monkeypatch.setitem(logsafe._library_literals, __file__, logsafe._read_literals(__file__))
         auth_log = logging.getLogger("fastmcp.server.auth.oauth_proxy.proxy")
         auth_log.warning(
             "Resource mismatch: client requested %s but server is %s", CANARY, "https://x"
@@ -621,11 +624,18 @@ class TestOAuthProxy:
         [exc] = [r for r in captured.records if r.name.startswith("mcp.server.auth")]
         assert exc.exc_text is not None and exc.exc_text.startswith("ValueError at ")
 
+    def test_an_unwarmed_module_is_fingerprinted_whole(self, captured: _Capture) -> None:
+        """A module loaded after the warm-up is never read at log time."""
+        logging.getLogger("fastmcp.server.auth.late").warning("Literal %s", CANARY)
+        [line] = [r.getMessage() for r in captured.records if r.name.endswith(".late")]
+        assert line == logsafe.redact_source(f"Literal {CANARY}")
+
     def test_library_templates_stay_readable(self) -> None:
         """The proxy's own format strings are literals, so only values are cut."""
         from fastmcp.server.auth.oauth_proxy import proxy
 
-        literals = logsafe._literals(proxy.__file__)
+        logsafe.warm_library_literals()
+        literals = logsafe._library_literals[proxy.__file__]
         assert "Authorization code not found in client codes: %s" in literals
         assert "Refresh token client_id mismatch: expected %s, got %s" in literals
         assert "Forwarding to client callback for transaction " not in literals
