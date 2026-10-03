@@ -193,15 +193,16 @@ def _build_interface(loop: asyncio.AbstractEventLoop | None = None) -> Any:
         def GetLayerStatus(self) -> "s":  # type: ignore[name-defined]  # noqa: N802, F821
             """Return JSON layer availability status."""
             from .config import get_config
-            from .quarantine.classifier import is_classifier_available
+            from .quarantine.classifier import is_classifier_available, model_info
 
             config = get_config()
+            model = model_info() if is_classifier_available() else None
             return json.dumps(
                 {
                     "l1": {"active": True, "description": "Deterministic detection"},
                     "l2": {
-                        "active": is_classifier_available(),
-                        "description": "Prompt Guard 2 classifier",
+                        "active": model is not None,
+                        "description": f"{model.id} classifier" if model else "classifier",
                     },
                     "l3": l3_status(config),
                 }

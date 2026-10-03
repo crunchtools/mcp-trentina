@@ -15,9 +15,12 @@ can do. Every attack is written to slip past the cheaper layers:
 - **Layer 1** (deterministic detection) counts hidden markup, zero-width
   characters, base64 blobs, markdown-image exfil URLs, and literal delimiter
   tokens. The attacks carry none of those.
-- **Layer 2** (Prompt Guard 2) is trained on instruction-override *syntax*
+- **Layer 2** was Prompt Guard 2, trained on instruction-override *syntax*
   ("ignore previous instructions", "you are now…"). Most attacks use none of
   it; the structural ones do, and 8 of 39 score above 0.9 (see the sweep below).
+  The default L2 model since 0.55.0 catches most of them anyway (see
+  [L2 model comparison](#l2-model-comparison-350)); the corpus still measures
+  L3 because L3 reads every call whatever L2 concluded.
 
 What's left is pure semantics — social pretext, action-framed exfiltration,
 second-order instructions, logic bombs, and attacks aimed at the detector
@@ -125,28 +128,28 @@ zero marginal cost.
 
 ## L2 threshold sweep (issue #86)
 
-`l2_threshold` (default 0.5) is a cutoff applied to Prompt Guard 2's
-continuous score after inference, so one scoring pass answers it for every
-threshold. Every run passes each case once through `defense._stage_one`, the
+The L2 model's threshold is a cutoff applied to its continuous score after
+inference, so one scoring pass answers it for every threshold. Every run passes each case once through `defense._stage_one`, the
 recipe `defend()` uses: L2 scores the original and, when L1 normalized
 anything, L1's copy too, keeping the stronger score, which is the one
 production thresholds.
 
 The score is stored as `l2_malicious_score` per case and under `l2.scores` in
 the JSON. The report gains a sweep table: detection, FP rate and precision at
-0.05 to 0.95 with the current default in bold, and the cutoff with the best
+0.05 to 0.95 with the threshold in force in bold, and the cutoff with the best
 separation (max detection minus FP rate, over the observed scores plus one
 just above the highest, which flags nothing; shown from 30 benign cases up).
 
 ```bash
-# L2 only: no provider, no tokens. Needs the model at CLASSIFIER_MODEL_PATH.
-uv run python benchmarks/provider_benchmark.py --l2-only
+# L2 only: no provider, no tokens. Scores whichever model CLASSIFIER_MODEL /
+# CLASSIFIER_MODEL_PATH selects; the report names it.
+CLASSIFIER_MODEL_PATH=/path/to/export uv run python benchmarks/provider_benchmark.py --l2-only
 ```
 
 Recompute a different cut from the stored scores with
 `benchmarks/l2_sweep.py`; no rerun needed.
 
-### Result: `l2_threshold` stays 0.5 (2026-09-28)
+### Result: Prompt Guard 2 stays at 0.5 (2026-09-28)
 
 Internal corpus (39 attacks, 9 benign): the scores are bimodal. Nothing
 lands between 0.10 and 0.90, so every threshold in that band flags the same
@@ -177,14 +180,54 @@ cheaper cutoffs buy little: 0.20 gains 1.3 points of detection for three
 times the false positives, the best-separation point 2.7 points for nine
 times.
 
-Raising the threshold above 0.5 changes nothing. `defend()` flags on the
-model's own MALICIOUS label (`CLASSIFIER_THRESHOLD`, default 0.5) or on
-`l2_threshold`, whichever is lower, so the profile setting can only make L2
-more sensitive.
+A profile cannot loosen this. `defend()` flags on the model's own MALICIOUS
+label (its manifest threshold, or `CLASSIFIER_THRESHOLD`) or on a profile's
+`l2_threshold` when one is set, so the profile setting can only make L2 more
+sensitive.
 
 Not measured: false positives on retrieved content (web pages, code,
 mail), which is what L2 actually reads in production. The benign half here
 is prompts.
+
+## L2 model comparison (#350)
+
+L2's model is a setting since 0.55.0. Two ship in the image:
+`prompt-injection-guard-small` (Horizon-Labs, mmBERT-small, Apache-2.0, the
+default at 0.7) and `prompt-guard-2-86m` (Meta, mDeBERTa-base, Llama 4
+Community License, 0.5). Measured 2026-10-03, L2 alone, 512-token windows at
+stride 446, each model at its own threshold:
+
+| Set | Prompt Guard 2 86M | prompt-injection-guard-small |
+|---|---|---|
+| Internal corpus, attacks caught | 14/39 | 37/39 |
+| Internal corpus, benign flagged | 2/9 | 1/9 |
+| Internal attacks planted in 12K-char benign documents | 5/39 | 26/39 |
+| deepset/prompt-injections test split | 10/60, 0 FP | 29/60, 0 FP |
+| xTRam1/safe-guard test | 338/650, 2/1410 FP | 466/650, 17/1410 FP |
+| jackhhao jailbreak, all rows | 641/666, 1/640 FP | 559/666, 2/640 FP |
+| Benign retrieved documents (stdlib source, changelogs) flagged | 2/150 | 2/150 |
+| Throughput, paired runs on one CPU | 1x | 2.9x |
+
+The new model is never worse on the internal corpus case by case: it misses
+two attacks, and Prompt Guard 2 misses both of them too. It catches the
+whole of `exfil_action`, `tool_invocation` and `conditional_trigger`, which
+Prompt Guard 2 scored at 0.00. Prompt Guard 2 is the better detector of
+DAN-style jailbreaks, which are user-to-model attacks rather than the tool
+output L2 reads. The new model's training data includes the deepset train
+and jackhhao splits, so those rows flatter it; the planted-document set and the internal
+corpus are ours.
+
+0.7 rather than 0.5: at 0.5 it flags 6 of the 150 benign documents (4.0%)
+and at 0.7 two, the same as Prompt Guard 2, for one fewer planted-document
+catch. The near misses on benign text are code and changelogs scoring 0.5
+to 0.67.
+
+**Trying another model.** Export it in the model-builder image with
+`scripts/export_l2_model.py` (pinned revision, manifest naming the malicious
+outputs and threshold), mount the directory and set `CLASSIFIER_MODEL_PATH`.
+Score it with `--l2-only` above, then run `tests/test_l2_integration.py`
+against it with `TRENTINA_REQUIRE_L2_MODEL=1`; a model with no recorded
+expectations runs only the benign checks until its row is added.
 
 ## Continuous detection gate (CI)
 

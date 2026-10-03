@@ -250,12 +250,34 @@ class TestVerdictKey:
         return Profile(name="p", auth=AuthConfig(bearer_token_env="T"))
 
     def test_the_env_default_judge_keeps_the_legacy_key(self) -> None:
-        """Every persisted verdict was judged by the env default; they must stay reachable."""
+        """The env-default judge adds nothing to the key, as before #137."""
         legacy = hashlib.sha256(b"tool:external:0.5:some text").hexdigest()
+        explicit = Profile(
+            name="p",
+            auth=AuthConfig(bearer_token_env="T"),
+            defense=DefenseConfig(l2_threshold=0.5),
+        )
 
-        key = ing._cache_key(self._profile(), "tool:external", "some text", judge_of(None))
+        key = ing._cache_key(explicit, "tool:external", "some text", judge_of(None))
 
         assert key == legacy
+
+    def test_an_unset_l2_threshold_is_keyed_apart_from_an_explicit_one(self) -> None:
+        """Unset means the model's own threshold (#350), not 0.5."""
+        unset = ing._cache_key(self._profile(), "tool:external", "x", judge_of(None))
+        explicit = ing._cache_key(
+            Profile(
+                name="p",
+                auth=AuthConfig(bearer_token_env="T"),
+                defense=DefenseConfig(l2_threshold=0.5),
+            ),
+            "tool:external",
+            "x",
+            judge_of(None),
+        )
+
+        assert unset == hashlib.sha256(b"tool:external:model:x").hexdigest()
+        assert unset != explicit
 
     def test_a_different_model_is_a_different_verdict(self) -> None:
         provider, model = judge_of(None)

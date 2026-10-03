@@ -69,7 +69,7 @@ The defense-in-depth approach means an attack has to evade three fundamentally d
 L1 counts, and never modifies what the agent receives:
 
 - **What the agent receives** (`content`) — the caller's text, untouched. A CVE ticket, a Nagios alert, or a security mail *discusses* attacks in the words attacks use; amputating those lines destroyed exactly the content an ops agent exists to read, and destroyed the evidence before the smarter layers could judge it.
-- **A normalized copy** (`l2_input`) — the same text with obfuscation undone: zero-width characters removed, encoded blobs decoded, fake `<|im_start|>`/`<|eot_id|>`/`[INST]` delimiters dropped, exfiltration image URLs (Markdown and HTML) defanged. L2 reads it *in addition to* the original whenever L1's normalizing stages fired (three zero-width characters can split Prompt Guard's tokens while L1 rates them only medium), and redact mode's extraction turn reads it.
+- **A normalized copy** (`l2_input`) — the same text with obfuscation undone: zero-width characters removed, encoded blobs decoded, fake `<|im_start|>`/`<|eot_id|>`/`[INST]` delimiters dropped, exfiltration image URLs (Markdown and HTML) defanged. L2 reads it *in addition to* the original whenever L1's normalizing stages fired (three zero-width characters can split a classifier's tokens while L1 rates them only medium), and redact mode's extraction turn reads it.
 
 Detections (hidden markup, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions", and — for a directory — Python files that shadow the standard library) feed the risk score, the warning, and L3's briefing.
 
@@ -90,19 +90,26 @@ OWASP's recommended "dual-LLM" architecture, where a quarantined model reads unt
 
 **Latency:** ~55ms per 100k characters. **Cost:** Zero (no model calls). **Always runs.**
 
-### Layer 2 — Prompt Guard 2 Classifier
+### Layer 2 — Local Classifier
 
-Meta's Prompt Guard 2 86M model running on ONNX Runtime (CPU, no GPU required). Classifies content as `BENIGN` or `MALICIOUS` with a confidence score.
+A prompt-injection classifier running on ONNX Runtime (CPU, no GPU required), sliding a 512-token window across the payload and keeping the highest malicious score. Which model is an operator setting (#350): `CLASSIFIER_MODEL` picks one the image ships, `CLASSIFIER_MODEL_PATH` points at any other export (`scripts/export_l2_model.py`).
 
-**What it catches:** Direct instruction overrides, system prompt manipulation, delimiter injection, role hijacking.
+| Model (`CLASSIFIER_MODEL`) | Threshold | Notes |
+|---|---|---|
+| `prompt-injection-guard-small` (default) | 0.7 | Horizon-Labs, Apache-2.0, mmBERT-small. Trained on injections planted in documents, tool output and mail. |
+| `prompt-guard-2-86m` | 0.5 | Meta, Llama 4 Community License, mDeBERTa-base. Trained on instruction-override and jailbreak syntax. |
 
-**What it misses:** Data exfiltration requests (syntactically identical to legitimate requests), social engineering (authority-based attacks that don't use injection language).
+Measured on our corpora (`docs/benchmark.md`, #350), the default catches 37 of 39 internal attacks to Prompt Guard 2's 14, and 26 of 39 when they are planted inside long benign documents to Prompt Guard 2's 5, at the same false-positive rate on benign documents and 2.9x the throughput on CPU. Prompt Guard 2 is the better detector of DAN-style direct jailbreaks (96% vs 84% on the jackhhao set).
 
-**Latency:** ~150ms (86M model, ONNX, CPU). **Cost:** Zero (runs locally). **Configurable threshold per profile.**
+Each model directory carries a `trentina-model.json`: its id, pinned revision, threshold, and which outputs are malicious. A model whose polarity cannot be read from it or its labels does not load, and L2's absence is then a gap like any other (`TRENTINA_REQUIRE_L2`). The model, revision and threshold are part of the perimeter verdict stamp, so switching models sweeps cached verdicts.
+
+**What it misses:** whatever needs reasoning rather than pattern: social engineering and quiet exfiltration requests most of all. A low L2 score is never evidence of safety, and L3 is told so on every call.
+
+**Latency:** per 512-token window, Prompt Guard 2 86M takes ~550ms in production and the default about a third of that (2.9x, paired runs on one CPU). **Cost:** Zero (runs locally). **Threshold per model, stricter per profile.**
 
 ### Layer 3 — Quarantined LLM (Q-Agent)
 
-A quarantined LLM — `gemini-2.5-flash-lite` by default, any configured provider otherwise — that receives the **original, unmodified content** and judges it while ignoring injected instructions. It waits for L1 and L2 and is briefed with both: L1's counts, L2's label and score, and — unconditionally — the caveat that L2 misses social engineering about 40% of the time and exfiltration intent about 20%, so a low score is never evidence of safety. The Q-Agent is deliberately constrained:
+A quarantined LLM — `gemini-2.5-flash-lite` by default, any configured provider otherwise — that receives the **original, unmodified content** and judges it while ignoring injected instructions. It waits for L1 and L2 and is briefed with both: L1's counts, L2's label and score, and — unconditionally — the caveat that L2 misses attacks that need reasoning, such as social engineering and exfiltration intent, so a low score is never evidence of safety. The Q-Agent is deliberately constrained:
 
 - **No tools** — can't execute actions even if manipulated
 - **No memory** — can't be poisoned across sessions
@@ -118,7 +125,7 @@ A quarantined LLM — `gemini-2.5-flash-lite` by default, any configured provide
 
 ## Coverage Matrix
 
-Benchmarked against 105 test cases across 10 attack categories (Prompt Guard 2 22M vs 86M, ONNX Runtime, CPU):
+Benchmarked against 105 test cases across 10 attack categories with Prompt Guard 2 (22M vs 86M, ONNX Runtime, CPU). The L2 column describes Prompt Guard 2; the default model since 0.55.0 also catches most of the social-engineering and exfiltration rows (`docs/benchmark.md`, #350):
 
 | Attack Type | L1 (Structural) | L2 (Classifier) | L3 (Q-Agent) |
 |-------------|-----------------|-----------------|--------------|
@@ -179,7 +186,7 @@ profiles:
       bearer_token_env: TRENTINA_PROFILE_MYAGENT_TOKEN
     defense:
       enforcement: flag        # what a flag COSTS — flag | block
-      l2_threshold: 0.5        # how suspicious L2 must be before it flags
+      # l2_threshold: 0.6      # optional: flag below the model's own threshold
 ```
 
 **There are no per-layer on/off switches, and that is deliberate.** An earlier schema had
@@ -192,9 +199,10 @@ it refuses to start.
 What a profile controls is a threshold and a consequence:
 
 - **`l2_threshold`** — how suspicious L2 must be before it FLAGS. A flag is a consequence, not
-  an execution: L2 runs either way. The default is 0.5, where the model's own label turns
-  MALICIOUS. Anything lower also flags content the classifier labels BENIGN, so lower it
-  knowingly and measure first (#86).
+  an execution: L2 runs either way. Unset (the default), the model's own threshold decides,
+  0.7 for the default model and 0.5 for Prompt Guard 2. A value below it also flags content
+  the classifier labels BENIGN, so set it knowingly and measure first (#86); a value above it
+  changes nothing.
 - **`enforcement`** — what a flag costs. `flag` delivers the content with a
   `_trentina_warning` (the calibration mode) and `block` refuses it outright.
   `TRENTINA_ENFORCEMENT_OVERRIDE=flag` is the kill switch.

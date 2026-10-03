@@ -10,7 +10,7 @@
 
 Trentina today exposes 6 web-content tools (`fetch`, `read`, `search`, `scan`,
 `blocklist`, `stats`) that run untrusted content through a 3-layer prompt-injection
-defense (L1 → L2 Prompt Guard 2 classifier → L3 quarantined Gemini
+defense (L1 → L2 local classifier → L3 quarantined Gemini
 re-extraction) before returning anything to the LLM.
 
 This design extends trentina with a second surface — a **per-consumer MCP gateway**
@@ -157,7 +157,7 @@ profiles:
       # ... rest of agent2's backends
     defense:
       enforcement: flag             # interactive: flagged content is delivered with the verdict attached
-      l2_threshold: 0.5             # how suspicious L2 must be before it flags
+      # l2_threshold: 0.6           # unset: the L2 model's own threshold
 
   agent1:
     auth:
@@ -180,7 +180,7 @@ profiles:
       # ... narrower backend set
     defense:
       enforcement: block            # autonomous: a flagged response is refused outright
-      l2_threshold: 0.5             # below 0.5 flags what L2 itself labels BENIGN
+      # l2_threshold: 0.6           # below the model's threshold flags BENIGN-labelled content
 ```
 
 ### Allowlist semantics
@@ -239,7 +239,7 @@ or discard.
 | Layer | Reuse | New |
 |---|---|---|
 | L1 | Existing `l1/` pipeline applied to MCP response content | None |
-| L2 — Prompt Guard 2 | Existing classifier, same thresholds (per-profile-configurable) | None |
+| L2 — local classifier | Selectable model, its own threshold (per-profile stricter) | None |
 | L3 — Q-Agent | Existing quarantined Gemini path with `quarantine_threshold` trigger | Per-profile + runtime toggle |
 | Audit | Existing SQLite events table; add `gateway_passthrough` row type | New columns: `profile`, `backend`, `tool` |
 | P-Agent (policy) | Existing blocklist logic applies to backend MCP servers (block a backend if its responses keep tripping L2) | New: blocklist scope expands from URL to MCP-server URL |
@@ -450,7 +450,7 @@ Per gateway call (worst case, L3 triggered):
 | Auth check + profile lookup | <1ms |
 | Backend MCP call (over `crunchtools` network) | depends on backend (5-500ms typical) |
 | L1 | <10ms |
-| L2 classifier | 50-200ms (Prompt Guard 2 inference) |
+| L2 classifier | ~200-550ms per 512-token window (model-dependent) |
 | L3 quarantine (if triggered) | 1-2s (Gemini round-trip) |
 | Audit log write | <5ms |
 

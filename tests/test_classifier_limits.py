@@ -24,6 +24,7 @@ from mcp_trentina_crunchtools.quarantine.classifier import (
     WINDOW_SPECIAL_TOKENS,
     WINDOW_STRIDE,
     WINDOW_TOKENS,
+    ModelInfo,
     classifier_status,
     classify,
     classify_async,
@@ -80,6 +81,10 @@ def mocked_model(token_count: int, max_tokens: int = MAX_TOKENS) -> Iterator[Mag
         patch("mcp_trentina_crunchtools.quarantine.classifier._tokenizer", tokenizer),
         patch("mcp_trentina_crunchtools.quarantine.classifier._session", session),
         patch("mcp_trentina_crunchtools.quarantine.classifier._loaded", True),
+        patch(
+            "mcp_trentina_crunchtools.quarantine.classifier._model",
+            ModelInfo(id="three-class", revision="", threshold=0.5, malicious=(1, 2)),
+        ),
         patch("mcp_trentina_crunchtools.quarantine.classifier._load_attempted", True),
         patch(
             "mcp_trentina_crunchtools.quarantine.classifier.get_config",
@@ -405,6 +410,10 @@ def word_tokenizer(*, fast: bool = True) -> Iterator[None]:
     with (
         patch("mcp_trentina_crunchtools.quarantine.classifier._tokenizer", tokenizer),
         patch("mcp_trentina_crunchtools.quarantine.classifier._loaded", True),
+        patch(
+            "mcp_trentina_crunchtools.quarantine.classifier._model",
+            ModelInfo(id="three-class", revision="", threshold=0.5, malicious=(1, 2)),
+        ),
     ):
         yield
 

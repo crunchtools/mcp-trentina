@@ -155,12 +155,12 @@ def load_verdict_cache() -> int:
     only against someone who has already won. The version stamp covers the
     case that actually happens — a row written by an older perimeter.
     """
-    from ..perimeter_db import PERIMETER_VERSION, get_all_verdicts
+    from ..perimeter_db import get_all_verdicts, perimeter_stamp
 
     global _persist_broken
     _persist_broken = False
 
-    loaded = get_all_verdicts(PERIMETER_VERSION)
+    loaded = get_all_verdicts(perimeter_stamp())
     _verdicts.update(loaded)
     while len(_verdicts) > _CACHE_MAX:
         _verdicts.popitem(last=False)
@@ -195,7 +195,9 @@ def _cache_key(profile: Profile, kind: str, text: str, judge: tuple[str, str]) -
     gateway-wide config, so this cannot carry a verdict across profiles.
     """
     d = profile.defense
-    cfg = f"{d.l2_threshold}"
+    # Unset defers to the model's own threshold, which the store's stamp
+    # carries (#350); an explicit one keeps its pre-0.55 spelling.
+    cfg = "model" if d.l2_threshold is None else f"{d.l2_threshold}"
     if judge != judge_of(None):
         cfg = f"{cfg}:{judge[0]}/{judge[1]}"
     return hashlib.sha256(f"{kind}:{cfg}:{text}".encode()).hexdigest()
@@ -242,9 +244,9 @@ def _cache_put(key: str, value: dict[str, Any] | None, *, persist: bool = False)
     if not persist or _persist_broken:
         return
     try:
-        from ..perimeter_db import PERIMETER_VERSION, save_verdict
+        from ..perimeter_db import perimeter_stamp, save_verdict
 
-        save_verdict(key, value, PERIMETER_VERSION)
+        save_verdict(key, value, perimeter_stamp())
     except Exception:
         # A store that cannot be written is a slow next boot, not a wrong
         # answer, and must never cost the request in front of us. Stop

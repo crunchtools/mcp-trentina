@@ -254,6 +254,16 @@ class TestProfilePolicyIsHonoured:
         )
         assert verdict.flagged_by is Layer.L2
 
+    async def test_an_unset_l2_threshold_defers_to_the_models_label(self) -> None:
+        """Unset is the default (#350): a 0.80 the model calls BENIGN, under
+        a model whose own cut is higher, is not flagged by a hidden 0.5."""
+        verdict, _ = await _defend(
+            classification=BENIGN_HIGH,  # score 0.80, label BENIGN
+            defense=DefenseConfig(),
+            has_api_key=False,
+        )
+        assert verdict.flagged_by is not Layer.L2
+
     async def test_content_is_never_modified_regardless_of_config(self) -> None:
         verdict, _ = await _defend(
             content=L1_HOSTILE,

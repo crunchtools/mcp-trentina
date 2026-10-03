@@ -45,8 +45,9 @@ these variables control the process itself. Profile tokens
 | `TRENTINA_MODE` | `block` | Standalone only: the mode an omitted `trentina_mode` resolves to. `flag` or `block`. Under the gateway the profile's `defense.enforcement` decides. |
 | `TRENTINA_MODES` | the default | Standalone only: comma-separated modes a call may choose (`block,redact`). A default outside the set fails startup. Under the gateway the profile's `defense.modes` decides. |
 | `QUARANTINE_CONTEXT_TOKENS` | `1000000` | What the L3 model reads in one call. The admission cap is the smaller of this and `CLASSIFIER_MAX_TOKENS`; `block` and `redact` refuse a payload over it before any layer runs. Replaces `QUARANTINE_MAX_CONTENT` (removed in 0.43.0; setting it now fails startup). |
-| `CLASSIFIER_THRESHOLD` | `0.5` | Malicious-score threshold above which the L2 classifier flags content. |
-| `CLASSIFIER_MODEL_PATH` | `/models/prompt-guard-2-86m` | Filesystem path to the ONNX classifier model. Set to `/models/prompt-guard-2-86m` by the container image. |
+| `CLASSIFIER_MODEL` | `prompt-injection-guard-small` | The L2 model, by name under `/models`. The image ships `prompt-injection-guard-small` (Horizon-Labs, threshold 0.7) and `prompt-guard-2-86m` (Meta, threshold 0.5). See `docs/defense-pipeline.md` Layer 2. |
+| `CLASSIFIER_MODEL_PATH` | unset | Any exported model directory (`scripts/export_l2_model.py`); wins over `CLASSIFIER_MODEL`. |
+| `CLASSIFIER_THRESHOLD` | the model's | Overrides the loaded model's own threshold, from its `trentina-model.json` (0.5 for a model without one). |
 | `CLASSIFIER_MAX_TOKENS` | `32768` | L2's CPU budget in tokens, and with `QUARANTINE_CONTEXT_TOKENS` the admission cap. `0` removes L2's budget. |
 | `CLASSIFIER_THREADS` | `4` | ONNX Runtime intra-op thread count for the L2 classifier. |
 | `TRENTINA_L2_CONCURRENCY` | `2` | L2 scans run at once. Each already uses `CLASSIFIER_THREADS` threads, so size the product to the container's `--cpus`. A freed slot goes to waiting profiles in turn. |

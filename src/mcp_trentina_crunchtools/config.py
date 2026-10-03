@@ -21,11 +21,21 @@ DEFAULT_PROVIDER = "gemini"
 DEFAULT_MODEL = "gemini-2.5-flash-lite"
 DEFAULT_SEARCH_MODEL = "google/gemini-2.5-flash"
 DEFAULT_CLASSIFIER_THRESHOLD = 0.5
-DEFAULT_CLASSIFIER_MODEL_PATH = "/models/prompt-guard-2-86m"
+"""The cut for a model directory with no ``trentina-model.json`` (#350).
+
+A baked model's manifest carries its own threshold, and
+``CLASSIFIER_THRESHOLD`` overrides either."""
+
+CLASSIFIER_MODELS_DIR = "/models"
+DEFAULT_CLASSIFIER_MODEL = "prompt-injection-guard-small"
+"""The L2 model the image selects by name (#350): Horizon-Labs'
+prompt-injection-guard-small. ``prompt-guard-2-86m`` also ships; any other
+model is a directory named by ``CLASSIFIER_MODEL_PATH``."""
+
 DEFAULT_CLASSIFIER_MAX_TOKENS = 32_768
 """L2's CPU budget per payload, ~74 sliding windows at stride 446.
 
-A DoS guard, not a model limit: Prompt Guard's window is 512 tokens and
+A DoS guard, not a model limit: the classifier's window is 512 tokens and
 ``classify()`` slides it across everything it is given. One of the two
 inputs to ``Config.admission_tokens``."""
 
@@ -53,6 +63,29 @@ contend for the same quota and make scans slower — measured on host01
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "qwen2.5:0.5b"
 SUPPORTED_PROVIDERS = ("gemini", "openai", "anthropic", "ollama", "openrouter")
+
+
+def classifier_settings() -> tuple[float | None, str, str]:
+    """``(threshold override, model name, model directory)`` for L2 (#350).
+
+    An unset ``CLASSIFIER_THRESHOLD`` is None: the loaded model's manifest
+    decides, and ``classifier.model_info()`` reports the threshold in force.
+    ``CLASSIFIER_MODEL`` names a model under ``CLASSIFIER_MODELS_DIR``;
+    ``CLASSIFIER_MODEL_PATH`` wins over it, since that is how an operator
+    tries a model the image does not ship.
+    """
+    threshold_raw = os.environ.get("CLASSIFIER_THRESHOLD", "").strip()
+    threshold = float(threshold_raw) if threshold_raw else None
+    name = os.environ.get("CLASSIFIER_MODEL", "").strip() or DEFAULT_CLASSIFIER_MODEL
+    if "/" in name or name in (".", ".."):
+        from .errors import ConfigError
+
+        raise ConfigError(
+            f"CLASSIFIER_MODEL names a model under {CLASSIFIER_MODELS_DIR}; "
+            "use CLASSIFIER_MODEL_PATH for a directory"
+        )
+    path = os.environ.get("CLASSIFIER_MODEL_PATH", "").strip() or f"{CLASSIFIER_MODELS_DIR}/{name}"
+    return threshold, name, path
 
 
 def bool_env(name: str, default: bool) -> bool:
@@ -269,11 +302,9 @@ class Config:
                 )
         self.provider_fallback: list[str] = fallback_list
 
-        self.classifier_threshold: float = float(
-            os.environ.get("CLASSIFIER_THRESHOLD", str(DEFAULT_CLASSIFIER_THRESHOLD))
-        )
-        self.classifier_model_path: str = os.environ.get(
-            "CLASSIFIER_MODEL_PATH", DEFAULT_CLASSIFIER_MODEL_PATH
+        # The threshold override (None: the model's own), the name, the dir.
+        self.classifier_threshold, self.classifier_model, self.classifier_model_path = (
+            classifier_settings()
         )
         self.classifier_max_tokens: int = int(
             os.environ.get("CLASSIFIER_MAX_TOKENS", str(DEFAULT_CLASSIFIER_MAX_TOKENS))

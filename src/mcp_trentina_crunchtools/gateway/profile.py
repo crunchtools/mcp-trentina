@@ -814,14 +814,15 @@ class DefenseConfig(BaseModel):
             )
         return self
 
-    l2_threshold: float = Field(
-        default=0.5,
+    l2_threshold: float | None = Field(
+        default=None,
         ge=0.0,
         le=1.0,
         description=(
-            "L2 (Prompt Guard) score at or above which the content is "
-            "flagged, in addition to the model's own MALICIOUS label. "
-            "Above CLASSIFIER_THRESHOLD (0.5) it changes nothing"
+            "L2 score at or above which the content is flagged, in addition "
+            "to the model's own MALICIOUS label. Unset (the default) uses the "
+            "loaded model's threshold alone (#350); at or above that "
+            "threshold it changes nothing, so it can only make L2 stricter"
         ),
     )
     audit: bool = Field(default=True, description="Write detection rows to SQLite")

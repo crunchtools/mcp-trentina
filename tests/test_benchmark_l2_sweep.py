@@ -111,10 +111,18 @@ def test_markdown_without_scores_says_so() -> None:
     assert "No scores were produced" in l2_sweep.render_markdown([], 0.5, unscored=4)
 
 
-def test_default_threshold_tracks_the_profile_default() -> None:
+def test_threshold_in_force_is_the_models_own() -> None:
+    """A profile leaves l2_threshold unset, so the loaded model decides (#350)."""
+    from mcp_trentina_crunchtools.config import DEFAULT_CLASSIFIER_THRESHOLD
     from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+    from mcp_trentina_crunchtools.quarantine.classifier import ModelInfo
 
-    assert DefenseConfig().l2_threshold == bench.L2_DEFAULT_THRESHOLD
+    assert DefenseConfig().l2_threshold is None
+    with patch.object(bench, "model_info", return_value=None):
+        assert bench.l2_threshold_in_force() == DEFAULT_CLASSIFIER_THRESHOLD
+    model = ModelInfo(id="m", revision="r", threshold=0.7, malicious=(1,))
+    with patch.object(bench, "model_info", return_value=model):
+        assert bench.l2_threshold_in_force() == 0.7
 
 
 def _fake_score(text: str, **_: object) -> ClassifierResult:

@@ -10,6 +10,44 @@ under that name.
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-10-03
+
+### Added
+- A pluggable L2 classifier (#350). `CLASSIFIER_MODEL` picks a model the
+  image ships by name; `CLASSIFIER_MODEL_PATH` points at any other export.
+  Each model directory carries a `trentina-model.json` (id, pinned revision,
+  threshold, which outputs are malicious), written by the new
+  `scripts/export_l2_model.py`. A model whose polarity cannot be read does
+  not load. `quarantine_stats` and the D-Bus status name the model in force.
+- Horizon-Labs/prompt-injection-guard-small (Apache-2.0), exported from a
+  pinned revision. On our corpora it catches 37/39 internal attacks to
+  Prompt Guard 2's 14/39 and 26/39 planted in long documents to 5/39, at the
+  same benign-document false-positive rate, 2.9x faster on CPU
+  (`docs/benchmark.md`).
+
+### Changed
+- The default L2 model is prompt-injection-guard-small at threshold 0.7.
+  Prompt Guard 2 86M still ships and is one setting away:
+  `CLASSIFIER_MODEL=prompt-guard-2-86m`.
+- `CLASSIFIER_THRESHOLD` is an override; unset, the model's manifest decides.
+- `defense.l2_threshold` is unset by default and then defers to the model.
+  A profile that sets it can still only make L2 stricter. A profile that
+  set 0.5 explicitly keeps 0.5, which under the new default model is
+  stricter than its 0.7.
+- Cached perimeter verdicts are stamped with the L2 model, revision and
+  threshold (`perimeter_stamp()`), and `PERIMETER_VERSION` is 5, so the first
+  boot of this version re-judges tool descriptions once.
+- L3's briefing no longer quotes Prompt Guard 2's miss rates as L2's; the
+  caveat that a low L2 score is no evidence of safety is unchanged.
+
+### Fixed
+- CI ran the in-container L2 and L3 integration tests with
+  `CLASSIFIER_MODEL_PATH=/models/prompt-guard-2-22m`, a path the image never
+  had, so the classifier never loaded and every L2 integration test skipped.
+  Their expectations had drifted from the model unnoticed. CI now runs them
+  once per shipped model and fails, rather than skips, when a model does not
+  load (`TRENTINA_REQUIRE_L2_MODEL`).
+
 ## [0.54.3] - 2026-10-02
 
 ### Changed

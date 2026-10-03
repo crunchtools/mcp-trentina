@@ -1,6 +1,6 @@
 """Offline L2 threshold sweep (issue #86).
 
-Prompt Guard 2 emits a continuous malicious score; ``l2_threshold`` is a
+The L2 model emits a continuous malicious score; its threshold is a
 cutoff applied to it afterwards. So one scoring pass over a labeled corpus
 answers the question for every threshold at once: this module takes the
 stored scores and sweeps the cutoff over them, with no inference.
@@ -105,9 +105,9 @@ def render_markdown(
         f"## L2 threshold sweep: {corpus} corpus" if corpus else "## L2 threshold sweep",
         "",
         (
-            f"Prompt Guard 2 scores for {n_attacks} attacks and {n_benign} benign "
+            f"L2 scores for {n_attacks} attacks and {n_benign} benign "
             "cases, cut offline at each threshold. Flagged means score >= threshold. "
-            f"Current `l2_threshold` default: {current}."
+            f"Threshold in force: {current}."
         ),
         "",
     ]

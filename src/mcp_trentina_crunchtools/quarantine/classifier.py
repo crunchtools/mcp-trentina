@@ -1,7 +1,12 @@
-"""Layer 2 — Prompt Guard 2 86M classifier via ONNX Runtime.
+"""Layer 2 — a local prompt-injection classifier via ONNX Runtime.
 
 Embedded in-process inference. No sidecar, no HTTP API, no network calls.
-Synchronous — ONNX inference is CPU-bound (<100ms), not I/O-bound.
+Synchronous — ONNX inference is CPU-bound, not I/O-bound.
+
+Which model is pluggable (#350): any sequence-classification ONNX export in a
+directory, described by a ``trentina-model.json`` manifest (or, failing one,
+by the labels in its ``config.json``). The image ships Horizon-Labs'
+prompt-injection-guard-small, the default, and Llama Prompt Guard 2 86M.
 
 The classifier sees the L2 input (post-Layer 1) on the input path,
 and extracted text (post-Layer 3) on the output verification path.
@@ -11,13 +16,15 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import json
 import logging
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from ..config import get_config, int_env
+from ..config import DEFAULT_CLASSIFIER_THRESHOLD, get_config, int_env
 from ..errors import UnscannableContentError
 
 logger = logging.getLogger(__name__)
@@ -46,13 +53,126 @@ os.environ.setdefault(TELEMETRY_ENV, "1")
 
 _session: Any | None = None
 _tokenizer: Any = None
+_model: ModelInfo | None = None
 _loaded = False
 _load_attempted = False
+
+MANIFEST_FILE = "trentina-model.json"
+"""Written beside ``model.onnx`` when a model is exported for Trentina."""
+
+BENIGN_LABELS = frozenset({"BENIGN", "SAFE"})
+"""Label names that mean clean, read without a manifest."""
+
+MALICIOUS_LABELS = frozenset({"MALICIOUS", "INJECTION", "JAILBREAK"})
+"""Label names that mean attack, read without a manifest. A label in neither
+set refuses the model: ``POSITIVE``/``NEGATIVE`` say nothing about polarity."""
+
+
+class ModelManifestError(ValueError):
+    """A model directory that does not say which of its outputs is malicious."""
+
+
+@dataclass(frozen=True)
+class ModelInfo:
+    """What L2 is running: identity for the verdict stamp, and how to score it."""
+
+    id: str
+    revision: str
+    threshold: float
+    malicious: tuple[int, ...]  # output indices whose probabilities sum to the score
+    source: str = ""
+    license: str = ""
+
+
+def resolve_model(model_path: str, threshold_override: float | None = None) -> ModelInfo:
+    """Read a model directory's manifest and labels into a :class:`ModelInfo`.
+
+    The manifest names the malicious outputs, by ``malicious_indices`` or by
+    ``malicious_labels``, and the threshold. Without one, every ``id2label``
+    entry in :data:`MALICIOUS_LABELS` is malicious, provided every label is
+    in that set or :data:`BENIGN_LABELS`, and the threshold is
+    ``DEFAULT_CLASSIFIER_THRESHOLD``. Any other label (``LABEL_0``, a
+    sentiment model's ``POSITIVE``, or none at all, as Prompt Guard 2 ships)
+    is refused without a manifest:
+    guessing a polarity wrong would report every attack as clean, so L2 is
+    absent instead and ``TRENTINA_REQUIRE_L2`` decides. The indices are
+    checked against the session's output width when it loads.
+    """
+    root = Path(model_path)
+    config = json.loads((root / "config.json").read_text())
+    id2label = {int(k): str(v).upper() for k, v in (config.get("id2label") or {}).items()}
+    manifest_path = root / MANIFEST_FILE
+    manifest: dict[str, Any] = (
+        json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
+    )
+
+    if "malicious_indices" in manifest:
+        malicious = tuple(sorted({int(i) for i in manifest["malicious_indices"]}))
+        if any(i < 0 for i in malicious):
+            raise ModelManifestError("negative output index in the manifest")
+    elif "malicious_labels" in manifest:
+        wanted = {str(label).upper() for label in manifest["malicious_labels"]}
+        malicious = tuple(sorted(i for i, label in id2label.items() if label in wanted))
+        if len(malicious) != len(wanted):
+            raise ModelManifestError("manifest names a malicious label config.json lacks")
+    else:
+        known = BENIGN_LABELS | MALICIOUS_LABELS
+        if not id2label or any(label not in known for label in id2label.values()):
+            raise ModelManifestError("unrecognized labels and no manifest: polarity unknown")
+        malicious = tuple(sorted(i for i, label in id2label.items() if label in MALICIOUS_LABELS))
+    if not malicious or (id2label and len(malicious) >= len(id2label)):
+        raise ModelManifestError("no benign/malicious split in the model's outputs")
+
+    threshold = (
+        threshold_override
+        if threshold_override is not None
+        else float(manifest.get("threshold", DEFAULT_CLASSIFIER_THRESHOLD))
+    )
+    if not 0.0 < threshold <= 1.0:
+        raise ModelManifestError("threshold outside (0, 1]")
+    return ModelInfo(
+        id=str(manifest.get("id") or root.name),
+        revision=str(manifest.get("revision") or _unpinned_revision(root)),
+        threshold=threshold,
+        malicious=malicious,
+        source=str(manifest.get("source", "")),
+        license=str(manifest.get("license", "")),
+    )
+
+
+def _unpinned_revision(root: Path) -> str:
+    """A stand-in revision for a model with no pinned one in its manifest.
+
+    The revision is part of the verdict stamp, so two different unpinned
+    exports swapped into one path must not share it: verdicts one reached
+    would be replayed for the other. The graph's size and mtime differ.
+    """
+    try:
+        stat = (root / "model.onnx").stat()
+    except OSError:
+        return "unpinned"
+    return f"unpinned-{stat.st_size}-{stat.st_mtime_ns}"
+
+
+def _check_output_width(session: Any, model: ModelInfo) -> None:
+    """Refuse a manifest whose malicious outputs the graph does not have.
+
+    A static output width is required: an index past it would raise on the
+    first scan, and one that covers every output would flag everything.
+    """
+    width = session.get_outputs()[0].shape[-1]
+    if not isinstance(width, int) or max(model.malicious) >= width or len(model.malicious) >= width:
+        raise ModelManifestError("malicious outputs do not fit the model's output width")
+
+
+def model_info() -> ModelInfo | None:
+    """The loaded model, or None before a load or after a failed one."""
+    return _model if _loaded else None
 
 
 @dataclass
 class ClassifierResult:
-    """Result from the Prompt Guard 2 classifier."""
+    """Result from the L2 classifier."""
 
     label: str  # "BENIGN" or "MALICIOUS"
     score: float  # confidence score (0.0-1.0)
@@ -68,7 +188,7 @@ def is_classifier_available() -> bool:
     one intra-op thread per core and spin-waits on them, so a single long
     scan pegs every core and starves the gateway.
     """
-    global _session, _tokenizer, _loaded, _load_attempted
+    global _session, _tokenizer, _model, _loaded, _load_attempted
 
     if _loaded:
         return True
@@ -89,6 +209,14 @@ def is_classifier_available() -> bool:
 
     try:
         model_file = f"{model_path}/model.onnx"
+        # TRUST: deciding which model outputs mean "malicious"
+        #   untrusted: nothing a caller chose; the operator's model directory and env
+        #   judged-by: resolve_model (polarity, threshold) and _check_output_width
+        #   on-failure: fail-closed: any error leaves _loaded False, L2 is absent, and
+        #     TRENTINA_REQUIRE_L2 refuses block/redact rather than guess a polarity
+        #   owner: classifier.is_classifier_available
+        #   evidence: T4 except below never sets _loaded; T2 json builds plain types only
+        _model = resolve_model(model_path, config.classifier_threshold)
         _tokenizer = AutoTokenizer.from_pretrained(model_path)
 
         sess_options = ort.SessionOptions()
@@ -102,8 +230,15 @@ def is_classifier_available() -> bool:
             sess_options=sess_options,
             providers=["CPUExecutionProvider"],
         )
+        _check_output_width(_session, _model)
         _loaded = True
-        logger.info("Layer 2 classifier loaded from %s", model_path)
+        logger.info(
+            "Layer 2 classifier loaded from %s: %s@%s, threshold %.2f",
+            model_path,
+            _model.id,
+            _model.revision or "unpinned",
+            _model.threshold,
+        )
     except Exception:
         logger.warning(  # logsafe: ours — loading the operator's model
             "Failed to load classifier model from %s", model_path, exc_info=True
@@ -157,7 +292,7 @@ def _classify_segment(input_ids: list[int], attention_mask: list[int]) -> tuple[
         "attention_mask": np.array([attention_mask], dtype=np.int64),
     }
 
-    if _session is None:
+    if _session is None or _model is None:
         # is_classifier_available() guards every caller of this function, so
         # this should be unreachable -- fail loudly rather than silently
         # under python -O if that invariant ever breaks.
@@ -168,8 +303,8 @@ def _classify_segment(input_ids: list[int], attention_mask: list[int]) -> tuple[
     exp_logits = np.exp(logits - np.max(logits))
     probs = exp_logits / exp_logits.sum()
 
-    malicious_score = float(probs[1] + probs[2]) if len(probs) > 2 else float(probs[1])
-    label = "MALICIOUS" if malicious_score >= get_config().classifier_threshold else "BENIGN"
+    malicious_score = float(sum(probs[i] for i in _model.malicious))
+    label = "MALICIOUS" if malicious_score >= _model.threshold else "BENIGN"
 
     return label, malicious_score
 
@@ -468,7 +603,7 @@ def classifier_status() -> str:
     """Report load state without triggering the lazy load.
 
     Health probes must stay cheap; calling is_classifier_available() here
-    would pull an 86M model off disk on the first request.
+    would pull a model off disk on the first request.
     """
     if _loaded:
         return "loaded"
@@ -477,8 +612,9 @@ def classifier_status() -> str:
 
 def reset_classifier() -> None:
     """Reset classifier state. For testing only."""
-    global _session, _tokenizer, _loaded, _load_attempted
+    global _session, _tokenizer, _model, _loaded, _load_attempted
     _session = None
     _tokenizer = None
+    _model = None
     _loaded = False
     _load_attempted = False

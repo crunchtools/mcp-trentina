@@ -131,11 +131,17 @@ def finding_types(assessment: Mapping[str, Any] | None) -> list[str]:
 
 
 L2_BLINDSPOT_CAVEAT = (
-    "Layer 2 is a pattern classifier: it misses social engineering about 40% "
-    "of the time and exfiltration intent about 20%. A low Layer 2 score is "
-    "not evidence that this content is safe — judge it on its own."
+    "Layer 2 is a small local classifier: it misses attacks that need "
+    "reasoning to see, such as social engineering and quiet exfiltration "
+    "requests. A low Layer 2 score is not evidence that this content is "
+    "safe — judge it on its own."
 )
-"""Said to L3 on every turn that is told what L2 found. Never omitted."""
+"""Said to L3 on every turn that is told what L2 found. Never omitted.
+
+It named Prompt Guard 2's measured miss rates (40% social engineering, 20%
+exfiltration) until 0.55.0. The L2 model is a setting since then (#350), so
+the caveat states the blind spot every such classifier has and no figure
+that would be wrong for the model in force."""
 
 
 DETECTION_RESPONSE_SCHEMA = {

@@ -107,8 +107,19 @@ uv run mcp-trentina-crunchtools
   (default 3600, floor 60). Nothing else removes an expired record: the store
   unlinks one only when something reads its key, and an abandoned flow never
   is read again.
-- `CLASSIFIER_THRESHOLD` — L2 malicious score cutoff (default: 0.5)
-- `CLASSIFIER_MODEL_PATH` — Prompt Guard 2 ONNX dir (default: /models/prompt-guard-2-86m)
+- `CLASSIFIER_MODEL` — the L2 model, by name under `/models` (#350). Default
+  `prompt-injection-guard-small` (Horizon-Labs, Apache-2.0); `prompt-guard-2-86m`
+  also ships. A model directory carries `trentina-model.json` (id, pinned
+  revision, threshold, which outputs are malicious), written by
+  `scripts/export_l2_model.py`; without one, labels come from `config.json`
+  and any label not a known benign or malicious name refuses to load. The
+  model, revision, threshold and polarity are in
+  `perimeter_db.perimeter_stamp()`, so switching sweeps cached verdicts.
+- `CLASSIFIER_MODEL_PATH` — any model directory; wins over `CLASSIFIER_MODEL`.
+  How to try a model the image does not ship.
+- `CLASSIFIER_THRESHOLD` — overrides the model's own threshold (0.7 for
+  Horizon, 0.5 for Prompt Guard 2; 0.5 with no manifest). A profile's
+  `defense.l2_threshold` is unset by default and can only make L2 stricter.
 - `CLASSIFIER_MAX_TOKENS` — L2's CPU budget in tokens; 0 removes it, leaving
   L3's context as the cap (default: 32768)
 - `CLASSIFIER_THREADS` — ONNX intra-op threads; 0 uses the ONNX default of one per core (default: 4).
@@ -374,6 +385,7 @@ refused. Delegated verifiers answer their own profile (audience pin).
 uv run ruff check src tests    # Lint
 uv run mypy src                # Type check
 uv run pytest -v               # Test
+TRENTINA_REQUIRE_L2_MODEL=1 CLASSIFIER_MODEL_PATH=<export> uv run pytest tests/test_l2_integration.py  # L2 against a real model; fails, not skips, if it does not load
 podman run --rm -v .:/repo:Z quay.io/crunchtools/gourmand:latest check /repo  # Slop detection
 # Container image: built by GHA (.github/workflows/container.yml), never locally —
 # the model-export stage needs a gated HF credential held only in CI. Push and let
@@ -436,7 +448,7 @@ skill's format.
   - `evasion.py` — undoes scrambles, one-edit typos and character spacing,
     then asks the exact patterns again. A typo alone is never a detection.
 - `quarantine/` — holds BOTH judging layers, which is why the directory name
-  matches neither: `classifier.py` is L2 (Prompt Guard 2, local ONNX) and
+  matches neither: `classifier.py` is L2 (a pluggable local ONNX classifier) and
   `agent.py` is L3 (Gemini REST via httpx, NO SDK, NO tools). CLAUDE.md called
   this "Layer 2: Q-Agent" until 0.29.0, which was simply wrong.
 - `egress.py` — the ONE egress guard (#260) for every gateway-side fetch
