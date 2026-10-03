@@ -17,7 +17,8 @@ not marked ``# logsafe: ours`` with the reason its text is the server's own.
 
 Third-party loggers that format request data themselves (uvicorn's access
 log, httpx, httpcore) are held to the same rule by ``guard()`` and
-``install()``.
+``install()``, and so is library OAuth code (``fastmcp.server.auth``,
+``mcp.server.auth``), whose every interpolated value is fingerprinted.
 
 That rule is about what a call site may pass. The backstop (#341) is about
 what a record may carry whoever built it: ``guard()``, run when the package
@@ -31,11 +32,13 @@ site, in a library, or in a traceback is then harmless rather than a leak.
 
 from __future__ import annotations
 
+import ast
 import functools
 import hashlib
 import logging
 import os
 import re
+import sys
 import threading
 import traceback
 from collections.abc import Callable, Mapping
@@ -364,7 +367,91 @@ def _scrub_arg(arg: object, depth: int = 0) -> object:
     return arg if cleaned == text else cleaned
 
 
+#: Loggers of library auth code, which interpolates what an OAuth client sent:
+#: an unknown code, a refresh token's client, a resource indicator, an
+#: exception or validation error that echoes the request (#343).
+_LIBRARY_AUTH = ("fastmcp.server.auth", "mcp.server.auth")
+
+
+def _is_library_auth(name: str) -> bool:
+    return any(name == p or name.startswith(f"{p}.") for p in _LIBRARY_AUTH)
+
+
+#: Each warmed library module's file to the string constants written in it.
+#: Filled at startup by ``warm_library_literals``; a record never reads a file.
+_library_literals: dict[str, frozenset[str]] = {}
+
+
+def _read_literals(pathname: str) -> frozenset[str]:
+    """The string constants written in ``pathname``, f-string pieces excluded.
+
+    A message that is one of them was written by the library's author; any
+    other message was assembled at run time (an f-string, a ``str(exc)``)
+    and may hold anything.
+    """
+    try:
+        with open(pathname, encoding="utf-8") as source:
+            tree = ast.parse(source.read())
+    except (OSError, SyntaxError, ValueError):
+        return frozenset()
+    inside = {
+        id(child)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.JoinedStr)
+        for child in ast.walk(node)
+    }
+    return frozenset(
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in inside
+    )
+
+
+def warm_library_literals() -> int:
+    """Read the literals of every library auth module loaded so far.
+
+    Called once the OAuth provider is built, before a request can arrive: a
+    record is made on the caller's thread, which for the proxy is the event
+    loop, so parsing a source file there would stall it. A module loaded
+    after this is not warmed, and its messages are fingerprinted whole.
+    Returns how many modules are warm.
+    """
+    for name, module in list(sys.modules.items()):
+        path = getattr(module, "__file__", None)
+        if _is_library_auth(name) and path and path not in _library_literals:
+            _library_literals[path] = _read_literals(path)
+    return len(_library_literals)
+
+
+def _fingerprint_value(arg: object) -> object:
+    return arg if arg is None or isinstance(arg, (bool, int, float)) else redact_source(arg)
+
+
+def _fingerprint_library(record: logging.LogRecord) -> None:
+    """A library auth record with every interpolated value fingerprinted.
+
+    Unlike ``scrub``, which cuts what LOOKS like a credential, this cuts
+    everything the library did not write itself: a canary sent as a code is
+    not credential-shaped, and the journal is agent-readable (#262).
+    """
+    literals = _library_literals.get(record.pathname, frozenset())
+    if not (isinstance(record.msg, str) and record.msg in literals):
+        record.msg, record.args = "%s", (redact_source(record.getMessage()),)
+    elif isinstance(record.args, tuple):
+        record.args = tuple(_fingerprint_value(a) for a in record.args)
+    elif isinstance(record.args, Mapping):
+        record.args = {k: _fingerprint_value(v) for k, v in record.args.items()}
+    exc = record.exc_info[1] if record.exc_info else None
+    if exc is not None:
+        record.exc_text, record.exc_info = f"{exc_kind(exc)} at {exc_where(exc)}", None
+    if record.stack_info:
+        record.stack_info = scrub(record.stack_info)
+
+
 def _scrub_record(record: logging.LogRecord) -> None:
+    if _is_library_auth(record.name):
+        _fingerprint_library(record)
+        return
     args = record.args
     if not args and isinstance(record.msg, str):
         # No arguments: the message is the line, and one pass covers it.
