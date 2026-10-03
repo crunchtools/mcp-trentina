@@ -73,21 +73,14 @@ classification = "gourmand_bug"
 check = "single_use_helpers"
 path = "tests/test_reload.py"
 pattern = "_registry"
-justification = "Not single-use: called from 10 distinct locations in the file, verified by grep. Same undercount as the tests/test_gateway_router.py `_profile` entry below -- the check appears to attribute callers per test class and stops counting once a module-level helper is also used by another module-level helper."
-classification = "gourmand_bug"
-
-[[exceptions]]
-check = "single_use_helpers"
-path = "tests/test_gateway_router.py"
-pattern = "_profile"
-justification = "Not single-use: called from roughly 20 distinct test functions across the file, verified by grep. The single_use_helpers check appears to attribute callers per test class and undercounts once a module-level helper is also used by the file's last class -- re-flagging as a linter bug (gourmand_bug) rather than an architectural tradeoff."
+justification = "Not single-use: called from 10 distinct locations in the file, verified by grep. The check stops counting callers inside class methods once the helper also has one module-level caller (_list_tools). Upstream: https://gitlab.com/mattdm/gourmand/-/issues/25"
 classification = "gourmand_bug"
 
 [[exceptions]]
 check = "single_use_helpers"
 path = "tests/test_read_confinement.py"
 pattern = "_refusal"
-justification = "Not single-use: called from 14 test functions, verified by grep. The same per-class undercount as the tests/test_reload.py `_registry` entry above."
+justification = "Not single-use: called from 14 test functions, verified by grep. The same per-class undercount as the tests/test_reload.py `_registry` entry above. Upstream: https://gitlab.com/mattdm/gourmand/-/issues/25"
 classification = "gourmand_bug"
 
 [[exceptions]]
@@ -387,12 +380,6 @@ classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "tests/test_bridge_agent_rule.py"
-justification = "Not single-use: _started is called from seven tests in TestStartupVetting and from TestBothBotsInOneRoom in test_matrix_bridge.py, verified by grep. Same single_use_helpers undercount as the test_content.py exception (gourmand_bug)."
-classification = "gourmand_bug"
-
-[[exceptions]]
-check = "single_use_helpers"
 path = "src/mcp_trentina_crunchtools/bridge/client.py"
 justification = "Not single-use: Bridge._payload is called from _announce_rooms and _forward_event, verified by grep. It is the one place the bridge's wire format for an event is built, so an announcement and a message cannot drift apart. Linter undercount (gourmand_bug)."
 classification = "gourmand_bug"
@@ -490,14 +477,8 @@ classification = "by_design"
 
 [[exceptions]]
 check = "single_use_helpers"
-path = "tests/test_content.py"
-justification = "Not single-use: called from 4 distinct test functions (test_safe_content_clean, test_quarantine_content_extracts, test_scan_content_clean, test_blocklist_uses_content_hash), verified by grep. Same single_use_helpers undercount as the test_gateway_router.py _profile exception -- reflagging as a linter bug (gourmand_bug) rather than an architectural tradeoff."
-classification = "gourmand_bug"
-
-[[exceptions]]
-check = "single_use_helpers"
 path = "tests/test_gateway_transform.py"
-justification = "Not single-use: called from 4 distinct test functions (test_disabled_by_default_leaves_response_untouched, test_min_bytes_floor_skips_small_payloads, test_processor_failure_delivers_content_unchanged, test_perimeter_scans_the_reduced_artifact), verified by grep. Same single_use_helpers undercount as the test_gateway_router.py _profile exception -- reflagging as a linter bug (gourmand_bug) rather than an architectural tradeoff."
+justification = "Not single-use: called from 4 distinct test functions (test_disabled_by_default_leaves_response_untouched, test_min_bytes_floor_skips_small_payloads, test_processor_failure_delivers_content_unchanged, test_perimeter_scans_the_reduced_artifact), verified by grep. Same single_use_helpers undercount as the tests/test_reload.py `_registry` entry. Upstream: https://gitlab.com/mattdm/gourmand/-/issues/25"
 classification = "gourmand_bug"
 
 [[exceptions]]
@@ -716,14 +697,6 @@ pattern = "_admits"
 justification = "Not single-use: called from held_tools (per synthetic name a glob admits) and from _open_fetch, verified by grep. It is the allowlist's own rule (allow minus deny, as gateway/filter.py applies it), and two copies of that rule are how a lint drifts from the filter it describes."
 classification = "gourmand_bug"
 
-[[exceptions]]
-check = "single_use_helpers"
-path = "tests/test_incident_replay.py"
-pattern = "_profile"
-justification = "Not single-use: called from the cross-profile blocklist replay and the forged-marker replay, verified by grep. The same per-class undercount as the tests/test_gateway_router.py `_profile` entry."
-classification = "gourmand_bug"
-
-# --- logsafe: the one stdlib hook that has no extension point (#341) ---
 [[exceptions]]
 check = "lint_suppression"
 path = "src/mcp_trentina_crunchtools/logsafe.py"
