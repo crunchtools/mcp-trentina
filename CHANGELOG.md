@@ -10,6 +10,16 @@ under that name.
 
 ## [Unreleased]
 
+## [0.54.3] - 2026-10-02
+
+### Changed
+- `petit-log-crunchtools>=4.10.2`, which no longer logs on the root logger
+  (crunchtools/petit#89). `logsafe.configure` drops the #344 workaround that
+  set the root level and re-formatted basicConfig's default handler by hand;
+  `basicConfig` takes effect again on its own. A test runs the bridge's
+  imports and petit in a fresh process and fails if any library leaves the
+  root logger a handler.
+
 ## [0.54.2] - 2026-10-02
 
 ### Security

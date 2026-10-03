@@ -1369,7 +1369,7 @@ wheels = [
 
 [[package]]
 name = "mcp-trentina-crunchtools"
-version = "0.54.2"
+version = "0.54.3"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -1414,7 +1414,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "numpy", specifier = ">=1.24" },
     { name = "onnxruntime", specifier = ">=1.17" },
-    { name = "petit-log-crunchtools", specifier = ">=4.10.1" },
+    { name = "petit-log-crunchtools", specifier = ">=4.10.2" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
@@ -1944,11 +1944,11 @@ wheels = [
 
 [[package]]
 name = "petit-log-crunchtools"
-version = "4.10.1"
+version = "4.10.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e4/65/7b965d145f00b9cf08473511b2c19769b76971073b466f5c964fc3f0cd09/petit_log_crunchtools-4.10.1.tar.gz", hash = "sha256:35e10e537a83f51ff53fb3e3c669ffd0d515437136020a32acca0770fb9de524", size = 908229, upload-time = "2026-09-27T02:10:13.419Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3c/04/7b2bf333c1348666a00d7b849b02bcaaa5be74e73738c783d30abfc44715/petit_log_crunchtools-4.10.2.tar.gz", hash = "sha256:bc09e57d39ccebf243d270e69e963134b796a03a3e7156fbb40f2158a46509cf", size = 909066, upload-time = "2026-10-03T01:15:35.296Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/45/943ceacdae1033d82213e6d17666c14f519bfea2bc3bf61933640c293479/petit_log_crunchtools-4.10.1-py3-none-any.whl", hash = "sha256:809c6c0830389ec26a018b0f0177ee009d201e60ada72118a3c7aad8b2ffb55f", size = 360127, upload-time = "2026-09-27T02:10:11.949Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/10/72c7c3363202244864fa92a99f846628a4f63e99c28e876c3926eed14d7b/petit_log_crunchtools-4.10.2-py3-none-any.whl", hash = "sha256:54e4dd8de6955ace6b610282adce291762587b14c1905d9189215026f4ff275c", size = 360349, upload-time = "2026-10-03T01:15:33.247Z" },
 ]
 
 [[package]]

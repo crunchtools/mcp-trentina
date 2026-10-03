@@ -644,18 +644,10 @@ def configure(level_env: str, *, default: str = "INFO") -> str:
     if resolved not in LOG_LEVELS:
         resolved = default
     level = LOG_LEVELS[resolved]
+    # A no-op once the root logger has a handler. petit before 4.10.2 gave it
+    # one by logging on the root logger (#344); the dependency floor and
+    # tests/test_log_scrub.py keep any library from doing so again.
     logging.basicConfig(level=level, format=LOG_FORMAT)
-    # basicConfig does nothing once the root logger has a handler, and a
-    # library that logs on the root logger at import gives it one (petit
-    # does, in the bridge): the level and the format were both ignored
-    # (#344). Set them directly. Only a handler still printing basicConfig's
-    # default format is reformatted, which is what the implicit call leaves;
-    # a handler someone configured keeps its formatter.
-    root = logging.getLogger()
-    root.setLevel(level)
-    for handler in root.handlers:
-        if getattr(handler.formatter, "_fmt", None) == logging.BASIC_FORMAT:
-            handler.setFormatter(logging.Formatter(LOG_FORMAT))
     logging.getLogger("httpx").setLevel(level)
     install(level)
     return resolved
