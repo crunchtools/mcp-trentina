@@ -303,6 +303,9 @@ class TestDeliveredAsTheOversizeRefusal:
         ):
             mock_cfg.return_value.db_path = str(tmp_path / "audit.db")
             mock_cfg.return_value.ensure_db_dir = lambda: None
+            # The first audit write of a process runs the expiry sweep, which
+            # reads this; a mock attribute there loses the row (TypeError).
+            mock_cfg.return_value.blocklist_ttl_days = 30
             resp = await route_jsonrpc(
                 profile,
                 {
