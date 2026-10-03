@@ -16,6 +16,8 @@ import ast
 import logging
 import logging.config
 import pathlib
+import subprocess
+import sys
 import time
 from collections.abc import Callable, Iterator
 
@@ -576,26 +578,36 @@ def test_configure_uses_the_default_when_the_variable_is_unset(
 
 
 @pytest.mark.usefixtures("logging_state")
-@pytest.mark.usefixtures("logging_state")
-def test_configure_takes_effect_after_an_implicit_basicconfig(
+def test_configure_sets_the_root_level_when_the_root_has_a_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A library that logs on the root logger at import leaves it a default
-    handler, after which ``basicConfig`` is a no-op: the level and the format
-    have to be set directly, and a handler that is not ours is left alone."""
-    root = logging.getLogger()
-    implicit = logging.StreamHandler()
-    implicit.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
-    theirs = logging.StreamHandler()
-    theirs.setFormatter(logging.Formatter("theirs %(message)s"))
-    monkeypatch.setattr(root, "handlers", [implicit, theirs])
+    """``basicConfig`` is a no-op here (pytest's handlers are on the root),
+    so the level has to be set directly or the host's stays in effect."""
+    assert logging.getLogger().handlers
     monkeypatch.setenv("BRIDGE_LOG_LEVEL", "debug")
     assert logsafe.configure("BRIDGE_LOG_LEVEL", default="WARNING") == "DEBUG"
-    assert root.level == logging.DEBUG
-    assert implicit.formatter is not None
-    assert implicit.formatter._fmt == logsafe.LOG_FORMAT
-    assert theirs.formatter is not None
-    assert theirs.formatter._fmt == "theirs %(message)s"
+    assert logging.getLogger().level == logging.DEBUG
+
+
+#: Imports the bridge and drives petit, then prints the root logger's handlers.
+_ROOT_PROBE = """
+import logging
+import mcp_trentina_crunchtools.bridge.main
+from petit import analyze_text
+analyze_text("\\n".join(f"host app[{i}]: request {i} done in {i}ms" for i in range(200)))
+print(len(logging.getLogger().handlers))
+"""
+
+
+def test_no_library_gives_the_root_logger_a_handler() -> None:
+    """``configure``'s basicConfig is a no-op once the root logger has a
+    handler. petit before 4.10.2 gave it one by logging on the root logger,
+    and the bridge then logged at WARNING in the default format (#344). A
+    fresh process, because pytest's own capture handlers sit on the root."""
+    probe = subprocess.run(
+        [sys.executable, "-c", _ROOT_PROBE], capture_output=True, text=True, check=True
+    )
+    assert probe.stdout.strip() == "0", probe.stderr
 
 
 @pytest.mark.usefixtures("env_names")

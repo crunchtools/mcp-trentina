@@ -10,6 +10,24 @@ under that name.
 
 ## [Unreleased]
 
+## [0.54.3] - 2026-10-02
+
+### Changed
+- `petit-log-crunchtools>=4.10.2`, which no longer logs on the root logger
+  (crunchtools/petit#89). `logsafe.configure` drops the #344 workaround that
+  re-formatted basicConfig's default handler; the root level is still set
+  directly, for a host that configured logging first. A test runs the
+  bridge's imports and petit in a fresh process and fails if any library
+  leaves the root logger a handler.
+
+### Fixed
+- `test_an_endless_reply_is_cut_at_the_cap` raced: after the client hung
+  up, uvicorn's `send()` returned without awaiting, so the test server's
+  generator never let Starlette's disconnect listener run and counted all
+  64 MiB though the client stopped reading at the cap. petit 4.10.1's stray
+  root handler slowed logging enough to hide it. The server now yields each
+  chunk; disabling the cap still fails the test.
+
 ## [0.54.2] - 2026-10-02
 
 ### Security

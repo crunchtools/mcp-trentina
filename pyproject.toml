@@ -1,6 +1,6 @@
 [project]
 name = "mcp-trentina-crunchtools"
-version = "0.54.2"
+version = "0.54.3"
 description = "MCP gateway for AI agents — prompt-injection defense, token savings, deterministic policy, OAuth, per-agent profiles"
 requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
@@ -44,9 +44,11 @@ dependencies = [
     # grouping they call for silently does not exist.
     # See crunchtools/petit#31 and mcp-trentina#95.
     #
-    # 4.10.1 is the floor now: 4.10.0 added pull_identifiers, which
-    # `preprocess/structured.py` lists identifier-varying records with (#173).
-    "petit-log-crunchtools>=4.10.1",
+    # 4.10.0 added pull_identifiers, which `preprocess/structured.py` lists
+    # identifier-varying records with (#173). 4.10.2 is the floor now: before
+    # it petit logged on the root logger, which gave it a handler and made
+    # `logsafe.configure`'s basicConfig a no-op in the bridge (#344).
+    "petit-log-crunchtools>=4.10.2",
     "httpx>=0.28",
     "pydantic>=2.0",
     "beautifulsoup4>=4.12",

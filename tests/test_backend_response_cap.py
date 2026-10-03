@@ -9,6 +9,7 @@ HTTP server, so what they prove is what the transport actually does.
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
 import socket
@@ -123,6 +124,11 @@ class _Server:
         while produced[0] < BIG:
             produced[0] += CHUNK
             yield b"x" * CHUNK
+            # Once the client hangs up, uvicorn's send() returns at once
+            # without awaiting, so without a checkpoint here Starlette's
+            # disconnect listener never runs and this loop counts all of BIG
+            # whether or not the client was still reading.
+            await asyncio.sleep(0)
         yield b'"}]}}' + (b"\n\n" if self.mode == "sse" else b"")
 
     def start(self) -> None:
