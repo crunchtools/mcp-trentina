@@ -736,3 +736,9 @@ check = "copy_paste_detection"
 path = "src/mcp_trentina_crunchtools/gateway/matrix_bridge/routes.py"
 justification = "register_bridge_routes is reported as 100% similar to logsafe.configure. They share no code: one registers Starlette routes for the Matrix bridge, the other sets the process's log level and formatter. The match is on statement shape alone (assign, early return, a few calls, a for loop, a call, a return), verified by reading both."
 classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/mcp_trentina_crunchtools/bridge/main.py"
+justification = "main builds the bridge's argparse CLI; logsafe.configure sets log levels. Both are straight runs of single calls, which is all the match is on — they share no logic, and main already calls configure rather than repeating it."
+classification = "gourmand_bug"

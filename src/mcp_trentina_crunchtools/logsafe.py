@@ -644,10 +644,13 @@ def configure(level_env: str, *, default: str = "INFO") -> str:
     if resolved not in LOG_LEVELS:
         resolved = default
     level = LOG_LEVELS[resolved]
-    # A no-op once the root logger has a handler. petit before 4.10.2 gave it
-    # one by logging on the root logger (#344); the dependency floor and
-    # tests/test_log_scrub.py keep any library from doing so again.
+    # basicConfig is a no-op once the root logger has a handler: a host that
+    # configured logging first, or a library that logged on the root logger
+    # (petit before 4.10.2, #344; tests/test_log_scrub.py holds every library
+    # to not doing so). The level is ours either way; the format is the
+    # host's if it set one.
     logging.basicConfig(level=level, format=LOG_FORMAT)
+    logging.getLogger().setLevel(level)
     logging.getLogger("httpx").setLevel(level)
     install(level)
     return resolved

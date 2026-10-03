@@ -577,6 +577,18 @@ def test_configure_uses_the_default_when_the_variable_is_unset(
     assert logsafe.configure("BRIDGE_LOG_LEVEL", default="WARNING") == "WARNING"
 
 
+@pytest.mark.usefixtures("logging_state")
+def test_configure_sets_the_root_level_when_the_root_has_a_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``basicConfig`` is a no-op here (pytest's handlers are on the root),
+    so the level has to be set directly or the host's stays in effect."""
+    assert logging.getLogger().handlers
+    monkeypatch.setenv("BRIDGE_LOG_LEVEL", "debug")
+    assert logsafe.configure("BRIDGE_LOG_LEVEL", default="WARNING") == "DEBUG"
+    assert logging.getLogger().level == logging.DEBUG
+
+
 #: Imports the bridge and drives petit, then prints the root logger's handlers.
 _ROOT_PROBE = """
 import logging
