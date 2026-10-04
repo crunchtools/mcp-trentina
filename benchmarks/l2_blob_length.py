@@ -91,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--samples", type=int, default=20, help="draws per cell (default 20)")
     parser.add_argument("--seed", type=int, default=365)
     args = parser.parse_args(argv)
+    if args.samples < 1:
+        parser.error("--samples must be at least 1")
     if not is_classifier_available():
         print("error: no L2 model loaded (set CLASSIFIER_MODEL_PATH)", file=sys.stderr)
         return 2

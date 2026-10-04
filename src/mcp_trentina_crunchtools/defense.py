@@ -414,16 +414,21 @@ async def defend(
         A verdict. This function never raises on a detection.
     """
     has_text = bool(content.strip())
-    # Stage 2 of pre-processing (#365): what every layer reads. The delivery,
+    # The unpack stage (#365): what every layer reads. The delivery,
     # ``content``, is never changed; ``view.text`` is it with every packed
-    # part decoded or labelled.
-    # Past this length the payload is over the cap however it unpacks, and
-    # admission refuses or truncates it on its own count: unpacking it would
-    # be work the cap exists to prevent.
-    unpackable = has_text and len(content) <= get_config().admission_tokens * _MAX_CHARS_PER_TOKEN
-    view = await asyncio.to_thread(unpack, content) if unpackable else None
+    # part decoded or labelled. Past ``limit`` characters the payload is over
+    # the cap however it unpacks, so only the head is unpacked: it is all flag
+    # reads, and it still reports binary no layer can read. Admission then
+    # counts the whole delivery, which refuses or truncates it.
+    limit = get_config().admission_tokens * _MAX_CHARS_PER_TOKEN
+    over_limit = len(content) > limit
+    view = (
+        await asyncio.to_thread(unpack, content[:limit] if over_limit else content)
+        if has_text
+        else None
+    )
     read = view.text if view is not None else content
-    tokens, cap = await admission(read) if has_text else (0, 0)
+    tokens, cap = await admission(content if over_limit else read) if has_text else (0, 0)
     refuse_at_admission = stop_on_partial and tokens > cap
 
     scan = has_text and not refuse_at_admission
