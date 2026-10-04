@@ -152,6 +152,9 @@ max-complexity = 10
 # the alternative (never starting a real server) is what let a production
 # breakage through a green CI run in the first place.
 "tests/*" = ["S101", "S105", "S106", "S108", "S603", "PLC0415", "PLR2004", "ARG002", "ARG005", "RUF003", "PT018", "TC003"]
+# RUF001: the Chinese and Japanese cases (#353) use fullwidth punctuation,
+# which is what that text is written with; ASCII would make them less real.
+"tests/adversarial_corpus.py" = ["RUF001"]
 "src/mcp_trentina_crunchtools/dbus_interface.py" = ["UP037", "C901", "TRY300"]
 "src/mcp_trentina_crunchtools/gateway/app.py" = ["C901", "PLR0911", "PLR0912"]
 # Request handler: each early return is a distinct HTTP failure response
