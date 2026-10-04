@@ -1,4 +1,4 @@
-"""L1: the deterministic pipeline, and the one that builds the L2 input.
+"""L1: the deterministic pipeline. It counts, and its counts brief L3.
 
 FORMAT-AGNOSTIC since 0.28.0. There is one entry point and it scans what it
 is handed. The ``looks_like_html`` dispatch that used to choose between an
@@ -21,7 +21,33 @@ from .encoded import EncodedStats, normalize_encoded
 from .exfiltration import ExfiltrationStats, strip_exfiltration
 from .hidden import HiddenStats, detect_hidden_markup
 from .shadows import ShadowStats
-from .unicode import UnicodeStats, normalize_unicode, strips_anything
+from .unicode import UnicodeStats, normalize_unicode
+
+FINDING_NAMES: dict[str, str] = {
+    "hidden_elements": "elements hidden from view",
+    "hidden_off_screen": "elements positioned off screen",
+    "hidden_same_color": "text coloured like its background",
+    "hidden_latex_invisible": "LaTeX coloured invisible",
+    "unicode_zero_width_chars": "zero-width characters inside words",
+    "unicode_control_chars": "control characters",
+    "unicode_bidi_overrides": "bidirectional overrides",
+    "unicode_unicode_tags": "Unicode tag characters",
+    "unicode_variation_selectors": "variation-selector runs",
+    "encoded_base64_payloads": "base64 payloads that decode to text",
+    "encoded_hex_payloads": "hex payloads that decode to text",
+    "encoded_data_uris": "text data URIs",
+    "exfiltration_exfiltration_urls": "image URLs that could exfiltrate data",
+    "delimiters_llm_delimiters": "LLM chat delimiters",
+    "delimiters_custom_patterns": "profile-defined delimiter patterns",
+    "directives_directives_detected": "lines matching a known injection directive",
+    "directives_evasions_detected": "lines matching one once scrambled, misspelled or spaced out",
+    "shadows_files": "Python files shadowing the standard library",
+    "shadows_obfuscated": "of those, files with obfuscated code",
+}
+"""What L3's briefing calls each ``PipelineStats.to_flat_dict`` counter.
+
+Every counter has an entry; a test fails a new one that does not, so a new L1
+stage cannot go unmentioned to L3."""
 
 
 @dataclass
@@ -53,19 +79,15 @@ class PipelineStats:
                 flat[f"{section_name}_{key}"] = value
         return flat
 
-    def normalized(self) -> bool:
-        """Whether L1's copy for L2 differs from the arrived text by construction.
+    def findings(self) -> list[str]:
+        """Each non-zero counter as ``"<what>: <n>"``, in ``FINDING_NAMES`` order.
 
-        These are the stages that REWRITE the L2 copy to undo obfuscation.
-        When any fired, L2 reads both texts: the raw one because it is what
-        arrived, the normalized one because three zero-width characters are
-        enough to split Prompt Guard's tokens while L1 rates them only medium.
+        How L1 hands L3 what it found (the Layer contract: findings, never
+        inputs). The words come from ``FINDING_NAMES`` alone, never from the
+        payload, so nothing here can carry an attacker's text to the judge.
         """
-        return bool(
-            sum(asdict(self.unicode).values())
-            + sum(asdict(self.encoded).values())
-            + sum(asdict(self.delimiters).values())
-        )
+        flat = self.to_flat_dict()
+        return [f"{name}: {flat[key]}" for key, name in FINDING_NAMES.items() if flat.get(key)]
 
     def total_detections(self) -> int:
         """Total detections across all stages (informational).
@@ -142,9 +164,11 @@ class PipelineResult:
 
     ``l2_input`` is L1's NORMALIZED COPY — the same text with obfuscation
     undone: zero-width characters removed, encoded blobs replaced, delimiter
-    tokens dropped. L2 reads it as well as ``content`` whenever a normalizing
-    stage fired, so the very tricks L1 counts cannot blind the classifier;
-    redact's extraction turn reads it too. It is never delivered.
+    tokens dropped. NO DETECTOR READS IT: L2 reads ``content`` once, like
+    every layer (the Layer contract, ``docs/defense-pipeline.md``; #359
+    retired the second L2 pass over this copy). Its one reader is redact's
+    extraction turn, and whether that should stay is #360, which also owns
+    the name. It is never delivered.
 
     The owner's rule (2026-09-13): what the agent receives is byte-identical
     to what entered the perimeter, or nothing at all.
@@ -155,16 +179,6 @@ class PipelineResult:
     stats: PipelineStats
     input_size: int
     output_size: int
-
-    def l2_reads_both(self) -> bool:
-        """Whether L2 must read ``l2_input`` as well as ``content``.
-
-        True when a normalizing stage rewrote the copy, whether or not what
-        it rewrote was counted: the counts rate risk (#204 stopped counting
-        padding and terminal escapes), while a stripped character is a token
-        boundary the classifier would otherwise never see removed.
-        """
-        return self.stats.normalized() or strips_anything(self.content)
 
 
 def _run_stages(content: str, stats: PipelineStats) -> PipelineResult:

@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS verdict_cache (
 );
 """
 
-PERIMETER_VERSION = "5"
+PERIMETER_VERSION = "6"
 """Bump whenever a change could alter what a scan CONCLUDES: a new detector, a
 retuned L3 prompt, a different L2 model or threshold set. Rows stamped with any
 other value are swept on load, so an older perimeter's verdict is unusable
@@ -54,7 +54,8 @@ rather than merely old.
 reduction. "4" (0.31.0): L2 reads the arrived bytes plus L1's normalized copy,
 L3 is briefed with L2's result, and warnings carry L3's finding types.
 "5" (0.55.0): L3's caveat about L2 no longer quotes Prompt Guard 2's miss
-rates (#350).
+rates (#350). "6" (0.56.0): L2 reads the arrived bytes once, never L1's copy,
+and L3's briefing names L1's findings by type (#359).
 
 The L2 model and its threshold are no longer bumped here: they are an
 operator setting since 0.55.0 (#350), so :func:`perimeter_stamp` carries them."""

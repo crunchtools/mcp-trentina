@@ -1,6 +1,6 @@
 [project]
 name = "mcp-trentina-crunchtools"
-version = "0.55.0"
+version = "0.56.0"
 description = "MCP gateway for AI agents — prompt-injection defense, token savings, deterministic policy, OAuth, per-agent profiles"
 requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
@@ -171,6 +171,7 @@ max-complexity = 10
 # no real branching. Kept inline (one caller) to satisfy Gourmand's
 # single-use-helper rule rather than split into helpers.
 "benchmarks/provider_benchmark.py" = ["E402", "PLR0915"]
+"benchmarks/l2_obfuscation.py" = ["E402"]
 
 [tool.mypy]
 # NOT the 3.11 floor, deliberately. numpy's bundled stubs use PEP 695 `type X =`

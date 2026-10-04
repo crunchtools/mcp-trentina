@@ -1,12 +1,13 @@
 """Unicode — strip invisible chars, bidi overrides, NFKC normalize.
 
-Stripping and counting are two different questions (#204). The L2 copy loses
-every invisible character, because any of them can split Prompt Guard's
-tokens. The COUNT feeds risk, and counting characters rather than attacks
-rated ordinary content critical: a coloured container log carries an ESC per
-line, a document export writes each soft return as ``\\x0b``, a newsletter
-pads its preheader with a hundred ZWNJs, and every emoji carries a variation
-selector. So each class counts only in the context an attack needs:
+Stripping and counting are two different questions (#204). L1's normalized
+copy loses every invisible character, so the later stages' patterns match
+through them; no detector reads that copy (#359). The COUNT feeds risk, and
+counting characters rather than attacks rated ordinary content critical: a
+coloured container log carries an ESC per line, a document export writes each
+soft return as ``\\x0b``, a newsletter pads its preheader with a hundred
+ZWNJs, and every emoji carries a variation selector. So each class counts
+only in the context an attack needs:
 
 * A zero-width character counts **inside a Latin word**: ``ig\\u200bnore``,
   the token-splitting signature. Between emoji, in padding runs, or in the
@@ -71,31 +72,6 @@ _COUNTED_CONTROL = re.compile("[\x00-\x08\x0e-\x1f]")
 # a hostile run cannot make this backtrack.
 _ANSI_ESCAPE = re.compile("\x1b\\[[0-?]*[ -/]*[@-~]|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)")
 _SELECTOR_RUN = re.compile("[\ufe00-\ufe0f\U000e0100-\U000e01ef]{2,}")
-
-
-_STRIPPED = re.compile(
-    "|".join(
-        p.pattern
-        for p in (
-            _INVISIBLE_CHARS,
-            _BIDI_CHARS,
-            _VARIATION_SELECTORS,
-            _UNICODE_TAGS,
-            _CONTROL_CHARS,
-        )
-    )
-)
-
-
-def strips_anything(text: str) -> bool:
-    """Whether this stage removes anything from ``text``'s L2 copy, counted or not.
-
-    The counts answer "is this an attack"; this answers "does L2 need to read
-    the copy as well". They used to be the same question, and after #204 an
-    uncounted ZWNJ between two words is still stripped — and still a token
-    boundary Prompt Guard never saw.
-    """
-    return _STRIPPED.search(text) is not None
 
 
 def normalize_unicode(text: str) -> tuple[str, UnicodeStats]:

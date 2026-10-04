@@ -404,13 +404,19 @@ skill's format.
 
 ## Architecture
 
+Layer contract (`docs/defense-pipeline.md#layer-contract`, enforced by
+`tests/test_layer_contract.py`): every layer reads the arrived bytes once;
+layers share findings, never inputs; a model's weakness is fixed in the
+model or at selection (`benchmarks/l2_obfuscation.py`), never with an extra
+pass. #359 removed the last workaround that broke it.
+
 - `l1/` — Layer 1: the deterministic pipeline, plus module shadow detection.
-  It does not make content safe — it counts what it found and normalizes a
-  COPY for L2 to read. `PipelineResult` carries exactly two strings and the
-  names say who reads each: `content` is what the agent receives, byte-identical
-  to what arrived, and what L2 and L3 detect on; `l2_input` is L1's normalized
-  copy, which L2 reads AS WELL when L1 normalized anything, and which redact's
-  extraction turn reads. L1 also takes a directory's stdlib-shadow counts
+  It does not make content safe — it counts what it found, by type, and L3's
+  briefing names each count (`PipelineStats.findings`). `content` is what the
+  agent receives, byte-identical to what arrived, and the ONLY thing L1, L2
+  and L3 detect on, each once. `l2_input` is L1's private normalized copy: no
+  detector reads it (#359), redact's extraction turn does (#360 decides
+  whether it should, and owns the name). L1 also takes a directory's stdlib-shadow counts
   (`ShadowStats`), merged in by the `dir` producer.
 
   There is no "scan view" and no "delivery view". Those names were retired in
@@ -436,11 +442,9 @@ skill's format.
     `scan_shadows` reads through the descriptor `dir_tool` listed (#287) and
     never follows a link; `detect_module_shadows` takes a path and is NOT
     confined, so no tool may hand it a caller's path.
-  - `unicode.py` — strips every invisible character from the L2 copy but
+  - `unicode.py` — strips every invisible character from L1's copy but
     COUNTS one only in the context an attack needs (#204): zero-width inside
-    a Latin word, a lone ESC, a run of variation selectors. Whether L2 reads
-    the copy too is `PipelineResult.l2_reads_both()`, keyed on what was
-    stripped, never on the counts.
+    a Latin word, a lone ESC, a run of variation selectors.
   - `directives.py` — the exact patterns, named after OpenRouter's guardrail
     (#201). Near-misses matter as much as hits: every pattern has an attack
     and a benign line in `tests/adversarial_corpus.py` (`L1_PATTERN_CASES`),

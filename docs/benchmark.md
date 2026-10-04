@@ -130,9 +130,8 @@ zero marginal cost.
 
 The L2 model's threshold is a cutoff applied to its continuous score after
 inference, so one scoring pass answers it for every threshold. Every run passes each case once through `defense._stage_one`, the
-recipe `defend()` uses: L2 scores the original and, when L1 normalized
-anything, L1's copy too, keeping the stronger score, which is the one
-production thresholds.
+recipe `defend()` uses: L2 reads the arrived bytes once (#359), and that
+score is the one production thresholds.
 
 The score is stored as `l2_malicious_score` per case and under `l2.scores` in
 the JSON. The report gains a sweep table: detection, FP rate and precision at
@@ -273,6 +272,34 @@ outputs and threshold), mount the directory and set `CLASSIFIER_MODEL_PATH`.
 Score it with `--l2-only` above, then run `tests/test_l2_integration.py`
 against it with `TRENTINA_REQUIRE_L2_MODEL=1`; a model with no recorded
 expectations runs only the benign checks until its row is added.
+
+## L2 obfuscation gate (#359)
+
+A model-selection gate, run before an L2 model ships. L2 reads the arrived
+bytes once (the [Layer contract](defense-pipeline.md#layer-contract)), so
+a model that a zero-width split, a fullwidth letter or an encoding blinds
+gets no help from the pipeline. `benchmarks/l2_obfuscation.py` classifies
+every corpus attack plain and under six transforms, and fails any transform
+that loses more than `--max-drop` (default 1) detections against plain.
+
+```bash
+CLASSIFIER_MODEL_PATH=<export> uv run python benchmarks/l2_obfuscation.py
+```
+
+2026-10-04, 44 attacks, each model at its own threshold:
+
+| transform | Horizon small | Prompt Guard 2 86M |
+|---|---|---|
+| plain | 41 | 9 |
+| zero-width, every letter | 41 pass | 0 FAIL |
+| zero-width, mid-word | 41 pass | 14 pass |
+| soft hyphens | 41 pass | 0 FAIL |
+| fullwidth | 41 pass | 1 FAIL |
+| base64 | 44 pass | 0 FAIL |
+| Unicode tag characters | 41 pass | 1 FAIL |
+
+Prompt Guard 2's failures are why L2 used to read L1's normalized copy as
+well. Horizon needs no such help, and the second pass was retired.
 
 ## Continuous detection gate (CI)
 

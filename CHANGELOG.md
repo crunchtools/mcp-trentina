@@ -10,7 +10,29 @@ under that name.
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-10-04
+
+### Removed
+- L2's second pass over L1's normalized copy (#359). Whenever L1 stripped
+  anything, one zero-width character was enough, L2 read the copy as well
+  and the stronger score won, as did redact's check on turn 2's output.
+  It was a Prompt Guard 2 tokenizer workaround: against Horizon it changed 1
+  of 308 obfuscated-attack outcomes and did worse than the raw bytes on
+  base64. Every layer now reads the arrived bytes once, which halves L2's
+  worst case at the admission cap (about 49 s to about 25 s on production
+  CPU). `PipelineResult.l2_reads_both`, `PipelineStats.normalized` and
+  `unicode.strips_anything` are gone.
+
 ### Added
+- The Layer contract in `docs/defense-pipeline.md`, enforced by
+  `tests/test_layer_contract.py` (#359): one read per layer, findings shared
+  and inputs never, and a model's weakness fixed at selection rather than
+  with an extra pass. An AST check fails any new L2 call site.
+- L3's briefing names L1's findings by type (`PipelineStats.findings`, from
+  the fixed `FINDING_NAMES` table), not just the totals.
+- `benchmarks/l2_obfuscation.py`: an L2 model-selection gate over six
+  obfuscations of every corpus attack. Horizon passes all six, and Prompt
+  Guard 2 fails five.
 - Ten multilingual cases in the adversarial corpus (#353): planted attacks
   in German, French, Chinese, Japanese and a code-switched mix, each paired
   with a benign case in the same language and register, so a detector that
@@ -20,6 +42,8 @@ under that name.
   of running a model repo's remote code (PIGuard's head).
 
 ### Changed
+- Perimeter version 6: cached verdicts reached with two L2 reads and the
+  totals-only briefing are swept on load.
 - L2 comparison in `docs/benchmark.md` remeasured on our own exports through
   `classify()`, with two more models: ProtectAI's
   deberta-v3-base-prompt-injection-v2 and PIGuard, both rejected (#353). They

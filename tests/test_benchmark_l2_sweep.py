@@ -158,22 +158,21 @@ def test_missing_model_yields_none_scores(tmp_path: Path) -> None:
     assert payload["l2"]["internal"]["best_threshold"] is None
 
 
-async def test_score_l2_takes_the_stronger_of_original_and_normalized() -> None:
-    # A zero-width space inside a word makes L1 normalize, so L2 reads both.
+async def test_score_l2_reads_each_payload_once_as_it_arrived() -> None:
+    # A zero-width space inside a word: L1 counts it, L2 still reads only the
+    # arrived bytes (#359).
     case = Case(id="zw", category="t", payload="ig\u200bnore this", expect_injection=True)
 
-    async def score(text: str, **_: object) -> ClassifierResult:
-        return ClassifierResult(
-            label="BENIGN", score=0.2 if "\u200b" in text else 0.9, latency_ms=0.0
-        )
+    async def score(_text: str, **_: object) -> ClassifierResult:
+        return ClassifierResult(label="BENIGN", score=0.2, latency_ms=0.0)
 
     with (
         patch.object(bench, "is_classifier_available", return_value=True),
         patch("mcp_trentina_crunchtools.defense.classify_async", side_effect=score) as spy,
     ):
         scores = await bench.score_l2([case])
-    assert spy.call_count == 2
-    assert scores == {"zw": 0.9}
+    assert [c.args[0] for c in spy.call_args_list] == [case.payload]
+    assert scores == {"zw": 0.2}
 
 
 async def test_score_l2_records_a_failed_scan_as_none() -> None:

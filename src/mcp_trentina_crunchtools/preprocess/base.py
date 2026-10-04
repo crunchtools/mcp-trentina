@@ -52,11 +52,12 @@ Three invariants, none negotiable:
    site accounts for the gap — coverage, a skip histogram by reason, and
    ``low_scan_coverage`` below the floor.
 
-   Scan-differs-from-deliver is not an anomaly to be designed out. It is what
-   L1 has always done: ``l1/pipeline.py`` normalizes a COPY for L2 to
-   read and delivers the original untouched, because a Nagios alert or a CVE
-   ticket discusses attacks in the words attacks use, and amputating those
-   lines destroys exactly the content an ops agent exists to read.
+   Scan-differs-from-deliver at a call site is not an anomaly to be designed
+   out; the Matrix path cannot deliver plaintext it does not own. It is a
+   call-site property only. INSIDE the perimeter every layer reads the bytes
+   that are delivered (the Layer contract, ``docs/defense-pipeline.md``).
+   This paragraph used to cite L1's normalized copy for L2 as precedent;
+   #359 retired L2's read of that copy.
 
    A previous revision of this file (#163) ruled the opposite — that a
    pre-processor may never open a gap between what is scanned and what is
