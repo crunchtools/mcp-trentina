@@ -301,6 +301,49 @@ CLASSIFIER_MODEL_PATH=<export> uv run python benchmarks/l2_obfuscation.py
 Prompt Guard 2's failures are why L2 used to read L1's normalized copy as
 well. Horizon needs no such help, and the second pass was retired.
 
+## L1 briefing ablation
+
+L1 reaches the verdict two ways: its own refusal at high or critical
+risk, and L3's briefing, which names its counts by type. The second is
+measured by `benchmarks/l1_briefing.py`, which runs real L1 and L2 on every
+payload, then L3 with the production briefing (`full`) and with L1's
+findings emptied (`ablated`). Each arm gets three calls and a majority vote.
+The payloads are the semantic corpus, its attacks and benign cases under the
+six obfuscation transforms, and the L1 pattern cases.
+
+```bash
+CLASSIFIER_MODEL_PATH=<export> TRENTINA_MODEL_PROVIDER=openrouter \
+OPENROUTER_API_KEY=... uv run python benchmarks/l1_briefing.py --json rows.json
+```
+
+2026-10-04, 0.56.0, Horizon small at 0.7, `gemini-2.5-flash-lite`. The run
+covered 502 payloads; L1 fired on 241, and only those have an ablated arm.
+
+| | attacks (194 compared) | benign (47 compared) |
+|---|---|---|
+| L3 flagged with the briefing, not without | 2 | 4 |
+| L3 flagged without the briefing, not with | 1 | 6 |
+| verdict decided by L1's refusal alone | 2 | 29 |
+
+16 of 502 payloads split across L3's own three calls.
+
+- **The briefing does not measurably change L3.** It flipped 13 of 241
+  payloads, in both directions, and that is inside L3's own run-to-run
+  disagreement.
+- **L1's refusal is what changes outcomes.** It caught 2 zero-width
+  attacks that L2 and L3 both passed. It also refused 29 benign texts
+  carrying zero-width or tag characters that both other layers cleared,
+  because four invisible characters is already high risk.
+- **L1 misses two transforms.** It counts nothing in soft-hyphen or
+  fullwidth text (#363). L2 catches both.
+- **Elsewhere:** L2 flags every benign payload wrapped in base64 (14 of 14),
+  and L3 flags 16 of the 48 L1 near-miss lines. L1 fires on none of
+  those, so both arms are the same.
+
+The benign transforms are synthetic: real benign text rarely carries a
+zero-width character in every word. The 14-case benign corpus moves in 7%
+steps.
+
 ## Continuous detection gate (CI)
 
 The periodic benchmark above is the deep, cross-provider comparison. For a

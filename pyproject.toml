@@ -172,6 +172,7 @@ max-complexity = 10
 # single-use-helper rule rather than split into helpers.
 "benchmarks/provider_benchmark.py" = ["E402", "PLR0915"]
 "benchmarks/l2_obfuscation.py" = ["E402"]
+"benchmarks/l1_briefing.py" = ["E402"]
 
 [tool.mypy]
 # NOT the 3.11 floor, deliberately. numpy's bundled stubs use PEP 695 `type X =`
