@@ -181,7 +181,9 @@ one does; the rest name the benchmark that measured them.
    deliberate: a lenient decoder could read a blob differently from the
    agent's own tools. Tested.
 3. **Decoding stops at two levels and 140,000 characters.** Base64 of base64
-   is read; a third level, or a longer token, is read as it arrived.
+   is read; a third level is read as it arrived. A longer token is
+   identified from its first 4,096 characters: an openable format is
+   `binary_unread`, anything else is read as it arrived.
 4. **Binary with no known signature counts as read.** The table in
    `unpack/signatures.py` covers images, PDFs, archives (also behind a
    stub), office files, audio, video, SQLite and WebAssembly. Bytes matching
@@ -204,16 +206,26 @@ one does; the rest name the benchmark that measured them.
 8. **L1's briefing to L3 has no measurable effect.** Same ablation: with
    and without L1's counts, L3's verdicts differed on 13 of 241 payloads in
    both directions, inside its own run-to-run noise.
-9. **L3 flags bare imperatives.** 16 of the 48 near-miss lines that L1
+9. **L2 flags SSH `authorized_keys` lines** whatever their key: `ssh-rsa
+   ops@lotor` alone scores 0.97 with the default model, and the same line
+   with its key labelled scores 0.92 (2026-10-04). Horizon reads the shape as
+   key planting. Block mode refuses a response that is little else; in a
+   longer document the line is diluted (two such lines scored 0.62).
+10. **L3 flags a near-empty document whose content is an unread image.**
+   A README of a heading, a labelled image and one line was flagged by L3 on
+   three of three calls; the same image in a paragraph of text was not.
+   Block mode refuses it either way (`binary_unread`); flag mode reports L3
+   as well.
+11. **L3 flags bare imperatives.** 16 of the 48 near-miss lines that L1
    correctly passes ("Override the default port in config.yaml.") were
    flagged by L3, judged on their own without a surrounding document.
-10. **L3 misses evasive attacks.** The default `QUARANTINE_MODEL` catches
+12. **L3 misses evasive attacks.** The default `QUARANTINE_MODEL` catches
     86% of attacks written to evade L1 and L2, and 33% of those aimed at
     the detector itself ([benchmark](benchmark.md)).
-11. **Flag mode reads only the head of an oversized payload.** The tail is
+13. **Flag mode reads only the head of an oversized payload.** The tail is
     delivered unread, and the warning says so (`l2_truncated`,
     `l3_truncated`).
-12. **Matrix media and E2EE ciphertext without decryption are unread**,
+14. **Matrix media and E2EE ciphertext without decryption are unread**,
     and forwarded (#371). The constitution requires every content-bearing
     event to cross all three layers, so this is a known violation, not a
     design choice.
