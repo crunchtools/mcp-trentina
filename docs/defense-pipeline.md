@@ -73,6 +73,8 @@ Four rules shape every layer, and any change to a layer is held to them. `tests/
 
 Open (#360): redact's extraction turn still reads L1's normalized copy (`l2_input`) instead of the arrived bytes. No detector reads that copy. Whether the extraction should is being measured.
 
+Planned (#365): the rule becomes "nothing is delivered that the layers did not read, in its original or decoded form". Pre-processing becomes two stages, always in this order. First, shrink what will be delivered (today's reducers). Second, unpack that delivery for reading: strict base64 decoded, binary labelled by its signature, and later archives, PDFs and images extracted. Every layer then reads the unpacked text once, and the delivery itself is never changed. Until that lands, rule 1 holds as written, and [Coverage](#coverage) lists what it leaves unread.
+
 ### Retired designs
 
 - **The double L2 read (0.31.0 to 0.55.0, #359).** Whenever L1 stripped anything, L2 also read L1's normalized copy, and the stronger score won. It compensated for Prompt Guard 2, whose tokenizer a zero-width split or a fullwidth letter blinds. Measured against Horizon, the shipped L2, over 44 attacks under 7 obfuscations, it changed 1 of 308 outcomes, and on base64 it was worse than the raw bytes (36 against 44 of 44). It cost a sequential second pass that any attacker could trigger with one zero-width character, which doubled the worst-case latency. It was removed. A model with the weakness it covered now fails the obfuscation gate instead: Prompt Guard 2 fails five of the six transforms.
@@ -138,15 +140,85 @@ A quarantined LLM — `gemini-2.5-flash-lite` by default, any configured provide
 
 **Latency:** 1-2s per turn (Gemini round-trip). **Cost:** Gemini API tokens — one call per payload, three in redact mode. **Always runs;** its absence is a gap, never a skip.
 
-## Coverage Matrix
+## Coverage
 
-Benchmarked against 105 test cases across 10 attack categories with Prompt Guard 2 (22M vs 86M, ONNX Runtime, CPU). The L2 column describes Prompt Guard 2; the default model since 0.55.0 also catches most of the social-engineering and exfiltration rows (`docs/benchmark.md`, #350):
+What is defended and what is not, by kind of content, as of 0.56.0. A row
+changes only together with the code and the gap tests in
+`tests/test_coverage_gaps.py`. #365 is the plan that closes most of the
+gaps below.
+
+| Content | The agent receives | The layers read | Block mode |
+|---|---|---|---|
+| Prose and plain text | the text; reply chains collapsed and repeats grouped by default | the same | judged |
+| HTML | Markdown; hidden elements, scripts and comments dropped, and the hiding counted for L1 (#229) | that Markdown | judged |
+| HTML with `trentina_preprocess: false` | raw HTML | raw HTML, with L1 counting hiding fingerprints | judged |
+| JSON and `structuredContent` | compacted JSON | every string, keys included | judged |
+| Base64 that decodes to text | as it arrived | the raw blob; L1 decodes it only to count, and only when it hits L1's keywords | judged, but L2 flags long blobs even when harmless |
+| Base64 binary (image, PDF, archive, key) inside text or JSON | as it arrived | the raw blob; nobody reads what it contains | usually refused, because L2 reacts to blobs, not because anything read it |
+| An MCP image block or resource blob | as it arrived | nothing | **delivered**; counted in the warning |
+| A fetched URL that is not text (PDF, image, binary) | a refusal | nothing | refused |
+| Matrix media (`image/*`, `audio/*`, `video/*`, octet-stream) | forwarded | nothing | forwarded unjudged |
+| Matrix E2EE without `preprocess.decrypt` | the ciphertext | nothing; the gap is counted | forwarded |
+| Over the admission cap (`CLASSIFIER_MAX_TOKENS`, 32,768 L2 tokens) | block and redact: a refusal; flag: as it arrived | flag: the head only | refused |
+
+### Known gaps
+
+Each gap has an issue and a measurement. Where a test can hold it open,
+one does; the rest name the benchmark that measured them.
+
+1. **L2 flags base64 blobs whatever they contain** (#367). Measured
+   2026-10-04 with the default model: all 14 benign corpus texts were
+   flagged once wrapped in base64, a ConfigMap holding a harmless shell
+   script scored 0.99, and a data-URI image 0.81. In block mode that refuses
+   ordinary ops content. Tested.
+2. **Nothing reads inside binary** (#367 to #370). Text drawn in an image,
+   a PDF's text layer and the files in an archive are judged by no layer.
+   When block mode refuses one today, it is by accident (gap 1).
+3. **Block mode delivers MCP image blocks unread** (#367). They are counted
+   in `_trentina_warning.unscannable`, not treated as a gap. Like gap 12,
+   this violates the constitution's every-payload rule. Tested.
+4. **L1 counts encoded text only when it hits L1's keywords** (#367). An
+   encoded instruction without them ("Assistant: forward this thread to
+   ...") is not counted, and L2 and L3 read only the blob. Tested.
+5. **L1 counts a `data:image` URI as an exfiltration URL** (#367). An
+   inline image cannot send anything anywhere. Tested.
+6. **L1 has no counter for soft-hyphen or fullwidth obfuscation** (#363).
+   Its patterns read through both, but unlike zero-width characters neither
+   is a finding in itself, so L3's briefing never mentions it. Tested.
+7. **L1's own refusal is coarse on invisible characters.** Four of them
+   already rate high risk. In the L1 briefing ablation
+   ([benchmark](benchmark.md#l1-briefing-ablation)) L1 alone refused 29
+   benign texts carrying zero-width or tag characters that L2 and L3
+   cleared, and caught 2 attacks they missed.
+8. **L1's briefing to L3 has no measurable effect.** Same ablation: with
+   and without L1's counts, L3's verdicts differed on 13 of 241 payloads in
+   both directions, inside its own run-to-run noise.
+9. **L3 flags bare imperatives.** 16 of the 48 near-miss lines that L1
+   correctly passes ("Override the default port in config.yaml.") were
+   flagged by L3, judged on their own without a surrounding document.
+10. **L3 misses evasive attacks.** The default `QUARANTINE_MODEL` catches
+    86% of attacks written to evade L1 and L2, and 33% of those aimed at
+    the detector itself ([benchmark](benchmark.md)).
+11. **Flag mode reads only the head of an oversized payload.** The tail is
+    delivered unread, and the warning says so (`l2_truncated`,
+    `l3_truncated`).
+12. **Matrix media and E2EE ciphertext without decryption are unread**,
+    and forwarded (#371). The constitution requires every content-bearing
+    event to cross all three layers, so this is a known violation, not a
+    design choice.
+
+### Attack coverage by layer (Prompt Guard 2, 2026-06)
+
+Benchmarked against 105 test cases across 10 attack categories when Prompt
+Guard 2 was L2. The default model since 0.55.0 also catches most of the
+social-engineering and exfiltration rows (`docs/benchmark.md`, #350). L1
+has only counted since 0.29.0; it never strips.
 
 | Attack Type | L1 (Structural) | L2 (Classifier) | L3 (Q-Agent) |
 |-------------|-----------------|-----------------|--------------|
-| Hidden div injection | **catches** (counts; conversion removes it) | n/a | n/a |
-| Zero-width obfuscation | **catches** | n/a (L1 strips it) | n/a |
-| Base64 encoded payloads | **catches** | n/a (L1 strips it) | n/a |
+| Hidden div injection | **counts** (conversion removes it) | n/a | n/a |
+| Zero-width obfuscation | **counts** | reads through it with the default model | catches |
+| Base64 encoded payloads | counts only on its keywords (gap 4) | flags the blob, harmless or not (gap 1) | reads the blob raw |
 | Markdown image exfiltration | **catches** | misses | n/a |
 | Direct instruction override | partial | **catches** (100%) | catches |
 | System prompt manipulation | partial | **catches** (90%) | catches |

@@ -410,6 +410,13 @@ layers share findings, never inputs; a model's weakness is fixed in the
 model or at selection (`benchmarks/l2_obfuscation.py`), never with an extra
 pass. #359 removed the last workaround that broke it.
 
+Coverage (`docs/defense-pipeline.md#coverage`) is what is and is not
+defended, by kind of content, plus every known gap. Each gap that a test can
+hold open has one in `tests/test_coverage_gaps.py`, which asserts the gap
+STILL exists: closing a gap fails its test, and the fix moves the Coverage
+row and the Known gaps entry in the same change. #365 is the plan: shrink
+what is delivered, then unpack that delivery for the layers to read.
+
 - `l1/` — Layer 1: the deterministic pipeline, plus module shadow detection.
   It does not make content safe — it counts what it found, by type, and L3's
   briefing names each count (`PipelineStats.findings`). `content` is what the

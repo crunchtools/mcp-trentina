@@ -10,6 +10,18 @@ under that name.
 
 ## [Unreleased]
 
+### Added
+- Coverage in `docs/defense-pipeline.md` (#366): what the agent receives,
+  what the layers read and what block mode does, for each kind of content,
+  plus twelve known gaps with the issue and measurement for each. It
+  replaces the coverage matrix, which still said L1 strips zero-width
+  characters and base64; L1 has only counted since 0.29.0.
+- `tests/test_coverage_gaps.py`: each gap a test can hold open has a test
+  asserting it still exists, so closing one forces its documentation to
+  move with it.
+- `benchmarks/l1_briefing.py` (#364): L3 with and without L1's findings in
+  its briefing.
+
 ## [0.56.0] - 2026-10-04
 
 ### Removed
