@@ -28,9 +28,7 @@ def test_a_document_export_with_vertical_tab_soft_returns() -> None:
 
 def test_a_newsletter_preheader_padded_with_zwnj() -> None:
     mail = "Your weekly digest is here" + "\u200c\u00a0" * 100 + "\nRead the full issue online."
-    result = run_l1(mail)
-    assert result.stats.risk_level() == "low"
-    assert result.l2_reads_both(), "the padding is still stripped, so L2 reads both copies"
+    assert run_l1(mail).stats.risk_level() == "low"
 
 
 def test_an_emoji_heavy_status_update() -> None:

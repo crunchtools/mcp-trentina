@@ -249,7 +249,8 @@ def build_l3_briefing(
     if detections:
         l1 = (
             f"Layer 1 deterministic scanning flagged {detections} pattern(s) "
-            f"({stats.suspicious_detections()} suspicious). Nothing has been "
+            f"({stats.suspicious_detections()} suspicious): "
+            f"{'; '.join(stats.findings())}. Nothing has been "
             "removed — you are reading the full original text. The flagged "
             "patterns may be an attack, or legitimate security content: a CVE "
             "report, a researcher's writeup, an ops alert quoting attacker "
@@ -273,13 +274,6 @@ def build_l3_briefing(
     if extra:
         parts.append(extra)
     return "\n".join(parts)
-
-
-def _stronger(a: ClassifierResult | None, b: ClassifierResult | None) -> ClassifierResult | None:
-    """The more suspicious of two classifications of the same payload."""
-    if a is None or b is None:
-        return a or b
-    return a if a.score >= b.score else b
 
 
 async def _classify(
@@ -327,31 +321,26 @@ async def _stage_one(
     scan: bool,
     stop_on_partial: bool,
 ) -> tuple[PipelineResult, ClassifierResult | None, bool]:
-    """L1 and L2 in parallel on the arrived bytes, then L2 on L1's copy.
+    """L1 and L2 in parallel, each reading the arrived bytes once.
 
-    L2 reads L1's normalized copy as well when L1 normalized anything, and
-    the stronger score wins. ``scan`` False runs L1 alone.
+    Neither reads anything the other produced; they meet only in L3's
+    briefing (the Layer contract, ``docs/defense-pipeline.md``). ``scan``
+    False runs L1 alone.
     """
-    first: tuple[ClassifierResult | None, bool] = (None, False)
+    l2: tuple[ClassifierResult | None, bool] = (None, False)
     if precomputed_l1 is not None:
         pipeline = precomputed_l1
         if scan:
-            first = await _classify(content, source, stop_on_partial=stop_on_partial)
+            l2 = await _classify(content, source, stop_on_partial=stop_on_partial)
     elif scan:
-        pipeline, first = await asyncio.gather(
+        pipeline, l2 = await asyncio.gather(
             asyncio.to_thread(run_l1, content),
             _classify(content, source, stop_on_partial=stop_on_partial),
         )
     else:
         pipeline = await asyncio.to_thread(run_l1, content)
 
-    classification, truncated = first
-    if scan and pipeline.l2_reads_both() and pipeline.l2_input.strip():
-        normalized, normalized_truncated = await _classify(
-            pipeline.l2_input, source, stop_on_partial=stop_on_partial
-        )
-        classification = _stronger(classification, normalized)
-        truncated = truncated or normalized_truncated
+    classification, truncated = l2
     return pipeline, classification, truncated
 
 
@@ -383,11 +372,9 @@ async def defend(
     """Run the three layers over one piece of content and report a verdict.
 
     Stage 1 is L1 and L2 in parallel, both reading the payload as it arrived:
-    independent signals, neither shaped by the other. When L1's normalizing
-    stages fired, L2 reads L1's normalized copy as well and the stronger
-    score wins — obfuscation that splits the classifier's tokens is exactly
-    what L1 counts. Stage 2 is L3, which waits for both and is told what
-    they found (``build_l3_briefing``).
+    independent signals, neither shaped by the other, each read once. Stage 2
+    is L3, which waits for both and is told what they found
+    (``build_l3_briefing``), L1's counts by type included.
 
     Args:
         content: Raw untrusted text, as it arrived.
@@ -417,13 +404,6 @@ async def defend(
     pipeline, classification, l2_truncated = await _stage_one(
         content, source, precomputed_l1, scan=scan, stop_on_partial=stop_on_partial
     )
-    if scan and stop_on_partial and l2_truncated:
-        # The one partial read left under stop_on_partial: L1's normalized
-        # copy decoded past the cap. Refused at admission all the same; what
-        # L2 found in the original still stands. The count reported is the
-        # copy's, the one that was over.
-        refuse_at_admission, l2_truncated = True, False
-        tokens, _ = await admission(pipeline.l2_input)
     if refuse_at_admission:
         logger.warning(
             "admission: refused %s, %d tokens against a %d-token cap",

@@ -62,6 +62,21 @@ Prompt injection is the critical vulnerability in agentic AI systems. An attacke
 
 The defense-in-depth approach means an attack has to evade three fundamentally different detection methods to succeed.
 
+## Layer contract
+
+Four rules shape every layer, and any change to a layer is held to them. `tests/test_layer_contract.py` enforces the first two.
+
+1. **Every layer reads the bytes as they arrived, exactly once.** L1 and L2 run in parallel on the same bytes, and L3 reads them after both. Redact's checks on turn 2's output follow the same rule: L1 and L2 read each output string once, as written.
+2. **Layers share findings, never inputs.** L1's counts by type and L2's label and score reach L3's briefing as structure: fixed names and numbers, never payload text. No layer reads text that another layer produced.
+3. **A layer's weakness is fixed inside that layer or at model selection.** The fix is a better model, a new L1 stage, or a benchmark gate that rejects a model a trick can blind (`benchmarks/l2_obfuscation.py`). The pipeline never gets an extra pass, a second input, or a reshaped copy to compensate.
+4. **Read time is linear in payload size, one pass per layer.** The admission cap (`CLASSIFIER_MAX_TOKENS`) is sized on that: 32K tokens is about 23 s of L2 on production CPU, well inside the 60 s MCP client timeout.
+
+Open (#360): redact's extraction turn still reads L1's normalized copy (`l2_input`) instead of the arrived bytes. No detector reads that copy. Whether the extraction should is being measured.
+
+### Retired designs
+
+- **The double L2 read (0.31.0 to 0.55.0, #359).** Whenever L1 stripped anything, L2 also read L1's normalized copy, and the stronger score won. It compensated for Prompt Guard 2, whose tokenizer a zero-width split or a fullwidth letter blinds. Measured against Horizon, the shipped L2, over 44 attacks under 7 obfuscations, it changed 1 of 308 outcomes, and on base64 it was worse than the raw bytes (36 against 44 of 44). It cost a sequential second pass that any attacker could trigger with one zero-width character, which doubled the worst-case latency. It was removed. A model with the weakness it covered now fails the obfuscation gate instead: Prompt Guard 2 fails five of the six transforms.
+
 ## The Three Layers
 
 ### Layer 1 — Deterministic Detection
@@ -69,9 +84,9 @@ The defense-in-depth approach means an attack has to evade three fundamentally d
 L1 counts, and never modifies what the agent receives:
 
 - **What the agent receives** (`content`) — the caller's text, untouched. A CVE ticket, a Nagios alert, or a security mail *discusses* attacks in the words attacks use; amputating those lines destroyed exactly the content an ops agent exists to read, and destroyed the evidence before the smarter layers could judge it.
-- **A normalized copy** (`l2_input`) — the same text with obfuscation undone: zero-width characters removed, encoded blobs decoded, fake `<|im_start|>`/`<|eot_id|>`/`[INST]` delimiters dropped, exfiltration image URLs (Markdown and HTML) defanged. L2 reads it *in addition to* the original whenever L1's normalizing stages fired (three zero-width characters can split a classifier's tokens while L1 rates them only medium), and redact mode's extraction turn reads it.
+- **Counts, by type** (`PipelineStats`) — hidden markup, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions", and, for a directory, Python files that shadow the standard library. They feed the risk score and the warning, and L3's briefing names each non-zero one (`PipelineStats.findings`, from the fixed `FINDING_NAMES` table).
 
-Detections (hidden markup, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions", and — for a directory — Python files that shadow the standard library) feed the risk score, the warning, and L3's briefing.
+To match through obfuscation, some stages work on a private normalized copy, `l2_input`: zero-width characters removed, encoded blobs decoded, fake `<|im_start|>`/`<|eot_id|>`/`[INST]` delimiters dropped, exfiltration image URLs defanged. No detector reads that copy (the [Layer contract](#layer-contract)). Redact's extraction turn does, pending #360.
 
 **L1 is format-agnostic.** It scans what it is handed and makes no judgement about a payload's type. Until 0.28.0 a `looks_like_html` sniffer chose between an HTML pipeline and a text one on a leading `<!DOCTYPE` or `<html>`; an HTML *fragment* — the shape most tool output carries — matched neither, so identical bytes were defended two different ways depending on their first few characters. The fork is gone. Markup is handled in two tiers instead:
 
@@ -109,7 +124,7 @@ Each model directory carries a `trentina-model.json`: its id, pinned revision, t
 
 ### Layer 3 — Quarantined LLM (Q-Agent)
 
-A quarantined LLM — `gemini-2.5-flash-lite` by default, any configured provider otherwise — that receives the **original, unmodified content** and judges it while ignoring injected instructions. It waits for L1 and L2 and is briefed with both: L1's counts, L2's label and score, and — unconditionally — the caveat that L2 misses attacks that need reasoning, such as social engineering and exfiltration intent, so a low score is never evidence of safety. The Q-Agent is deliberately constrained:
+A quarantined LLM — `gemini-2.5-flash-lite` by default, any configured provider otherwise — that receives the **original, unmodified content** and judges it while ignoring injected instructions. It waits for L1 and L2 and is briefed with both: L1's counts by type, L2's label and score, and — unconditionally — the caveat that L2 misses attacks that need reasoning, such as social engineering and exfiltration intent, so a low score is never evidence of safety. The Q-Agent is deliberately constrained:
 
 - **No tools** — can't execute actions even if manipulated
 - **No memory** — can't be poisoned across sessions
@@ -215,7 +230,7 @@ turn that layer's absence into a warning instead of a refusal; no setting excuse
 
 ```
 Stage 0  pre-processors (outside the perimeter; subtract, never absolve)
-Stage 1  L1  ∥  L2          both read the payload as it arrived
+Stage 1  L1  ∥  L2          both read the payload as it arrived, once
 Stage 2  L3 detect          waits for both; briefed with both
 Stage 3  the mode decides delivery
 ```
@@ -226,12 +241,12 @@ The mode decides what is delivered, never which layers run (`modes.py`). The nam
 |------|----|----|-----------|------------|-----------|----------|
 | block | ✓ | ✓ | ✓ | — | — | nothing if any layer flagged; else the original |
 | flag | ✓ | ✓ | ✓ | — | — | the original, plus the verdict |
-| redact | ✓ | ✓ | ✓ | from L1's normalized copy | the extraction | a verified extraction; nothing if verify objects |
+| redact | ✓ | ✓ | ✓ | from L1's normalized copy (#360) | L1 ∥ L2 on the extraction, then L3 | a verified extraction; nothing if verify objects |
 
 Ten rules hold on every path (#187):
 
 1. All three layers fire. No mode, config or source property reduces the count.
-2. L1 and L2 run in parallel on the arrived bytes, so their signals stay independent.
+2. L1 and L2 run in parallel on the arrived bytes, each reading them once, so their signals stay independent ([Layer contract](#layer-contract)).
 3. L3 waits for both and sees both findings.
 4. The mode decides delivery, never detection.
 5. Every finding reaches the agent as structure — booleans, scores, closed-enum finding types — never as text L3 wrote. A page can steer the judge into quoting it.

@@ -56,8 +56,9 @@ Every untrusted payload crosses three independent layers, with no off switch
 per layer (see `docs/defense-pipeline.md`):
 
 - **L1 (deterministic):** `l1/` counts obfuscation, hidden markup, encoded
-  blobs, exfiltration URLs, delimiters and directives, and builds a
-  normalized copy for L2. It never modifies what the agent receives.
+  blobs, exfiltration URLs, delimiters and directives, by type; its counts
+  brief L3. Every layer reads the arrived bytes once (the Layer contract in
+  `docs/defense-pipeline.md`). It never modifies what the agent receives.
 - **L2 (classifier):** a local ONNX prompt-injection classifier
   (`quarantine/classifier.py`). The model is an operator setting
   (`CLASSIFIER_MODEL`, #350): Horizon-Labs' prompt-injection-guard-small by

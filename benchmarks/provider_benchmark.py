@@ -269,12 +269,12 @@ def l2_threshold_in_force() -> float:
 async def score_l2(cases: list[Case]) -> dict[str, float | None]:
     """Each case's L2 malicious score, exactly as ``defend()`` computes it.
 
-    ``_stage_one`` is the production recipe: L1 and L2 on the arrived bytes,
-    then L2 on L1's normalized copy when L1 changed anything, stronger score
-    wins. Scoring the raw payload alone would sweep a number the gateway
-    never thresholds. None for every case when the model is not loaded, and
-    for a case whose scan raised, as ``_run_case`` records a failed call
-    rather than aborting the run.
+    ``_stage_one`` is the production recipe: L1 and L2 in parallel, L2
+    reading the arrived bytes once (#359). Going through it rather than the
+    classifier keeps the sweep on the number the gateway thresholds. None
+    for every case when the model is not loaded, and for a case whose scan
+    raised, as ``_run_case`` records a failed call rather than aborting the
+    run.
     """
     if not await asyncio.to_thread(is_classifier_available):
         print("warning: no L2 model loaded; L2 scores omitted", file=sys.stderr)
