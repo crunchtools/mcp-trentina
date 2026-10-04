@@ -64,6 +64,7 @@ from mcp_trentina_crunchtools.defense import _stage_one
 from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
 from mcp_trentina_crunchtools.quarantine.classifier import is_classifier_available, model_info
 from mcp_trentina_crunchtools.quarantine.prompts import DETECTION_SYSTEM_PROMPT
+from mcp_trentina_crunchtools.unpack.scan import unpack
 from tests.adversarial_corpus import CORPUS, RISK_ORDER, Case
 
 TOKENS_PER_MILLION = 1_000_000
@@ -269,8 +270,8 @@ def l2_threshold_in_force() -> float:
 async def score_l2(cases: list[Case]) -> dict[str, float | None]:
     """Each case's L2 malicious score, exactly as ``defend()`` computes it.
 
-    ``_stage_one`` is the production recipe: L1 and L2 in parallel, L2
-    reading the arrived bytes once (#359). Going through it rather than the
+    ``unpack`` then ``_stage_one`` is the production recipe: L1 and L2 in
+    parallel, L2 reading the unpacked delivery once (#359, #367). Going through it rather than the
     classifier keeps the sweep on the number the gateway thresholds. None
     for every case when the model is not loaded, and for a case whose scan
     raised, as ``_run_case`` records a failed call rather than aborting the
@@ -282,8 +283,14 @@ async def score_l2(cases: list[Case]) -> dict[str, float | None]:
 
     async def _one(case: Case) -> tuple[str, float | None]:
         try:
+            read = unpack(case.payload).text
             _, result, _ = await _stage_one(
-                case.payload, "benchmark", None, scan=True, stop_on_partial=False
+                read,
+                "benchmark",
+                None,
+                unpacked=read is not case.payload,
+                scan=True,
+                stop_on_partial=False,
             )
         except Exception as exc:
             print(f"warning: L2 failed on {case.id}: {type(exc).__name__}: {exc}", file=sys.stderr)

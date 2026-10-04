@@ -64,6 +64,7 @@ from ..modes import (
     refusal_reason,
 )
 from ..quarantine.agent import quarantine_redact
+from ..unpack.scan import IMAGE_BLOCK, UNDECODABLE, image_too_small_to_draw, read_blob
 from ..warning import build_warning
 from .service import judge_of, service_context, service_profile
 
@@ -284,28 +285,33 @@ def _collect_strings(value: Any, out: list[str]) -> None:
 def _collect_response_texts(
     content_blocks: list[Any] | None,
     structured_content: Any,
-) -> tuple[list[str], dict[str, int]]:
+) -> tuple[list[str], dict[str, int], set[str]]:
     """Pull every judgeable string out of an MCP tool result.
 
-    Returns the texts and a count of what CANNOT be judged — image blocks
-    and binary resource blobs. Unscannable content is not silently fine; the
-    counts go into the warning so the agent (and later, a block-mode
-    enforcement) knows the wall had a gap on this response.
+    Returns the texts, a count of what CANNOT be read as text (image blocks
+    and binary resource blobs), and the kinds among those an agent's tools
+    could open and no layer reads (#367). Those are the ``binary_unread``
+    gap: block and redact refuse them, flag delivers them with the warning.
+    A blob that decodes to text joins the texts; one that is a key or random
+    bytes joins them as its label, read by its type.
     """
     texts: list[str] = []
     unscannable = {"images": 0, "blobs": 0}
+    unread: set[str] = set()
 
     for block in content_blocks or []:
         if isinstance(block, dict):
-            _collect_block(block, texts, unscannable)
+            _collect_block(block, texts, unscannable, unread)
 
     if structured_content is not None:
         _collect_strings(structured_content, texts)
 
-    return texts, unscannable
+    return texts, unscannable, unread
 
 
-def _collect_block(block: dict[str, Any], texts: list[str], unscannable: dict[str, int]) -> None:
+def _collect_block(
+    block: dict[str, Any], texts: list[str], unscannable: dict[str, int], unread: set[str]
+) -> None:
     btype = block.get("type")
     if btype == "text":
         text = block.get("text")
@@ -313,14 +319,61 @@ def _collect_block(block: dict[str, Any], texts: list[str], unscannable: dict[st
             texts.append(text)
     elif btype == "image":
         unscannable["images"] += 1
-    elif btype == "resource":
-        resource = block.get("resource")
-        if isinstance(resource, dict):
-            rtext = resource.get("text")
-            if isinstance(rtext, str) and rtext:
-                texts.append(rtext)
-            elif resource.get("blob") is not None:
-                unscannable["blobs"] += 1
+        image = block.get("data")
+        if isinstance(image, str) and image_too_small_to_draw(image):
+            texts.append(f"({IMAGE_BLOCK.name}, too small to draw text)")
+        else:
+            unread.add(IMAGE_BLOCK.name)
+    elif btype == "resource" and isinstance(block.get("resource"), dict):
+        _collect_resource(block["resource"], texts, unscannable, unread)
+
+
+def _collect_resource(
+    resource: dict[str, Any], texts: list[str], unscannable: dict[str, int], unread: set[str]
+) -> None:
+    """A resource's text, or its blob read as the unpack stage reads one token.
+
+    Text a blob decodes to is read like any text block; binary is read by its
+    label, or is unread; a blob that does not decode is unread.
+    """
+    rtext = resource.get("text")
+    blob = resource.get("blob")
+    if isinstance(rtext, str) and rtext:
+        texts.append(rtext)
+    if blob is not None:  # a resource may carry both, and each is read
+        unscannable["blobs"] += 1
+        view = read_blob(blob) if isinstance(blob, str) else None
+        if view is None:
+            unread.add(UNDECODABLE.name)
+        else:
+            texts.append(view.text)
+            unread.update(view.unread)
+
+
+def _binary_only(
+    unscannable: dict[str, int], unread: set[str], mode: Mode, policy: ModePolicy
+) -> IngressDecision:
+    """A response with no text at all: only image blocks or blobs, or nothing.
+
+    No layer has anything to read, so the verdict is the gap alone: block and
+    redact refuse what an agent could open, flag delivers it with the warning.
+    """
+    counts = {k: v for k, v in unscannable.items() if v}
+    if not unread:
+        return IngressDecision(warning={"unscannable": counts} if counts else None)
+    warning = _unread_warning({"unscannable": counts}, unread)
+    if mode is Mode.FLAG:
+        return IngressDecision(warning=warning)
+    warning["blocked"] = True
+    return IngressDecision(
+        warning=warning, blocked=True, refusal=_refusal_from_warning(warning, mode, policy)
+    )
+
+
+def _unread_warning(warning: dict[str, Any] | None, unread: set[str]) -> dict[str, Any]:
+    """``warning`` with the ``binary_unread`` gap for blocks no layer read."""
+    kinds = sorted(unread | set((warning or {}).get("unread_kinds", ())))
+    return {**(warning or {}), "binary_unread": True, "unread_kinds": kinds}
 
 
 async def scan_tool_response(
@@ -356,14 +409,16 @@ async def scan_tool_response(
     Flags are recorded to the detections table (source_type="tool_response")
     except on a verdict-cache hit.
     """
-    texts, unscannable = _collect_response_texts(content_blocks, structured_content)
+    # Decoding blobs is linear in their size; off the loop, like L1 (#295).
+    texts, unscannable, unread = await asyncio.to_thread(
+        _collect_response_texts, content_blocks, structured_content
+    )
     joined = "\n".join(texts)
     mode = effective_mode(profile, mode)
     policy = policy or ModePolicy((mode,), mode)
 
     if not joined.strip():
-        gaps = {k: v for k, v in unscannable.items() if v}
-        return IngressDecision(warning={"unscannable": gaps} if gaps else None)
+        return _binary_only(unscannable, unread, mode, policy)
 
     # The briefing is in the key: the same bytes from a backend whose operator
     # briefed L3 differently may be judged differently (#204). So is the
@@ -414,6 +469,8 @@ async def scan_tool_response(
         },
     )
     warning = build_warning(verdict, unscannable=unscannable)
+    if unread:
+        warning = _unread_warning(warning, unread)
 
     # Under block, "we could not finish judging this" is treated exactly
     # like "this is hostile" — the adversarial review's H1/H3: padding a
@@ -423,7 +480,7 @@ async def scan_tool_response(
     # TRENTINA_REQUIRE_L2=false: one rule, and an escape hatch for a bad
     # image rather than a silent exemption.
     layer_gaps = gaps_of(verdict)
-    unjudgeable = layer_gaps.blocking()
+    unjudgeable = layer_gaps.blocking() or bool(unread)
 
     if mode is Mode.REDACT:
         return await _redact_response(verdict, warning, unjudgeable, prompt, policy, key)

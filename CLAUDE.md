@@ -405,17 +405,39 @@ skill's format.
 ## Architecture
 
 Layer contract (`docs/defense-pipeline.md#layer-contract`, enforced by
-`tests/test_layer_contract.py`): every layer reads the arrived bytes once;
-layers share findings, never inputs; a model's weakness is fixed in the
-model or at selection (`benchmarks/l2_obfuscation.py`), never with an extra
-pass. #359 removed the last workaround that broke it.
+`tests/test_layer_contract.py`): nothing is delivered that the layers did
+not read, in its original or decoded form, or, for binary, by its type;
+every layer reads the delivery once, unpacked; layers share findings, never
+inputs; a model's weakness is fixed in the model or at selection
+(`benchmarks/l2_obfuscation.py`), never with an extra pass. #359 removed the
+last workaround that broke it.
 
 Coverage (`docs/defense-pipeline.md#coverage`) is what is and is not
 defended, by kind of content, plus every known gap. Each gap that a test can
 hold open has one in `tests/test_coverage_gaps.py`, which asserts the gap
 STILL exists: closing a gap fails its test, and the fix moves the Coverage
-row and the Known gaps entry in the same change. #365 is the plan: shrink
-what is delivered, then unpack that delivery for the layers to read.
+row and the Known gaps entry in the same change. #365 is the plan.
+
+Pre-processing is two stages, always in this order (#365). Stage 1,
+`preprocess/`, decides what the agent receives. Stage 2, `unpack/`, builds
+what L1, L2 and L3 read from that delivery, inside `defense.defend()`, and
+never changes it. Nothing restores anything afterwards, because nothing was
+replaced.
+
+- `unpack/` — stage 2 (#367). `scan.unpack(text)` decodes canonical
+  base64 and hex that decode to text, in place and unmarked (a bracketed
+  marker raised L2's false positives fourfold), to two levels; labels binary
+  of 64 characters or more by its signature (`signatures.py`),
+  `(image/png, 1.1 KB, not read)`; and leaves identifiers, short binary and
+  anything non-canonical as it arrived. Binary an agent's tools could open
+  (image, PDF, archive) is `Unpacked.unread`, which becomes the
+  `binary_unread` gap: block and redact refuse it, flag warns. Kind names
+  are a closed set: a data URI's declared type is mapped, never echoed.
+  `UnpackStats` rides in L1's `PipelineStats` as `unpacked` and is
+  informational, not suspicious. Binary an agent cannot open is labelled
+  only when its own characters read as noise (`_reads_as_noise`): a label
+  means no layer reads the token, and `MIIB` plus an instruction written
+  without spaces decodes to a DER signature.
 
 - `l1/` — Layer 1: the deterministic pipeline, plus module shadow detection.
   It does not make content safe — it counts what it found, by type, and L3's

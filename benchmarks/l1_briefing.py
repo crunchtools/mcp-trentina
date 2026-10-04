@@ -2,8 +2,9 @@
 
 L1 is count-only: it never changes what L2 or L3 read, and its one lever on
 L3 is the briefing (``build_l3_briefing`` names each non-zero count). This
-measures whether that lever does anything. Every payload goes through real
-L1 and real L2, then L3 twice over:
+measures whether that lever does anything. Every payload is unpacked as
+``defend()`` does it (decoded and labelled, #367), then goes through real L1
+and real L2, then L3 twice over:
 
 - ``full``: the production briefing, L1's findings by type.
 - ``ablated``: the same briefing built from empty L1 stats, so L3 is told
@@ -52,6 +53,7 @@ from mcp_trentina_crunchtools.quarantine.classifier import (
     classify,
     is_classifier_available,
 )
+from mcp_trentina_crunchtools.unpack.scan import unpack
 from tests.adversarial_corpus import ATTACKS, BENIGN, L1_PATTERN_CASES
 
 _L1_REFUSES = ("high", "critical")
@@ -85,9 +87,13 @@ def _vote(calls: list[bool | None]) -> bool | None:
 
 
 async def _judge(
-    sem: asyncio.Semaphore, row: Row, text: str, reps: int, l2: ClassifierResult | None
+    sem: asyncio.Semaphore,
+    row: Row,
+    text: str,
+    stats: PipelineStats,
+    reps: int,
+    l2: ClassifierResult | None,
 ) -> None:
-    stats = run_l1(text).stats
     full = build_l3_briefing(stats, l2)
     ablated = build_l3_briefing(PipelineStats(), l2)
     row.full = list(await asyncio.gather(*(_l3(sem, text, full) for _ in range(reps))))
@@ -156,8 +162,12 @@ async def _run(reps: int, concurrency: int) -> list[Row]:
         payloads += [(f"attack/{name}", True, transform(c.payload)) for c in ATTACKS]
         payloads += [(f"benign/{name}", False, transform(c.payload)) for c in BENIGN]
     payloads += [("pattern", p.expect_detection, p.payload) for p in L1_PATTERN_CASES]
-    for set_name, attack, text in payloads:
+    for set_name, attack, delivered in payloads:
+        # What every layer reads, as defend() builds it (#367).
+        view = unpack(delivered)
+        text = view.text
         pipeline = run_l1(text)
+        pipeline.stats.unpacked = view.stats
         l2 = classify(text)
         row = Row(
             set=set_name,
@@ -168,7 +178,7 @@ async def _run(reps: int, concurrency: int) -> list[Row]:
             l2_flags=l2 is not None and l2.label == "MALICIOUS",
         )
         rows.append(row)
-        jobs.append(_judge(sem, row, text, reps, l2))
+        jobs.append(_judge(sem, row, text, pipeline.stats, reps, l2))
     await asyncio.gather(*jobs)
     return rows
 

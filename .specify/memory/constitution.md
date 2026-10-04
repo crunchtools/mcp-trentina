@@ -1,8 +1,8 @@
 # mcp-trentina-crunchtools Constitution
 
-> **Version:** 1.6.0
+> **Version:** 1.7.0
 > **Ratified:** 2026-09-22
-> **Amended:** 2026-10-03
+> **Amended:** 2026-10-04
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.18.0
 > **Profile:** MCP Server
@@ -25,7 +25,9 @@ inherited version and are checked against this repo's files by
   smaller of L2's CPU budget and the Q-Agent's context window. Admitted
   content is read whole by every layer; `block` and `redact` refuse what is
   over the cap, and no layer is handed a truncated slice of content it was
-  asked to judge (`flag` alone scans an over-cap payload's head, and says so).
+  asked to judge. `flag` alone scans an over-cap payload's head, and alone
+  delivers binary no layer can read yet (`binary_unread`, below); it says so
+  in the warning both times.
 - **Supply chain:** no google-genai SDK, which enforces the Q-Agent
   quarantine architecturally.
 
@@ -57,8 +59,7 @@ per layer (see `docs/defense-pipeline.md`):
 
 - **L1 (deterministic):** `l1/` counts obfuscation, hidden markup, encoded
   blobs, exfiltration URLs, delimiters and directives, by type; its counts
-  brief L3. Every layer reads the arrived bytes once (the Layer contract in
-  `docs/defense-pipeline.md`). It never modifies what the agent receives.
+  brief L3. It never modifies what the agent receives.
 - **L2 (classifier):** a local ONNX prompt-injection classifier
   (`quarantine/classifier.py`). The model is an operator setting
   (`CLASSIFIER_MODEL`, #350): Horizon-Labs' prompt-injection-guard-small by
@@ -70,6 +71,18 @@ per layer (see `docs/defense-pipeline.md`):
   does not load; L2 is then absent, never guessed.
 - **L3 (judge):** a quarantined LLM (`quarantine/agent.py`): no tools, no
   memory, no SDK, per-request canary.
+
+Nothing is delivered that the layers did not read, in its original or
+decoded form, or, for binary, by its identified type (#365). Pre-processing
+is two stages in that order: the pre-processors decide what is delivered, and
+the unpack stage (`unpack/`) builds what the layers read from it, never
+changing it. Canonical base64 and hex that decode to text are read decoded;
+binary is read as a label naming its type. Every layer reads that once (the
+Layer contract in `docs/defense-pipeline.md`). Binary an agent's tools could
+open and no layer can read yet (an image, a PDF, an archive, audio, video)
+is the `binary_unread` gap: `block` and `redact` refuse it. One exception: an
+image whose header states 4 by 4 pixels or less, too small to draw a letter
+or a QR code, is read by its type.
 
 The mode (`trentina_mode`, chosen per call within the profile's policy)
 decides what is delivered, never which layers run. No text written by L3
@@ -186,3 +199,4 @@ justification in `gourmand-exceptions.toml`.
 | 1.4.1 | 2026-09-27 | Bridge operator commands read the bridge's own store; `import-mautrix` named as the one read of a foreign store |
 | 1.5.0 | 2026-10-02 | Manifest under constitution v1.18.0: profile restatement removed, repo-specific security design kept under its own headings; the stale `block_`/`warn_`/`clean_` tool-prefix wording replaced by the per-call `trentina_mode` |
 | 1.6.0 | 2026-10-03 | L2 is a pluggable local classifier (#350): Horizon-Labs prompt-injection-guard-small by default, Prompt Guard 2 86M selectable, polarity and threshold from a pinned-model manifest |
+| 1.7.0 | 2026-10-04 | Layers read the delivery unpacked, not the arrived bytes: nothing is delivered that the layers did not read, in its original or decoded form, or for binary by its type (#365, #367). Binary no layer can read is the `binary_unread` gap; `flag` delivers it with the warning, as it does an over-cap payload's tail |

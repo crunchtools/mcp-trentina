@@ -348,6 +348,89 @@ The benign transforms are synthetic: real benign text rarely carries a
 zero-width character in every word. The 14-case benign corpus moves in 7%
 steps.
 
+## Unpack stage (#367)
+
+The unpack stage (`unpack/scan.py`) builds what the layers read: canonical
+base64 decoded in place, binary labelled by type. Three measurements set
+its rules, all on 2026-10-04 with the default L2 at 0.7.
+
+**Where L2 starts reacting to binary.** `benchmarks/l2_blob_length.py`
+scores blobs by length and kind. Its synthetic tables (a blob alone, or in
+one benign paragraph) overstate short blobs: a bare 32-character hex digest
+is flagged every time, yet commit lists are not. The shapes ops output
+actually carries set the floor:
+
+| payload | label | score |
+|---|---|---|
+| git log, 5 commits | BENIGN | 0.070 |
+| commit list JSON, 10 SHAs | BENIGN | 0.004 |
+| app config, 44- and 24-char keys | BENIGN | 0.474 |
+| docker config.json auth (56 chars) | BENIGN | 0.012 |
+| seed, 64 chars | BENIGN | 0.692 |
+| SRI integrity hash (64 chars) | MALICIOUS | 0.916 |
+| SSH public key (~380 chars) | MALICIOUS | 0.991 |
+| k8s Secret with a TLS key | MALICIOUS | 0.963 |
+
+So binary is labelled from 64 characters, and hex digests up to SHA-512's
+128 stay verbatim.
+
+**Decoded text carries no marker.** Each of the 14 benign corpus texts
+was classified as `Note: <marker><text>`:
+
+| marker | benign flagged | attacks flagged (of 44) |
+|---|---|---|
+| none | 1 | 42 |
+| `[base64 → text] ` | 4 | 43 |
+| `[decoded] ` | 6 | 43 |
+| `(decoded from base64:) ` | 5 | 43 |
+| `[base64-decoded] ` | 8 | 43 |
+
+A bracketed annotation reads like injection framing to the classifier. L3
+learns what was decoded from its briefing instead. Labels for binary, in
+parentheses, stayed at the benign baseline (0 to 3 of 42 placements across
+wordings, against 1 to 3 for the plain text around them).
+
+**Before and after, the base64 transform of the corpus** (L2 only):
+
+| | L2 on the raw blob | L2 on the unpacked text |
+|---|---|---|
+| 14 benign texts | 14 flagged | 1 flagged |
+| 44 attacks | 44 flagged | 42 flagged |
+
+The 1 benign and 42 attacks match what L2 flags on the same texts with no
+encoding at all, so the unpacked text reads like plain text to L2.
+
+**The whole pipeline**, rerun with `benchmarks/l1_briefing.py` on lotor
+(L3 `gemini-2.5-flash-lite`, three calls a payload, majority vote). Each
+cell counts payloads refused by L1, L2 or L3:
+
+| base64 transform | 0.56.0, raw blob | 0.57.0, unpacked |
+|---|---|---|
+| 14 benign texts refused | 14 | 2 |
+| 44 attacks refused | 44 | 43 |
+
+0.56.0 refused every base64 attack because L2 refused every blob, harmless
+ones included. 0.57.0 refuses what the decoded text says. The attack it
+lets through is one that L2 and L3 also pass when it is not encoded.
+
+**What may be labelled.** A label means no layer reads the token's
+characters, while an agent reading the raw delivery does. So binary an
+agent cannot open (a key, an executable, random bytes) is labelled only
+when every 64-character window of the token reads as noise. That needs
+4.8 bits of entropy per character, and less than half of the window in
+word-shaped letter runs:
+
+| 64-character windows | entropy | word-shaped share |
+|---|---|---|
+| random base64 | 4.91 at the least | 0.58 at the most (0.36 at the 99th percentile) |
+| spaceless English, corpus payloads | 4.72 at the most | 0.08 to 1.00, median 0.92 |
+| spaceless English, words of four letters or fewer | n/a | 0.58 at the least |
+
+Without the test, `MIIB` followed by an instruction written without
+spaces decodes to a DER signature and would have been read as
+`(DER certificate or key)`. An image, PDF or archive is labelled
+regardless, because that label is the `binary_unread` refusal.
+
 ## Continuous detection gate (CI)
 
 The periodic benchmark above is the deep, cross-provider comparison. For a

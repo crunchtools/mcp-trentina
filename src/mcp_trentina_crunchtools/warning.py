@@ -102,6 +102,9 @@ def build_warning(
     if verdict.oversize is not None:
         warning["oversize"] = True
         warning["tokens"], warning["token_cap"] = verdict.oversize
+    if gaps.binary_unread:
+        warning["binary_unread"] = True
+        warning["unread_kinds"] = list(verdict.unread)
     if unread:
         warning["unscannable"] = unread
     if extras:

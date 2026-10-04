@@ -125,6 +125,10 @@ class Gaps:
     l3_truncated: bool = False
     oversize: bool = False
     """Over the admission cap (#225): refused before L2 or L3 ran."""
+    binary_unread: bool = False
+    """The delivery holds binary an agent's tools could open (an image, a PDF,
+    an archive) and no layer could read (#367). Never excused: the rule is
+    that nothing is delivered that the layers did not read."""
 
     def names(self) -> list[str]:
         """The gaps that are true, by field name."""
@@ -137,6 +141,7 @@ class Gaps:
             or self.l3_unavailable
             or self.l3_truncated
             or self.oversize
+            or self.binary_unread
         )
 
     def blocking(self) -> bool:
@@ -146,6 +151,7 @@ class Gaps:
             self.l2_truncated
             or self.l3_truncated
             or self.oversize
+            or self.binary_unread
             or (self.l2_unavailable and config.require_l2)
             or (self.l3_unavailable and config.require_l3)
         )
@@ -165,11 +171,12 @@ class Gaps:
         """Every gap is a partial read, none an absent layer or an oversize payload.
 
         The allowlist may send these to redact, whose output all three layers
-        verify. An absent layer it may not excuse, and an over-cap payload is
-        refused at admission for every caller (#225), allowlisted or not.
+        verify. An absent layer it may not excuse, an over-cap payload is
+        refused at admission for every caller (#225), allowlisted or not, and
+        unread binary is unread whoever asks (#367).
         """
         return (self.l2_truncated or self.l3_truncated) and not (
-            self.l2_unavailable or self.l3_unavailable or self.oversize
+            self.l2_unavailable or self.l3_unavailable or self.oversize or self.binary_unread
         )
 
 
@@ -205,6 +212,7 @@ def gaps_of(verdict: DefenseVerdict) -> Gaps:
         l3_unavailable=bool(asked and not _l3_answered(assessment)),
         l3_truncated=verdict.l3_truncated,
         oversize=oversize,
+        binary_unread=bool(verdict.unread),
     )
 
 
@@ -226,6 +234,7 @@ def refusal_reason(flagged_by: str | None, gaps: Gaps) -> str | None:
             ("L3 read only part of the payload", gaps.l3_truncated),
             # Not "token cap": scrub_credentials redacts whatever follows "token ".
             ("over the admission cap, so neither L2 nor L3 read it", gaps.oversize),
+            ("holds an image, PDF or archive that no layer can read yet", gaps.binary_unread),
         )
         if present
     ]

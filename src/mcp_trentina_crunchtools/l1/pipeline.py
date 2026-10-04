@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
+from ..unpack.stats import UnpackStats
 from .delimiters import DelimiterStats, normalize_delimiters
 from .directives import DirectiveStats, strip_directives
 from .encoded import EncodedStats, normalize_encoded
@@ -43,6 +44,9 @@ FINDING_NAMES: dict[str, str] = {
     "directives_evasions_detected": "lines matching one once scrambled, misspelled or spaced out",
     "shadows_files": "Python files shadowing the standard library",
     "shadows_obfuscated": "of those, files with obfuscated code",
+    "unpacked_text_decoded": "encoded spans decoded to text for you to read",
+    "unpacked_binary_labelled": "binary spans replaced by a label naming their type",
+    "unpacked_binary_unread": "of those, images, PDFs or archives no layer could read",
 }
 """What L3's briefing calls each ``PipelineStats.to_flat_dict`` counter.
 
@@ -61,6 +65,9 @@ class PipelineStats:
     delimiters: DelimiterStats = field(default_factory=DelimiterStats)
     directives: DirectiveStats = field(default_factory=DirectiveStats)
     shadows: ShadowStats = field(default_factory=ShadowStats)
+    unpacked: UnpackStats = field(default_factory=UnpackStats)
+    """Set by ``defense.defend`` from the unpack stage, not by a stage here.
+    Informational, so ``suspicious_detections`` leaves it out."""
 
     def to_flat_dict(self) -> dict[str, int]:
         """Flatten all stats into a single dict for serialization."""
@@ -73,6 +80,7 @@ class PipelineStats:
             ("delimiters", asdict(self.delimiters)),
             ("directives", asdict(self.directives)),
             ("shadows", asdict(self.shadows)),
+            ("unpacked", asdict(self.unpacked)),
         ]
         for section_name, section_dict in named_sections:
             for key, value in section_dict.items():
