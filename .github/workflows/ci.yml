@@ -200,7 +200,9 @@ jobs:
 
       # Once per model the image ships (#350). TRENTINA_REQUIRE_L2_MODEL makes
       # a model that fails to load FAIL the run: until 0.55.0 this step named
-      # a path the image never had, and every L2 test here skipped.
+      # a path the image never had, and every L2 test here skipped. The
+      # corpus's own L2 annotations run here too: outside the image they
+      # always skip, and one went stale under the 0.55.0 default (#353).
       - name: Run L2 integration tests in container
         run: |
           for model in prompt-injection-guard-small prompt-guard-2-86m; do
@@ -212,7 +214,8 @@ jobs:
               -e CLASSIFIER_MODEL="$model" \
               -e TRENTINA_REQUIRE_L2_MODEL=1 \
               mcp-trentina:test-runner \
-              -m pytest /tests/test_l2_integration.py -v
+              -m pytest /tests/test_l2_integration.py \
+                "/tests/test_adversarial_corpus.py::TestLayer2Boundary" -v
             echo "::endgroup::"
           done
 

@@ -10,6 +10,35 @@ under that name.
 
 ## [Unreleased]
 
+### Added
+- Ten multilingual cases in the adversarial corpus (#353): planted attacks
+  in German, French, Chinese, Japanese and a code-switched mix, each paired
+  with a benign case in the same language and register, so a detector that
+  flags the language shows up as a false positive.
+- `scripts/export_l2_model.py --head cls-linear`: a DeBERTa-v2 encoder with
+  a Linear on the first token and no pooler, built by the script instead
+  of running a model repo's remote code (PIGuard's head).
+
+### Changed
+- L2 comparison in `docs/benchmark.md` remeasured on our own exports through
+  `classify()`, with two more models: ProtectAI's
+  deberta-v3-base-prompt-injection-v2 and PIGuard, both rejected (#353). They
+  flag 29 and 67 of 150 benign documents to the default's 3, and at the
+  default's false-positive rate catch 0 and 3 of 39 planted attacks to its 19.
+  No shipped model changes.
+
+### Fixed
+- 0.55.0 overstated the default L2 model: planted in long documents it
+  catches 21/39, not 26/39 (Prompt Guard 2 4/39, not 5/39), internally 36/39
+  to Prompt Guard 2's 8/39, not 37/39 to 14/39, at 2.4x Prompt Guard 2's
+  throughput, not 2.9x, and 520/666 on jackhhao, not 559/666. The 0.55.0 figures came from Horizon's published ONNX
+  in a separate harness; README and `docs/defense-pipeline.md` now carry the
+  production-path figures.
+- `config-best-practices-guide` was annotated as passing L2, which the 0.55.0
+  default does not (0.999); it is model-dependent now. CI's in-image L2 step
+  runs the corpus's L2 annotations against every shipped model, where before
+  they only ever skipped.
+
 ## [0.55.0] - 2026-10-03
 
 ### Added

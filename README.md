@@ -29,8 +29,8 @@ commerce keeps flowing, and nothing dangerous gets in.
    local classifier and L3 is a quarantined LLM with no tools. L2's model is
    a setting: Horizon-Labs' prompt-injection-guard-small by default, Prompt
    Guard 2 86M one variable away. On our attacks planted inside long
-   documents the default catches 26 of 39 where Prompt Guard 2 catches 5,
-   2.9x faster on CPU. L3 reads everything L2 lets through.
+   documents the default catches 21 of 39 where Prompt Guard 2 catches 4,
+   2.4x faster on CPU. L3 reads everything L2 lets through.
    Around the layers sit an egress guard, file confinement and a startup
    containment check. [Defense Pipeline](docs/defense-pipeline.md) ·
    [Benchmark](docs/benchmark.md)

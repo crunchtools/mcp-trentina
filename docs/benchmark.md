@@ -189,38 +189,70 @@ Not measured: false positives on retrieved content (web pages, code,
 mail), which is what L2 actually reads in production. The benign half here
 is prompts.
 
-## L2 model comparison (#350)
+## L2 model comparison (#350, #353)
 
 L2's model is a setting since 0.55.0. Two ship in the image:
 `prompt-injection-guard-small` (Horizon-Labs, mmBERT-small, Apache-2.0, the
 default at 0.7) and `prompt-guard-2-86m` (Meta, mDeBERTa-base, Llama 4
-Community License, 0.5). Measured 2026-10-03, L2 alone, 512-token windows at
-stride 446, each model at its own threshold:
+Community License, 0.5). Two more were measured and rejected in #353:
+`deberta-v3-base-prompt-injection-v2` (ProtectAI, mirrored as
+`RedHatAI/...` and shipped in OpenShift AI, Apache-2.0) and `PIGuard`
+(ACL 2025, MIT), both DeBERTa-v3-base and English-only.
 
-| Set | Prompt Guard 2 86M | prompt-injection-guard-small |
-|---|---|---|
-| Internal corpus, attacks caught | 14/39 | 37/39 |
-| Internal corpus, benign flagged | 2/9 | 1/9 |
-| Internal attacks planted in 12K-char benign documents | 5/39 | 26/39 |
-| deepset/prompt-injections test split | 10/60, 0 FP | 29/60, 0 FP |
-| xTRam1/safe-guard test | 338/650, 2/1410 FP | 466/650, 17/1410 FP |
-| jackhhao jailbreak, all rows | 641/666, 1/640 FP | 559/666, 2/640 FP |
-| Benign retrieved documents (stdlib source, changelogs) flagged | 2/150 | 2/150 |
-| Throughput, paired runs on one CPU | 1x | 2.9x |
+Measured 2026-10-03, each model our own ONNX export from pinned safetensors,
+scored through `classify()` (512-token windows at stride 446), each at its
+own threshold. The planted set puts each attack at a random line of a
+~12K-character benign document (`/usr/share/doc` READMEs and changelogs,
+stdlib source); the benign-document set is 150 more such documents. That
+pair is the one that decides, because it is what L2 reads in production.
 
-The new model is never worse on the internal corpus case by case: it misses
-two attacks, and Prompt Guard 2 misses both of them too. It catches the
-whole of `exfil_action`, `tool_invocation` and `conditional_trigger`, which
-Prompt Guard 2 scored at 0.00. Prompt Guard 2 is the better detector of
-DAN-style jailbreaks, which are user-to-model attacks rather than the tool
-output L2 reads. The new model's training data includes the deepset train
-and jackhhao splits, so those rows flatter it; the planted-document set and the internal
-corpus are ours.
+| Set | PG2 86M @0.5 | **Horizon small @0.7** | DeBERTa v2 @0.5 | PIGuard @0.5 |
+|---|---|---|---|---|
+| Benign documents flagged (of 150) | 0 | **3** | 29 | 67 |
+| Internal attacks planted in documents (of 39) | 4 | **21** | 13 | 34 |
+| ... at a threshold flagging 2 of 150 benign documents | 9 | **19** | 0 | 3 |
+| deepset attacks planted in documents (of 40) | 5 | **12** | 9 | 36 |
+| Multilingual attacks planted in documents (of 5) | 1 | **5** | 0 | 2 |
+| Internal corpus, attacks (of 39) | 8 | **36** | 30 | 27 |
+| Internal corpus, benign flagged (of 9) | 1 | **0** | 3 | 3 |
+| Multilingual attacks / benign counterparts flagged (of 5 each) | 1 / 0 | **5 / 0** | 5 / 4 | 2 / 2 |
+| deepset/prompt-injections test split | 8/60, 0/56 FP | **25/60, 0 FP** | 22/60, 0 FP | 40/60, 0 FP |
+| xTRam1/safe-guard test | 337/650, 2/1410 FP | **452/650, 12 FP** | 550/650, 2 FP | 400/650, 73 FP |
+| jackhhao jailbreak, all rows (in Horizon's and DeBERTa's training data) | 624/666, 1/640 FP | **520/666, 3 FP** | 559/666, 4 FP | 649/666, 8 FP |
+| Throughput vs Prompt Guard 2, median of 3 rotated runs | 1x (620 tok/s) | **2.4x** | 1.0x | 1.0x |
 
-0.7 rather than 0.5: at 0.5 it flags 6 of the 150 benign documents (4.0%)
-and at 0.7 two, the same as Prompt Guard 2, for one fewer planted-document
-catch. The near misses on benign text are code and changelogs scoring 0.5
-to 0.67.
+Horizon is the only model that separates attacks from benign documents at
+all. DeBERTa and PIGuard score almost any instruction-shaped text near 1.0:
+holding either to Horizon's false-positive rate takes a threshold above
+0.99, where they catch next to nothing. PIGuard's paper is about reducing
+exactly that over-defense, on its own short-prompt benchmark; on retrieved
+documents it is the worst of the four. Both look good on direct-prompt sets
+(DeBERTa leads safeguard), which is why a direct-prompt benchmark does not
+transfer to L2. The multilingual pairs show the other failure: DeBERTa
+flags four of the five benign counterparts, so it is flagging the language.
+
+Horizon misses three internal attacks (`config-operator-runbook`,
+`meta-already-cleared-upstream`, `role-verdict-in-character-game` at
+0.66), and Prompt Guard 2 misses all three too. Its training data includes
+the deepset train and jackhhao splits, so those rows flatter it; the
+planted sets and the internal corpus are ours.
+
+0.7 rather than 0.5: at 0.5 it flags 8 of the 150 benign documents and
+catches 24 planted attacks; at 0.7, 3 and 21. Five of the eight benign
+documents score between 0.5 and 0.7, so the cut sits in a crowded band
+(three more score 0.77 to 0.97).
+
+Until #353 this table reported #350's figures (26/39 planted, 2/150 benign)
+from Horizon's own published ONNX in a separate harness. Its logits differ
+from our export's by up to 0.43; the figures above are what production runs.
+Its 2.9x throughput was raw ONNX on one window size; through `classify()`
+on 4 threads it is 2.4x.
+
+PIGuard's head is a Linear on the first token with no pooler, and its
+checkpoint still carries pooler weights, so a stock DeBERTa export loads it
+and scores wrong without an error. `export_l2_model.py --head cls-linear`
+builds that head itself instead of running the repo's remote code; its
+logits matched the reference within 1e-5.
 
 **Trying another model.** Export it in the model-builder image with
 `scripts/export_l2_model.py` (pinned revision, manifest naming the malicious

@@ -99,13 +99,13 @@ A prompt-injection classifier running on ONNX Runtime (CPU, no GPU required), sl
 | `prompt-injection-guard-small` (default) | 0.7 | Horizon-Labs, Apache-2.0, mmBERT-small. Trained on injections planted in documents, tool output and mail. |
 | `prompt-guard-2-86m` | 0.5 | Meta, Llama 4 Community License, mDeBERTa-base. Trained on instruction-override and jailbreak syntax. |
 
-Measured on our corpora (`docs/benchmark.md`, #350), the default catches 37 of 39 internal attacks to Prompt Guard 2's 14, and 26 of 39 when they are planted inside long benign documents to Prompt Guard 2's 5, at the same false-positive rate on benign documents and 2.9x the throughput on CPU. Prompt Guard 2 is the better detector of DAN-style direct jailbreaks (96% vs 84% on the jackhhao set).
+Measured on our corpora (`docs/benchmark.md`, #350), the default catches 36 of 39 internal attacks to Prompt Guard 2's 8, and 21 of 39 when they are planted inside long benign documents to Prompt Guard 2's 4, flagging 3 of 150 benign documents to Prompt Guard 2's 0, at 2.4x the throughput on CPU. Two English-only DeBERTa models, ProtectAI's v2 and PIGuard, were measured and rejected (#353): they flag 29 and 67 of the 150. Prompt Guard 2 is the better detector of DAN-style direct jailbreaks (624 vs 520 of 666 on the jackhhao set, 1 and 3 false positives of 640).
 
 Each model directory carries a `trentina-model.json`: its id, pinned revision, threshold, and which outputs are malicious. A model whose polarity cannot be read from it or its labels does not load, and L2's absence is then a gap like any other (`TRENTINA_REQUIRE_L2`). The model, revision and threshold are part of the perimeter verdict stamp, so switching models sweeps cached verdicts.
 
 **What it misses:** whatever needs reasoning rather than pattern: social engineering and quiet exfiltration requests most of all. A low L2 score is never evidence of safety, and L3 is told so on every call.
 
-**Latency:** per 512-token window, Prompt Guard 2 86M takes ~550ms in production and the default about a third of that (2.9x, paired runs on one CPU). **Cost:** Zero (runs locally). **Threshold per model, stricter per profile.**
+**Latency:** per 512-token window, Prompt Guard 2 86M takes ~550ms in production and the default about 40% of that (2.4x, rotated runs on one CPU). **Cost:** Zero (runs locally). **Threshold per model, stricter per profile.**
 
 ### Layer 3 — Quarantined LLM (Q-Agent)
 
