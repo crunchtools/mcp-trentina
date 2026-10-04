@@ -32,8 +32,9 @@ commerce keeps flowing, and nothing dangerous gets in.
    documents the default catches 21 of 39 where Prompt Guard 2 catches 4,
    2.4x faster on CPU. L3 reads everything L2 lets through.
    Around the layers sit an egress guard, file confinement and a startup
-   containment check. [Defense Pipeline](docs/defense-pipeline.md) ·
-   [Benchmark](docs/benchmark.md)
+   containment check. What is and is not defended, by kind of content, is in
+   [Coverage](docs/defense-pipeline.md#coverage), with every known gap.
+   [Defense Pipeline](docs/defense-pipeline.md) · [Benchmark](docs/benchmark.md)
 
 2. **Token savings.** Agents pay for every tool name, schema and response byte
    they read. Trentina hides tools a profile doesn't need, serves short names,
@@ -202,7 +203,7 @@ Then point Claude Code at it:
 | [Operator Profile](docs/operator.md) | The operator agent's seat and the gateway's service identity |
 | [Configuration](docs/configuration.md) | Every environment variable |
 | [Authentication](docs/authentication.md) | Static bearer, OAuth proxy with DCR or a provisioned client, delegated issuers |
-| [Defense Pipeline](docs/defense-pipeline.md) | L1/L2/L3, modes, coverage matrix |
+| [Defense Pipeline](docs/defense-pipeline.md) | L1/L2/L3, modes, coverage and known gaps |
 | [Benchmark](docs/benchmark.md) | Detection rates per layer and per L3 provider |
 | [Content Tools](docs/quarantine-tools.md) | fetch, read, dir, content, search |
 | [Blocklist](docs/blocklist.md) | Cumulative detection memory |

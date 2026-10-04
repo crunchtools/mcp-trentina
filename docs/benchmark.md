@@ -334,8 +334,12 @@ covered 502 payloads; L1 fired on 241, and only those have an ablated arm.
   attacks that L2 and L3 both passed. It also refused 29 benign texts
   carrying zero-width or tag characters that both other layers cleared,
   because four invisible characters is already high risk.
-- **L1 misses two transforms.** It counts nothing in soft-hyphen or
-  fullwidth text (#363). L2 catches both.
+- **L1 does not count two obfuscations.** Its patterns read through text
+  spaced out with soft hyphens or set in fullwidth letters: a known
+  directive still matches. Unlike zero-width characters, though, neither
+  obfuscation is counted as a finding in itself (#363). On this semantic
+  corpus L1 fired on the same 2 of 44 attacks with and without them. L2
+  reads through both.
 - **Elsewhere:** L2 flags every benign payload wrapped in base64 (14 of 14),
   and L3 flags 16 of the 48 L1 near-miss lines. L1 fires on none of
   those, so both arms are the same.
