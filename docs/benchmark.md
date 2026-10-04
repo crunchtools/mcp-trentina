@@ -254,6 +254,19 @@ and scores wrong without an error. `export_l2_model.py --head cls-linear`
 builds that head itself instead of running the repo's remote code; its
 logits matched the reference within 1e-5.
 
+**Candidates not measured** (surveyed on Hugging Face, 2026-10-03), so the
+next pick starts from a list rather than a search:
+
+| Model | Why not measured |
+|---|---|
+| `qualifire/prompt-injection-sentinel` | Gated, non-standard license; measure it once shipping it is cleared. |
+| `ibm-granite/granite-guardian-3.3-8b` | An 8B LLM judge: an L3 candidate, not L2. |
+| `meta-llama/Prompt-Guard-86M` (v1) | Superseded by Prompt Guard 2, which ships. |
+| `protectai/deberta-v3-base-prompt-injection` (v1), `deepset/deberta-v3-base-injection`, `fmops/distilbert-prompt-injection` | Older generations of the DeBERTa family measured above. |
+| `nvidia/NemoGuard-JailbreakDetect`, `katanemo/Arch-Guard`, `testsavantai/prompt-injection-defender-base-v0`, `Aira-security/FT-Llama-Prompt-Guard-2` | No stated license, or under 500 downloads. |
+
+Lakera Guard is an API, not a local model.
+
 **Trying another model.** Export it in the model-builder image with
 `scripts/export_l2_model.py` (pinned revision, manifest naming the malicious
 outputs and threshold), mount the directory and set `CLASSIFIER_MODEL_PATH`.
