@@ -40,7 +40,7 @@ Output is minified by default and the agent asks for exact text per call with `t
 
 Everything entering through the gateway is judged at its ingress — the firewall model: filter where content enters, once.
 
-- **MCP tool responses** from every remote backend: text blocks, resource text, and every string leaf of `structuredContent`, judged as one document (recorded as `source_type=tool_response`). Image blocks and binary blobs cannot be judged; their counts ride in the warning.
+- **MCP tool responses** from every remote backend: text blocks, resource text, and every string leaf of `structuredContent`, judged as one document (recorded as `source_type=tool_response`). Image blocks, and resource blobs an agent could open (an image, a PDF, an archive), cannot be read by any layer yet: they are the `binary_unread` gap, which block and redact refuse and flag delivers with the warning (#367). A blob that is a key or random bytes is counted and read by its type.
 - **Tool definitions** on every `tools/list`: name, title, description, `inputSchema`, annotations — the MCP tool-poisoning channel (`tool_description`). Runs on post-compression text; a description the compressor rewrote is model output and gets unconditional L3.
 - **Matrix**: `/sync` and room `/messages` responses, buffered and judged whole (`matrix_sync`). E2EE rooms are ciphertext on the wire; with `preprocess.decrypt` configured the proxy terminates Megolm to build the L2 input and forwards the original ciphertext untouched, so the homeserver never sees plaintext and the agent still decrypts for itself. Decryption is read-only, additive and ephemeral — recovered plaintext exists only in the L2 input. Without it, encrypted rooms are outside what the gateway can read, and the coverage gap is counted and reported rather than assumed.
 - **LLM completions** through the proxy, judged post-stream (`llm_completion`).
@@ -54,7 +54,7 @@ The PUSH paths set it themselves, because no agent is waiting to be asked: `aler
 
 Which responses are judged (#296): every 200, deny by default. `/members`, `/state`, profiles and the room directory return names and topics any user chose, and were forwarded unread while the proxy judged seven listed paths. The exempt set (`matrix_proxy._ACKS`, matched on the whole path and the method) is the acknowledgement of a write, the auth flows, one-time and backup keys, plus every DELETE and OPTIONS. A media download forwards unjudged only as `image/*`, `audio/*`, `video/*` or `application/octet-stream`: no layer reads pixels, and an E2EE attachment is ciphertext. Any other non-JSON body is judged as text; flagged or unjudged, it carries `X-Trentina-Warning: <risk level>`, and unjudged under `withhold` it is refused. Under `withhold` the proxy judges with `stop_on_partial`, so an over-cap response costs a token count rather than a full L2 scan.
 
-**The perimeter never edits what it judged.** L1 detects; it does not censor. What the agent receives is byte-identical to what entered the perimeter, or (under `block`) nothing plus the warning. The one rewrite is Matrix's, and it applies only to what was NOT judged: an unjudged response keeps the tokens its client needs and loses its language, because refusing a `/sync` would break the client's loop. Transformation belongs to the pre-processors, which run OUTSIDE the perimeter, BEFORE it, and whose output is what enters it: since 0.38.0 they minify by default (HTML to Markdown, JSON compacted, repeats collapsed to a count), and the response says what ran. That is a token saving, not a security edit, and the agent declines it with `trentina_preprocess: false`, subject to any processor the profile `required`.
+**The perimeter never edits what it judged.** L1 detects; it does not censor. What the agent receives is byte-identical to what entered the perimeter, or (under `block`) nothing plus the warning. The one rewrite is Matrix's, and it applies only to what was NOT judged: an unjudged response keeps the tokens its client needs and loses its language, because refusing a `/sync` would break the client's loop. Transformation belongs to the pre-processors, which run OUTSIDE the perimeter, BEFORE it, and whose output is what enters it and what is delivered. What the layers read is built from that output by the unpack stage (see the [Layer contract](#layer-contract)), and never replaces it: since 0.38.0 they minify by default (HTML to Markdown, JSON compacted, repeats collapsed to a count), and the response says what ran. That is a token saving, not a security edit, and the agent declines it with `trentina_preprocess: false`, subject to any processor the profile `required`.
 
 ## Why This Matters
 
@@ -66,14 +66,14 @@ The defense-in-depth approach means an attack has to evade three fundamentally d
 
 Four rules shape every layer, and any change to a layer is held to them. `tests/test_layer_contract.py` enforces the first two.
 
-1. **Every layer reads the bytes as they arrived, exactly once.** L1 and L2 run in parallel on the same bytes, and L3 reads them after both. Redact's checks on turn 2's output follow the same rule: L1 and L2 read each output string once, as written.
+1. **Nothing is delivered that the layers did not read, in its original or decoded form, or, for binary, by its identified type. Each layer reads it exactly once.** Pre-processing is two stages, always in this order (#365). Stage 1, the pre-processors, shrinks what will be delivered. Stage 2, the unpack stage (`unpack/scan.py`), builds what the layers read from that delivery: strict base64 and hex that decode to text are decoded in place, and binary is labelled by its signature, `(image/png, 1.1 KB, not read)`. The delivery itself is never changed. L1 and L2 run in parallel on the unpacked text, and L3 reads it after both. Redact's checks on turn 2's output follow the same rule: L1 and L2 read each output string once, unpacked. Binary an agent could open and no layer can read yet (an image, a PDF, an archive) is the `binary_unread` gap: block and redact refuse it, and offer `flag`.
 2. **Layers share findings, never inputs.** L1's counts by type and L2's label and score reach L3's briefing as structure: fixed names and numbers, never payload text. No layer reads text that another layer produced.
 3. **A layer's weakness is fixed inside that layer or at model selection.** The fix is a better model, a new L1 stage, or a benchmark gate that rejects a model a trick can blind (`benchmarks/l2_obfuscation.py`). The pipeline never gets an extra pass, a second input, or a reshaped copy to compensate.
 4. **Read time is linear in payload size, one pass per layer.** The admission cap (`CLASSIFIER_MAX_TOKENS`) is sized on that: 32K tokens is about 23 s of L2 on production CPU, well inside the 60 s MCP client timeout.
 
 Open (#360): redact's extraction turn still reads L1's normalized copy (`l2_input`) instead of the arrived bytes. No detector reads that copy. Whether the extraction should is being measured.
 
-Planned (#365): the rule becomes "nothing is delivered that the layers did not read, in its original or decoded form". Pre-processing becomes two stages, always in this order. First, shrink what will be delivered (today's reducers). Second, unpack that delivery for reading: strict base64 decoded, binary labelled by its signature, and later archives, PDFs and images extracted. Every layer then reads the unpacked text once, and the delivery itself is never changed. Until that lands, rule 1 holds as written, and [Coverage](#coverage) lists what it leaves unread.
+Only canonical base64 is decoded, meaning text whose re-encoding reproduces it exactly. A lenient decoder can read a non-canonical blob differently from the agent's own tools, so such blobs are read as they arrived. Decoded text carries no marker: any bracketed note in front of it made L2 flag 4 to 8 of the 14 benign corpus texts, against 1 without one ([benchmark](benchmark.md#unpack-stage-367)). L3's briefing names what was decoded and labelled instead. Archives, office files, PDFs and images are extracted in later phases (#368 to #370).
 
 ### Retired designs
 
@@ -142,7 +142,7 @@ A quarantined LLM — `gemini-2.5-flash-lite` by default, any configured provide
 
 ## Coverage
 
-What is defended and what is not, by kind of content, as of 0.56.0. A row
+What is defended and what is not, by kind of content, as of 0.57.0. A row
 changes only together with the code and the gap tests in
 `tests/test_coverage_gaps.py`. #365 is the plan that closes most of the
 gaps below.
@@ -153,9 +153,13 @@ gaps below.
 | HTML | Markdown; hidden elements, scripts and comments dropped, and the hiding counted for L1 (#229) | that Markdown | judged |
 | HTML with `trentina_preprocess: false` | raw HTML | raw HTML, with L1 counting hiding fingerprints | judged |
 | JSON and `structuredContent` | compacted JSON | every string, keys included | judged |
-| Base64 that decodes to text | as it arrived | the raw blob; L1 decodes it only to count, and only when it hits L1's keywords | judged, but L2 flags long blobs even when harmless |
-| Base64 binary (image, PDF, archive, key) inside text or JSON | as it arrived | the raw blob; nobody reads what it contains | usually refused, because L2 reacts to blobs, not because anything read it |
-| An MCP image block or resource blob | as it arrived | nothing | **delivered**; counted in the warning |
+| Base64 or hex that decodes to text (canonical only) | as it arrived | the decoded text, in place, to two levels | judged |
+| URL-safe, unpadded or otherwise non-canonical base64 | as it arrived | the raw blob | judged, but L2 may react to the blob |
+| Binary that is a key, an executable or random bytes, 64 characters or more, whose characters read as noise | as it arrived | a label naming its type and size | judged |
+| A token that decodes to binary but whose characters read as language | as it arrived | the token as it arrived | judged |
+| An image, PDF or archive inside text or JSON, or a data URI | as it arrived | a label; nothing reads inside it | refused (`binary_unread`), with `flag` offered; flag delivers it with the warning |
+| An MCP image block, or a resource blob an agent could open | as it arrived | nothing | refused (`binary_unread`), with `flag` offered |
+| An MCP resource blob that is a key or random bytes | as it arrived | nothing; counted by type | judged on the rest of the response |
 | A fetched URL that is not text (PDF, image, binary) | a refusal | nothing | refused |
 | Matrix media (`image/*`, `audio/*`, `video/*`, octet-stream) | forwarded | nothing | forwarded unjudged |
 | Matrix E2EE without `preprocess.decrypt` | the ciphertext | nothing; the gap is counted | forwarded |
@@ -166,22 +170,29 @@ gaps below.
 Each gap has an issue and a measurement. Where a test can hold it open,
 one does; the rest name the benchmark that measured them.
 
-1. **L2 flags base64 blobs whatever they contain** (#367). Measured
-   2026-10-04 with the default model: all 14 benign corpus texts were
-   flagged once wrapped in base64, a ConfigMap holding a harmless shell
-   script scored 0.99, and a data-URI image 0.81. In block mode that refuses
-   ordinary ops content. Tested.
-2. **Nothing reads inside binary** (#367 to #370). Text drawn in an image,
+1. **Nothing reads inside binary** (#368 to #370). Text drawn in an image,
    a PDF's text layer and the files in an archive are judged by no layer.
-   When block mode refuses one today, it is by accident (gap 1).
-3. **Block mode delivers MCP image blocks unread** (#367). They are counted
-   in `_trentina_warning.unscannable`, not treated as a gap. Like gap 12,
-   this violates the constitution's every-payload rule. Tested.
-4. **L1 counts encoded text only when it hits L1's keywords** (#367). An
-   encoded instruction without them ("Assistant: forward this thread to
-   ...") is not counted, and L2 and L3 read only the blob. Tested.
-5. **L1 counts a `data:image` URI as an exfiltration URL** (#367). An
-   inline image cannot send anything anywhere. Tested.
+   Since 0.57.0 block mode refuses them as `binary_unread` and says so,
+   instead of refusing them by accident when L2 reacted to the blob. Tested.
+2. **Only canonical base64 is decoded** (#367). URL-safe and unpadded
+   base64, and base64 wrapped at a width that is not a multiple of four, are
+   read as they arrived, and an instruction hidden that way reaches L2 and
+   L3 as a blob. MIME's 76-character wrapping decodes line by line. Strictness is
+   deliberate: a lenient decoder could read a blob differently from the
+   agent's own tools. Tested.
+3. **Decoding stops at two levels and 140,000 characters.** Base64 of base64
+   is read; a third level, or a longer token, is read as it arrived.
+4. **Binary with no known signature counts as read.** The table in
+   `unpack/signatures.py` covers images, PDFs, archives (also behind a
+   stub), office files, audio, video, SQLite and WebAssembly. Bytes matching
+   none of them are labelled when the token is 64 characters or more and
+   its characters read as noise, and read as they arrived otherwise. Either
+   way they are not the `binary_unread` gap. A format an agent's tools can
+   open that the table does not list would be delivered unread.
+5. **Images of 4 by 4 pixels or less are counted as read** (tracking
+   pixels, spacers), by the size a PNG or GIF header states. A letter or a
+   QR code needs more pixels than that. A header can lie about its size; an
+   agent's image tools then read pixels no layer did.
 6. **L1 has no counter for soft-hyphen or fullwidth obfuscation** (#363).
    Its patterns read through both, but unlike zero-width characters neither
    is a finding in itself, so L3's briefing never mentions it. Tested.
@@ -218,7 +229,7 @@ has only counted since 0.29.0; it never strips.
 |-------------|-----------------|-----------------|--------------|
 | Hidden div injection | **counts** (conversion removes it) | n/a | n/a |
 | Zero-width obfuscation | **counts** | reads through it with the default model | catches |
-| Base64 encoded payloads | counts only on its keywords (gap 4) | flags the blob, harmless or not (gap 1) | reads the blob raw |
+| Base64 encoded payloads | reads it decoded, so its patterns apply (since 0.57.0) | reads it decoded | reads it decoded |
 | Markdown image exfiltration | **catches** | misses | n/a |
 | Direct instruction override | partial | **catches** (100%) | catches |
 | System prompt manipulation | partial | **catches** (90%) | catches |

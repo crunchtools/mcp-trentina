@@ -33,6 +33,7 @@ from ..errors import (
 )
 from ..l1.pipeline import run_l1
 from ..logsafe import exc_kind
+from ..unpack.scan import unpack
 from .limiter import THROTTLE_STATUS, limited_generate, throttle_budget
 from .prompts import (
     DETECTION_RESPONSE_SCHEMA,
@@ -564,14 +565,21 @@ def extraction_briefing(detection: dict[str, Any] | None) -> str:
 async def _output_flagged(strings: dict[str, str]) -> bool:
     """L1 and L2 over turn 2's output, before turn 3 is asked.
 
-    Each reads each string once, as turn 2 wrote it (the Layer contract).
+    Each reads each string once, unpacked like any delivery (the Layer
+    contract): an answer the payload talked turn 2 into encoding is read
+    decoded, and one carrying binary no layer can read is refused.
     """
     from .classifier import classify_async
 
     for text in strings.values():
         # Turn 2's output is as long as the model chose to make it; L1 on the
         # loop stalls every profile for that long (#295).
-        l1, l2 = await asyncio.gather(asyncio.to_thread(run_l1, text), classify_async(text))
+        view = await asyncio.to_thread(unpack, text)
+        if view.unread:
+            return True
+        l1, l2 = await asyncio.gather(
+            asyncio.to_thread(run_l1, view.text), classify_async(view.text)
+        )
         if l1.stats.total_detections() and l1.stats.risk_level() in _BLOCKING_RISKS:
             return True
         if l2 is not None and l2.label == "MALICIOUS":

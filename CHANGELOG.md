@@ -10,7 +10,41 @@ under that name.
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-10-04
+
 ### Added
+- The unpack stage, `unpack/` (#367, Phase 1 of #365). Inside `defend()` it
+  builds what L1, L2 and L3 read from what will be delivered, and never
+  changes the delivery. It does three things:
+  - **Text:** canonical base64 and hex that decode to text are read decoded,
+    in place, to two levels.
+  - **Binary:** 64 characters or more is read as a label naming its type and
+    size. A key, executable or random bytes is labelled only when the
+    token's own characters read as noise. Otherwise an instruction written
+    without spaces behind a `MIIB` prefix would decode to a DER signature
+    and hide behind the label.
+  - **Everything else** is read as it arrived: identifiers, short binary and
+    non-canonical base64.
+
+  Before, L2 flagged harmless text as soon as it was base64 (14 of 14 benign
+  corpus texts); now it flags 1, the same as the plain text. An encoded
+  instruction now reaches all three layers as plain text.
+- The `binary_unread` gap. An image, PDF or archive that an agent's tools
+  could open and no layer can yet read is refused by block and redact, with
+  `flag` offered as the alternative. This covers base64 and data URIs inside
+  text, MCP image blocks, and resource blobs. Before, block mode delivered
+  MCP image blocks unread, against the constitution's every-payload rule.
+- `benchmarks/l2_blob_length.py`: L2's score against blob length and kind,
+  and on real-world shapes. It sets the label floor.
+
+### Changed
+- Redact's check on turn 2's output reads each string unpacked, and refuses
+  binary no layer can read.
+- `data:image` URIs are no longer counted as exfiltration URLs; the layers
+  read their label.
+- `PERIMETER_VERSION` 7: cached verdicts were reached reading raw blobs.
+
+### Added (docs and tests)
 - Coverage in `docs/defense-pipeline.md` (#366): what the agent receives,
   what the layers read and what block mode does, for each kind of content,
   plus twelve known gaps with the issue and measurement for each. It

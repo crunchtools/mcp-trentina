@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -70,6 +70,7 @@ from .quarantine.classifier import (
     head,
 )
 from .quarantine.prompts import L2_BLINDSPOT_CAVEAT, RISK_LEVELS
+from .unpack.scan import unpack
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,9 @@ class DefenseVerdict:
     admission (#225): over ``Config.admission_tokens``, so neither L2 nor L3
     ran. ``l2_truncated`` and ``l3_truncated`` stay False; nothing was read
     in part."""
+    unread: tuple[str, ...] = ()
+    """Kinds of binary in the delivery that an agent's tools could open and no
+    layer read (images, PDFs, archives): the ``binary_unread`` gap (#367)."""
 
     @property
     def flagged(self) -> bool:
@@ -314,31 +318,42 @@ async def admission(content: str) -> tuple[int, int]:
 
 
 async def _stage_one(
-    content: str,
+    read: str,
     source: str,
     precomputed_l1: PipelineResult | None,
     *,
+    unpacked: bool,
     scan: bool,
     stop_on_partial: bool,
 ) -> tuple[PipelineResult, ClassifierResult | None, bool]:
-    """L1 and L2 in parallel, each reading the arrived bytes once.
+    """L1 and L2 in parallel, each reading the unpacked delivery once.
 
     Neither reads anything the other produced; they meet only in L3's
     briefing (the Layer contract, ``docs/defense-pipeline.md``). ``scan``
     False runs L1 alone.
+
+    ``precomputed_l1`` is L1 run by a caller over the delivery itself (per
+    JSON leaf, or with stage 1's counts folded in). When the unpack stage
+    changed nothing it is used as is. When it did, L1 reads the unpacked text
+    like the other layers, and keeps from the caller's run only what the
+    delivery alone cannot show: hiding that stage 1 removed (#229) and a
+    directory's shadow counts.
     """
     l2: tuple[ClassifierResult | None, bool] = (None, False)
-    if precomputed_l1 is not None:
+    if precomputed_l1 is not None and not unpacked:
         pipeline = precomputed_l1
         if scan:
-            l2 = await _classify(content, source, stop_on_partial=stop_on_partial)
+            l2 = await _classify(read, source, stop_on_partial=stop_on_partial)
     elif scan:
         pipeline, l2 = await asyncio.gather(
-            asyncio.to_thread(run_l1, content),
-            _classify(content, source, stop_on_partial=stop_on_partial),
+            asyncio.to_thread(run_l1, read),
+            _classify(read, source, stop_on_partial=stop_on_partial),
         )
     else:
-        pipeline = await asyncio.to_thread(run_l1, content)
+        pipeline = await asyncio.to_thread(run_l1, read)
+    if precomputed_l1 is not None and unpacked:
+        pipeline.stats.hidden = pipeline.stats.hidden.at_least(precomputed_l1.stats.hidden)
+        pipeline.stats.shadows = precomputed_l1.stats.shadows
 
     classification, truncated = l2
     return pipeline, classification, truncated
@@ -371,13 +386,15 @@ async def defend(
 ) -> DefenseVerdict:
     """Run the three layers over one piece of content and report a verdict.
 
-    Stage 1 is L1 and L2 in parallel, both reading the payload as it arrived:
-    independent signals, neither shaped by the other, each read once. Stage 2
-    is L3, which waits for both and is told what they found
-    (``build_l3_briefing``), L1's counts by type included.
+    First the unpack stage builds what the layers read: ``content`` with every
+    packed part unpacked (``unpack.scan``). Stage 1 is L1 and L2 in parallel,
+    both reading that once: independent signals, neither shaped by the other.
+    Stage 2 is L3, which waits for both and is told what they found
+    (``build_l3_briefing``), L1's counts by type included. The verdict carries
+    ``content`` unchanged, which is what is delivered.
 
     Args:
-        content: Raw untrusted text, as it arrived.
+        content: Untrusted text, exactly as it will be delivered.
         source: URL, path, or identifier, recorded with any detection.
         source_type: Row type for the `detections` table.
         defense: Per-profile thresholds. None means built-in defaults.
@@ -397,13 +414,30 @@ async def defend(
         A verdict. This function never raises on a detection.
     """
     has_text = bool(content.strip())
-    tokens, cap = await admission(content) if has_text else (0, 0)
+    # Stage 2 of pre-processing (#365): what every layer reads. The delivery,
+    # ``content``, is never changed; ``view.text`` is it with every packed
+    # part decoded or labelled.
+    # Past this length the payload is over the cap however it unpacks, and
+    # admission refuses or truncates it on its own count: unpacking it would
+    # be work the cap exists to prevent.
+    unpackable = has_text and len(content) <= get_config().admission_tokens * _MAX_CHARS_PER_TOKEN
+    view = await asyncio.to_thread(unpack, content) if unpackable else None
+    read = view.text if view is not None else content
+    tokens, cap = await admission(read) if has_text else (0, 0)
     refuse_at_admission = stop_on_partial and tokens > cap
 
     scan = has_text and not refuse_at_admission
     pipeline, classification, l2_truncated = await _stage_one(
-        content, source, precomputed_l1, scan=scan, stop_on_partial=stop_on_partial
+        read,
+        source,
+        precomputed_l1,
+        unpacked=read is not content,
+        scan=scan,
+        stop_on_partial=stop_on_partial,
     )
+    if view is not None:
+        pipeline.stats.unpacked = view.stats
+    pipeline = replace(pipeline, content=content)
     if refuse_at_admission:
         logger.warning(
             "admission: refused %s, %d tokens against a %d-token cap",
@@ -428,7 +462,7 @@ async def defend(
     if has_text and not refuse_at_admission:
         l3_truncated = tokens > cap
         l3_assessment = await _stage_two(
-            await asyncio.to_thread(head, content, cap) if l3_truncated else content,
+            await asyncio.to_thread(head, read, cap) if l3_truncated else read,
             defense,
             build_l3_briefing(
                 pipeline.stats, classification, l2_truncated=l2_truncated, extra=l3_context
@@ -485,7 +519,7 @@ async def defend(
             )
 
     return DefenseVerdict(
-        content=pipeline.content,
+        content=content,
         pipeline=pipeline,
         classification=classification,
         l3_assessment=l3_assessment,
@@ -494,6 +528,7 @@ async def defend(
         l2_truncated=l2_truncated,
         l3_truncated=l3_truncated,
         oversize=(tokens, cap) if refuse_at_admission else None,
+        unread=view.unread if view is not None else (),
     )
 
 
