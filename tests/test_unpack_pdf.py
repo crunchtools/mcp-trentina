@@ -186,6 +186,18 @@ class TestWhatStaysUnread:
         monkeypatch.setattr(pdf_reader, "DEADLINE", 0.001)
         assert read_pdf(pdf(_SHOWN)) is None
 
+    def test_a_pdf_that_finds_every_slot_busy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Waiting holds one of the gateway's worker threads, so it is short."""
+        monkeypatch.setattr(pdf_reader, "SLOT_WAIT", 0.01)
+        held = [pdf_reader._slots.acquire() for _ in range(pdf_reader.CONCURRENCY)]
+        try:
+            assert all(held)
+            assert read_pdf(pdf(_SHOWN)) is None
+        finally:
+            for _ in held:
+                pdf_reader._slots.release()
+        assert read_pdf(pdf(_SHOWN)) is not None, "the slots come back"
+
     def test_too_many_pages(self) -> None:
         from mcp_trentina_crunchtools.unpack.pdf_worker import MAX_PAGES
 

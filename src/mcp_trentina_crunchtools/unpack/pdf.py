@@ -27,6 +27,9 @@ DEADLINE = 30.0
 CONCURRENCY = 2
 """PDFs being read at once. Each is a process with up to a gigabyte to use."""
 
+SLOT_WAIT = 10.0
+"""Seconds a PDF waits for one of those slots before it is given up as unread."""
+
 MAX_OUTPUT = 16 * 1024 * 1024
 """Bytes of worker output accepted. Its own text cap is far below this."""
 
@@ -89,8 +92,9 @@ def read_pdf(packed: bytes) -> PdfReading | None:
     """Read ``packed`` as a PDF, or None when it stays unread.
 
     None for a file the worker could not read to the end: corrupt,
-    encrypted with a password, over a size cap, or still running at the
-    deadline. The caller counts it as ``binary_unread``.
+    encrypted with a password, over a size cap, still running at the
+    deadline, or one that found every slot busy for ``SLOT_WAIT`` seconds.
+    The caller counts it as ``binary_unread``.
     """
     # TRUST: parsing a PDF nobody has judged yet
     #   untrusted: all of `packed`, and therefore everything the worker prints
@@ -100,19 +104,25 @@ def read_pdf(packed: bytes) -> PdfReading | None:
     #   evidence: T1 the child has RLIMIT_CPU, RLIMIT_AS, a wall-clock kill and
     #     no secret in its environment; T1 argv is this interpreter and a constant
     #     module; T1 _checked() accepts only its shapes; T4 tests/test_unpack_pdf.py
-    with _slots:
-        try:
-            done = subprocess.run(
-                [sys.executable, "-m", WORKER],
-                input=packed,
-                capture_output=True,
-                timeout=DEADLINE,
-                env=_environment(),
-                cwd="/",
-                check=False,
-            )
-        except (subprocess.TimeoutExpired, OSError):
-            return None
+    # Callers are worker threads of the gateway's one pool. A thread that
+    # waits here is a thread L1 and the tokenizer cannot have, so the wait
+    # for a slot is short and a PDF that does not get one is unread.
+    if not _slots.acquire(timeout=SLOT_WAIT):
+        return None
+    try:
+        done = subprocess.run(
+            [sys.executable, "-m", WORKER],
+            input=packed,
+            capture_output=True,
+            timeout=DEADLINE,
+            env=_environment(),
+            cwd="/",
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    finally:
+        _slots.release()
     if done.returncode != 0 or len(done.stdout) > MAX_OUTPUT:
         return None
     try:
