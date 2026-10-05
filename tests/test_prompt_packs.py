@@ -334,12 +334,18 @@ class TestTheHarness:
                          summary="Q-Agent detection failed: TruncatedResponseError")  # fmt: skip
         measured = harness.measure(report, [*report.results, failed])
         assert measured["schema_conformance"] == pytest.approx(20 / 21)
+        assert measured["calls"] == 21
         baseline = tmp_path / "generic.json"
         self._run(tmp_path, monkeypatch, report, "--prompt-pack", "generic", "--out", str(baseline))
-        other = json.loads(baseline.read_text()) | {"model": "another/model"}
-        baseline.write_text(json.dumps(other))
+        recorded = json.loads(baseline.read_text())
         pack = _file(tmp_path, _pack())
         better = _report(caught=6, flagged=0, meta=4)
+        assert self._run(tmp_path, monkeypatch, better, "--prompt-pack", pack,
+                         "--baseline", str(baseline)) == 0  # fmt: skip
+        baseline.write_text(json.dumps(recorded | {"cases": "0" * 64}))
+        assert self._run(tmp_path, monkeypatch, better, "--prompt-pack", pack,
+                         "--baseline", str(baseline)) == 2  # fmt: skip
+        baseline.write_text(json.dumps(recorded | {"model": "another/model"}))
         assert self._run(tmp_path, monkeypatch, better, "--prompt-pack", pack,
                          "--baseline", str(baseline)) == 2  # fmt: skip
 
@@ -455,3 +461,23 @@ class TestTheHarness:
             self._run(
                 tmp_path, monkeypatch, _report(caught=1, flagged=0, meta=1), "--prompt-pack", other
             )
+
+
+@pytest.mark.asyncio
+async def test_the_decoy_spike_asks_again_after_a_reply_that_is_not_json() -> None:
+    from benchmarks import decoy_tools
+
+    good = {
+        "choices": [{"message": {"content": json.dumps(_CLEAN)}}],
+        "usage": {"prompt_tokens": 9},
+    }
+    request = httpx.Request("POST", "https://example.com")
+    replies = [httpx.Response(200, text="<html>", request=request),
+               httpx.Response(200, json=good, request=request)]  # fmt: skip
+    client = AsyncMock()
+    client.post.side_effect = replies
+    with patch.dict("os.environ", {"OPENROUTER_API_KEY": "k"}), patch("asyncio.sleep", AsyncMock()):
+        answer = await decoy_tools.ask(client, "m", "text", decoys=False)
+    assert answer is not None
+    assert (answer.detected, answer.tripped, answer.prompt_tokens) == (False, False, 9)
+    assert client.post.await_count == 2

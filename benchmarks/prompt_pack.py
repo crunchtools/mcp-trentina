@@ -110,8 +110,10 @@ def voted(runs: list[ProviderReport]) -> ProviderReport:
 def measure(report: ProviderReport, attempts: list[Any] | None = None) -> dict[str, Any]:
     """What one run is worth, by corpus kept apart and for the gate together.
 
-    ``catch`` and ``false_positive`` are over the cases that got a verdict.
-    ``schema_conformance`` is the share of calls whose answer parsed.
+    ``catch`` and ``false_positive`` are over the cases of ``report`` that got
+    a verdict. ``calls`` and ``schema_conformance`` (the share of calls whose
+    answer parsed) are over ``attempts``: every result of every vote, when a
+    case was asked more than once. Without it they are over ``report`` too.
     """
     scored = [r for r in report.results if not r.error]
     attacks = [r for r in scored if r.expect_injection]
