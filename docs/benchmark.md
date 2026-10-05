@@ -501,6 +501,104 @@ objects asked the parser for numbers the file did not define, which took
 82 s on the RFC and takes 0.8 s now. Anything past roughly 40 pages of
 text is over the admission cap whatever the reader does.
 
+## L3 prompt packs (#354)
+
+A prompt pack is the judge's prompts for one exact `(provider, model)`
+([L3 prompt tuning](l3-prompt-tuning.md)). `benchmarks/prompt_pack.py`
+scores one on a fixed held-out split: the internal corpus less the one case
+in four set aside for tuning, and the external jailbreak set's `test`
+split, 172 attacks and 134 benign cases. Every row below is that split,
+three votes a case, through OpenRouter, 2026-10-05.
+
+**One candidate was written**, for `google/gemini-2.5-flash-lite`, the
+judge every production profile runs. Its detection prompt keeps the generic
+rules and adds two lists: what an injection does (overrides rules, grants a
+rule-free persona, orders a tool call or a send, claims authority, tells a
+scanner what to conclude), and what is not one (a role-play prompt that
+puts no rule aside, writing about attacks, instructions for a human). It
+was tuned on the train split in two rounds, then run on held-out once with
+one vote and once with three.
+
+| judge | prompts | attacks caught | benign flagged | precision | `detector_meta` | gate |
+|---|---|---|---|---|---|---|
+| gemini-2.5-flash-lite | generic | 98.3% | 20.1% | 86.2% | 2 of 3 | |
+| gemini-2.5-flash-lite | candidate | 97.1% | 2.2% | 98.2% | 2 of 3 | fails: 2 fewer attacks |
+| claude-haiku-4.5 | generic | 99.4% | 13.4% | 90.5% | 3 of 3 | |
+| claude-haiku-4.5 | the same wording | 97.7% | 2.2% | 98.2% | 3 of 3 | fails: 3 fewer attacks |
+| gpt-4o-mini | generic | 95.8% of 72 | 5.2% | 90.8% | 2 of 3 | |
+| gpt-4o-mini | the same wording | 97.2% of 72 | 1.5% | 97.2% | 2 of 3 | passes, on what it would read |
+
+**No pack ships.** The rule in #354 is that a pack must beat the generic
+prompts on held-out at an equal or lower false-positive rate, and the gate
+reads that as: no fewer attacks caught, no more benign flagged, better at
+one. The candidate is better at one by a wide margin and worse at the other
+by a narrow one:
+
+- On every category of the internal corpus (instructions planted in
+  content, which is what Trentina is for) the candidate and the generic
+  prompts caught exactly the same cases, on both models that answered all
+  of them.
+- All of the difference is in the external set, which is a user
+  jailbreaking a chatbot directly. The candidate missed 4 of its 139
+  attacks on flash-lite where generic missed 2; on Haiku, 4 and 1.
+- It flagged 3 of 134 benign prompts where generic flagged 27 (flash-lite)
+  and 18 (Haiku). The ones generic flags are role-play prompts: a
+  character and a task, nothing put aside.
+
+Whether one to three more misses on direct jailbreaks is worth 15 to 24
+fewer false refusals in 134 is a decision about the rule, not a
+measurement. The candidate is in the repository as
+`benchmarks/packs/gemini-2.5-flash-lite.candidate.json` and loads as it
+is; a profile can be pointed at it with `defense.l3_prompt_pack`.
+
+**gpt-4o-mini cannot be the judge on this route.** With
+`data_collection: deny`, OpenRouter serves it from Azure, whose content
+filter answered 100 of the 172 attacks with HTTP 400 before the model read
+them. Those are an unavailable judge, which `block` refuses, so nothing got
+through; but a judge that will not read attacks is not judging them. Its
+rates above are over the 72 it answered, and no pack ships for it. The
+direct OpenAI adapter was not measured: there is no key for it here.
+
+**An open-weight model was sampled, not tuned.**
+`meta-llama/llama-3.3-70b-instruct` on OpenRouter, generic prompts, the
+first 80 held-out cases, one vote: 85.1% of 47 attacks caught, 8.0% of 25
+benign flagged, 1 of 3 `detector_meta`, and 10% of its answers cut off at
+the output-token cap (reported as `TruncatedResponseError` since #358, and
+counted as an unavailable judge). Median latency 3.5 s, 95th percentile
+19.8 s. A three-vote run of the full split did not finish in an hour. It
+needs its own pack before it can judge, and a faster host before one can
+be tuned.
+
+The tuning split, for the record, since it is not a result: generic 94.6%
+and 18.1%; candidate 94.6% and 1.8%.
+
+## Decoy tools (#357)
+
+The idea: declare a few tools to the L3 detection call that nothing will
+ever execute. If the judge calls one, the content took it over, whatever
+its verdict says. `benchmarks/decoy_tools.py` measured it on
+`google/gemini-2.5-flash-lite` through OpenRouter with five decoys
+(`send_email`, `write_file`, `post_message`, `http_request`,
+`create_dns_record`), the generic detection prompt unchanged, over the
+internal corpus and all 1,306 rows of the external set (2026-10-05).
+
+| a decoy was called on | one call, schema and tools | second call, tools only |
+|---|---|---|
+| attacks the verdict misses today (23) | 17 (73.9%) | 6 (26.1%) |
+| attacks the verdict catches | 72.8% | 19.7% |
+| **benign content** (653) | **73.0%** | **32.6%** |
+
+**Not built.** The issue's bar was a benign trip rate of about zero. In one
+call, the response schema and tools together break this model: on a
+paragraph about RHEL's lifecycle it called all five decoys several times
+over, with the paragraph as their arguments, and ended with
+`finish_reason: error` in 12 of 14 benign cases; a verdict came back in 27%
+of calls. In a second call with no schema it calls a decoy on a third of
+benign text, and less often on attacks than on benign. A model handed text
+and tools uses the tools on the text. The trip does not separate attacks
+from anything, so it cannot be a tripwire. `enforce_no_tools` stays as it
+is.
+
 ## OCR for images (#370)
 
 Images are read by RapidOCR 3.9 (PP-OCRv6 small detection and recognition

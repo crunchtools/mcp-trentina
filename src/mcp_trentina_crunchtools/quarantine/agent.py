@@ -36,6 +36,7 @@ from ..l1.pipeline import run_l1
 from ..logsafe import exc_kind
 from ..unpack.scan import unpack
 from .limiter import THROTTLE_STATUS, limited_generate, throttle_budget
+from .packs import pack_for
 from .prompts import (
     DETECTION_RESPONSE_SCHEMA,
     DETECTION_SYSTEM_PROMPT,
@@ -79,6 +80,23 @@ L0_SEARCH_TIMEOUT = 60.0
 GEMINI_API_KEY_HEADER = "x-goog-api-key"
 MAX_OUTPUT_TOKENS = 4096
 MAX_EXTRACTED_TEXT = 50_000
+
+
+def _from_pack(
+    judge: tuple[str, str], profile: Profile | None, turn: str, briefing: str | None
+) -> tuple[str, str | None]:
+    """The system prompt and briefing for one L3 turn, from the judge's prompt pack.
+
+    The pack is the one for the judge answering THIS call (#354), which
+    under the fallback chain may not be the profile's primary. The briefing
+    is ours (``defense._l3_briefing``, ``extraction_briefing``), and the
+    Layer 2 caveat in it is swapped for the pack's wording.
+    """
+    own = getattr(getattr(profile, "defense", None), "l3_prompt_pack", None)
+    pack = pack_for(judge, own)
+    if briefing:
+        briefing = briefing.replace(L2_BLINDSPOT_CAVEAT, pack.l2_caveat)
+    return pack.prompt(turn), briefing
 
 
 def _generate_canary() -> str:
@@ -161,6 +179,7 @@ async def _call_with_fallback(
     system_prompt: str,
     response_schema: dict[str, Any],
     user_prompt: str | None = None,
+    turn: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Call the provider chain, falling back on retryable errors.
 
@@ -187,6 +206,7 @@ async def _call_with_fallback(
             user_prompt=user_prompt,
             provider_name=name,
             api_key=key,
+            turn=turn,
         )
         try:
             try:
@@ -225,6 +245,7 @@ async def _call_throttle_aware(
     user_prompt: str | None,
     provider_name: str,
     api_key: SecretStr | None,
+    turn: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     """``_call_gemini`` on one provider, waiting out its 429s within the budget.
 
@@ -246,6 +267,7 @@ async def _call_throttle_aware(
                 provider_name=provider_name,
                 _api_key_override=api_key,
                 _bypass_profile=True,
+                turn=turn,
             )
         except QuarantineAgentError as exc:
             if exc.status_code != THROTTLE_STATUS:
@@ -315,6 +337,7 @@ async def _call_gemini(
     provider_name: str | None = None,
     _api_key_override: SecretStr | None = None,
     _bypass_profile: bool = False,
+    turn: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Call the configured LLM provider and return parsed JSON response and canary.
 
@@ -332,14 +355,10 @@ async def _call_gemini(
         provider_name: LLM provider override (default: global config or profile override).
         _api_key_override: Explicit API key — skips profile resolution when _bypass_profile=True.
         _bypass_profile: Set by _call_with_fallback() to indicate key + provider are pre-resolved.
+        turn: One of ``packs.TURNS`` for an L3 turn. The system prompt is then
+            the prompt pack's for the judge answering, and ``system_prompt``
+            is not used; ``user_prompt`` gets that pack's Layer 2 caveat.
     """
-    canary = _generate_canary()
-    prompted = _inject_canary(system_prompt, canary)
-
-    user_text = content
-    if user_prompt:
-        user_text = f"{user_prompt}\n\n---\n\n{content}"
-
     if _bypass_profile:
         profile = get_current_profile()
         model = getattr(getattr(profile, "defense", None), "model", None) if profile else None
@@ -369,6 +388,12 @@ async def _call_gemini(
             )
         else:
             provider = get_provider(provider_name)
+
+    if turn is not None:
+        system_prompt, user_prompt = _from_pack(provider.judge, profile, turn, user_prompt)
+    canary = _generate_canary()
+    prompted = _inject_canary(system_prompt, canary)
+    user_text = f"{user_prompt}\n\n---\n\n{content}" if user_prompt else content
 
     provider_result = await limited_generate(
         provider,
@@ -507,6 +532,7 @@ async def quarantine_extract(
             response_schema=EXTRACTION_RESPONSE_SCHEMA,
             user_prompt=user_prompt,
             provider_name=provider_name,
+            turn="extraction",
         )
     else:
         parsed, _canary = await _call_with_fallback(
@@ -514,6 +540,7 @@ async def quarantine_extract(
             system_prompt=EXTRACTION_SYSTEM_PROMPT,
             response_schema=EXTRACTION_RESPONSE_SCHEMA,
             user_prompt=user_prompt,
+            turn="extraction",
         )
     usage = parsed.pop("_usage", {})
     extracted = parsed.get("extracted_text")
@@ -529,6 +556,7 @@ async def quarantine_verify(text: str) -> dict[str, Any]:
             content=text,
             system_prompt=VERIFY_SYSTEM_PROMPT,
             response_schema=DETECTION_RESPONSE_SCHEMA,
+            turn="verify",
         )
     except QuarantineAgentError as exc:
         logger.warning("Q-Agent verification failed: %s", exc_kind(exc))
@@ -677,23 +705,26 @@ async def quarantine_detect(
             callers get a clean threat assessment; the provider benchmark
             (issue #43) turns it on to compute per-call cost.
     """
-    scan_content = content
-    if layer1_context:
-        scan_content = f"{layer1_context}\n\n---\n\n{content}"
-
     try:
+        # The briefing rides as the user prompt, which reaches the model as
+        # `briefing, a rule, content`: the same text as before, and the one
+        # place a pack's Layer 2 caveat is put in.
         if provider_name is not None:
             parsed, _canary = await _call_gemini(
-                content=scan_content,
+                content=content,
                 system_prompt=DETECTION_SYSTEM_PROMPT,
                 response_schema=DETECTION_RESPONSE_SCHEMA,
+                user_prompt=layer1_context,
                 provider_name=provider_name,
+                turn="detection",
             )
         else:
             parsed, _canary = await _call_with_fallback(
-                content=scan_content,
+                content=content,
                 system_prompt=DETECTION_SYSTEM_PROMPT,
                 response_schema=DETECTION_RESPONSE_SCHEMA,
+                user_prompt=layer1_context,
+                turn="detection",
             )
     except QuarantineAgentError as exc:
         logger.warning("Q-Agent detection failed: %s", exc_kind(exc))

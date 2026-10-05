@@ -10,6 +10,40 @@ under that name.
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-10-05
+
+### Added
+- L3 prompt packs (#354): the judge's three system prompts and Layer 2
+  caveat for one exact `(provider, model)`, in a checked JSON file. A pack
+  holds prompts and nothing else, and must keep the framing sentences in
+  every system prompt, or it is refused at load. The pack for the judge
+  answering a call is chosen at call time, so a fallback model gets its own
+  or the generic prompts. Its id and a hash of its text are in the verdict
+  cache key.
+  - `defense.l3_prompt_pack` in a profile, or `TRENTINA_L3_PROMPT_PACK`,
+    names an operator's pack. `generic` in place of a path turns shipped
+    packs off.
+  - No pack ships in this release: see below.
+- `benchmarks/prompt_pack.py`, the tuning harness: a fixed train and
+  held-out split, majority voting, catch rate, false positives, precision,
+  per-category, answers that parsed, latency and cost, and a gate that a
+  shipped pack must pass (no fewer attacks caught, no more benign flagged,
+  better at one, `detector_meta` no worse). `docs/l3-prompt-tuning.md` is the
+  operator's guide.
+- `benchmarks/decoy_tools.py`, the decoy-tool spike (#357).
+
+### Measured, not shipped
+- A candidate pack for `google/gemini-2.5-flash-lite`, the production
+  judge: on held-out with three votes it flags 2.2% of benign text against
+  the generic prompt's 20.1%, and catches 97.1% of attacks against 98.3%.
+  It catches fewer, so by the rule in #354 it does not ship. The same
+  wording on Claude Haiku 4.5: 2.2% against 13.4%, and 97.7% against 99.4%.
+  The file is `benchmarks/packs/gemini-2.5-flash-lite.candidate.json`, and
+  an operator who wants that trade can point a profile at it.
+- Decoy tools (#357): with decoys declared the judge calls one on 73% of
+  benign text in one call with the schema, and on 33% in a second call
+  without it. Not built.
+
 ## [0.62.0] - 2026-10-05
 
 ### Added
