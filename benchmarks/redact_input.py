@@ -73,7 +73,11 @@ leak. Shorter overlaps are ordinary words the two texts share."""
 
 
 def l1_copy(text: str) -> str:
-    """The pre-0.57.1 extraction input: ``text`` after L1's normalizing stages."""
+    """The pre-0.57.1 extraction input: ``text`` after L1's normalizing stages.
+
+    ``strip_directives`` is left out because it only counts: it returned its
+    input unchanged then, as it does now.
+    """
     working, _ = normalize_unicode(text)
     working, _ = normalize_encoded(working)
     working, _ = strip_exfiltration(working)
@@ -203,12 +207,22 @@ async def _run(reps: int, concurrency: int, every: int) -> list[Row]:
     return rows
 
 
+def _positive(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return number
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--reps", type=int, default=2, help="redact runs per arm (default 2)")
-    parser.add_argument("--concurrency", type=int, default=8, help="payloads in flight")
+    parser.add_argument("--reps", type=_positive, default=2, help="redact runs per arm (default 2)")
+    parser.add_argument("--concurrency", type=_positive, default=8, help="payloads in flight")
     parser.add_argument(
-        "--every", type=int, default=1, help="take every Nth attack under each transform"
+        "--every",
+        type=_positive,
+        default=1,
+        help="take every Nth attack under each transform",
     )
     parser.add_argument("--json", type=Path, help="write every row here")
     args = parser.parse_args(argv)
