@@ -59,6 +59,16 @@ dependencies = [
     "dbus-fast>=2.0",
     "pyyaml>=6.0",
     "pypdf>=6.19",
+    # OCR for images (#370). RapidOCR is Apache-2.0 and ships its three
+    # PP-OCR models (31 MB) inside the wheel, so they are hash-pinned by
+    # uv.lock like any other file and nothing is fetched at run time.
+    # It asks for `opencv-python`, the GUI build, which needs libxcb and does
+    # not import in the image; `opencv-python-headless` provides the same
+    # `cv2` module without it, and the uv override at the end of this file
+    # drops the GUI build from the resolution. Like pypdf, this runs only in
+    # a child process (unpack/ocr_worker.py).
+    "rapidocr>=3.9",
+    "opencv-python-headless>=4.10",
 ]
 
 [project.optional-dependencies]
@@ -218,3 +228,9 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["nio", "nio.*"]
 ignore_missing_imports = true
+
+[tool.uv]
+# rapidocr requires `opencv-python`; we install `opencv-python-headless`
+# instead (see the dependency comment above). A marker that is never true
+# removes the GUI build from every resolution.
+override-dependencies = ["opencv-python ; sys_platform == 'never'"]
