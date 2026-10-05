@@ -80,7 +80,7 @@ class TestFullScanEqualsJsonScan:
         assert via_json.verdict.pipeline.content == via_view.pipeline.content, (
             "the two walks disagree about which leaves exist, or their order"
         )
-        assert via_json.verdict.pipeline.l2_input == via_view.pipeline.l2_input
+        assert via_json.verdict.read == via_view.read
         assert _stat_tuples(via_json.verdict.pipeline.stats) == _stat_tuples(
             via_view.pipeline.stats
         )
@@ -104,7 +104,7 @@ class TestFullScanEqualsJsonScan:
             via_view = await defend_selection(view, source="s", source_type="tool_response")
 
             assert via_json.verdict.pipeline.content == via_view.pipeline.content
-            assert via_json.verdict.pipeline.l2_input == via_view.pipeline.l2_input
+            assert via_json.verdict.read == via_view.read
             assert via_json.verdict.risk_level == via_view.risk_level
 
     async def test_the_corpus_is_not_empty(self) -> None:

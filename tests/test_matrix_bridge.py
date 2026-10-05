@@ -79,9 +79,8 @@ def _verdict(*, flagged_by: Layer | None = None, l3: bool = True) -> DefenseVerd
     text = "x"
     return DefenseVerdict(
         content=text,
-        pipeline=PipelineResult(
-            content=text, l2_input=text, stats=PipelineStats(), input_size=1, output_size=1
-        ),
+        read=text,
+        pipeline=PipelineResult(content=text, stats=PipelineStats(), input_size=1, output_size=1),
         classification=ClassifierResult(label="BENIGN", score=0.01, latency_ms=1.0),
         l3_assessment={"injection_detected": flagged_by is not None} if l3 else None,
         risk_level="high" if flagged_by else "low",

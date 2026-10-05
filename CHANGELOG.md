@@ -10,6 +10,16 @@ under that name.
 
 ## [Unreleased]
 
+## [0.57.1] - 2026-10-05
+
+### Changed
+- L1 hands on counts and nothing else (#360). Its stages still normalize a
+  private copy so a directive split by zero-width characters matches, but the
+  copy no longer leaves the layer: `PipelineResult.l2_input` is gone. Redact's
+  extraction turn, the copy's last reader, now reads `DefenseVerdict.read`,
+  the unpacked text L1, L2 and L3 judged. Detection is unchanged, so no
+  cached verdict is swept.
+
 ## [0.57.0] - 2026-10-04
 
 ### Added

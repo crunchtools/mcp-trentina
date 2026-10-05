@@ -171,10 +171,10 @@ class TestL1PreservesContentItFlags:
 
     The owner's call (2026-09-13, twice, each time stronger): L1 never
     modifies delivery text at all. It detects; the counts feed the risk
-    verdict, the sidecar, and the L3 gate; obfuscation-normalization lives
-    in the separate ``l2_input`` that L2 judges; and the Q-Agent reads the
-    original. Disposition belongs to the enforcement mode. The one
-    transformation that remains in delivery is HTML-to-Markdown extraction,
+    verdict, the sidecar, and the L3 gate; obfuscation-normalization stays
+    inside L1 (#360); and L2 and the Q-Agent read what L1 read. Disposition
+    belongs to the enforcement mode. The one transformation that remains in
+    delivery is HTML-to-Markdown extraction,
     because readable text is the fetch tools' product, not a security edit.
     """
 
@@ -227,18 +227,18 @@ class TestL1PreservesContentItFlags:
             "the flag survives even though the content does"
         )
 
-    def test_obfuscation_is_normalized_in_the_l2_input_only(self) -> None:
-        """The L2 input neutralizes obfuscation; delivery stays intact.
+    def test_obfuscation_is_counted_and_delivery_stays_intact(self) -> None:
+        """L1 counts obfuscation; delivery stays intact.
 
         Second owner's call, same day: L1 never modifies delivery text AT
-        ALL — not even zero-width characters. The normalization lives in
-        ``l2_input`` so L2 cannot be blinded, and the counts brief L3.
+        ALL — not even zero-width characters. Its normalized copy is private
+        (#360): nothing but counts leaves the layer, and the counts brief L3.
         """
         from mcp_trentina_crunchtools.l1.pipeline import run_l1
 
         text = "Real sentence.\nZero\u200bwidth and a token <|im_start|> here."
         result = run_l1(text)
         assert result.content == text, "delivery text is byte-identical"
-        assert "\u200b" not in result.l2_input
-        assert "<|im_start|>" not in result.l2_input
-        assert result.stats.suspicious_detections() >= 2
+        assert not hasattr(result, "l2_input"), "the copy does not leave L1"
+        assert result.stats.unicode.zero_width_chars == 1
+        assert result.stats.delimiters.llm_delimiters == 1

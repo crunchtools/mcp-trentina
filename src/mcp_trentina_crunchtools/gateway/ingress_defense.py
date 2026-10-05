@@ -561,7 +561,7 @@ async def _redact_response(
             refusal=_refusal_from_warning(blocked_warning, Mode.REDACT, policy),
         )
     result = await quarantine_redact(
-        verdict.pipeline.l2_input,
+        verdict.read,
         prompt or DEFAULT_REDACT_PROMPT,
         detection=verdict.l3_assessment,
     )

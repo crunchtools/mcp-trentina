@@ -443,10 +443,11 @@ replaced.
   It does not make content safe — it counts what it found, by type, and L3's
   briefing names each count (`PipelineStats.findings`). `content` is what the
   agent receives, byte-identical to what arrived, and the ONLY thing L1, L2
-  and L3 detect on, each once. `l2_input` is L1's private normalized copy: no
-  detector reads it (#359), redact's extraction turn does (#360 decides
-  whether it should, and owns the name). L1 also takes a directory's stdlib-shadow counts
-  (`ShadowStats`), merged in by the `dir` producer.
+  and L3 detect on, each once. Its stages normalize a private copy to match
+  through obfuscation; that copy never leaves `_run_stages` (#360). Redact's
+  extraction reads `DefenseVerdict.read`, the unpacked text the layers
+  judged. L1 also takes a directory's stdlib-shadow counts (`ShadowStats`),
+  merged in by the `dir` producer.
 
   There is no "scan view" and no "delivery view". Those names were retired in
   0.29.0 along with `sanitize`/`scanview`: a reader cannot tell from "scan

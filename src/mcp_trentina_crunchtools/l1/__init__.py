@@ -3,8 +3,8 @@
 Deterministic stages, no model, no network. L1 reads the arrived bytes, like
 L2 and L3, and its counts reach L3's briefing by type
 (``PipelineStats.findings``). Some stages undo obfuscation on a private copy
-so their patterns can match; that copy, ``l2_input``, is read by no detector
-(#359) and only by redact's extraction turn (#360).
+so their patterns can match; that copy never leaves the layer (#360). L1
+hands on counts and nothing else.
 
 Called `sanitize/` until 0.24.0. The word claimed the layer made content
 safe; it does not, and cannot. It counts what it found.
