@@ -456,6 +456,46 @@ class TestOfficeFiles:
         assert reduced[1] == "## Other text\n\nUptime by region"
         assert "Editor" in unpack(b64(book)).text, "the layers read every part"
 
+    def test_a_chart_on_a_hidden_sheet_is_hidden_with_it(self) -> None:
+        from .office_files import CONTENT_TYPES, A, R, S
+
+        def chart(title: str) -> str:
+            return f'<c xmlns:a="{A}"><a:p><a:r><a:t>{title}</a:t></a:r></a:p></c>'
+
+        def points_to(target: str) -> str:
+            return f'<Relationships><Relationship Id="rId1" Target="{target}"/></Relationships>'
+
+        sheets = "".join(
+            f'<sheet name="{name}" sheetId="{n}"{state} r:id="rId{n}"/>'
+            for n, (name, state) in enumerate([("Shown", ""), ("Scratch", ' state="hidden"')], 1)
+        )
+        book = zipped(
+            {
+                "[Content_Types].xml": CONTENT_TYPES,
+                "xl/workbook.xml": f'<workbook xmlns="{S}" xmlns:r="{R}"><sheets>{sheets}'
+                "</sheets></workbook>",
+                "xl/_rels/workbook.xml.rels": "<Relationships>"
+                '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/>'
+                '<Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>',
+                "xl/worksheets/sheet1.xml": f'<worksheet xmlns="{S}"/>',
+                "xl/worksheets/sheet2.xml": f'<worksheet xmlns="{S}"/>',
+                "xl/worksheets/_rels/sheet1.xml.rels": points_to("../drawings/drawing1.xml"),
+                "xl/worksheets/_rels/sheet2.xml.rels": points_to("../drawings/drawing2.xml"),
+                "xl/drawings/drawing1.xml": "<d/>",
+                "xl/drawings/drawing2.xml": "<d/>",
+                "xl/drawings/_rels/drawing1.xml.rels": points_to("../charts/chart1.xml"),
+                "xl/drawings/_rels/drawing2.xml.rels": points_to("../charts/chart2.xml"),
+                "xl/charts/chart1.xml": chart("Uptime by region"),
+                "xl/charts/chart2.xml": chart(_NOTE),
+            }
+        )
+        reduced = office.reduce_base64(b64(book), 140_000)
+        assert reduced is not None
+        assert (reduced[1], reduced[2]) == ("## Other text\n\nUptime by region", 1)
+        view = unpack(b64(book))
+        assert _NOTE in view.text, "the layers still read it"
+        assert view.hidden == 1
+
     def test_a_zip_that_is_not_an_office_file_is_a_zip(self) -> None:
         plain = zipped({"word/document.xml": "<a>not a package</a>"})
         assert unpack(b64(plain)).text.startswith("(zip archive, ")

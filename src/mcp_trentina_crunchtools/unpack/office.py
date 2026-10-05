@@ -71,6 +71,10 @@ MAX_STYLE_HOPS = 20
 _SLIDE_NUMBER = re.compile(r"(\d+)\.xml$")
 _OTHER_CONTENT = re.compile(r"/(?:charts|diagrams|drawings)/[^/]+\.xml$|[cC]omments?\d*\.xml$")
 """Parts outside the main ones that hold text a reader sees."""
+_FOLLOWS_OWNER = re.compile(
+    r"/(?:charts|diagrams|drawings|notesSlides)/[^/]+\.xml$|[cC]omments?\d*\.xml$"
+)
+"""Parts that belong to the slide or sheet pointing at them."""
 _DOCX_EXTRA = re.compile(r"word/(footnotes|endnotes|comments|header\d*|footer\d*)\.xml$")
 
 
@@ -156,6 +160,10 @@ class Text:
 
     def all(self) -> str:
         return "\n".join(line for line, _ in self.lines)
+
+    def all_hidden(self) -> Text:
+        """The same lines, every one of them marked hidden."""
+        return Text([(line, True) for line, _ in self.lines])
 
     def visible(self) -> str:
         return "\n".join(line for line, hidden in self.lines if not hidden)
@@ -350,6 +358,8 @@ class Reading:
     kind: str
     parts: dict[str, Text] = field(default_factory=dict)
     titles: list[tuple[str, str]] = field(default_factory=list)  # (part name, heading)
+    hidden_owners: set[str] = field(default_factory=set)
+    """Hidden slides and sheets: what they alone point to is hidden with them."""
 
     @property
     def hidden(self) -> int:
@@ -384,17 +394,10 @@ def read(entries: list[Entry], kind: str) -> Reading:
         and (tree := parse(e.content)) is not None
     }
     reading = Reading(kind)
-    if kind == XLSX:
-        _read_xlsx(trees, reading)
-    else:
-        styles_part = trees.get("word/styles.xml")
-        styles = _Styles() if styles_part is None else _Styles.read(styles_part)
-        for name, tree in trees.items():
-            if name.endswith(".rels"):
-                continue
-            slide_off = kind == PPTX and (attr(tree, "show") or "1").lower() in _OFF
-            reading.parts[name] = _flow(tree, styles, hidden=slide_off)
-        reading.titles = list(_docx_titles(trees) if kind == DOCX else _pptx_titles(trees))
+    _READERS[kind](trees, reading)
+    for name in _owned(trees, reading.hidden_owners):
+        if name in reading.parts:
+            reading.parts[name] = reading.parts[name].all_hidden()
     titled = {name for name, _ in reading.titles}
     for name in reading.parts:
         # Text a reader sees that lives outside the main parts: a chart's
@@ -412,6 +415,46 @@ def read(entries: list[Entry], kind: str) -> Reading:
         if links.lines:
             reading.titles.append((name, "Links"))
     return reading
+
+
+def _read_flowed(trees: dict[str, ET.Element], reading: Reading) -> None:
+    """A Word or PowerPoint file: every part as paragraphs of text."""
+    styles_part = trees.get("word/styles.xml")
+    styles = _Styles() if styles_part is None else _Styles.read(styles_part)
+    for name, tree in trees.items():
+        if name.endswith(".rels"):
+            continue
+        slide_off = reading.kind == PPTX and (attr(tree, "show") or "1").lower() in _OFF
+        reading.parts[name] = _flow(tree, styles, hidden=slide_off)
+        if slide_off:
+            reading.hidden_owners.add(name)
+    reading.titles = list(_docx_titles(trees) if reading.kind == DOCX else _pptx_titles(trees))
+
+
+MAX_OWNED = 1000
+"""Parts followed out from hidden slides and sheets before giving up."""
+
+
+def _owned(trees: dict[str, ET.Element], owners: set[str]) -> set[str]:
+    """Charts, diagrams, drawings, comments and notes that hidden parts point to.
+
+    A chart on a hidden slide is as hidden as the slide. Relationships are
+    followed from each hidden slide or sheet, through drawings, to the parts
+    that hold text. Layouts, masters and themes are shared by visible slides
+    too, and are never followed.
+    """
+    owned: set[str] = set()
+    frontier = list(owners)
+    while frontier and len(owned) < MAX_OWNED:
+        part = frontier.pop()
+        folder, base = posixpath.split(part)
+        rels = trees.get(posixpath.join(folder, "_rels", f"{base}.rels"))
+        internal, _ = _relationships(rels, folder)
+        for target in internal.values():
+            if target not in owned and _FOLLOWS_OWNER.search(target):
+                owned.add(target)
+                frontier.append(target)
+    return owned
 
 
 def _docx_titles(trees: dict[str, ET.Element]) -> Iterator[tuple[str, str]]:
@@ -457,6 +500,8 @@ def _read_xlsx(trees: dict[str, ET.Element], reading: Reading) -> None:
             continue
         title, off = sheets.get(name, ("", False))
         reading.parts[name] = book.sheet(tree, hidden=off)
+        if off:
+            reading.hidden_owners.add(name)
         reading.titles.append((name, f"## {' '.join(title.split()) or 'Sheet'}"))
     reading.parts["xl/sharedStrings.xml"] = book.unused()
 
@@ -502,3 +547,7 @@ def reduce_base64(token: str, max_chars: int) -> tuple[str, str, int] | None:
     reading = read(entries, kind)
     markdown = reading.markdown()
     return (kind, markdown, reading.hidden) if markdown else None
+
+
+_READERS = {DOCX: _read_flowed, PPTX: _read_flowed, XLSX: _read_xlsx}
+"""How each kind's parts are read into a ``Reading``."""
