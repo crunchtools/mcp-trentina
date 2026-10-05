@@ -171,6 +171,21 @@ class TestBlocksOfOneResponse:
         assert verdict.content == b64(_PNG)
 
 
+class TestAdmission:
+    @pytest.mark.asyncio
+    async def test_an_image_longer_than_the_cap_in_base64_is_judged_by_its_text(
+        self, reads: _Reader
+    ) -> None:
+        """Two megabytes of base64 unpack to one line: admission counts the line."""
+        big = noise((900, 800))
+        token = b64(big)
+        assert len(token) > 32_768 * 64, "past what admission would refuse by length alone"
+        verdict = await _defend(f"screenshot: {token}")
+        assert verdict.read.endswith(_NOTE)
+        assert verdict.unread == ()
+        assert reads.requests == [[big]]
+
+
 class TestTheRequest:
     def _answer(self, monkeypatch: pytest.MonkeyPatch, stdout: object, code: int = 0) -> list:
         seen: list = []

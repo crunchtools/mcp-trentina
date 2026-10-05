@@ -881,11 +881,9 @@ class TestEveryResponseIsJudged:
             ("POST", "_matrix/client/v3/keys/upload", "application/json"),
             ("POST", "_matrix/client/v3/rooms/!r:x/receipt/m.read/$e", "application/json"),
             ("DELETE", "_matrix/client/v3/devices/D", "application/json"),
-            ("GET", "_matrix/client/v1/media/download/x/abc", "image/png"),
-            ("GET", "_matrix/media/v3/download/x/abc", "application/octet-stream"),
         ],
     )
-    def test_an_acknowledgement_or_binary_media_is_not(
+    def test_an_acknowledgement_is_not(
         self, monkeypatch: pytest.MonkeyPatch, method: str, path: str, content_type: str
     ) -> None:
         from starlette.testclient import TestClient
@@ -949,7 +947,10 @@ class TestJudgement:
             ("GET", "_matrix/client/v3/sync", 200, "application/json", "json"),
             ("GET", "_matrix/client/v3/sync", 404, "application/json", None),
             ("GET", "_matrix/client/v1/media/download/x/a", 200, "text/plain", "text"),
-            ("GET", "_matrix/client/v1/media/download/x/a", 200, " IMAGE/png", None),
+            ("GET", "_matrix/client/v1/media/download/x/a", 200, " IMAGE/png", "media"),
+            ("GET", "_matrix/media/v3/thumbnail/x/a", 200, "video/mp4", "media"),
+            ("GET", "_matrix/media/v3/download/x/a", 200, "application/octet-stream", "media"),
+            ("GET", "_matrix/media/v3/download/x/a", 404, "image/png", None),
             ("GET", "_matrix/client/v3/thing", 200, "application/octet-stream", "text"),
             ("OPTIONS", "_matrix/client/v3/sync", 200, "", None),
             ("GET", "_matrix/client/v3/sync", 200, "application/json; charset=utf-8", "json"),

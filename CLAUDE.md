@@ -458,6 +458,14 @@ replaced.
   JSON checked field by field. Never import pypdf into the gateway process. `preprocess/pdf.py` is the stage-1 reducer, for
   a fetched PDF (handed over as base64 by `client.py`) and for a base64 PDF
   in a JSON string.
+  `ocr.py` reads images the same way (#370): `ocr_worker.py` runs RapidOCR
+  in a child, once per payload. `scan.py` does not OCR an image where it
+  meets it: `_Darkroom` sets each aside and leaves a mark carrying a random
+  token, and `_Pass.result` replaces the marks after one request has read
+  them all. `read_blobs` shares one darkroom across the blocks of a
+  response. Tests run with `scan.read_images` stubbed to "unread"
+  (`conftest._no_ocr_process`); mark a test `@pytest.mark.ocr` to run the
+  real worker.
 
 - `l1/` — Layer 1: the deterministic pipeline, plus module shadow detection.
   It does not make content safe — it counts what it found, by type, and L3's

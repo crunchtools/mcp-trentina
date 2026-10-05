@@ -25,7 +25,7 @@ from mcp_trentina_crunchtools.quarantine.classifier import (
     model_info,
     reset_classifier,
 )
-from mcp_trentina_crunchtools.unpack.scan import LABEL_FLOOR, read_blob, unpack
+from mcp_trentina_crunchtools.unpack.scan import LABEL_FLOOR, MAX_MEDIA_TOKEN, read_blob, unpack
 from mcp_trentina_crunchtools.unpack.signatures import OPAQUE, from_media_type
 
 
@@ -353,7 +353,7 @@ class TestDefend:
 
     async def test_only_the_head_of_a_payload_over_the_cap_is_unpacked(self) -> None:
         png = b64(b"\x89PNG\r\n\x1a\n" + _RANDOM[:1200])
-        limit = 32_768 * 64
+        limit = MAX_MEDIA_TOKEN  # past admission by length, and past any token read whole
         content = f"![logo](data:image/png;base64,{png}) " + "x" * limit
         with patch(f"{_D}.unpack", wraps=unpack) as spy:
             verdict = await _defend(content)

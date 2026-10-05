@@ -74,31 +74,17 @@ forty lines."""
 MAX_FAINT_BOXES = 200
 """Boxes the second pass will consider in one frame."""
 
+SPREAD = (0.5, 99.5)
+"""Percentiles a box's light and dark are read at. Wide, because the ink of a
+slanted line is a few percent of its upright box; not the extremes, which
+one stray pixel sets."""
+
 MARGIN = 4
 """Pixels added around a detected box before it is cut out or measured."""
 
+OPAQUE = 255
 BACKDROP = (128, 128, 128)
 """What transparency is laid over: neither white text nor black disappears on it."""
-
-
-def _frames(packed: bytes) -> list[Any] | None:
-    """The image's frames as RGB arrays, or None if it is not readable."""
-    import numpy as np
-    from PIL import Image, ImageSequence
-
-    Image.MAX_IMAGE_PIXELS = MAX_PIXELS
-    image = Image.open(io.BytesIO(packed))
-    if image.format not in FORMATS or getattr(image, "n_frames", 1) > MAX_FRAMES:
-        return None
-    frames = []
-    for frame in ImageSequence.Iterator(image):
-        rgba = frame.convert("RGBA")
-        flat = Image.new("RGBA", rgba.size, (*BACKDROP, 255))
-        flat.alpha_composite(rgba)
-        rgb = flat.convert("RGB")
-        rgb.thumbnail((MAX_SIDE, MAX_SIDE))
-        frames.append(np.asarray(rgb))
-    return frames
 
 
 def _stretched(frame: Any) -> Any:
@@ -143,7 +129,7 @@ def _contrast(frame: Any, rect: Rect) -> float:
     crop = frame[rect[1] : rect[3], rect[0] : rect[2]]
     if crop.size == 0:
         return 0.0
-    low, high = np.percentile(crop.reshape(-1, crop.shape[-1]), (3, 97), axis=0)
+    low, high = np.percentile(crop.reshape(-1, crop.shape[-1]), SPREAD, axis=0)
     return float((high - low).max())
 
 
@@ -191,13 +177,28 @@ def _second_pass(engine: Any, frame: Any, taken: list[Rect]) -> list[tuple[str, 
 
 
 def _read(engine: Any, packed: bytes) -> dict[str, list[str]] | None:
-    """One image: what it says, and what it says too faintly to see."""
-    frames = _frames(packed)
-    if frames is None:
+    """One image: what it says, and what it says too faintly to see.
+
+    None for a format this does not open or an animation of more than
+    ``MAX_FRAMES`` frames. Each frame is laid over ``BACKDROP`` first and
+    scaled down to ``MAX_SIDE``.
+    """
+    import numpy as np
+    from PIL import Image, ImageSequence
+
+    Image.MAX_IMAGE_PIXELS = MAX_PIXELS
+    image = Image.open(io.BytesIO(packed))
+    if image.format not in FORMATS or getattr(image, "n_frames", 1) > MAX_FRAMES:
         return None
     text: list[str] = []
     faint: list[str] = []
-    for frame in frames:
+    for still in ImageSequence.Iterator(image):
+        rgba = still.convert("RGBA")
+        flat = Image.new("RGBA", rgba.size, (*BACKDROP, OPAQUE))
+        flat.alpha_composite(rgba)
+        rgb = flat.convert("RGB")
+        rgb.thumbnail((MAX_SIDE, MAX_SIDE))
+        frame = np.asarray(rgb)
         first = _first_pass(engine, frame)
         second = _second_pass(engine, frame, [rect for _, rect in first])
         for line, rect in (*first, *second):

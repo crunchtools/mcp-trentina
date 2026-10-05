@@ -70,7 +70,7 @@ from .quarantine.classifier import (
     head,
 )
 from .quarantine.prompts import L2_BLINDSPOT_CAVEAT, RISK_LEVELS
-from .unpack.scan import unpack
+from .unpack.scan import MAX_MEDIA_TOKEN, unpack
 
 logger = logging.getLogger(__name__)
 
@@ -424,7 +424,9 @@ async def defend(
     # the cap however it unpacks, so only the head is unpacked: it is all flag
     # reads, and it still reports binary no layer can read. Admission then
     # counts the whole delivery, which refuses or truncates it.
-    limit = get_config().admission_tokens * _MAX_CHARS_PER_TOKEN
+    # The limit is the longer of admission's and the longest token the unpack
+    # stage opens: megabytes of image unpack to a page of text (#370).
+    limit = max(get_config().admission_tokens * _MAX_CHARS_PER_TOKEN, MAX_MEDIA_TOKEN)
     over_limit = len(content) > limit
     view = (
         await asyncio.to_thread(unpack, content[:limit] if over_limit else content)

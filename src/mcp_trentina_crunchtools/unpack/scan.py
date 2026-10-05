@@ -180,30 +180,33 @@ class _Pass:
     exposed: list[int] = field(default_factory=list)
 
     def result(self, text: str) -> Unpacked:
-        """The finished view: every image's mark replaced by what the image says."""
+        """The finished view: every image's mark replaced by what the image says.
+
+        An image OCR read is its text under a line naming it, with the text
+        too faint to see set apart and counted as hidden. One it could not
+        read is labelled unread, like any other binary no layer opened.
+        """
         read = self.darkroom.develop() if self.exposed else []
         for index in self.exposed:
-            said = read[index]
-            text = text.replace(self.darkroom.mark(index), self._print(index, said))
+            kind, said = self.darkroom.kinds[index], read[index]
+            size = _size(len(self.darkroom.images[index]))
+            self.stats.binary_labelled += 1
+            if said is None:
+                self.stats.binary_unread += 1
+                self.unread.add(kind)
+                printed = [f"({kind}, {size}, not read)"]
+            elif not said.text and not said.faint:
+                printed = [f"({kind}, {size}, no text found in it)"]
+            else:
+                printed = [f"({kind}, {size}, text read from it below)", *said.text]
+                printed.extend(
+                    ["(text in it too faint to see:)", *said.faint] if said.faint else []
+                )
+            if said is not None:
+                self.stats.images_read += 1
+                self.hidden += len(said.faint)
+            text = text.replace(self.darkroom.mark(index), "\n".join(printed))
         return Unpacked(text, self.stats, tuple(sorted(self.unread)), self.hidden)
-
-    def _print(self, index: int, said: ImageText | None) -> str:
-        """What the layers read in an image's place, and the counts for it."""
-        kind = self.darkroom.kinds[index]
-        size = _size(len(self.darkroom.images[index]))
-        self.stats.binary_labelled += 1
-        if said is None:
-            self.stats.binary_unread += 1
-            self.unread.add(kind)
-            return f"({kind}, {size}, not read)"
-        self.stats.images_read += 1
-        self.hidden += len(said.faint)
-        if not said.text and not said.faint:
-            return f"({kind}, {size}, no text found in it)"
-        parts = [f"({kind}, {size}, text read from it below)", *said.text]
-        if said.faint:
-            parts.extend(["(text in it too faint to see:)", *said.faint])
-        return "\n".join(parts)
 
 
 def unpack(text: str) -> Unpacked:
@@ -269,27 +272,36 @@ def _long(token: str, declared: Kind, state: _Pass) -> str | None:
     kind = kind if kind is not OPAQUE else declared
     if not kind.extractable:
         return None
-    whole = _strict_base64(token) if len(token) <= MAX_MEDIA_TOKEN else None
-    opened = None if whole is None else _opened(kind, whole, state)
-    return opened or _label(kind, head, state, size=len(token) * 3 // 4)
+    if len(token) <= MAX_MEDIA_TOKEN:
+        whole = _strict_base64(token)
+        opened = None if whole is None else _opened(kind, whole, state)
+        if opened is not None:
+            return opened
+    return _label(kind, head, state, size=len(token) * 3 // 4)
 
 
 def _data_uri(match: re.Match[str], depth: int, state: _Pass) -> str | None:
     """A data URI, labelled or decoded whole, or None to leave it as it is."""
-    media_type = match["type"].lower()
+    declared = from_media_type(match["type"].lower())
     payload = match["payload"]
     if len(payload) > MAX_TOKEN:
-        return _long(payload, from_media_type(media_type), state)
+        return _long(payload, declared, state)
     decoded = _strict_base64(payload) if payload else None
     if decoded is None:
         return None
     # Text is text whatever the URI declares: application/javascript or
     # octet-stream can carry an instruction as well as text/plain can.
     text = _as_text(decoded)
-    if text is not None:
-        return _text(text, depth, state)
     kind = identify(decoded)
-    kind = kind if kind is not OPAQUE else from_media_type(media_type)
+    return (
+        _text(text, depth, state)
+        if text is not None
+        else _read_or_labelled(kind if kind is not OPAQUE else declared, decoded, state)
+    )
+
+
+def _read_or_labelled(kind: Kind, decoded: bytes, state: _Pass) -> str:
+    """Binary an agent could open: what is inside it, or its label, unread."""
     return _opened(kind, decoded, state) or _label(kind, decoded, state)
 
 
@@ -298,8 +310,8 @@ def _decoded(decoded: bytes, token: str, depth: int, state: _Pass) -> str | None
     if text is not None:
         return _text(text, depth, state)
     kind = identify(decoded, short=len(token) < LABEL_FLOOR)
-    if kind.extractable:  # an openable format at any size: read inside, or labelled unread
-        return _opened(kind, decoded, state) or _label(kind, decoded, state)
+    if kind.extractable:  # an openable format at any size
+        return _read_or_labelled(kind, decoded, state)
     if len(token) < LABEL_FLOOR or not _reads_as_noise(token):
         return None
     return _labelled_with_strings(kind, decoded, state)
@@ -469,7 +481,7 @@ def _entry(entry: Entry, reading: office.Reading | None, state: _Pass) -> str:
         return _unpack(text, MAX_DEPTH - 1, state)
     kind = identify(entry.content)
     if kind.extractable:
-        return _opened(kind, entry.content, state) or _label(kind, entry.content, state)
+        return _read_or_labelled(kind, entry.content, state)
     return _labelled_with_strings(kind, entry.content, state)
 
 
