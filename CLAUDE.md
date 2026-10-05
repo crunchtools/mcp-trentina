@@ -443,6 +443,15 @@ replaced.
   only when its own characters read as noise (`_reads_as_noise`): a label
   means no layer reads the token, and `MIIB` plus an instruction written
   without spaces decodes to a DER signature.
+  `archive.py` opens zip, tar, gzip, bzip2 and xz in memory, within limits
+  on bytes, files, ratio and nesting (#368); every read is bounded by the
+  budget, never by a header, and a zip with bytes its directory does not
+  list is refused whole. `office.py` reads docx, xlsx and pptx: every text
+  node of every part for the layers, hidden text counted into
+  `hidden_elements`; XML with a DOCTYPE is not parsed. A file inside an
+  archive goes back through `scan.py`'s own rules. Stage 1 reduces a base64
+  office file in a JSON string to `{"format", "as_markdown"}`
+  (`preprocess/structured.py`).
 
 - `l1/` — Layer 1: the deterministic pipeline, plus module shadow detection.
   It does not make content safe — it counts what it found, by type, and L3's

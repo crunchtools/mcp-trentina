@@ -61,6 +61,7 @@ FINDING_NAMES: dict[str, str] = {
     "unpacked_text_decoded": "encoded spans decoded to text for you to read",
     "unpacked_binary_labelled": "binary spans replaced by a label naming their type",
     "unpacked_binary_unread": "of those, images, PDFs or archives no layer could read",
+    "unpacked_archives_opened": "archives or office files opened, their files read below",
 }
 """What L3's briefing calls each ``PipelineStats.to_flat_dict`` counter.
 

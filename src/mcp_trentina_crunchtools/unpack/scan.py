@@ -22,6 +22,11 @@ What becomes of a token:
   (``benchmarks/l2_blob_length.py``), blobs from 64 characters up are where
   L2 starts reacting: a 64-character integrity hash scored 0.92, an SSH
   public key 0.99. A 44-character key in a config scored 0.47.
+* **It decodes to an archive or an office file** (#368): the layers read
+  what is inside. ``archive.py`` opens zip, tar, gzip, bzip2 and xz within
+  limits; each file is then read by these same rules, an office part as its
+  text (``office.py``). One that does not open, or breaks a limit, falls to
+  the next case and is labelled unread.
 * **Anything else stays verbatim:** short binary, hex digests up to SHA-512's
   128 characters, and runs that decode to binary but read like words, such
   as a URL path or a run of ``x``.
@@ -46,6 +51,8 @@ import string
 from collections import Counter
 from dataclasses import dataclass, field
 
+from . import office
+from .archive import OPENABLE, ZIP, Budget, Entry, open_archive
 from .signatures import OPAQUE, Kind, from_media_type, identify
 from .stats import UnpackStats
 
@@ -57,6 +64,10 @@ MIN_TOKEN = 8
 
 MAX_DEPTH = 2
 """Levels of decoding: base64 of base64 is read, a third layer is left."""
+
+MAX_NESTING = 2
+"""Archives opened inside one another: a zip in a tar.gz is read, a third
+level stays unread."""
 
 MAX_TOKEN = 140_000
 """Characters past which a token is left encoded. L1's decode cap
@@ -100,17 +111,27 @@ class Unpacked:
         stats: Counts for L3's briefing.
         unread: Kinds of binary an agent's tools could open and no layer
             read, sorted and distinct. Non-empty is the ``binary_unread`` gap.
+        hidden: Lines of an office file that its application would not show
+            (``office.py``). The layers read them; this is the count L1
+            reports with its other hidden-content findings.
     """
 
     text: str
     stats: UnpackStats
     unread: tuple[str, ...]
+    hidden: int = 0
 
 
 @dataclass
 class _Pass:
     stats: UnpackStats = field(default_factory=UnpackStats)
     unread: set[str] = field(default_factory=set)
+    hidden: int = 0
+    nesting: int = 0
+    budget: Budget = field(default_factory=Budget)
+
+    def result(self, text: str) -> Unpacked:
+        return Unpacked(text, self.stats, tuple(sorted(self.unread)), self.hidden)
 
 
 def unpack(text: str) -> Unpacked:
@@ -124,8 +145,7 @@ def unpack(text: str) -> Unpacked:
     #   evidence: T1 b64decode(validate=True) plus re-encode equality; T1 `re` with no
     #     ambiguous repeat; T4 tests/test_unpack.py linearity; T3 Layer contract rule 1
     state = _Pass()
-    out = _unpack(text, 0, state)
-    return Unpacked(text=out, stats=state.stats, unread=tuple(sorted(state.unread)))
+    return state.result(_unpack(text, 0, state))
 
 
 def _unpack(text: str, depth: int, state: _Pass) -> str:
@@ -186,7 +206,8 @@ def _data_uri(match: re.Match[str], depth: int, state: _Pass) -> str | None:
     if text is not None:
         return _text(text, depth, state)
     kind = identify(decoded)
-    return _label(kind if kind is not OPAQUE else from_media_type(media_type), decoded, state)
+    kind = kind if kind is not OPAQUE else from_media_type(media_type)
+    return _opened(kind, decoded, state) or _label(kind, decoded, state)
 
 
 def _decoded(decoded: bytes, token: str, depth: int, state: _Pass) -> str | None:
@@ -194,15 +215,118 @@ def _decoded(decoded: bytes, token: str, depth: int, state: _Pass) -> str | None
     if text is not None:
         return _text(text, depth, state)
     kind = identify(decoded, short=len(token) < LABEL_FLOOR)
-    if kind.extractable:
-        return _label(kind, decoded, state)  # an openable format at any size
+    if kind.extractable:  # an openable format at any size: read inside, or labelled unread
+        return _opened(kind, decoded, state) or _label(kind, decoded, state)
     if len(token) < LABEL_FLOOR or not _reads_as_noise(token):
         return None
-    # Readable strings inside the bytes are what a `strings` tool would show
-    # an agent, so the layers read them too, bare after the label.
+    return _labelled_with_strings(kind, decoded, state)
+
+
+def _labelled_with_strings(kind: Kind, decoded: bytes, state: _Pass) -> str:
+    """A label, then the readable strings inside the bytes.
+
+    Those strings are what a ``strings`` tool would show an agent, so the
+    layers read them too, bare after the label.
+    """
     inside = " ".join(run.decode("ascii") for run in _SENTENCE.findall(decoded) if b" " in run)
     label = _label(kind, decoded, state)
     return f"{label} {inside}" if inside else label
+
+
+_ARCHIVE_NAMES = {ZIP: "zip archive"}
+"""What an opened archive is called once it is known not to be an office file."""
+
+ENCRYPTED_ENTRY = "encrypted or unsupported archive entry"
+"""The ``unread`` kind for a file inside an archive that could not be read."""
+
+
+def _opened(kind: Kind, decoded: bytes, state: _Pass) -> str | None:
+    """What the layers read for an archive or office file, or None if it stays unread.
+
+    A header naming the kind and its file count, then every file under a
+    ``=== name ===`` line: an office part as its text, a text file unpacked
+    like any other text, an archive inside opened in turn, other binary
+    labelled. File names are the archive author's text and are read with the
+    rest. None leaves the caller to label the whole archive unread: a kind
+    not opened here, a corrupt file, a broken limit, or nesting past
+    ``MAX_NESTING``.
+    """
+    if kind.name not in OPENABLE or state.nesting >= MAX_NESTING:
+        return None
+    entries = open_archive(decoded, kind.name, state.budget)
+    if entries is None:
+        return None
+    state.stats.archives_opened += 1
+    office_kind = office.kind_of(e.name for e in entries) if kind.name == ZIP else None
+    reading = office.read(entries, office_kind) if office_kind else None
+    if reading is not None:
+        state.hidden += reading.hidden
+    name = reading.kind if reading is not None else _ARCHIVE_NAMES.get(kind.name, kind.name)
+    files = "1 file" if len(entries) == 1 else f"{len(entries)} files"
+    parts = [f"({name}, {_size(len(decoded))}, {files})"]
+    state.nesting += 1
+    try:
+        for entry in entries:
+            body = _entry(entry, reading, state)
+            if body:
+                parts.append(f"=== {entry.name} ===\n{body}")
+    finally:
+        state.nesting -= 1
+    return "\n".join(parts)
+
+
+def _entry(entry: Entry, reading: office.Reading | None, state: _Pass) -> str:
+    """What the layers read for one file of an archive. Empty for an empty file."""
+    if entry.content is None:
+        state.stats.binary_labelled += 1
+        state.stats.binary_unread += 1
+        state.unread.add(ENCRYPTED_ENTRY)
+        return f"({entry.unread}, not read)"
+    if reading is not None and entry.name in reading.parts:
+        return reading.parts[entry.name].all()
+    if not entry.content:
+        return ""
+    text = _file_text(entry.content)
+    if text is not None:
+        # One more level: a base64 token in a file inside an archive is decoded.
+        return _unpack(text, MAX_DEPTH - 1, state)
+    kind = identify(entry.content)
+    if kind.extractable:
+        return _opened(kind, entry.content, state) or _label(kind, entry.content, state)
+    return _labelled_with_strings(kind, entry.content, state)
+
+
+_BOMS = (
+    (b"\xef\xbb\xbf", "utf-8-sig"),
+    (b"\xff\xfe\x00\x00", "utf-32"),
+    (b"\x00\x00\xfe\xff", "utf-32"),
+    (b"\xff\xfe", "utf-16"),
+    (b"\xfe\xff", "utf-16"),
+)
+TEXT_SHARE = 0.95
+"""Share of a file's characters that must be printable for it to be text."""
+
+
+def _file_text(raw: bytes) -> str | None:
+    """A file's bytes as text when a text editor would show them as text.
+
+    UTF-8 first; then a byte-order mark's encoding; then Latin-1, which
+    decodes anything, accepted only when nearly all of it is printable. A
+    file is not held to ``_as_text``'s short-token rules: it was found as a
+    file, not guessed at from a run of base64 characters.
+    """
+    for bom, encoding in _BOMS:
+        if raw.startswith(bom):
+            try:
+                return raw.decode(encoding)
+            except UnicodeDecodeError:
+                return None
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    printable = sum(c.isprintable() or c in "\n\r\t" for c in text)
+    return text if printable >= TEXT_SHARE * len(text) else None
 
 
 def _text(text: str, depth: int, state: _Pass) -> str:
@@ -251,9 +375,7 @@ def read_blob(blob: str) -> Unpacked | None:
         return None
     state = _Pass()
     text = _decoded(decoded, blob, 0, state)
-    return Unpacked(
-        text=blob if text is None else text, stats=state.stats, unread=tuple(sorted(state.unread))
-    )
+    return state.result(blob if text is None else text)
 
 
 UNDECODABLE = Kind("undecodable blob", extractable=True)

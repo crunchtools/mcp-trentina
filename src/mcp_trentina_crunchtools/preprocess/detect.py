@@ -222,26 +222,44 @@ class DetectProcessor:
         )
 
 
-_HIDING_DETAILS = ("hidden_elements", "off_screen_elements", "same_color_text", "template_tags")
+_HIDING_DETAILS = (
+    "hidden_elements",
+    "off_screen_elements",
+    "same_color_text",
+    "template_tags",
+    "office_hidden",
+)
 
 
-def _converted_html(result: PreProcessResult) -> bool:
-    """Whether a result deleted markup, directly or inside ``detect``."""
+def _converted(result: PreProcessResult) -> bool:
+    """Whether a result deleted markup or converted an office file (#368),
+    directly or inside ``detect``."""
     if not result.applied:
         return False
+    if int(result.details.get("office_converted", 0)):
+        return True
     return result.name == "html" or "html" in str(result.details.get("chain", "")).split(",")
 
 
 def hiding_removed(results: Sequence[PreProcessResult]) -> int | None:
     """Elements hidden from a human reader that conversion deleted.
 
-    None when nothing converted markup, which is different from zero: the
+    None when nothing was converted, which is different from zero: the
     caller recounts the ORIGINAL's hiding for L1 only when conversion ran.
     """
-    converted = [r for r in results if _converted_html(r)]
+    converted = [r for r in results if _converted(r)]
     if not converted:
         return None
     return sum(int(r.details.get(k, 0)) for r in converted for k in _HIDING_DETAILS)
+
+
+def office_hidden(results: Sequence[PreProcessResult]) -> int:
+    """Lines an office file marked hidden that its conversion dropped (#368).
+
+    ``detect_hidden_markup`` cannot recount these from the original, which is
+    a base64 token, so the count stage 1 took is what L1 is handed.
+    """
+    return sum(int(r.details.get("office_hidden", 0)) for r in results if r.applied)
 
 
 def hiding_briefing(removed: int) -> str | None:
@@ -249,7 +267,7 @@ def hiding_briefing(removed: int) -> str | None:
     if not removed:
         return None
     return (
-        f"This content was converted from HTML to Markdown before judging, and "
+        f"This content was converted from HTML or an office file to Markdown before judging, and "
         f"the conversion removed {removed} element(s) hidden from a human "
         f"reader, so you are not reading all of the original. Hiding text is "
         f"a common way to address an agent without the reader noticing."

@@ -10,6 +10,36 @@ under that name.
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-10-05
+
+### Added
+- The unpack stage reads inside archives and office files (#368, Phase 2 of
+  #365). Until now they were labelled and refused as `binary_unread`.
+  - **Archives:** zip, tar, gzip, bzip2 and xz, in memory. Each file is
+    unpacked by the same rules as any text; an archive inside an archive is
+    opened to two levels; an image or PDF inside stays `binary_unread`.
+  - **Limits:** 1 MiB uncompressed, 256 files, a 200 to 1 ratio. Every read
+    is bounded by the budget, not by what a header claims. Past a limit the
+    archive stays unread, whole.
+  - **No half-read archives:** a zip with bytes its directory does not
+    account for (a stub in front, a file only a stream reader finds), a tar
+    with data after its end marker and a compressed stream with trailing
+    data are refused. Zip and entry comments are read.
+  - **Office files:** docx, xlsx and pptx are read as the text of every XML
+    part, whatever its namespace prefix. Text the file marks hidden (Word's
+    `vanish`, directly or through a style; hidden sheets and rows; unused
+    shared strings; hidden slides) is read and counted as hidden content.
+    XML with a DOCTYPE is not parsed.
+- Stage 1 reduces a base64 office file in a JSON string to its visible text,
+  `{"format": "docx", "as_markdown": ...}`, dropping hidden text and handing
+  the count to L1. `trentina_preprocess: false` keeps the file.
+- Tar, xz and zstd signatures. `benchmarks/unpack_archives.py`.
+
+### Changed
+- `PERIMETER_VERSION` is 9, so every cached verdict is judged again.
+- Known gap 1 is now images and PDFs; gap 15 is office hiding the format
+  does not mark (white text, one-point type).
+
 ## [0.59.1] - 2026-10-05
 
 ### Fixed

@@ -446,6 +446,9 @@ async def defend(
     )
     if view is not None:
         pipeline.stats.unpacked = view.stats
+        # Text an office file marks hidden (#368): read with the rest, and
+        # counted where L1 counts every other kind of hiding.
+        pipeline.stats.hidden.elements += view.hidden
     pipeline = replace(pipeline, content=content)
     if refuse_at_admission:
         logger.warning(
