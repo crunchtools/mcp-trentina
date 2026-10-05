@@ -120,6 +120,12 @@ uv run mcp-trentina-crunchtools
   `benchmarks/l2_obfuscation.py --record` (the Containerfile's `l2-gate`
   stage); `posture.check_l2_gate` warns on a model without a passing one and
   refuses under `TRENTINA_REQUIRE_HARDENED`.
+- `TRENTINA_L3_PROMPT_PACK` — an L3 prompt pack file (#354), or `generic`.
+  `quarantine/packs.py` loads and checks packs: closed key set, the framing
+  sentences in every system prompt, an exact (provider, model). The pack for
+  the judge answering a call is chosen in `agent._from_pack`; its stamp is in
+  the verdict key. `benchmarks/prompt_pack.py` is the tuning harness and the
+  gate a shipped pack must pass; `docs/l3-prompt-tuning.md` is the guide.
 - `CLASSIFIER_MODEL_PATH` — any model directory; wins over `CLASSIFIER_MODEL`.
   How to try a model the image does not ship.
 - `CLASSIFIER_THRESHOLD` — overrides the model's own threshold (0.7 for

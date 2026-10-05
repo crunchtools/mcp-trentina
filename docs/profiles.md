@@ -330,6 +330,7 @@ Each profile configures its defense **policy** — never the layers' existence. 
 | `enforcement` | string | `flag` | The default mode — what a flagged response becomes when the call does not choose: `flag` (delivered intact + warning) or `block` (refused). Cannot be `redact` |
 | `modes` | list | `[enforcement]` | The modes the agent may choose per call — see [Content modes](#content-modes) |
 | `l2_threshold` | float | unset | L2 score at/above which content is flagged, in addition to the model's own MALICIOUS label. Unset, the L2 model's own threshold decides (0.7 for the default model, 0.5 for Prompt Guard 2; `CLASSIFIER_THRESHOLD` overrides it gateway-wide). Below that threshold it flags content the classifier itself labels BENIGN, so set it knowingly; at or above it, it changes nothing. The thresholds are measured, not midpoints; see `docs/benchmark.md`. |
+| `l3_prompt_pack` | path | unset | An L3 prompt pack for this profile's judge (#354). It applies to the exact (provider, model) it names and no other; checked when the profile loads. `generic` turns shipped packs off. See [L3 prompt tuning](l3-prompt-tuning.md). |
 | `audit` | bool | `true` | Write detection rows to SQLite |
 | `provider` | string | `null` | LLM provider override (`gemini`, `openai`, `anthropic`, `ollama`, `openrouter`) |
 

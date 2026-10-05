@@ -198,15 +198,8 @@ def shipped() -> dict[tuple[str, str], PromptPack]:
     return {(pack.provider, pack.model): pack for pack in packs}
 
 
-@lru_cache(maxsize=32)
-def _loaded(path: str, _changed: int) -> PromptPack | None:
-    try:
-        return load_pack(path)
-    except PackError as exc:
-        logger.error(  # logsafe: ours — PackError's message is a rule from this module
-            "l3 prompt pack: not loaded, %s; the generic prompts are used", exc
-        )
-        return None
+_read: dict[str, tuple[int, PromptPack | None]] = {}
+"""Operator packs by path, each with the file's change time when it was read."""
 
 
 def operator_pack(path: str | None) -> PromptPack | None:
@@ -226,7 +219,15 @@ def operator_pack(path: str | None) -> PromptPack | None:
         changed = Path(path).stat().st_mtime_ns
     except OSError:
         changed = 0
-    return _loaded(path, changed)
+    if path not in _read or _read[path][0] != changed:
+        try:
+            _read[path] = (changed, load_pack(path))
+        except PackError as exc:
+            logger.error(  # logsafe: ours — PackError's message is a rule from this module
+                "l3 prompt pack: not loaded, %s; the generic prompts are used", exc
+            )
+            _read[path] = (changed, None)
+    return _read[path][1]
 
 
 def pack_for(judge: tuple[str, str], operator_path: str | None = None) -> PromptPack:
