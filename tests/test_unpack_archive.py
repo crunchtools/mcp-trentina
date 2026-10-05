@@ -496,6 +496,49 @@ class TestOfficeFiles:
         assert _NOTE in view.text, "the layers still read it"
         assert view.hidden == 1
 
+    def test_a_chart_a_shown_slide_also_uses_stays_visible(self) -> None:
+        from .office_files import CONTENT_TYPES, A, P
+
+        def slide(show: str) -> str:
+            return f'<p:sld xmlns:p="{P}"{show}/>'
+
+        shared = (
+            '<Relationships><Relationship Id="rId1" Target="../charts/chart1.xml"/></Relationships>'
+        )
+        deck = zipped(
+            {
+                "[Content_Types].xml": CONTENT_TYPES,
+                "ppt/presentation.xml": f'<p:presentation xmlns:p="{P}"/>',
+                "ppt/slides/slide1.xml": slide(""),
+                "ppt/slides/slide2.xml": slide(' show="0"'),
+                "ppt/slides/_rels/slide1.xml.rels": shared,
+                "ppt/slides/_rels/slide2.xml.rels": shared,
+                "ppt/charts/chart1.xml": f'<c xmlns:a="{A}"><a:p><a:r><a:t>Uptime by region'
+                "</a:t></a:r></a:p></c>",
+            }
+        )
+        reduced = office.reduce_base64(b64(deck), 140_000)
+        assert reduced is not None
+        assert (reduced[1], reduced[2]) == ("## Other text\n\nUptime by region", 0)
+
+    def test_a_relationship_to_a_part_that_is_not_there_is_not_followed(self) -> None:
+        from .office_files import CONTENT_TYPES, P
+
+        many = "".join(
+            f'<Relationship Id="r{n}" Target="../charts/chart{n}.xml"/>' for n in range(5000)
+        )
+        deck = zipped(
+            {
+                "[Content_Types].xml": CONTENT_TYPES,
+                "ppt/presentation.xml": f'<p:presentation xmlns:p="{P}"/>',
+                "ppt/slides/slide1.xml": f'<p:sld xmlns:p="{P}" show="0"/>',
+                "ppt/slides/_rels/slide1.xml.rels": f"<Relationships>{many}</Relationships>",
+            }
+        )
+        start = time.perf_counter()
+        assert unpack(b64(deck)).unread == ()
+        assert time.perf_counter() - start < 2.0
+
     def test_a_zip_that_is_not_an_office_file_is_a_zip(self) -> None:
         plain = zipped({"word/document.xml": "<a>not a package</a>"})
         assert unpack(b64(plain)).text.startswith("(zip archive, ")

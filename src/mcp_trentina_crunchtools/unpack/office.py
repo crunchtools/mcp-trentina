@@ -360,6 +360,8 @@ class Reading:
     titles: list[tuple[str, str]] = field(default_factory=list)  # (part name, heading)
     hidden_owners: set[str] = field(default_factory=set)
     """Hidden slides and sheets: what they alone point to is hidden with them."""
+    shown_owners: set[str] = field(default_factory=set)
+    """Slides and sheets a reader sees: what they point to stays visible."""
 
     @property
     def hidden(self) -> int:
@@ -395,9 +397,8 @@ def read(entries: list[Entry], kind: str) -> Reading:
     }
     reading = Reading(kind)
     _READERS[kind](trees, reading)
-    for name in _owned(trees, reading.hidden_owners):
-        if name in reading.parts:
-            reading.parts[name] = reading.parts[name].all_hidden()
+    for name in _owned(trees, reading.hidden_owners) - _owned(trees, reading.shown_owners):
+        reading.parts[name] = reading.parts[name].all_hidden()
     titled = {name for name, _ in reading.titles}
     for name in reading.parts:
         # Text a reader sees that lives outside the main parts: a chart's
@@ -426,32 +427,30 @@ def _read_flowed(trees: dict[str, ET.Element], reading: Reading) -> None:
             continue
         slide_off = reading.kind == PPTX and (attr(tree, "show") or "1").lower() in _OFF
         reading.parts[name] = _flow(tree, styles, hidden=slide_off)
-        if slide_off:
-            reading.hidden_owners.add(name)
+        if local(tree.tag) == "sld":
+            (reading.hidden_owners if slide_off else reading.shown_owners).add(name)
     reading.titles = list(_docx_titles(trees) if reading.kind == DOCX else _pptx_titles(trees))
 
 
-MAX_OWNED = 1000
-"""Parts followed out from hidden slides and sheets before giving up."""
-
-
 def _owned(trees: dict[str, ET.Element], owners: set[str]) -> set[str]:
-    """Charts, diagrams, drawings, comments and notes that hidden parts point to.
+    """Charts, diagrams, drawings, comments and notes that ``owners`` point to.
 
-    A chart on a hidden slide is as hidden as the slide. Relationships are
-    followed from each hidden slide or sheet, through drawings, to the parts
-    that hold text. Layouts, masters and themes are shared by visible slides
-    too, and are never followed.
+    A chart on a hidden slide is as hidden as the slide, unless a slide a
+    reader sees shows it too: the caller takes the hidden owners' parts less
+    the shown owners'. Relationships are followed through drawings to the
+    parts that hold text. Only parts that were parsed are followed, so the
+    walk is bounded by the archive's own file count. Layouts, masters and
+    themes are shared by design and never followed.
     """
     owned: set[str] = set()
     frontier = list(owners)
-    while frontier and len(owned) < MAX_OWNED:
+    while frontier:
         part = frontier.pop()
         folder, base = posixpath.split(part)
         rels = trees.get(posixpath.join(folder, "_rels", f"{base}.rels"))
         internal, _ = _relationships(rels, folder)
         for target in internal.values():
-            if target not in owned and _FOLLOWS_OWNER.search(target):
+            if target in trees and target not in owned and _FOLLOWS_OWNER.search(target):
                 owned.add(target)
                 frontier.append(target)
     return owned
@@ -500,8 +499,7 @@ def _read_xlsx(trees: dict[str, ET.Element], reading: Reading) -> None:
             continue
         title, off = sheets.get(name, ("", False))
         reading.parts[name] = book.sheet(tree, hidden=off)
-        if off:
-            reading.hidden_owners.add(name)
+        (reading.hidden_owners if off else reading.shown_owners).add(name)
         reading.titles.append((name, f"## {' '.join(title.split()) or 'Sheet'}"))
     reading.parts["xl/sharedStrings.xml"] = book.unused()
 
