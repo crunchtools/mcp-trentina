@@ -326,6 +326,23 @@ class TestTheHarness:
         every_failed = harness.voted([run(True, False, True), run(True, False, True)])
         assert every_failed.results[2].error is True
 
+    def test_conformance_counts_every_vote_and_the_baseline_must_be_the_same_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        report = _report(caught=3, flagged=1, meta=3)
+        failed = _result("x", "exfil", attack=True, detected=False, error=True,
+                         summary="Q-Agent detection failed: TruncatedResponseError")  # fmt: skip
+        measured = harness.measure(report, [*report.results, failed])
+        assert measured["schema_conformance"] == pytest.approx(20 / 21)
+        baseline = tmp_path / "generic.json"
+        self._run(tmp_path, monkeypatch, report, "--prompt-pack", "generic", "--out", str(baseline))
+        other = json.loads(baseline.read_text()) | {"model": "another/model"}
+        baseline.write_text(json.dumps(other))
+        pack = _file(tmp_path, _pack())
+        better = _report(caught=6, flagged=0, meta=4)
+        assert self._run(tmp_path, monkeypatch, better, "--prompt-pack", pack,
+                         "--baseline", str(baseline)) == 2  # fmt: skip
+
     def test_what_is_measured(self) -> None:
         measured = harness.measure(_report(caught=3, flagged=2, meta=4))
         assert (measured["attacks"], measured["benign"]) == (10, 10)

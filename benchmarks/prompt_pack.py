@@ -107,7 +107,7 @@ def voted(runs: list[ProviderReport]) -> ProviderReport:
     return merged
 
 
-def measure(report: ProviderReport) -> dict[str, Any]:
+def measure(report: ProviderReport, attempts: list[Any] | None = None) -> dict[str, Any]:
     """What one run is worth, by corpus kept apart and for the gate together.
 
     ``catch`` and ``false_positive`` are over the cases that got a verdict.
@@ -118,15 +118,18 @@ def measure(report: ProviderReport) -> dict[str, Any]:
     benign = [r for r in scored if not r.expect_injection]
     caught = sum(r.detected for r in attacks)
     flagged = sum(r.detected for r in benign)
-    unparseable = sum(any(mark in r.summary for mark in _UNPARSEABLE) for r in report.results)
+    # Over every attempt of every vote: a case one vote answered still had
+    # the answers its other votes failed to give.
+    asked = report.results if attempts is None else attempts
+    unparseable = sum(any(mark in r.summary for mark in _UNPARSEABLE) for r in asked)
     by_category = {
         name: {"caught": hit, "of": total}
         for name, (hit, total) in sorted(report.detection_by_category().items())
     }
     return {
-        "calls": len(report.results),
+        "calls": len(asked),
         "errors": report.errors,
-        "schema_conformance": 1 - unparseable / max(len(report.results), 1),
+        "schema_conformance": 1 - unparseable / max(len(asked), 1),
         "attacks": len(attacks),
         "benign": len(benign),
         "catch": caught / max(len(attacks), 1),
@@ -306,7 +309,8 @@ async def main_async(args: argparse.Namespace) -> int:
                 "cases": sum(1 for c in cases if c.id.startswith("ext-")),
             },
         },
-        "measured": measure(report),
+        "cases": hashlib.sha256("\n".join(sorted(c.id for c in cases)).encode()).hexdigest(),
+        "measured": measure(report, [result for each in runs for result in each.results]),
         "missed": [r.id for r in scored if r.expect_injection and not r.detected],
         "flagged_benign": [r.id for r in scored if not r.expect_injection and r.detected],
     }
@@ -315,8 +319,9 @@ async def main_async(args: argparse.Namespace) -> int:
         Path(args.out).write_text(json.dumps(run, indent=2) + "\n")
     if baseline is None:
         return 0
-    if (baseline["split"], baseline.get("votes", 1)) != (run["split"], run["votes"]):
-        print("\nThe baseline ran on another split or vote count: nothing to conclude.")
+    same = ("provider", "model", "split", "votes", "cases")
+    if any(baseline.get(key) != run[key] for key in same):
+        print("\nThe baseline is another judge, split, vote count or set of cases: no verdict.")
         return 2
     reasons = gate(run["measured"], baseline["measured"])
     print("\nGate: " + ("PASS" if not reasons else "FAIL: " + "; ".join(reasons)))

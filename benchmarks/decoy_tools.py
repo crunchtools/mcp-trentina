@@ -155,7 +155,10 @@ async def ask(
             reply = None
         latency = (time.perf_counter() - start) * 1000
         if reply is not None and reply.status_code == HTTP_OK:
-            answer = Answer.of(reply.json(), latency, verdict=schema)
+            try:
+                answer = Answer.of(reply.json(), latency, verdict=schema)
+            except ValueError:
+                answer = None  # a 200 whose body is not JSON: asked again
             if answer is not None:
                 return answer
         await asyncio.sleep(2**attempt)
@@ -216,7 +219,7 @@ def report(cases: list[Case], plain: list[Answer | None], armed: list[Answer | N
 
 async def run(
     cases: list[Case], model: str, concurrency: int, *, one_call: bool
-) -> tuple[list[Any], list[Any]]:
+) -> tuple[list[Answer | None], list[Answer | None]]:
     gate = asyncio.Semaphore(concurrency)
 
     async def one(client: httpx.AsyncClient, case: Case, decoys: bool) -> Answer | None:
