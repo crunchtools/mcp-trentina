@@ -379,6 +379,10 @@ RETRYABLE_MARKERS = (
     "timeout",
     "unavailable",
     "connect",
+    # A provider that ends a completion with an error mid-answer (seen from
+    # OpenRouter as finish_reason "error") leaves JSON that does not parse.
+    # It is the same transient failure as a 503, one layer up.
+    "malformedresponseerror",
 )
 
 
