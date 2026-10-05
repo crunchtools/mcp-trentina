@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import binascii
+import html
 import re
+import urllib.parse
 from dataclasses import dataclass, field
 
 _INSTRUCTION_PATTERN = re.compile(
@@ -40,6 +42,47 @@ class EncodedStats:
     base64_payloads: int = field(default=0)
     hex_payloads: int = field(default=0)
     data_uris: int = field(default=0)
+    escaped_payloads: int = field(default=0)
+
+
+# Percent-encoding, backslash escapes and character references (#363). Each
+# anchor is three ASCII LETTERS in a row written in the encoding. Nothing
+# needs to encode a letter, so three together are someone hiding a word:
+# `%20`, `\\x1b` and `&#8212;` are ordinary and are not letters.
+_LETTER_HEX = r"(?:4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a])"
+_LETTER_DEC = r"(?:6[5-9]|[78][0-9]|90|9[7-9]|1[01][0-9]|12[0-2])"
+_ESCAPED_ANCHORS: tuple[re.Pattern[str], ...] = (
+    re.compile(rf"(?:%{_LETTER_HEX}){{3}}", re.IGNORECASE),
+    re.compile(rf"(?:\\x{_LETTER_HEX}|\\u00{_LETTER_HEX}){{3}}", re.IGNORECASE),
+    re.compile(rf"(?:&#(?:x0{{0,2}}{_LETTER_HEX}|0{{0,2}}{_LETTER_DEC});){{3}}", re.IGNORECASE),
+)
+_BACKSLASH_UNIT = re.compile(r"\\x([0-9a-f]{2})|\\u([0-9a-f]{4})", re.IGNORECASE)
+
+
+def _unescape(line: str) -> str:
+    """``line`` with all three encodings undone, once each."""
+    decoded = urllib.parse.unquote(line, errors="replace")
+    decoded = _BACKSLASH_UNIT.sub(lambda m: chr(int(m.group(1) or m.group(2), 16)), decoded)
+    return html.unescape(decoded)
+
+
+def _escaped_payloads(text: str) -> int:
+    """Lines whose escapes hide an instruction word.
+
+    A line counts when it holds an anchor and decoding it yields MORE matches
+    of ``_INSTRUCTION_PATTERN`` than the line had as written, so the word came
+    out of the encoding. Each line is decoded at most once.
+    """
+    if not any(anchor.search(text) for anchor in _ESCAPED_ANCHORS):
+        return 0
+    found = 0
+    for line in text.split("\n"):
+        if not any(anchor.search(line) for anchor in _ESCAPED_ANCHORS):
+            continue
+        before = len(_INSTRUCTION_PATTERN.findall(line))
+        if len(_INSTRUCTION_PATTERN.findall(_unescape(line))) > before:
+            found += 1
+    return found
 
 
 def _decode_base64_safe(encoded: str) -> str | None:
@@ -95,5 +138,6 @@ def normalize_encoded(
         return match.group(0)
 
     cleaned = _HEX_PATTERN.sub(_replace_hex, cleaned)
+    stats.escaped_payloads = _escaped_payloads(text)
 
     return cleaned, stats

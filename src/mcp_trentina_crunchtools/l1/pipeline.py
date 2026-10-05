@@ -16,10 +16,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from ..unpack.stats import UnpackStats
+from .addressed import AddressedStats, detect_addressed
 from .delimiters import DelimiterStats, normalize_delimiters
 from .directives import DirectiveStats, strip_directives
 from .encoded import EncodedStats, normalize_encoded
 from .exfiltration import ExfiltrationStats, strip_exfiltration
+from .forgery import ForgeryStats, detect_forgery
 from .hidden import HiddenStats, detect_hidden_markup
 from .shadows import ShadowStats
 from .unicode import UnicodeStats, normalize_unicode
@@ -34,14 +36,26 @@ FINDING_NAMES: dict[str, str] = {
     "unicode_bidi_overrides": "bidirectional overrides",
     "unicode_unicode_tags": "Unicode tag characters",
     "unicode_variation_selectors": "variation-selector runs",
+    "unicode_soft_hyphen_words": "words spelled out with soft hyphens between letters",
+    "unicode_fullwidth_runs": "runs of words in fullwidth Latin letters",
+    "unicode_mixed_script_words": "Latin words with Cyrillic or Greek lookalike letters",
     "encoded_base64_payloads": "base64 payloads that decode to text",
     "encoded_hex_payloads": "hex payloads that decode to text",
     "encoded_data_uris": "text data URIs",
+    "encoded_escaped_payloads": (
+        "lines whose percent, backslash or character-reference escapes hide an instruction word"
+    ),
     "exfiltration_exfiltration_urls": "image URLs that could exfiltrate data",
+    "exfiltration_exfiltration_links": "links whose query is built to be filled in with data",
+    "exfiltration_mismatched_links": "links showing one site's URL and going to another",
     "delimiters_llm_delimiters": "LLM chat delimiters",
     "delimiters_custom_patterns": "profile-defined delimiter patterns",
     "directives_directives_detected": "lines matching a known injection directive",
     "directives_evasions_detected": "lines matching one once scrambled, misspelled or spaced out",
+    "directives_ciphered_detected": "lines matching one once read in ROT13 or backwards",
+    "forgery_gateway_verdicts": "lines impersonating this gateway's verdict on the content",
+    "forgery_tool_calls": "tool calls written into the content",
+    "addressed_ai_addressed_lines": "lines addressed to an AI reading the content",
     "shadows_files": "Python files shadowing the standard library",
     "shadows_obfuscated": "of those, files with obfuscated code",
     "unpacked_text_decoded": "encoded spans decoded to text for you to read",
@@ -64,6 +78,8 @@ class PipelineStats:
     exfiltration: ExfiltrationStats = field(default_factory=ExfiltrationStats)
     delimiters: DelimiterStats = field(default_factory=DelimiterStats)
     directives: DirectiveStats = field(default_factory=DirectiveStats)
+    forgery: ForgeryStats = field(default_factory=ForgeryStats)
+    addressed: AddressedStats = field(default_factory=AddressedStats)
     shadows: ShadowStats = field(default_factory=ShadowStats)
     unpacked: UnpackStats = field(default_factory=UnpackStats)
     """Set by ``defense.defend`` from the unpack stage, not by a stage here.
@@ -79,6 +95,8 @@ class PipelineStats:
             ("exfiltration", asdict(self.exfiltration)),
             ("delimiters", asdict(self.delimiters)),
             ("directives", asdict(self.directives)),
+            ("forgery", asdict(self.forgery)),
+            ("addressed", asdict(self.addressed)),
             ("shadows", asdict(self.shadows)),
             ("unpacked", asdict(self.unpacked)),
         ]
@@ -110,8 +128,10 @@ class PipelineStats:
 
         Only categories that signal an actual attack vector count: hidden
         elements, off-screen positioning, same-color text, unicode
-        manipulation, encoded payloads, exfiltration URLs, LLM delimiters and
-        directive injection.
+        manipulation, encoded payloads, exfiltration URLs and fill-in links,
+        LLM delimiters, directive injection, forged verdicts and tool calls,
+        and text addressed to an AI. A link whose text and target disagree is
+        not one: mail trackers do that on every message.
 
         Normal HTML hygiene (comments, scripts, styles, meta, noscript) is
         expected on any website and never counted here. Those counters left
@@ -125,9 +145,12 @@ class PipelineStats:
             + self.hidden.latex_invisible
             + sum(asdict(self.unicode).values())
             + sum(asdict(self.encoded).values())
-            + sum(asdict(self.exfiltration).values())
+            + self.exfiltration.exfiltration_urls
+            + self.exfiltration.exfiltration_links
             + sum(asdict(self.delimiters).values())
             + sum(asdict(self.directives).values())
+            + sum(asdict(self.forgery).values())
+            + sum(asdict(self.addressed).values())
             + self.shadows.files
             + self.shadows.obfuscated
         )
@@ -207,6 +230,8 @@ def _run_stages(content: str, stats: PipelineStats) -> PipelineResult:
     working, stats.exfiltration = strip_exfiltration(working)
     working, stats.delimiters = normalize_delimiters(working)
     _, stats.directives = strip_directives(working)
+    stats.forgery = detect_forgery(working)
+    stats.addressed = detect_addressed(working)
 
     size = len(content.encode("utf-8"))
     return PipelineResult(
