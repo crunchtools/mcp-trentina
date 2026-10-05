@@ -41,6 +41,8 @@ _SIGNATURES: tuple[tuple[bytes, Kind], ...] = (
     (b"PK\x03\x04", Kind("zip archive or office file", extractable=True)),
     (b"\x1f\x8b", Kind("gzip", extractable=True)),
     (b"BZh", Kind("bzip2", extractable=True)),
+    (b"\xfd7zXZ\x00", Kind("xz", extractable=True)),
+    (b"\x28\xb5\x2f\xfd", Kind("zstd", extractable=True)),
     (b"7z\xbc\xaf\x27\x1c", Kind("7z archive", extractable=True)),
     (b"Rar!\x1a\x07", Kind("rar archive", extractable=True)),
     (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", Kind("legacy office file", extractable=True)),
@@ -61,6 +63,11 @@ _SIGNATURES: tuple[tuple[bytes, Kind], ...] = (
     (b"\x30\x82", Kind("DER certificate or key", extractable=False)),
 )
 
+
+TAR = Kind("tar archive", extractable=True)
+TAR_MAGIC_AT = 257
+TAR_MAGIC = b"ustar"
+"""A tar opens with a file name, so its magic sits in the first header block."""
 
 STRONG_PREFIX = 4
 """Signature bytes a short token must match. Two-byte prefixes (``BM``, an
@@ -86,6 +93,8 @@ def identify(decoded: bytes, *, short: bool = False) -> Kind:
     for prefix, kind in _SIGNATURES:
         if decoded.startswith(prefix) and not (short and len(prefix) < STRONG_PREFIX):
             return kind
+    if decoded[TAR_MAGIC_AT : TAR_MAGIC_AT + len(TAR_MAGIC)] == TAR_MAGIC:
+        return TAR
     return _embedded(decoded)
 
 

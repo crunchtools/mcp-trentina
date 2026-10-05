@@ -86,6 +86,7 @@ from petit import pull_identifiers
 from petit.Filter import Filter
 
 from ..channels import Channel, Kind
+from ..unpack.office import reduce_base64
 from .base import Cost, PreProcessContext, PreProcessResult
 
 # The normalization policy, loaded from petit rather than restated here — the
@@ -114,6 +115,11 @@ _SAMPLES_PER_GROUP = 3
 _MAX_STRING_CHARS = 20_000
 
 # How deep to walk before leaving a subtree alone. Hostile JSON nests.
+_MAX_OFFICE_CHARS = 140_000
+"""Base64 characters of an office file stage 1 will open: the unpack
+stage's own token cap, so a file too big for the layers to read whole is
+never reduced into something they can."""
+
 _MAX_DEPTH = 40
 
 _FINGERPRINT_MAX_CHARS = 400
@@ -223,10 +229,41 @@ class _Reducer:
         self.elements_listed = 0
         self.strings_truncated = 0
         self.chars_truncated = 0
+        self.office_converted = 0
+        self.office_hidden = 0
 
     @property
     def changed(self) -> bool:
-        return bool(self.elements_dropped or self.elements_listed or self.strings_truncated)
+        return bool(
+            self.elements_dropped
+            or self.elements_listed
+            or self.strings_truncated
+            or self.office_converted
+        )
+
+    def _office(self, node: str) -> dict[str, str] | None:
+        """A base64 Word, Excel or PowerPoint file as its visible text (#368).
+
+        An office file is a reducer format, as HTML is: the agent asked for
+        a document and gets its text, at a fraction of the tokens. Text the
+        file marks hidden is dropped and counted, and L1 is handed the
+        count. ``trentina_preprocess: false`` keeps the file itself.
+        """
+        reduced = reduce_base64(node, _MAX_OFFICE_CHARS)
+        if reduced is None:
+            return None
+        kind, markdown, hidden = reduced
+        self.office_converted += 1
+        self.office_hidden += hidden
+        return {"format": kind, "as_markdown": markdown}
+
+    def _clipped(self, node: str) -> str:
+        if not self.truncate or len(node) <= _MAX_STRING_CHARS:
+            return node
+        removed = len(node) - _MAX_STRING_CHARS
+        self.strings_truncated += 1
+        self.chars_truncated += removed
+        return node[:_MAX_STRING_CHARS] + _TRUNCATED.format(count=removed)
 
     def walk(self, node: Any, depth: int = 0) -> Any:
         """Reduce arrays and long strings, leaving everything else alone.
@@ -246,12 +283,7 @@ class _Reducer:
             return node
 
         if isinstance(node, str):
-            if not self.truncate or len(node) <= _MAX_STRING_CHARS:
-                return node
-            removed = len(node) - _MAX_STRING_CHARS
-            self.strings_truncated += 1
-            self.chars_truncated += removed
-            return node[:_MAX_STRING_CHARS] + _TRUNCATED.format(count=removed)
+            return self._office(node) or self._clipped(node)
 
         if isinstance(node, dict):
             return {key: self.walk(value, depth + 1) for key, value in node.items()}
@@ -476,5 +508,7 @@ class StructuredProcessor:
                 "elements_listed": reducer.elements_listed,
                 "strings_truncated": reducer.strings_truncated,
                 "chars_truncated": reducer.chars_truncated,
+                "office_converted": reducer.office_converted,
+                "office_hidden": reducer.office_hidden,
             },
         )

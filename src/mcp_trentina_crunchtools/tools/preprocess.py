@@ -29,7 +29,7 @@ from ..errors import PreProcessFailedError
 from ..l1.hidden import detect_hidden_markup
 from ..l1.pipeline import PipelineResult, run_l1
 from ..preprocess import Cost, PreProcessContext, PreProcessResult, run_preprocessors
-from ..preprocess.detect import hiding_briefing, hiding_removed
+from ..preprocess.detect import hiding_briefing, hiding_removed, office_hidden
 from ..preprocess.policy import FAILED_DECLINES, current_preprocess_policy
 
 if TYPE_CHECKING:
@@ -47,10 +47,15 @@ class Prepared:
     provenance: Provenance = Provenance.EXTERNAL  # MODEL_OUTPUT after a METERED rewrite
 
 
-def _l1_with_original_hiding(converted: str, original: str) -> PipelineResult:
-    """L1 over what is delivered, with the hiding counts of what arrived."""
+def _l1_with_original_hiding(converted: str, original: str, office: int) -> PipelineResult:
+    """L1 over what is delivered, with the hiding counts of what arrived.
+
+    ``office`` is the hidden lines stage 1 dropped from office files (#368):
+    they are counted there, since the original holds them as base64.
+    """
     pipeline = run_l1(converted)
     _, pipeline.stats.hidden = detect_hidden_markup(original)
+    pipeline.stats.hidden.elements += office
     return pipeline
 
 
@@ -144,6 +149,8 @@ async def prepare(
 
     removed = hiding_removed(applied)
     if removed is not None:
-        prepared.pipeline = await asyncio.to_thread(_l1_with_original_hiding, final, content)
+        prepared.pipeline = await asyncio.to_thread(
+            _l1_with_original_hiding, final, content, office_hidden(applied)
+        )
         prepared.briefing = hiding_briefing(removed)
     return prepared

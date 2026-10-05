@@ -43,7 +43,7 @@ from ..defense import Provenance
 from ..l1.hidden import HiddenStats, detect_hidden_markup
 from ..logsafe import exc_kind, exc_where, redact_source
 from ..preprocess import PreProcessContext, PreProcessor, Strategy, run_preprocessors
-from ..preprocess.detect import hiding_briefing, hiding_removed
+from ..preprocess.detect import hiding_briefing, hiding_removed, office_hidden
 from ..preprocess.policy import FAILED_DECLINES
 from .backend import loggable_tool
 from .drivers import build_preprocessors
@@ -344,7 +344,7 @@ async def _transform_blocks(
     counts = await asyncio.gather(
         *(asyncio.to_thread(detect_hidden_markup, text) for (_, text), _ in targets)
     )
-    hidden = sum((c for _, c in counts), HiddenStats())
+    hidden = sum((c for _, c in counts), HiddenStats(elements=office_hidden(results)))
     return replace(outcome, hidden=hidden, briefing=hiding_briefing(removed))
 
 

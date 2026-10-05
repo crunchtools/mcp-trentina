@@ -17,3 +17,4 @@ class UnpackStats:
     text_decoded: int = field(default=0)
     binary_labelled: int = field(default=0)
     binary_unread: int = field(default=0)
+    archives_opened: int = field(default=0)
