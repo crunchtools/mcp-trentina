@@ -107,6 +107,21 @@ class MalformedResponseError(QuarantineAgentError):
         super().__init__(f"Malformed provider response: {detail}")
 
 
+class TruncatedResponseError(QuarantineAgentError):
+    """The provider stopped at the output-token cap, so its JSON is cut short.
+
+    Deliberately not a ``MalformedResponseError``: that one is asked again
+    once, and the same request hits the same cap (#358). It carries no
+    status code, so no fallback provider is tried either. A detection turn
+    cut short is ``l3_unavailable`` like any other provider error. Redact
+    reports it as ``t2_truncated``, which tells the caller to ask for less,
+    where ``t2_unavailable`` says try later.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("response cut at the output-token cap")
+
+
 class SearchCanaryLeakedError(QuarantineAgentError):
     """L0 repeated its system prompt's canary: whatever it read steered it.
 

@@ -81,6 +81,8 @@ No payload text and no L3 prose appear in a refusal.
 
 A provider error at turn 2 or 3 refuses. Until 0.31.0 a provider error handed back the raw input labelled as an extraction.
 
+Turn 2 answers the question in `{"redact": "<question>"}`; it does not transcribe the document. Its output is capped at 4,096 tokens (`MAX_OUTPUT_TOKENS`), about 15,000 characters. An extraction that reaches the cap is refused as `redact refused: t2_truncated`, after one provider call: ask a narrower question, or use `block` to read the document itself. `t2_unavailable` is the provider failing, and worth trying again. Until 0.59.1 a capped extraction was reported as `t2_unavailable` after two calls, and turn 2 copied a long document whatever the question was, so a one-line question about a 52 KB text always reached the cap (#358).
+
 ### redact does not invent (0.43.0)
 
 An extraction model asked about a near-empty page answers from its priors. A 23-byte app shell once came back as 90 fluent, fabricated words marked `confidence: "high"` (#245). Two gates stop that:

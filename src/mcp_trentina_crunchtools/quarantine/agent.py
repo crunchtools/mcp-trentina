@@ -30,6 +30,7 @@ from ..errors import (
     MalformedResponseError,
     QuarantineAgentError,
     SearchCanaryLeakedError,
+    TruncatedResponseError,
 )
 from ..l1.pipeline import run_l1
 from ..logsafe import exc_kind
@@ -386,6 +387,8 @@ async def _call_gemini(
     #   owner: quarantine.agent._call_gemini
     #   evidence: T3 #294; T3 CLAUDE.md "No text written by L3 reaches an agent";
     #     T1 json.loads raises ValueError/RecursionError, TypeError on a non-str
+    if provider_result.truncated:
+        raise TruncatedResponseError
     text = provider_result.text
     if not isinstance(text, str):
         raise MalformedResponseError("no text")
@@ -490,7 +493,7 @@ async def quarantine_extract(
     briefing: str | None = None,
     provider_name: str | None = None,
 ) -> dict[str, Any]:
-    """Turn 2: extract from L1's normalized text. Raises on any provider error.
+    """Turn 2: answer the request from the text the layers judged. Raises on any provider error.
 
     There is no fallback. It used to return the raw input as the
     "extraction" when the provider failed, unless QUARANTINE_FALLBACK=fail —
@@ -614,6 +617,9 @@ async def quarantine_redact(
         extraction = await quarantine_extract(
             content, prompt, briefing=extraction_briefing(detection)
         )
+    except TruncatedResponseError:
+        logger.warning("Q-Agent extraction stopped at the output-token cap")
+        return CleanResult(refused_by="t2_truncated")
     except QuarantineAgentError as exc:
         logger.warning("Q-Agent extraction failed: %s", exc_kind(exc))
         return CleanResult(refused_by="t2_unavailable")

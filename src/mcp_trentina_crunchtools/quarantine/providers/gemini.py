@@ -93,6 +93,7 @@ class GeminiProvider(Provider):
                 text=text,
                 input_tokens=count(dig(resp_json, "usageMetadata", "promptTokenCount")),
                 output_tokens=count(dig(resp_json, "usageMetadata", "candidatesTokenCount")),
+                truncated=dig(resp_json, "candidates", 0, "finishReason") == "MAX_TOKENS",
             )
 
         except httpx.HTTPStatusError as exc:

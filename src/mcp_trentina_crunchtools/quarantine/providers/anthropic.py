@@ -96,6 +96,7 @@ class AnthropicProvider(Provider):
                 text=text,
                 input_tokens=count(dig(resp_json, "usage", "input_tokens")),
                 output_tokens=count(dig(resp_json, "usage", "output_tokens")),
+                truncated=dig(resp_json, "stop_reason") == "max_tokens",
             )
 
         except httpx.HTTPStatusError as exc:

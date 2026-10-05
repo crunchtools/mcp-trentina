@@ -78,6 +78,7 @@ class OllamaProvider(Provider):
                 text=text,
                 input_tokens=count(dig(resp_json, "prompt_eval_count")),
                 output_tokens=count(dig(resp_json, "eval_count")),
+                truncated=dig(resp_json, "done_reason") == "length",
             )
 
         except httpx.HTTPStatusError as exc:
