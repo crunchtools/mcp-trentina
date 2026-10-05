@@ -57,6 +57,8 @@ _OFF = frozenset({"0", "false", "off"})
 _BREAKS = frozenset({"p", "br", "cr", "tr", "si", "row", "comment", "sheet", "definedName"})
 _ALT_TEXT = frozenset({"descr", "title", "tooltip"})
 _ALT_HOLDERS = frozenset({"docPr", "cNvPr", "hlinkClick", "hyperlink"})
+_PARAGRAPH = frozenset({"p"})
+_RUN = frozenset({"r"})
 _RUN_TEXT = frozenset({"t", "delText", "instrText"})
 """Elements whose text joins its neighbours' with no space: a word may be
 split across runs."""
@@ -76,10 +78,10 @@ def _forbid(*_args: object) -> None:
     raise _ForbiddenError
 
 
-def parse(data: bytes) -> ET.Element | None:
-    """``data`` as an XML tree, or None when it is not well-formed or has a DTD."""
+def parse(part: bytes) -> ET.Element | None:
+    """``part`` as an XML tree, or None when it is not well-formed or has a DTD."""
     # TRUST: parsing XML nobody has judged yet
-    #   untrusted: all of `data`, a part of a file the payload's author wrote
+    #   untrusted: all of `part`, one file of a package the payload's author wrote
     #   judged-by: nothing here; the text this yields is what the layers read
     #   on-failure: fail-closed: None, and the caller reads the part as raw text
     #   owner: unpack.office.parse
@@ -95,7 +97,7 @@ def parse(data: bytes) -> ET.Element | None:
     parser.EndElementHandler = lambda name: builder.end(_qualified(name))
     parser.CharacterDataHandler = builder.data
     try:
-        parser.Parse(data, True)
+        parser.Parse(part, True)
         return builder.close()
     except (expat.ExpatError, _ForbiddenError, ValueError, LookupError, AssertionError):
         return None
@@ -166,9 +168,7 @@ class _Styles:
     hidden: frozenset[str] = frozenset()
 
     @classmethod
-    def read(cls, root: ET.Element | None) -> _Styles:
-        if root is None:
-            return cls()
+    def read(cls, root: ET.Element) -> _Styles:
         own: dict[str, bool | None] = {}
         based: dict[str, str] = {}
         default = False
@@ -239,14 +239,14 @@ class _Flow:
         return self.text
 
     def _hides(self, element: ET.Element, name: str, inherited: bool) -> bool:
-        if name == "p":
-            return self.forced or _styled(element, "pPr", "pStyle") in self.styles.hidden
-        if name != "r":
-            return inherited
-        said = _switch(_child(element, "rPr"))
-        if said is not None:
-            return self.forced or said
-        return inherited or _styled(element, "rPr", "rStyle") in self.styles.hidden
+        hidden = inherited
+        if name in _PARAGRAPH:
+            hidden = self.forced or _styled(element, "pPr", "pStyle") in self.styles.hidden
+        if name in _RUN:
+            said = _switch(_child(element, "rPr"))
+            styled = _styled(element, "rPr", "rStyle") in self.styles.hidden
+            hidden = (inherited or styled) if said is None else (self.forced or said)
+        return hidden
 
     def _alt_text(self, element: ET.Element, hidden: bool) -> None:
         for key in _ALT_TEXT:
@@ -272,40 +272,43 @@ def _flow(root: ET.Element, styles: _Styles, *, hidden: bool = False) -> Text:
     return _Flow(styles, forced=hidden).read(root)
 
 
-def _cells(root: ET.Element, shared: list[str], used: set[int], *, hidden: bool) -> Text:
-    """A worksheet as one line per row, cells joined by `` | ``."""
-    text = Text()
-    for row in root.iter():
-        if local(row.tag) != "row":
-            continue
-        cells: list[str] = []
-        for cell in row:
-            if local(cell.tag) != "c":
+@dataclass
+class _Workbook:
+    """The shared strings of one workbook, and which of them a cell used."""
+
+    shared: list[str]
+    used: set[int] = field(default_factory=set)
+
+    def sheet(self, root: ET.Element, *, hidden: bool) -> Text:
+        """A worksheet as one line per row, cells joined by `` | ``."""
+        text = Text()
+        for row in root.iter():
+            if local(row.tag) != "row":
                 continue
-            cells.append(_cell(cell, shared, used))
-        row_hidden = hidden or (attr(row, "hidden") or "0").lower() not in _OFF
-        text.add(" | ".join(c for c in cells if c), hidden=row_hidden)
-    return text
+            cells = [self._cell(cell) for cell in row if local(cell.tag) == "c"]
+            row_hidden = hidden or (attr(row, "hidden") or "0").lower() not in _OFF
+            text.add(" | ".join(c for c in cells if c), hidden=row_hidden)
+        return text
 
+    def _cell(self, cell: ET.Element) -> str:
+        """One cell: its value, a shared string looked up, its formula beside it."""
+        parts = {local(child.tag): child for child in cell}
+        value = "" if "v" not in parts else parts["v"].text or ""
+        if "is" in parts:
+            value = "".join(t.text or "" for t in parts["is"].iter() if local(t.tag) == "t")
+        if attr(cell, "t") == "s" and value.strip().isdigit() and int(value) < len(self.shared):
+            self.used.add(int(value))
+            value = self.shared[int(value)]
+        formula = "" if "f" not in parts else parts["f"].text or ""
+        return f"{value} (={formula})" if formula.strip() else value
 
-def _cell(cell: ET.Element, shared: list[str], used: set[int]) -> str:
-    kind = attr(cell, "t") or "n"
-    value = ""
-    formula = ""
-    for child in cell:
-        name = local(child.tag)
-        if name == "v":
-            value = child.text or ""
-        elif name == "f":
-            formula = child.text or ""
-        elif name == "is":
-            value = "".join(t.text or "" for t in child.iter() if local(t.tag) == "t")
-    if kind == "s" and value.strip().isdigit():
-        index = int(value)
-        if index < len(shared):
-            used.add(index)
-            value = shared[index]
-    return f"{value} (={formula})" if formula.strip() else value
+    def unused(self) -> Text:
+        """Shared strings no cell shows: text in the file that no sheet displays."""
+        text = Text()
+        for index, value in enumerate(self.shared):
+            if index not in self.used:
+                text.add(value, hidden=True)
+        return text
 
 
 def _relationships(root: ET.Element | None, base: str) -> tuple[dict[str, str], list[str]]:
@@ -366,22 +369,21 @@ def kind_of(names: Iterable[str]) -> str | None:
     return next((kind for part, kind in _MAIN_PARTS.items() if part in names), None)
 
 
-def read(entries: list[Entry]) -> Reading | None:
-    """Read an opened zip as an office file, or None if it is not one."""
-    files = {e.name: e.data for e in entries if e.data is not None}
-    kind = kind_of(files)
-    if kind is None:
-        return None
+def read(entries: list[Entry], kind: str) -> Reading:
+    """Read an opened zip as the office file ``kind_of`` says it is."""
     trees = {
-        name: tree
-        for name, data in files.items()
-        if name.endswith((".xml", ".rels")) and (tree := parse(data)) is not None
+        e.name: tree
+        for e in entries
+        if e.content is not None
+        and e.name.endswith((".xml", ".rels"))
+        and (tree := parse(e.content)) is not None
     }
     reading = Reading(kind)
     if kind == XLSX:
         _read_xlsx(trees, reading)
     else:
-        styles = _Styles.read(trees.get("word/styles.xml"))
+        sheet = trees.get("word/styles.xml")
+        styles = _Styles() if sheet is None else _Styles.read(sheet)
         for name, tree in trees.items():
             if name.endswith(".rels"):
                 continue
@@ -426,40 +428,40 @@ def _pptx_titles(trees: dict[str, ET.Element]) -> Iterator[tuple[str, str]]:
 
 
 def _read_xlsx(trees: dict[str, ET.Element], reading: Reading) -> None:
-    shared_tree = trees.get("xl/sharedStrings.xml")
-    shared = (
-        []
-        if shared_tree is None
-        else [
+    strings = trees.get("xl/sharedStrings.xml")
+    book = _Workbook(
+        [
             "".join(t.text or "" for t in item.iter() if local(t.tag) == "t")
-            for item in shared_tree.iter()
+            for item in ([] if strings is None else strings.iter())
             if local(item.tag) == "si"
         ]
     )
-    targets, _ = _relationships(trees.get("xl/_rels/workbook.xml.rels"), "xl")
-    sheets: dict[str, tuple[str, bool]] = {}
-    workbook = trees.get("xl/workbook.xml")
-    for sheet in [] if workbook is None else workbook.iter():
-        if local(sheet.tag) == "sheet":
-            part = targets.get(attr(sheet, "id") or "", "")
-            off = (attr(sheet, "state") or "visible").lower() != "visible"
-            sheets[part] = (attr(sheet, "name") or "", off)
-    used: set[int] = set()
-    empty = _Styles()
+    sheets = _sheet_names(trees)
+    plain = _Styles()
     for name, tree in trees.items():
         if name.endswith(".rels") or name == "xl/sharedStrings.xml":
             continue
-        if local(tree.tag) == "worksheet":
-            title, off = sheets.get(name, ("", False))
-            reading.parts[name] = _cells(tree, shared, used, hidden=off)
-            reading.titles.append((name, f"## {' '.join(title.split())}" if title else "## Sheet"))
-        else:
-            reading.parts[name] = _flow(tree, empty)
-    unused = Text()
-    for index, value in enumerate(shared):
-        if index not in used:
-            unused.add(value, hidden=True)
-    reading.parts["xl/sharedStrings.xml"] = unused
+        if local(tree.tag) != "worksheet":
+            reading.parts[name] = _flow(tree, plain)
+            continue
+        title, off = sheets.get(name, ("", False))
+        reading.parts[name] = book.sheet(tree, hidden=off)
+        reading.titles.append((name, f"## {' '.join(title.split()) or 'Sheet'}"))
+    reading.parts["xl/sharedStrings.xml"] = book.unused()
+
+
+def _sheet_names(trees: dict[str, ET.Element]) -> dict[str, tuple[str, bool]]:
+    """``(name, hidden)`` for each worksheet part the workbook lists."""
+    targets, _ = _relationships(trees.get("xl/_rels/workbook.xml.rels"), "xl")
+    workbook = trees.get("xl/workbook.xml")
+    return {
+        targets.get(attr(sheet, "id") or "", ""): (
+            attr(sheet, "name") or "",
+            (attr(sheet, "state") or "visible").lower() != "visible",
+        )
+        for sheet in ([] if workbook is None else workbook.iter())
+        if local(sheet.tag) == "sheet"
+    }
 
 
 ZIP_BASE64_PREFIX = "UEsDB"
@@ -477,14 +479,15 @@ def reduce_base64(token: str, max_chars: int) -> tuple[str, str, int] | None:
     if not token.startswith(ZIP_BASE64_PREFIX) or len(token) > max_chars or len(token) % 4:
         return None
     try:
-        data = base64.b64decode(token, validate=True)
+        packed = base64.b64decode(token, validate=True)
     except (binascii.Error, ValueError):
         return None
-    entries = open_archive(data, ZIP, Budget())
-    if entries is None or any(entry.data is None for entry in entries):
+    entries = open_archive(packed, ZIP, Budget())
+    if entries is None or any(entry.content is None for entry in entries):
         return None
-    reading = read(entries)
-    if reading is None:
+    kind = kind_of(entry.name for entry in entries)
+    if kind is None:
         return None
+    reading = read(entries, kind)
     markdown = reading.markdown()
-    return (reading.kind, markdown, reading.hidden) if markdown else None
+    return (kind, markdown, reading.hidden) if markdown else None

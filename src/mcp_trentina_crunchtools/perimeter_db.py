@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS verdict_cache (
 );
 """
 
-PERIMETER_VERSION = "8"
+PERIMETER_VERSION = "9"
 """Bump whenever a change could alter what a scan CONCLUDES: a new detector, a
 retuned L3 prompt, a different L2 model or threshold set. Rows stamped with any
 other value are swept on load, so an older perimeter's verdict is unusable
@@ -57,6 +57,8 @@ L3 is briefed with L2's result, and warnings carry L3's finding types.
 rates (#350). "6" (0.56.0): L2 reads the arrived bytes once, never L1's copy,
 and L3's briefing names L1's findings by type (#359). "7" (0.57.0): every
 layer reads the delivery unpacked, base64 decoded and binary labelled (#367).
+"8" (0.58.0): the count-only L1 stages of #363. "9" (0.60.0): archives and
+office files are read inside, and their hidden text counted (#368).
 
 The L2 model and its threshold are no longer bumped here: they are an
 operator setting since 0.55.0 (#350), so :func:`perimeter_stamp` carries them."""

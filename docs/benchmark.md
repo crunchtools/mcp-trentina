@@ -444,6 +444,32 @@ spaces decodes to a DER signature and would have been read as
 `(DER certificate or key)`. An image, PDF or archive is labelled
 regardless, because that label is the `binary_unread` refusal.
 
+## Archives and office files (#368)
+
+The unpack stage reads inside zip, tar, gzip, bzip2 and xz archives and
+docx, xlsx and pptx files. What the layers read is a header naming the kind
+and its file count, then each file under a `=== name ===` line. A bracketed
+marker in front of decoded base64 made L2 flag benign text (above), so the
+framing was measured before it shipped. `benchmarks/unpack_archives.py`
+packs every corpus text into each container, unpacks it, and classifies the
+result (2026-10-05, production L2 at 0.7):
+
+| container | benign flagged, of 14 | attacks flagged, of 44 |
+|---|---|---|
+| plain text | 0 | 41 |
+| zip, one text file | 1 | 40 |
+| zip, three text files | 0 | 34 |
+| tar.gz | 0 | 40 |
+| docx | 0 | 38 |
+| xlsx | 0 | 39 |
+| pptx | 0 | 39 |
+
+The framing reads like plain text to L2. The attack column drops as other
+content joins the attack in one window, most with two benign files beside
+it: that is L2 on a document, the same effect as an injection planted in a
+long page (L2 model comparison, above), and L3 reads the whole view. L1
+refused none of the benign rows and nothing was left unread.
+
 ## L1 stage false positives (#363)
 
 `benchmarks/l1_false_positives.py` runs L1 over real text and reports every

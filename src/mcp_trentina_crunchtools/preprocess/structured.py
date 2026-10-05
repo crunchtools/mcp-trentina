@@ -258,8 +258,6 @@ class _Reducer:
         return {"format": kind, "as_markdown": markdown}
 
     def _clipped(self, node: str) -> str:
-        if not self.truncate or len(node) <= _MAX_STRING_CHARS:
-            return node
         removed = len(node) - _MAX_STRING_CHARS
         self.strings_truncated += 1
         self.chars_truncated += removed
@@ -283,7 +281,8 @@ class _Reducer:
             return node
 
         if isinstance(node, str):
-            return self._office(node) or self._clipped(node)
+            long = self.truncate and len(node) > _MAX_STRING_CHARS
+            return self._office(node) or (self._clipped(node) if long else node)
 
         if isinstance(node, dict):
             return {key: self.walk(value, depth + 1) for key, value in node.items()}

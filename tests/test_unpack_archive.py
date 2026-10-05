@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import bz2
 import gzip
+import hashlib
 import io
 import json
 import lzma
@@ -32,6 +33,7 @@ from .test_unpack import _defend
 
 _DIRECTIVE = OWASP_TEST_ATTACKS[0]
 _NOTE = "The maintenance window for the storage cluster is Tuesday at 02:00 UTC."
+_KINDS = {gzip.compress: archive.GZIP, bz2.compress: archive.BZIP2, lzma.compress: archive.XZ}
 _PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 3
 
 
@@ -143,11 +145,9 @@ class TestLimits:
 
     @pytest.mark.parametrize("pack", [gzip.compress, bz2.compress, lzma.compress])
     def test_a_stream_past_the_byte_cap_stays_unread(self, pack) -> None:
-        import hashlib
-
         noise = b"".join(hashlib.sha256(bytes([i])).digest() for i in range(256)).hex().encode()
         data = (noise + b"\n") * (archive.MAX_BYTES // len(noise) + 2)
-        assert open_archive(pack(data), _kind(pack), Budget()) is None
+        assert open_archive(pack(data), _KINDS[pack], Budget()) is None
 
     def test_too_many_files_stays_unread(self) -> None:
         many = zipped({f"f{i}.txt": "x" for i in range(archive.MAX_ENTRIES + 1)})
@@ -168,7 +168,7 @@ class TestLimits:
         for at in _all(bytes(data), b"PK\x03\x04"):
             struct.pack_into("<I", data, at + 22, 5)
         entries = open_archive(bytes(data), archive.ZIP, Budget(bytes_left=1000))
-        assert entries is None or sum(len(e.data or b"") for e in entries) <= 1000
+        assert entries is None or sum(len(e.content or b"") for e in entries) <= 1000
 
     @pytest.mark.parametrize(
         "broken",
@@ -192,15 +192,11 @@ class TestLimits:
         assert time.perf_counter() - start < 2.0
 
 
-def _kind(pack) -> str:
-    return {gzip.compress: archive.GZIP, bz2.compress: archive.BZIP2}.get(pack, archive.XZ)
-
-
-def _all(data: bytes, magic: bytes) -> list[int]:
-    found, at = [], data.find(magic)
+def _all(packed: bytes, magic: bytes) -> list[int]:
+    found, at = [], packed.find(magic)
     while at >= 0:
         found.append(at)
-        at = data.find(magic, at + 1)
+        at = packed.find(magic, at + 1)
     return found
 
 
@@ -233,13 +229,13 @@ class TestBytesNoListingAccountsFor:
 
     @pytest.mark.parametrize("pack", [gzip.compress, bz2.compress, lzma.compress])
     def test_garbage_after_a_stream_ends(self, pack) -> None:
-        assert open_archive(pack(b"listed") + _NOTE.encode(), _kind(pack), Budget()) is None
+        assert open_archive(pack(b"listed") + _NOTE.encode(), _KINDS[pack], Budget()) is None
 
     @pytest.mark.parametrize("pack", [gzip.compress, bz2.compress, lzma.compress])
     def test_a_second_stream_is_read_too(self, pack) -> None:
-        entries = open_archive(pack(b"first ") + pack(_NOTE.encode()), _kind(pack), Budget())
+        entries = open_archive(pack(b"first ") + pack(_NOTE.encode()), _KINDS[pack], Budget())
         assert entries is not None
-        assert entries[0].data == b"first " + _NOTE.encode()
+        assert entries[0].content == b"first " + _NOTE.encode()
 
 
 class TestEntriesThatCannotBeRead:
@@ -259,7 +255,7 @@ class TestEntriesThatCannotBeRead:
             archive_file.writestr("a.txt", _NOTE)
         entries = open_archive(buffer.getvalue(), archive.ZIP, Budget())
         assert entries is not None
-        assert entries[0].data is None
+        assert entries[0].content is None
 
     @pytest.mark.parametrize(
         ("header", "kind"),

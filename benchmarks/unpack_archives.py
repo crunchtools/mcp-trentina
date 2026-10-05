@@ -37,31 +37,27 @@ if TYPE_CHECKING:
 def _tar_gz(text: str) -> bytes:
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
-        data = text.encode()
         info = tarfile.TarInfo("notes/report.txt")
-        info.size = len(data)
-        archive.addfile(info, io.BytesIO(data))
+        info.size = len(text.encode())
+        archive.addfile(info, io.BytesIO(text.encode()))
     return gzip.compress(buffer.getvalue())
 
 
-def _lines(text: str) -> list[str]:
-    return [escape(line) for line in text.splitlines() if line.strip()] or [escape(text)]
-
-
-CONTAINERS: dict[str, Callable[[str], bytes]] = {
-    "zip, one text file": lambda t: zipped({"notes/report.txt": t}),
-    "zip, three text files": lambda t: zipped(
+CONTAINERS: dict[str, Callable[[str, list[str]], bytes]] = {
+    "zip, one text file": lambda text, _: zipped({"notes/report.txt": text}),
+    "zip, three text files": lambda text, _: zipped(
         {
             "README.md": "Build notes for the storage service.",
-            "notes/report.txt": t,
+            "notes/report.txt": text,
             "VERSION": "1.4.2",
         }
     ),
-    "tar.gz": _tar_gz,
-    "docx": lambda t: docx(*(paragraph(run(line)) for line in _lines(t))),
-    "xlsx": lambda t: xlsx({"Sheet1": [[line] for line in _lines(t)]}),
-    "pptx": lambda t: pptx(_lines(t)),
+    "tar.gz": lambda text, _: _tar_gz(text),
+    "docx": lambda _, lines: docx(*(paragraph(run(line)) for line in lines)),
+    "xlsx": lambda _, lines: xlsx({"Sheet1": [[line] for line in lines]}),
+    "pptx": lambda _, lines: pptx(lines),
 }
+"""Each container, built from a text and from its lines escaped for XML."""
 
 
 def _flagged(text: str) -> bool:
@@ -80,13 +76,12 @@ def main() -> int:
         "| container | benign flagged by L2 | attacks flagged by L2 | L1 refuses benign | unread |"
     )
     print("|---|---|---|---|---|")
-    rows: dict[str, Callable[[str], str]] = {"plain text": lambda t: t}
-    rows.update(
-        {
-            name: (lambda t, pack=pack: f"Attachment: {b64(pack(t))}")
-            for name, pack in CONTAINERS.items()
-        }
-    )
+    rows: dict[str, Callable[[str], str]] = {"plain text": lambda text: text}
+    for container, pack in CONTAINERS.items():
+        rows[container] = lambda text, pack=pack: (
+            "Attachment: "
+            + b64(pack(text, [escape(line) for line in text.splitlines() if line.strip()]))
+        )
     for name, build in rows.items():
         views = {text: unpack(build(text)) for text in (*benign, *attacks)}
         unread = sum(bool(view.unread) for view in views.values())

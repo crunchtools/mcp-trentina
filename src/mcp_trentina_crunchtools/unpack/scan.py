@@ -22,6 +22,11 @@ What becomes of a token:
   (``benchmarks/l2_blob_length.py``), blobs from 64 characters up are where
   L2 starts reacting: a 64-character integrity hash scored 0.92, an SSH
   public key 0.99. A 44-character key in a config scored 0.47.
+* **It decodes to an archive or an office file** (#368): the layers read
+  what is inside. ``archive.py`` opens zip, tar, gzip, bzip2 and xz within
+  limits; each file is then read by these same rules, an office part as its
+  text (``office.py``). One that does not open, or breaks a limit, falls to
+  the next case and is labelled unread.
 * **Anything else stays verbatim:** short binary, hex digests up to SHA-512's
   128 characters, and runs that decode to binary but read like words, such
   as a URL path or a run of ``x``.
@@ -252,7 +257,8 @@ def _opened(kind: Kind, decoded: bytes, state: _Pass) -> str | None:
     if entries is None:
         return None
     state.stats.archives_opened += 1
-    reading = office.read(entries) if kind.name == ZIP else None
+    office_kind = office.kind_of(e.name for e in entries) if kind.name == ZIP else None
+    reading = office.read(entries, office_kind) if office_kind else None
     if reading is not None:
         state.hidden += reading.hidden
     name = reading.kind if reading is not None else _ARCHIVE_NAMES.get(kind.name, kind.name)
@@ -271,23 +277,23 @@ def _opened(kind: Kind, decoded: bytes, state: _Pass) -> str | None:
 
 def _entry(entry: Entry, reading: office.Reading | None, state: _Pass) -> str:
     """What the layers read for one file of an archive. Empty for an empty file."""
-    if entry.data is None:
+    if entry.content is None:
         state.stats.binary_labelled += 1
         state.stats.binary_unread += 1
         state.unread.add(ENCRYPTED_ENTRY)
         return f"({entry.unread}, not read)"
     if reading is not None and entry.name in reading.parts:
         return reading.parts[entry.name].all()
-    if not entry.data:
+    if not entry.content:
         return ""
-    text = _file_text(entry.data)
+    text = _file_text(entry.content)
     if text is not None:
         # One more level: a base64 token in a file inside an archive is decoded.
         return _unpack(text, MAX_DEPTH - 1, state)
-    kind = identify(entry.data)
+    kind = identify(entry.content)
     if kind.extractable:
-        return _opened(kind, entry.data, state) or _label(kind, entry.data, state)
-    return _labelled_with_strings(kind, entry.data, state)
+        return _opened(kind, entry.content, state) or _label(kind, entry.content, state)
+    return _labelled_with_strings(kind, entry.content, state)
 
 
 _BOMS = (
@@ -301,7 +307,7 @@ TEXT_SHARE = 0.95
 """Share of a file's characters that must be printable for it to be text."""
 
 
-def _file_text(data: bytes) -> str | None:
+def _file_text(raw: bytes) -> str | None:
     """A file's bytes as text when a text editor would show them as text.
 
     UTF-8 first; then a byte-order mark's encoding; then Latin-1, which
@@ -310,15 +316,15 @@ def _file_text(data: bytes) -> str | None:
     file, not guessed at from a run of base64 characters.
     """
     for bom, encoding in _BOMS:
-        if data.startswith(bom):
+        if raw.startswith(bom):
             try:
-                return data.decode(encoding)
+                return raw.decode(encoding)
             except UnicodeDecodeError:
                 return None
     try:
-        text = data.decode("utf-8")
+        text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        text = data.decode("latin-1")
+        text = raw.decode("latin-1")
     printable = sum(c.isprintable() or c in "\n\r\t" for c in text)
     return text if printable >= TEXT_SHARE * len(text) else None
 
