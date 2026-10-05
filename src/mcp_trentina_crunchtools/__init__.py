@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.58.0"
+__version__ = "0.59.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -296,12 +296,13 @@ def _ready_to_serve(llm_providers: Mapping[str, Any]) -> None:
     """
     from .gateway.envscrub import scrub_startup_secrets
     from .gateway.loader import secret_env_names
-    from .posture import FILE_FORM_SECRETS, check_secret_sources
+    from .posture import FILE_FORM_SECRETS, check_l2_gate, check_secret_sources
 
     # Before the scrub, which reads nothing back, and after every secret has
     # been read, so the names are complete.
     check_secret_sources(secret_env_names() - set(FILE_FORM_SECRETS))
     _warm_classifier()
+    check_l2_gate()
     scrub_startup_secrets(provider.api_key_env for provider in llm_providers.values())
 
 

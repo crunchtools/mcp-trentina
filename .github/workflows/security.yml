@@ -104,7 +104,7 @@ jobs:
 
       - name: Build container image
         run: |
-          docker build -f Containerfile --build-arg HF_TOKEN=${{ secrets.HF_TOKEN }} -t mcp-trentina:scan .
+          docker build -f Containerfile -t mcp-trentina:scan .
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master

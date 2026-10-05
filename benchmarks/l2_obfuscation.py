@@ -14,66 +14,39 @@ plain. Exit 1 on any failure, so a model that a trick blinds is rejected at
 selection.
 
     CLASSIFIER_MODEL_PATH=<export> uv run python benchmarks/l2_obfuscation.py
+
+``--record`` writes the result into the model's ``trentina-model.json``. The
+image build runs it for every model it ships and fails on a failing one
+(#362); the gateway warns at startup about a model with no passing record.
+The transforms themselves live in ``quarantine/obfuscation.py``.
 """
 
 from __future__ import annotations
 
 import argparse
-import base64
+import json
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from mcp_trentina_crunchtools.config import get_config
 from mcp_trentina_crunchtools.quarantine.classifier import (
+    MANIFEST_FILE,
     classify,
     is_classifier_available,
 )
+from mcp_trentina_crunchtools.quarantine.obfuscation import (
+    GATE_KEY,
+    GATE_MAX_DROP,
+    TRANSFORMS,
+    run_gate,
+)
 from tests.adversarial_corpus import CORPUS
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-_ZW = "\u200b"
-
-
-def _zw_every_letter(s: str) -> str:
-    return " ".join(_ZW.join(w) for w in s.split(" "))
-
-
-def _zw_mid_word(s: str) -> str:
-    return " ".join(
-        w[: len(w) // 2] + _ZW + w[len(w) // 2 :] if len(w) > 3 else w for w in s.split(" ")
-    )
-
-
-def _soft_hyphens(s: str) -> str:
-    return " ".join("\u00ad".join(w) for w in s.split(" "))
-
-
-def _fullwidth(s: str) -> str:
-    return "".join(chr(ord(c) + 0xFEE0) if "!" <= c <= "~" else c for c in s)
-
-
-def _base64(s: str) -> str:
-    return "Note: " + base64.b64encode(s.encode()).decode()
-
-
-def _tag_chars(s: str) -> str:
-    return "".join(chr(0xE0000 + ord(c)) if " " <= c <= "~" else c for c in s)
-
-
-TRANSFORMS: dict[str, Callable[[str], str]] = {
-    "zero-width, every letter": _zw_every_letter,
-    "zero-width, mid-word": _zw_mid_word,
-    "soft hyphens": _soft_hyphens,
-    "fullwidth": _fullwidth,
-    "base64": _base64,
-    "Unicode tag characters": _tag_chars,
-}
+__all__ = ["TRANSFORMS", "main"]
 
 
 def _detected(text: str) -> bool:
@@ -86,8 +59,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--max-drop",
         type=int,
-        default=1,
-        help="detections a transform may lose against plain (default 1)",
+        default=GATE_MAX_DROP,
+        help=f"detections a transform may lose against plain (default {GATE_MAX_DROP})",
+    )
+    parser.add_argument(
+        "--record",
+        action="store_true",
+        help=f"write the result into the model's {MANIFEST_FILE}, pass or fail",
     )
     args = parser.parse_args(argv)
     if not is_classifier_available():
@@ -95,18 +73,25 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     attacks = [c.payload for c in CORPUS if c.expect_injection]
-    plain = sum(_detected(a) for a in attacks)
+    record = run_gate(attacks, _detected, args.max_drop)
+    plain = record["plain"]
     print(f"{len(attacks)} attacks; plain: {plain} detected\n")
     print("| transform | detected | vs plain | |\n|---|---|---|---|")
-    failed = False
-    for name, transform in TRANSFORMS.items():
-        hits = sum(_detected(transform(a)) for a in attacks)
-        ok = plain - hits <= args.max_drop
-        failed |= not ok
-        print(
-            f"| {name} | {hits}/{len(attacks)} | {hits - plain:+d} | {'pass' if ok else 'FAIL'} |"
-        )
-    return 1 if failed else 0
+    for name, hits in record["transforms"].items():
+        verdict = "pass" if plain - hits <= args.max_drop else "FAIL"
+        print(f"| {name} | {hits}/{len(attacks)} | {hits - plain:+d} | {verdict} |")
+    if args.record:
+        _write_record(record)
+    return 0 if record["passed"] else 1
+
+
+def _write_record(record: dict[str, object]) -> None:
+    """Add the record to the manifest beside the loaded model, creating it if absent."""
+    path = Path(get_config().classifier_model_path) / MANIFEST_FILE
+    manifest = json.loads(path.read_text()) if path.is_file() else {}
+    manifest[GATE_KEY] = record
+    path.write_text(json.dumps(manifest, indent=2) + "\n")
+    print(f"\nrecorded in {path}")
 
 
 if __name__ == "__main__":

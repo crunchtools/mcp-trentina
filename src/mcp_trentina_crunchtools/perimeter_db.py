@@ -63,7 +63,7 @@ operator setting since 0.55.0 (#350), so :func:`perimeter_stamp` carries them.""
 
 
 def perimeter_stamp() -> str:
-    """``PERIMETER_VERSION`` plus the L2 model, revision, threshold and polarity.
+    """``PERIMETER_VERSION`` plus the L2 model, revision, threshold, polarity and gate.
 
     Switching ``CLASSIFIER_MODEL`` or ``CLASSIFIER_THRESHOLD`` changes what a
     scan concludes as surely as a code change does, so a verdict reached under
@@ -82,7 +82,7 @@ def perimeter_stamp() -> str:
     polarity = ",".join(str(i) for i in model.malicious)
     return (
         f"{PERIMETER_VERSION}:{model.id}@{model.revision or 'unpinned'}"
-        f":{model.threshold:g}:{polarity}"
+        f":{model.threshold:g}:{polarity}:gate-{model.gate}"
     )
 
 

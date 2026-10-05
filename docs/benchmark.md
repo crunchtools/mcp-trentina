@@ -301,6 +301,19 @@ CLASSIFIER_MODEL_PATH=<export> uv run python benchmarks/l2_obfuscation.py
 Prompt Guard 2's failures are why L2 used to read L1's normalized copy as
 well. Horizon needs no such help, and the second pass was retired.
 
+Since 0.59.0 the gate is enforced, not advisory (#362). `--record` writes
+the result into the model's `trentina-model.json`:
+
+```bash
+CLASSIFIER_MODEL_PATH=<export> uv run python benchmarks/l2_obfuscation.py --record
+```
+
+The image build runs that against the model it ships and stops on a
+failure. The gateway reads the record at startup and names a model without
+a passing one (`l2_obfuscation_gate_failed`, `l2_obfuscation_gate_unrecorded`);
+`TRENTINA_REQUIRE_HARDENED` turns that into a refusal to start. Prompt Guard
+2 no longer ships in the image.
+
 ## L1 briefing ablation
 
 L1 reaches the verdict two ways: its own refusal at high or critical

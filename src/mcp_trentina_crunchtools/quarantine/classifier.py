@@ -26,6 +26,7 @@ from typing import Any
 
 from ..config import DEFAULT_CLASSIFIER_THRESHOLD, get_config, int_env
 from ..errors import UnscannableContentError
+from .obfuscation import gate_state
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,7 @@ class ModelInfo:
     malicious: tuple[int, ...]  # output indices whose probabilities sum to the score
     source: str = ""
     license: str = ""
+    gate: str = "unrecorded"  # obfuscation gate: passed, failed or unrecorded (#362)
 
 
 def resolve_model(model_path: str, threshold_override: float | None = None) -> ModelInfo:
@@ -157,6 +159,7 @@ def resolve_model(model_path: str, threshold_override: float | None = None) -> M
         malicious=malicious,
         source=str(manifest.get("source", "")),
         license=str(manifest.get("license", "")),
+        gate=gate_state(manifest),
     )
 
 
@@ -253,11 +256,12 @@ def is_classifier_available() -> bool:
         _check_output_width(_session, _model)
         _loaded = True
         logger.info(
-            "Layer 2 classifier loaded from %s: %s@%s, threshold %.2f",
+            "Layer 2 classifier loaded from %s: %s@%s, threshold %.2f, obfuscation gate %s",
             model_path,
             _model.id,
             _model.revision or "unpinned",
             _model.threshold,
+            _model.gate,
         )
     except Exception:
         logger.warning(  # logsafe: ours — loading the operator's model

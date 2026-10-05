@@ -6,16 +6,10 @@
 # .github/workflows/container.yml builds and pushes quay.io/crunchtools/mcp-trentina.
 # Do NOT build this image by hand — building outside the pipeline causes drift.
 #
-# The model-builder stage below needs HF_TOKEN to reach the GATED Meta Prompt Guard
-# repo (one of the two L2 models; the default, Horizon-Labs', is ungated). That credential belongs in GitHub secrets and nowhere else; it must never be
-# copied to a workstation, because no local build path legitimately needs it.
-#
-# GitHub keeps Actions secrets and Dependabot secrets in SEPARATE stores, and a run
-# triggered by Dependabot reads only the Dependabot store. HF_TOKEN must therefore
-# exist in BOTH, or every dependency-update PR fails right here with a 401 on a gated
-# repo while main stays green. Symptom to look for in the log: `--build-arg HF_TOKEN=`
-# with nothing after the `=`. On crunchtools the Dependabot secret must be set at REPO
-# level; an org-level Dependabot secret did not reach the build.
+# No build secret is needed: the one L2 model the image ships is ungated.
+# Until 0.59.0 it also shipped Meta's gated Prompt Guard 2, which took an
+# HF_TOKEN build argument; that model fails the obfuscation gate below and
+# was dropped (#362).
 #
 # Run (Streamable HTTP on port 8019):
 #   podman run --rm \
@@ -52,11 +46,11 @@ RUN pip install --no-cache-dir \
     transformers \
     sentencepiece
 
-# Both L2 models, each exported to ONNX from a PINNED revision of its
-# safetensors, with the trentina-model.json manifest the classifier reads
-# for its identity, polarity and threshold (#350). CLASSIFIER_MODEL picks one.
-# Bumping a revision is a model change: re-run the L2 benchmark and update
-# the expectations in tests/test_l2_integration.py.
+# The L2 model, exported to ONNX from a PINNED revision of its safetensors,
+# with the trentina-model.json manifest the classifier reads for its
+# identity, polarity and threshold (#350). Bumping the revision is a model
+# change: re-run the L2 benchmark and update the expectations in
+# tests/test_l2_integration.py.
 COPY scripts/export_l2_model.py /usr/local/bin/export_l2_model.py
 
 # Default: Horizon-Labs/prompt-injection-guard-small (Apache-2.0, ungated).
@@ -69,19 +63,6 @@ RUN python /usr/local/bin/export_l2_model.py \
       --license Apache-2.0 \
       --threshold 0.7 \
       --malicious-labels INJECTION
-
-# Llama Prompt Guard 2 86M. Gated: requires HF_TOKEN. Its config.json names
-# no labels, so the manifest names the malicious output by index.
-ARG HF_TOKEN
-ARG PG2_REVISION=a8ded8e697ce7c355e395a0df51f94adb4a2fd27
-RUN HF_TOKEN="${HF_TOKEN}" python /usr/local/bin/export_l2_model.py \
-      --repo meta-llama/Llama-Prompt-Guard-2-86M \
-      --revision "${PG2_REVISION}" \
-      --out /models/prompt-guard-2-86m \
-      --id prompt-guard-2-86m \
-      --license "Llama 4 Community License Agreement" \
-      --threshold 0.5 \
-      --malicious-indices 1
 
 # ============================================================
 # Stage 2: pip install (builder variant — has shell for RUN)
@@ -131,6 +112,23 @@ RUN pip install --no-cache-dir uv \
 RUN tr -d - < /proc/sys/kernel/random/uuid > /etc/machine-id.seed
 
 # ============================================================
+# Stage 2b: the L2 obfuscation gate (#362)
+# The Layer contract makes reading through obfuscation the model's job, so
+# the build proves it: every corpus attack is classified plain and under six
+# transforms by the classifier code this image runs, and the result is
+# written into the model's manifest. A model that fails stops the build
+# here. The gateway warns at startup about a model with no passing record
+# and refuses to start on one under TRENTINA_REQUIRE_HARDENED.
+# ============================================================
+FROM pip-builder AS l2-gate
+COPY --from=model-builder /models/ /models/
+COPY benchmarks/l2_obfuscation.py /gate/benchmarks/l2_obfuscation.py
+COPY tests/adversarial_corpus.py /gate/tests/adversarial_corpus.py
+RUN cd /gate \
+ && ORT_DISABLE_TELEMETRY=1 CLASSIFIER_MODEL_PATH=/models/prompt-injection-guard-small \
+    python benchmarks/l2_obfuscation.py --record
+
+# ============================================================
 # Stage 3: Runtime image (distroless — no shell, no dnf)
 # ============================================================
 FROM quay.io/hummingbird/python:latest
@@ -152,9 +150,6 @@ LABEL name="mcp-trentina-crunchtools" \
       org.opencontainers.image.source="https://github.com/crunchtools/mcp-trentina" \
       org.opencontainers.image.description="MCP gateway for AI agents: injection defense, token savings, policy and auth" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later" \
-      com.meta.llama.built-with="Built with Llama" \
-      com.meta.llama.model="Llama-Prompt-Guard-2-86M" \
-      com.meta.llama.license="Llama 4 Community License Agreement" \
       com.crunchtools.l2.default="Horizon-Labs/prompt-injection-guard-small (Apache-2.0)"
 
 WORKDIR /app
@@ -162,10 +157,9 @@ WORKDIR /app
 # Copy libstdc++ from model-builder — required by onnxruntime/numpy C extensions
 COPY --from=model-builder /usr/lib64/libstdc++.so.6* /usr/lib64/
 
-# Copy ONNX model files from model-builder (no PyTorch in final image).
-# Both L2 models ship; CLASSIFIER_MODEL selects one (#350).
-COPY --from=model-builder /models/prompt-injection-guard-small/ /models/prompt-injection-guard-small/
-COPY --from=model-builder /models/prompt-guard-2-86m/ /models/prompt-guard-2-86m/
+# The ONNX model, from the gate stage: its manifest carries the gate record.
+# No PyTorch in the final image.
+COPY --from=l2-gate /models/prompt-injection-guard-small/ /models/prompt-injection-guard-small/
 
 # Copy installed Python packages from pip-builder (pure Python + native C extensions)
 COPY --from=pip-builder /usr/lib/python3.14/site-packages/ /usr/lib/python3.14/site-packages/

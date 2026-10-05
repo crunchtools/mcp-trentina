@@ -169,7 +169,7 @@ jobs:
 
       - name: Build container image
         run: |
-          docker build -f Containerfile --build-arg HF_TOKEN=${{ secrets.HF_TOKEN }} -t mcp-trentina:test .
+          docker build -f Containerfile -t mcp-trentina:test .
 
       - name: Verify container starts
         run: |
@@ -205,7 +205,7 @@ jobs:
       # always skip, and one went stale under the 0.55.0 default (#353).
       - name: Run L2 integration tests in container
         run: |
-          for model in prompt-injection-guard-small prompt-guard-2-86m; do
+          for model in prompt-injection-guard-small; do
             echo "::group::L2 integration: $model"
             docker run --rm \
               --entrypoint python \
