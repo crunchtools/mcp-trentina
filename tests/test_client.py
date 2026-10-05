@@ -56,17 +56,6 @@ class TestContentTypeAllowlist:
     """Only text-shaped bodies reach the defense pipeline."""
 
     @pytest.mark.asyncio
-    async def test_pdf_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The exact shape that took the host down."""
-        state = mock_http(monkeypatch, content_type="application/pdf", body=b"%PDF-1.7")
-
-        with pytest.raises(UnsupportedContentTypeError) as exc:
-            await fetch_url("https://example.com/report.pdf")
-
-        assert "application/pdf" in str(exc.value)
-        assert state["body_read"] is False, "PDF body should never be downloaded"
-
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "content_type",
         [

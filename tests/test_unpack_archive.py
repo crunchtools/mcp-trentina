@@ -21,7 +21,7 @@ import pytest
 
 from mcp_trentina_crunchtools.l1.pipeline import run_l1
 from mcp_trentina_crunchtools.preprocess.base import PreProcessContext
-from mcp_trentina_crunchtools.preprocess.detect import hiding_removed, office_hidden
+from mcp_trentina_crunchtools.preprocess.detect import document_hidden, hiding_removed
 from mcp_trentina_crunchtools.preprocess.structured import StructuredProcessor
 from mcp_trentina_crunchtools.unpack import archive, office
 from mcp_trentina_crunchtools.unpack.archive import Budget, open_archive
@@ -496,6 +496,37 @@ class TestOfficeFiles:
         assert _NOTE in view.text, "the layers still read it"
         assert view.hidden == 1
 
+    def test_a_chart_a_shown_sheet_also_uses_stays_visible(self) -> None:
+        from .office_files import CONTENT_TYPES, A, R, S
+
+        sheets = "".join(
+            f'<sheet name="{name}" sheetId="{n}"{state} r:id="rId{n}"/>'
+            for n, (name, state) in enumerate([("Shown", ""), ("Scratch", ' state="hidden"')], 1)
+        )
+        to_drawing = (
+            '<Relationships><Relationship Id="rId1" Target="../drawings/drawing1.xml"/>'
+            "</Relationships>"
+        )
+        book = zipped(
+            {
+                "[Content_Types].xml": CONTENT_TYPES,
+                "xl/workbook.xml": f'<workbook xmlns="{S}" xmlns:r="{R}"><sheets>{sheets}'
+                "</sheets></workbook>",
+                "xl/_rels/workbook.xml.rels": "<Relationships>"
+                '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/>'
+                '<Relationship Id="rId2" Target="worksheets/sheet2.xml"/></Relationships>',
+                "xl/worksheets/sheet1.xml": f'<worksheet xmlns="{S}"/>',
+                "xl/worksheets/sheet2.xml": f'<worksheet xmlns="{S}"/>',
+                "xl/worksheets/_rels/sheet1.xml.rels": to_drawing,
+                "xl/worksheets/_rels/sheet2.xml.rels": to_drawing,
+                "xl/drawings/drawing1.xml": f'<d xmlns:a="{A}"><a:p><a:r><a:t>Uptime by region'
+                "</a:t></a:r></a:p></d>",
+            }
+        )
+        reduced = office.reduce_base64(b64(book), 140_000)
+        assert reduced is not None
+        assert (reduced[1], reduced[2]) == ("## Other text\n\nUptime by region", 0)
+
     def test_a_chart_a_shown_slide_also_uses_stays_visible(self) -> None:
         from .office_files import CONTENT_TYPES, A, P
 
@@ -620,7 +651,7 @@ class TestStageOneReducer:
             details={"office_converted": 1, "office_hidden": 3},
         )
         assert hiding_removed([applied]) == 3
-        assert office_hidden([applied]) == 3
+        assert document_hidden([applied]) == 3
         clean = PreProcessResult(
             name="structured", cost=Cost.FREE, content="{}", applied=True, bytes_in=10, bytes_out=2
         )

@@ -29,7 +29,7 @@ from ..errors import PreProcessFailedError
 from ..l1.hidden import detect_hidden_markup
 from ..l1.pipeline import PipelineResult, run_l1
 from ..preprocess import Cost, PreProcessContext, PreProcessResult, run_preprocessors
-from ..preprocess.detect import hiding_briefing, hiding_removed, office_hidden
+from ..preprocess.detect import document_hidden, hiding_briefing, hiding_removed
 from ..preprocess.policy import FAILED_DECLINES, current_preprocess_policy
 
 if TYPE_CHECKING:
@@ -150,7 +150,7 @@ async def prepare(
     removed = hiding_removed(applied)
     if removed is not None:
         prepared.pipeline = await asyncio.to_thread(
-            _l1_with_original_hiding, final, content, office_hidden(applied)
+            _l1_with_original_hiding, final, content, document_hidden(applied)
         )
         prepared.briefing = hiding_briefing(removed)
     return prepared

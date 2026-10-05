@@ -48,6 +48,7 @@ from ..channels import Channel, Kind
 from .base import Cost, PreProcessContext, PreProcessor, PreProcessResult
 from .email import EmailProcessor
 from .html import HtmlProcessor
+from .pdf import PDF_BASE64_PREFIX, PdfProcessor, is_pdf_type
 from .petit import PetitProcessor
 from .policy import FAILED_DECLINES
 from .structured import StructuredProcessor
@@ -61,6 +62,7 @@ _HTML_TYPES = frozenset({"text/html", "application/xhtml+xml"})
 # a hostile payload must not buy a scan of megabytes.
 _SNIFF_CHARS = 65_536
 
+_PDF_SNIFF = 64
 _MIN_TAGS = 3
 
 # A tag name right after `<` or `</`, and the character after it. Linear: one
@@ -100,6 +102,7 @@ class Format(str, Enum):
 
     HTML = "html"
     JSON = "json"
+    PDF = "pdf"
     TEXT = "text"
 
 
@@ -137,6 +140,12 @@ def _looks_like_html(text: str) -> bool:
     return len(tags) >= _MIN_TAGS
 
 
+def _is_one_pdf(text: str) -> bool:
+    """One base64 token that opens as a PDF: a tool that returned the file itself."""
+    head = text[:_PDF_SNIFF].lstrip()
+    return head.startswith(PDF_BASE64_PREFIX) and not any(c.isspace() for c in text.strip())
+
+
 def _is_json(text: str) -> bool:
     """Bracketed at both ends. ``structured`` parses it once and says if it was wrong."""
     stripped = text.strip()
@@ -147,6 +156,8 @@ def detect(text: str, content_type: str | None = None) -> Format:
     """Which path a payload takes. Declared HTML wins; the sniff is strict."""
     if is_html_type(content_type):
         return Format.HTML
+    if is_pdf_type(content_type) or _is_one_pdf(text):
+        return Format.PDF
     if _is_json(text):
         return Format.JSON
     if _looks_like_html(text):
@@ -157,6 +168,7 @@ def detect(text: str, content_type: str | None = None) -> Format:
 _CHAINS: dict[Format, tuple[PreProcessor, ...]] = {
     Format.HTML: (HtmlProcessor(), PetitProcessor()),
     Format.JSON: (StructuredProcessor(),),
+    Format.PDF: (PdfProcessor(),),
     Format.TEXT: (EmailProcessor(), PetitProcessor()),
 }
 
@@ -228,15 +240,17 @@ _HIDING_DETAILS = (
     "same_color_text",
     "template_tags",
     "office_hidden",
+    "pdf_hidden",
 )
+_CONVERTED_DETAILS = ("office_converted", "pdf_converted")
 
 
 def _converted(result: PreProcessResult) -> bool:
-    """Whether a result deleted markup or converted an office file (#368),
-    directly or inside ``detect``."""
+    """Whether a result deleted markup or converted an office file or a PDF
+    (#368, #369), directly or inside ``detect``."""
     if not result.applied:
         return False
-    if int(result.details.get("office_converted", 0)):
+    if any(int(result.details.get(key, 0)) for key in _CONVERTED_DETAILS):
         return True
     return result.name == "html" or "html" in str(result.details.get("chain", "")).split(",")
 
@@ -253,13 +267,18 @@ def hiding_removed(results: Sequence[PreProcessResult]) -> int | None:
     return sum(int(r.details.get(k, 0)) for r in converted for k in _HIDING_DETAILS)
 
 
-def office_hidden(results: Sequence[PreProcessResult]) -> int:
-    """Lines an office file marked hidden that its conversion dropped (#368).
+def document_hidden(results: Sequence[PreProcessResult]) -> int:
+    """Hidden text that converting an office file or a PDF dropped (#368, #369).
 
     ``detect_hidden_markup`` cannot recount these from the original, which is
     a base64 token, so the count stage 1 took is what L1 is handed.
     """
-    return sum(int(r.details.get("office_hidden", 0)) for r in results if r.applied)
+    return sum(
+        int(r.details.get(key, 0))
+        for r in results
+        if r.applied
+        for key in ("office_hidden", "pdf_hidden")
+    )
 
 
 def hiding_briefing(removed: int) -> str | None:
@@ -267,7 +286,8 @@ def hiding_briefing(removed: int) -> str | None:
     if not removed:
         return None
     return (
-        f"This content was converted from HTML or an office file to Markdown before judging, and "
+        f"This content was converted from HTML, an office file or a PDF to Markdown before "
+        f"judging, and "
         f"the conversion removed {removed} element(s) hidden from a human "
         f"reader, so you are not reading all of the original. Hiding text is "
         f"a common way to address an agent without the reader noticing."

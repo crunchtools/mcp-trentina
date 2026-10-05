@@ -66,7 +66,7 @@ The defense-in-depth approach means an attack has to evade three fundamentally d
 
 Four rules shape every layer, and any change to a layer is held to them. `tests/test_layer_contract.py` enforces the first two.
 
-1. **Nothing is delivered that the layers did not read, in its original or decoded form, or, for binary, by its identified type. Each layer reads it exactly once.** Pre-processing is two stages, always in this order (#365). Stage 1, the pre-processors, shrinks what will be delivered. Stage 2, the unpack stage (`unpack/scan.py`), builds what the layers read from that delivery: strict base64 and hex that decode to text are decoded in place, archives and office files are opened and their files read (#368), and other binary is labelled by its signature, `(image/png, 1.1 KB, not read)`. The delivery itself is never changed. L1 and L2 run in parallel on the unpacked text, and L3 reads it after both. Redact's checks on turn 2's output follow the same rule: L1 and L2 read each output string once, unpacked. Binary an agent could open and no layer can read yet (an image, a PDF, an archive this stage does not open) is the `binary_unread` gap: block and redact refuse it, and offer `flag`.
+1. **Nothing is delivered that the layers did not read, in its original or decoded form, or, for binary, by its identified type. Each layer reads it exactly once.** Pre-processing is two stages, always in this order (#365). Stage 1, the pre-processors, shrinks what will be delivered. Stage 2, the unpack stage (`unpack/scan.py`), builds what the layers read from that delivery: strict base64 and hex that decode to text are decoded in place, archives, office files and PDFs are opened and read inside (#368, #369), and other binary is labelled by its signature, `(image/png, 1.1 KB, not read)`. The delivery itself is never changed. L1 and L2 run in parallel on the unpacked text, and L3 reads it after both. Redact's checks on turn 2's output follow the same rule: L1 and L2 read each output string once, unpacked. Binary an agent could open and no layer can read yet (an image, a PDF, an archive this stage does not open) is the `binary_unread` gap: block and redact refuse it, and offer `flag`.
 2. **Layers share findings, never inputs.** L1's counts by type and L2's label and score reach L3's briefing as structure: fixed names and numbers, never payload text. No layer reads text that another layer produced.
 3. **A layer's weakness is fixed inside that layer or at model selection.** The fix is a better model, a new L1 stage, or the obfuscation gate, which rejects a model a trick can blind: the image build runs it, and the gateway checks its record at startup (`benchmarks/l2_obfuscation.py`, #362). The pipeline never gets an extra pass, a second input, or a reshaped copy to compensate.
 4. **Read time is linear in payload size, one pass per layer.** The admission cap (`CLASSIFIER_MAX_TOKENS`) is sized on that: 32K tokens is about 23 s of L2 on production CPU, well inside the 60 s MCP client timeout.
@@ -162,7 +162,7 @@ A quarantined LLM — `gemini-2.5-flash-lite` by default, any configured provide
 
 ## Coverage
 
-What is defended and what is not, by kind of content, as of 0.60.0. A row
+What is defended and what is not, by kind of content, as of 0.61.0. A row
 changes only together with the code and the gap tests in
 `tests/test_coverage_gaps.py`. #365 is the plan that closes most of the
 gaps below.
@@ -180,10 +180,12 @@ gaps below.
 | A zip, tar, gzip, bzip2 or xz archive inside text or JSON, a data URI or an MCP blob | as it arrived | every file in it: text unpacked like any other, an archive inside opened to two levels, other binary labelled | judged; refused (`binary_unread`) if a file in it is an image or PDF, is encrypted, or the archive breaks a limit |
 | A Word, Excel or PowerPoint file (docx, xlsx, pptx) in a JSON string | its visible text as Markdown, `{"format": "docx", "as_markdown": ...}`; text the file marks hidden dropped and counted for L1 (#368) | that Markdown | judged |
 | The same with `trentina_preprocess: false`, or outside JSON | as it arrived | the text of every XML part, hidden text included and counted; embedded media labelled | judged; refused (`binary_unread`) if it embeds an image or a macro |
-| An image or PDF inside text or JSON, or a data URI; a 7z, rar or zstd archive; a legacy `.doc`, `.xls` or `.ppt` | as it arrived | a label; nothing reads inside it | refused (`binary_unread`), with `flag` offered; flag delivers it with the warning |
+| A PDF that `fetch` retrieved, or a base64 PDF in a JSON string | the text its pages show, as Markdown, with its links; invisible text dropped and counted for L1 (#369); a line for pages that are images and for embedded files left out | that Markdown | judged |
+| The same with `trentina_preprocess: false`, or a base64 PDF in other text (up to 140,000 characters) | as it arrived | each page's text, invisible text under its own heading and counted; notes, form values, links, JavaScript, document information and metadata from every object in the file; embedded files read like files in an archive | judged; refused (`binary_unread`) for a page that is an image, with or without an OCR text layer over it, an embedded file that cannot be read, a password, a file the reader could not finish in 20 CPU-seconds, or more than 500 pages or a million characters |
+| An image inside text or JSON, or a data URI; a 7z, rar or zstd archive; a legacy `.doc`, `.xls` or `.ppt` | as it arrived | a label; nothing reads inside it | refused (`binary_unread`), with `flag` offered; flag delivers it with the warning |
 | An MCP image block, or a resource blob an agent could open | as it arrived | nothing | refused (`binary_unread`), with `flag` offered |
 | An MCP resource blob that is a key or random bytes | as it arrived | nothing; counted by type | judged on the rest of the response |
-| A fetched URL that is not text (PDF, image, binary) | a refusal | nothing | refused |
+| A fetched URL that is not text or a PDF (image, archive, binary) | a refusal | nothing | refused |
 | Matrix media (`image/*`, `audio/*`, `video/*`, octet-stream) | forwarded | nothing | forwarded unjudged |
 | Matrix E2EE without `preprocess.decrypt` | the ciphertext | nothing; the gap is counted | forwarded |
 | Over the admission cap (`CLASSIFIER_MAX_TOKENS`, 32,768 L2 tokens) | block and redact: a refusal; flag: as it arrived | flag: the head only | refused |
@@ -193,9 +195,11 @@ gaps below.
 Each gap has an issue and a measurement. Where a test can hold it open,
 one does; the rest name the benchmark that measured them.
 
-1. **Nothing reads inside an image or a PDF** (#369, #370). Text drawn in
-   an image and a PDF's text layer are judged by no layer. Block mode
-   refuses them as `binary_unread` and says so. Archives and office files
+1. **Nothing reads inside an image** (#370). Text drawn in an image is
+   judged by no layer, and block mode refuses it as `binary_unread` and
+   says so. That includes a PDF page that is only an image. An image on a
+   PDF page that also has text is NOT counted: the page is read by its
+   text and the picture goes unread. Archives and office files
    are read since 0.60.0 (#368), with these limits, each of which leaves the
    archive `binary_unread`: 7z, rar, zstd and legacy office files are not
    opened; an encrypted entry, and a zip entry compressed with LZMA, is not
@@ -269,6 +273,18 @@ one does; the rest name the benchmark that measured them.
     one-point type, a shape moved off the page and a hidden column are not
     counted. The layers still read that text: what is missed is the count,
     and stage 1 delivers it as visible. Tested.
+16. **PDF invisibility is detected only where an operator names it**
+    (#369). Counted: text render modes 3 and 7; a size under a point or a
+    position off the page, for text drawn on the page itself; white fill on
+    a page that has painted nothing else. Not counted, though the layers
+    read the text: white text after any fill, shading or image; text sized
+    or placed inside a form XObject; text in a hidden optional-content
+    layer, behind an image or clipped away. A page that is an image with
+    all of its text invisible is a scan with an OCR layer: the layer is
+    read as the page's text and not counted, and because nothing checks
+    that it says what the picture shows, the page stays `binary_unread`
+    when the file itself is delivered. Stage 1 delivers the layer's text
+    and no picture. Tested.
 
 ### Attack coverage by layer (Prompt Guard 2, 2026-06)
 

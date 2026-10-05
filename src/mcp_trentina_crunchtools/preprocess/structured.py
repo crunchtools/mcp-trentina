@@ -88,6 +88,7 @@ from petit.Filter import Filter
 from ..channels import Channel, Kind
 from ..unpack.office import reduce_base64
 from .base import Cost, PreProcessContext, PreProcessResult
+from .pdf import reduce_base64 as reduce_pdf
 
 # The normalization policy, loaded from petit rather than restated here — the
 # same file its JSON and mail drivers declare, so this fingerprint and petit's
@@ -231,6 +232,8 @@ class _Reducer:
         self.chars_truncated = 0
         self.office_converted = 0
         self.office_hidden = 0
+        self.pdf_converted = 0
+        self.pdf_hidden = 0
 
     @property
     def changed(self) -> bool:
@@ -239,23 +242,29 @@ class _Reducer:
             or self.elements_listed
             or self.strings_truncated
             or self.office_converted
+            or self.pdf_converted
         )
 
-    def _office(self, node: str) -> dict[str, str] | None:
-        """A base64 Word, Excel or PowerPoint file as its visible text (#368).
+    def _document(self, node: str) -> dict[str, str] | None:
+        """A base64 office file or PDF as its visible text (#368, #369).
 
-        An office file is a reducer format, as HTML is: the agent asked for
-        a document and gets its text, at a fraction of the tokens. Text the
-        file marks hidden is dropped and counted, and L1 is handed the
-        count. ``trentina_preprocess: false`` keeps the file itself.
+        Both are reducer formats, as HTML is: the agent asked for a document
+        and gets its text, at a fraction of the tokens. Text the file hides
+        is dropped and counted, and L1 is handed the count.
+        ``trentina_preprocess: false`` keeps the file itself.
         """
-        reduced = reduce_base64(node, _MAX_OFFICE_CHARS)
-        if reduced is None:
-            return None
-        kind, markdown, hidden = reduced
-        self.office_converted += 1
-        self.office_hidden += hidden
-        return {"format": kind, "as_markdown": markdown}
+        office = reduce_base64(node, _MAX_OFFICE_CHARS)
+        if office is not None:
+            kind, markdown, hidden = office
+            self.office_converted += 1
+            self.office_hidden += hidden
+            return {"format": kind, "as_markdown": markdown}
+        pdf = reduce_pdf(node)
+        if pdf is not None:
+            self.pdf_converted += 1
+            self.pdf_hidden += pdf[1]
+            return {"format": "pdf", "as_markdown": pdf[0]}
+        return None
 
     def _clipped(self, node: str) -> str:
         removed = len(node) - _MAX_STRING_CHARS
@@ -282,7 +291,7 @@ class _Reducer:
 
         if isinstance(node, str):
             long = self.truncate and len(node) > _MAX_STRING_CHARS
-            return self._office(node) or (self._clipped(node) if long else node)
+            return self._document(node) or (self._clipped(node) if long else node)
 
         if isinstance(node, dict):
             return {key: self.walk(value, depth + 1) for key, value in node.items()}
@@ -509,5 +518,7 @@ class StructuredProcessor:
                 "chars_truncated": reducer.chars_truncated,
                 "office_converted": reducer.office_converted,
                 "office_hidden": reducer.office_hidden,
+                "pdf_converted": reducer.pdf_converted,
+                "pdf_hidden": reducer.pdf_hidden,
             },
         )

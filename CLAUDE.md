@@ -452,6 +452,12 @@ replaced.
   archive goes back through `scan.py`'s own rules. Stage 1 reduces a base64
   office file in a JSON string to `{"format", "as_markdown"}`
   (`preprocess/structured.py`).
+  `pdf.py` reads a PDF by running `pdf_worker.py` as a child process (#369)
+  through `child.ask`: pypdf under RLIMIT_CPU and RLIMIT_AS, no credential
+  in its environment, a wall-clock kill, a bounded wait for a slot, and its
+  JSON checked field by field. Never import pypdf into the gateway process. `preprocess/pdf.py` is the stage-1 reducer, for
+  a fetched PDF (handed over as base64 by `client.py`) and for a base64 PDF
+  in a JSON string.
 
 - `l1/` — Layer 1: the deterministic pipeline, plus module shadow detection.
   It does not make content safe — it counts what it found, by type, and L3's

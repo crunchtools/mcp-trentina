@@ -446,8 +446,8 @@ regardless, because that label is the `binary_unread` refusal.
 
 ## Archives and office files (#368)
 
-The unpack stage reads inside zip, tar, gzip, bzip2 and xz archives and
-docx, xlsx and pptx files. What the layers read is a header naming the kind
+The unpack stage reads inside zip, tar, gzip, bzip2 and xz archives,
+docx, xlsx and pptx files, and PDFs (#369). What the layers read is a header naming the kind
 and its file count, then each file under a `=== name ===` line. A bracketed
 marker in front of decoded base64 made L2 flag benign text (above), so the
 framing was measured before it shipped. `benchmarks/unpack_archives.py`
@@ -463,12 +463,42 @@ result (2026-10-05, production L2 at 0.7):
 | docx | 0 | 38 |
 | xlsx | 0 | 39 |
 | pptx | 0 | 39 |
+| pdf | 1 | 40 |
 
 The framing reads like plain text to L2. The attack column drops as other
 content joins the attack in one window, most with two benign files beside
 it: that is L2 on a document, the same effect as an injection planted in a
 long page (L2 model comparison, above), and L3 reads the whole view. L1
 refused none of the benign rows and nothing was left unread.
+
+## PDF reading (#369)
+
+A PDF is parsed by pypdf in a child process (`unpack/pdf_worker.py`) with
+its own CPU and memory limits, an environment holding no credential and a
+wall-clock kill, because a pure-Python parser of hostile files cannot be
+stopped from inside a thread. Measured in the production container
+(read-only, no capabilities, no new privileges, two CPUs), 2026-10-05:
+
+| PDF | size | pages | text | time | result |
+|---|---|---|---|---|---|
+| a one-page test file | 12 KB | 1 | 14 chars | 0.2 s | read |
+| the Bitcoin paper | 179 KB | 9 | 22 K chars | 0.6 s | read |
+| IRS form W-4 (59 form fields, 3 scripts) | 203 KB | 5 | 26 K | 0.7 s | read |
+| arXiv 1512.03385 | 800 KB | 12 | 62 K | 0.8 s | read |
+| arXiv 1706.03762 | 2.2 MB | 15 | 42 K | 2.3 s | read |
+| arXiv 2005.14165 | 6.6 MB | 75 | 237 K | 2.0 s | read |
+| RFC 9110, with its XML source embedded | 2.8 MB | 194 | 461 K | 9.3 s | read; the 1.5 MB embedded file is over its cap and counted unread |
+| a scanned archive release | 289 KB | 2 | none | 0.2 s | both pages `binary_unread` |
+| IRS publication 17 | 3.1 MB | | over a million chars | 15.6 s | refused: too large |
+| NIST SP 800-53r5 | 6.1 MB | 490 | | 16.8 s | refused: too large |
+
+None of the files that were read reported hidden text. Two rules were
+changed to get there, both from this run: an arXiv figure drew its labels
+inside a form whose coordinates looked off the page, so size and position
+are judged only for text on the page itself; and the first enumeration of
+objects asked the parser for numbers the file did not define, which took
+82 s on the RFC and takes 0.8 s now. Anything past roughly 40 pages of
+text is over the admission cap whatever the reader does.
 
 ## L1 stage false positives (#363)
 
