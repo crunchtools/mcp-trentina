@@ -75,13 +75,31 @@ class TestGateState:
     def test_no_record_is_unrecorded(self) -> None:
         assert gate_state({}) == "unrecorded"
 
-    def test_a_passing_and_a_failing_record(self) -> None:
+    def test_a_passing_record(self) -> None:
         assert gate_state({GATE_KEY: _passing()}) == "passed"
-        assert gate_state({GATE_KEY: {**_passing(), "passed": False}}) == "failed"
 
-    @pytest.mark.parametrize("record", [True, "passed", {"passed": "yes"}, {"passed": True}, []])
+    def test_the_verdict_comes_from_the_counts_not_the_claim(self) -> None:
+        blinded = run_gate(_ATTACKS, lambda text: text.isascii())
+        assert gate_state({GATE_KEY: blinded}) == "failed"
+        assert gate_state({GATE_KEY: {**blinded, "passed": True}}) == "failed"
+        assert gate_state({GATE_KEY: {**_passing(), "passed": False}}) == "passed"
+
+    def test_a_record_allowing_a_larger_drop_fails(self) -> None:
+        loose = run_gate(_ATTACKS, _misses_one_in_base64, max_drop=3)
+        assert loose["passed"] is True
+        assert gate_state({GATE_KEY: {**loose, "max_drop": 3}}) == "failed"
+
+    @pytest.mark.parametrize(
+        "record",
+        [True, "passed", [], {"passed": True}, {"passed": True, "transforms": {}}],
+    )
     def test_a_malformed_record_is_unrecorded(self, record: object) -> None:
         assert gate_state({GATE_KEY: record}) == "unrecorded"
+
+    @pytest.mark.parametrize("field", ["plain", "max_drop"])
+    @pytest.mark.parametrize("value", [None, "41", -1, True, 1.5])
+    def test_a_count_that_is_not_a_count_is_unrecorded(self, field: str, value: object) -> None:
+        assert gate_state({GATE_KEY: {**_passing(), field: value}}) == "unrecorded"
 
     def test_a_record_missing_a_transform_is_unrecorded(self) -> None:
         record = _passing()

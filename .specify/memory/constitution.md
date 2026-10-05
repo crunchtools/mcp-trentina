@@ -1,8 +1,8 @@
 # mcp-trentina-crunchtools Constitution
 
-> **Version:** 1.7.0
+> **Version:** 1.8.0
 > **Ratified:** 2026-09-22
-> **Amended:** 2026-10-04
+> **Amended:** 2026-10-05
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.18.0
 > **Profile:** MCP Server
@@ -63,8 +63,13 @@ per layer (see `docs/defense-pipeline.md`):
 - **L2 (classifier):** a local ONNX prompt-injection classifier
   (`quarantine/classifier.py`). The model is an operator setting
   (`CLASSIFIER_MODEL`, #350): Horizon-Labs' prompt-injection-guard-small by
-  default, Llama Prompt Guard 2 86M also shipped, each exported from a pinned
-  revision with a manifest that states its polarity and threshold. A model
+  default and the one model the image ships, exported from a pinned
+  revision with a manifest that states its polarity and threshold. A shipped
+  model passes the obfuscation gate (`benchmarks/l2_obfuscation.py`): the
+  image build runs it and records the result in the manifest, and the
+  gateway names a model without a passing record at startup and refuses to
+  start on one under `TRENTINA_REQUIRE_HARDENED` (#362). Llama Prompt Guard
+  2 86M fails the gate and is no longer shipped. A model
   an operator brings through `CLASSIFIER_MODEL_PATH` without a manifest
   loads only when every label in its `config.json` is a known benign or
   malicious name, at the 0.5 default. A model whose polarity cannot be read
@@ -200,3 +205,4 @@ justification in `gourmand-exceptions.toml`.
 | 1.5.0 | 2026-10-02 | Manifest under constitution v1.18.0: profile restatement removed, repo-specific security design kept under its own headings; the stale `block_`/`warn_`/`clean_` tool-prefix wording replaced by the per-call `trentina_mode` |
 | 1.6.0 | 2026-10-03 | L2 is a pluggable local classifier (#350): Horizon-Labs prompt-injection-guard-small by default, Prompt Guard 2 86M selectable, polarity and threshold from a pinned-model manifest |
 | 1.7.0 | 2026-10-04 | Layers read the delivery unpacked, not the arrived bytes: nothing is delivered that the layers did not read, in its original or decoded form, or for binary by its type (#365, #367). Binary no layer can read is the `binary_unread` gap; `flag` delivers it with the warning, as it does an over-cap payload's tail |
+| 1.8.0 | 2026-10-05 | The L2 obfuscation gate is enforced (#362): run by the image build, recorded in the model manifest, checked at startup. The image ships one L2 model; Prompt Guard 2 86M fails the gate and is dropped |

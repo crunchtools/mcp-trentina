@@ -73,8 +73,20 @@ def run_gate(
 ) -> dict[str, Any]:
     """Classify every attack plain and under each transform; return the record.
 
-    A transform passes when it loses at most ``max_drop`` detections against
-    plain. The record is what ``--record`` writes into the manifest.
+    Args:
+        attacks: The attack texts. Each is classified once plain and once
+            under every transform in :data:`TRANSFORMS`.
+        detected: The model under test: True when it calls a text malicious
+            at its own threshold. Called ``len(attacks) * 7`` times.
+        max_drop: Detections a transform may lose against plain and pass.
+
+    Returns:
+        The record ``--record`` writes into the manifest under
+        :data:`GATE_KEY`: ``attacks`` (how many were classified), ``plain``
+        (how many were detected untransformed), ``max_drop``,
+        ``transforms`` (detections under each, by transform name) and
+        ``passed``, true when ``plain - transforms[name] <= max_drop`` for
+        every transform.
     """
     plain = sum(detected(a) for a in attacks)
     hits = {name: sum(detected(t(a)) for a in attacks) for name, t in TRANSFORMS.items()}
@@ -83,20 +95,40 @@ def run_gate(
         "plain": plain,
         "max_drop": max_drop,
         "transforms": hits,
-        "passed": all(plain - n <= max_drop for n in hits.values()),
+        "passed": _passes(plain, hits, max_drop),
     }
+
+
+def _passes(plain: int, hits: dict[str, int], max_drop: int) -> bool:
+    return all(plain - n <= max_drop for n in hits.values())
+
+
+def _count(value: object) -> int | None:
+    """``value`` as a non-negative count, or None. A bool is not a count."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
 
 
 def gate_state(manifest: dict[str, Any]) -> str:
     """``passed``, ``failed`` or ``unrecorded``, from a model manifest.
 
-    A record counts only when it covers every transform in :data:`TRANSFORMS`:
-    one written before a transform was added says nothing about that transform.
+    The verdict is recomputed from the record's counts, never read from its
+    ``passed`` field: a record whose numbers do not pass is ``failed``
+    whatever it claims, and one allowing a larger drop than
+    :data:`GATE_MAX_DROP` is ``failed`` too. A record counts only when it
+    covers every transform in :data:`TRANSFORMS`: one written before a
+    transform was added says nothing about that transform. The manifest is
+    the operator's file, so this catches a stale or mistaken record, not a
+    forged one.
     """
     record = manifest.get(GATE_KEY)
-    if not isinstance(record, dict) or not isinstance(record.get("passed"), bool):
+    if not isinstance(record, dict):
         return "unrecorded"
     transforms = record.get("transforms")
     if not isinstance(transforms, dict) or set(transforms) != set(TRANSFORMS):
         return "unrecorded"
-    return "passed" if record["passed"] else "failed"
+    plain, max_drop = _count(record.get("plain")), _count(record.get("max_drop"))
+    hits = {name: _count(n) for name, n in transforms.items()}
+    if plain is None or max_drop is None or None in hits.values():
+        return "unrecorded"
+    counted = {name: n for name, n in hits.items() if n is not None}
+    return "passed" if max_drop <= GATE_MAX_DROP and _passes(plain, counted, max_drop) else "failed"

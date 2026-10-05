@@ -21,6 +21,8 @@ under that name.
   refuses to start on one under `TRENTINA_REQUIRE_HARDENED`. The gate's state
   joins the verdict stamp, so cached verdicts are judged again once.
 - The six transforms moved to `quarantine/obfuscation.py`.
+- Constitution 1.8.0: the image ships one L2 model, and a shipped model
+  passes the obfuscation gate.
 
 ### Removed
 - **Breaking:** the image no longer ships `prompt-guard-2-86m`. It fails five
