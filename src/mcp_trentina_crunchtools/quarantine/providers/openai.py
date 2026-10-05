@@ -132,6 +132,7 @@ class OpenAIProvider(Provider):
                 text=text,
                 input_tokens=count(dig(resp_json, "usage", "prompt_tokens")),
                 output_tokens=count(dig(resp_json, "usage", "completion_tokens")),
+                truncated=dig(resp_json, "choices", 0, "finish_reason") == "length",
             )
 
         except httpx.HTTPStatusError as exc:

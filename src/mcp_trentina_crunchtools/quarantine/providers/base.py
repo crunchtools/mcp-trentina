@@ -22,6 +22,8 @@ class ProviderResult:
     text: str
     input_tokens: int = 0
     output_tokens: int = 0
+    truncated: bool = False
+    """The provider stopped because it reached ``max_output_tokens`` (#358)."""
 
 
 class Provider(ABC):

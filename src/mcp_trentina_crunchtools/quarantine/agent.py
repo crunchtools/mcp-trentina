@@ -28,6 +28,7 @@ from ..egress import open_guarded
 from ..errors import (
     EgressRefusedError,
     MalformedResponseError,
+    TruncatedResponseError,
     QuarantineAgentError,
     SearchCanaryLeakedError,
 )
@@ -190,6 +191,9 @@ async def _call_with_fallback(
         try:
             try:
                 return await call()
+            except TruncatedResponseError:
+                # The same request reaches the same cap, here or on a fallback.
+                raise
             except MalformedResponseError:
                 # Usually one bad sample, and under Matrix withholding an
                 # unjudged /sync costs the agent that sync's events (#227).
@@ -386,6 +390,8 @@ async def _call_gemini(
     #   owner: quarantine.agent._call_gemini
     #   evidence: T3 #294; T3 CLAUDE.md "No text written by L3 reaches an agent";
     #     T1 json.loads raises ValueError/RecursionError, TypeError on a non-str
+    if provider_result.truncated:
+        raise TruncatedResponseError
     text = provider_result.text
     if not isinstance(text, str):
         raise MalformedResponseError("no text")
@@ -614,6 +620,9 @@ async def quarantine_redact(
         extraction = await quarantine_extract(
             content, prompt, briefing=extraction_briefing(detection)
         )
+    except TruncatedResponseError:
+        logger.warning("Q-Agent extraction stopped at the output-token cap")
+        return CleanResult(refused_by="t2_truncated")
     except QuarantineAgentError as exc:
         logger.warning("Q-Agent extraction failed: %s", exc_kind(exc))
         return CleanResult(refused_by="t2_unavailable")
