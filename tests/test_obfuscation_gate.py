@@ -101,6 +101,14 @@ class TestGateState:
     def test_a_count_that_is_not_a_count_is_unrecorded(self, field: str, value: object) -> None:
         assert gate_state({GATE_KEY: {**_passing(), field: value}}) == "unrecorded"
 
+    def test_an_extra_or_uncounted_transform_is_unrecorded(self) -> None:
+        extra = _passing()
+        extra["transforms"]["rot13"] = 3
+        assert gate_state({GATE_KEY: extra}) == "unrecorded"
+        uncounted = _passing()
+        uncounted["transforms"]["base64"] = "all"
+        assert gate_state({GATE_KEY: uncounted}) == "unrecorded"
+
     def test_a_record_missing_a_transform_is_unrecorded(self) -> None:
         record = _passing()
         del record["transforms"]["base64"]

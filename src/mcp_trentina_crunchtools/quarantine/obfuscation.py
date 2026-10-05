@@ -120,15 +120,23 @@ def gate_state(manifest: dict[str, Any]) -> str:
     the operator's file, so this catches a stale or mistaken record, not a
     forged one.
     """
-    record = manifest.get(GATE_KEY)
-    if not isinstance(record, dict):
+    counts = _record_counts(manifest.get(GATE_KEY))
+    if counts is None:
         return "unrecorded"
-    transforms = record.get("transforms")
-    if not isinstance(transforms, dict) or set(transforms) != set(TRANSFORMS):
-        return "unrecorded"
+    plain, max_drop, hits = counts
+    return "passed" if max_drop <= GATE_MAX_DROP and _passes(plain, hits, max_drop) else "failed"
+
+
+def _record_counts(record: object) -> tuple[int, int, dict[str, int]] | None:
+    """``(plain, max_drop, detections by transform)``, or None for a record
+    that is malformed or does not cover exactly the transforms of this gate."""
+    transforms = record.get("transforms") if isinstance(record, dict) else None
+    if not isinstance(record, dict) or not isinstance(transforms, dict):
+        return None
     plain, max_drop = _count(record.get("plain")), _count(record.get("max_drop"))
-    hits = {name: _count(n) for name, n in transforms.items()}
-    if plain is None or max_drop is None or None in hits.values():
-        return "unrecorded"
-    counted = {name: n for name, n in hits.items() if n is not None}
-    return "passed" if max_drop <= GATE_MAX_DROP and _passes(plain, counted, max_drop) else "failed"
+    hits = {name: n for name, raw in transforms.items() if (n := _count(raw)) is not None}
+    if plain is None or max_drop is None:
+        return None
+    if set(transforms) != set(TRANSFORMS) or len(hits) != len(transforms):
+        return None
+    return plain, max_drop, hits
