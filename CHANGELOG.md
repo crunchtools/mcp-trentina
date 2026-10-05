@@ -26,13 +26,15 @@ under that name.
     metadata, collected from every object the file defines, reachable from
     a page or not; then embedded files, read like files in an archive.
   - **Invisible** is text render mode 3 or 7, under a point, off the page,
-    or white on a page that has painted nothing else. A scan with an OCR
-    text layer is read as the page and not counted.
-  - **A page that is only an image** stays `binary_unread` until #370.
-- The parser runs in a child process (`unpack/pdf_worker.py`) with a 20
-  second CPU limit, a 1 GiB address-space limit, no credential in its
-  environment and a 30 second wall-clock kill. Its output is checked field
-  by field. At most two PDFs are read at once.
+    or white on a page that has painted nothing else. A scan's OCR text
+    layer is read as the page's text and not counted as hidden.
+  - **A page that is an image** stays `binary_unread` until #370, with or
+    without a text layer: nothing yet checks a layer against its picture.
+- The parser runs in a child process (`unpack/pdf_worker.py`, started by
+  `unpack/child.py`) with a 20 second CPU limit, a 1 GiB address-space
+  limit, no credential in its environment and a 30 second wall-clock kill.
+  Its output is checked field by field. At most two PDFs are read at once;
+  one that waits five seconds for a slot is unread, and the log says why.
 - Dependency: `pypdf` 6.19 or later (BSD-3-Clause, pure Python).
   Constitution 1.9.0 adds it to the stack, child process only.
 

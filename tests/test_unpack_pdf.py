@@ -11,6 +11,7 @@ import inspect
 import io
 import json
 import subprocess
+import types
 
 import pytest
 from pypdf import PdfWriter
@@ -25,8 +26,9 @@ from mcp_trentina_crunchtools.preprocess.detect import (
 )
 from mcp_trentina_crunchtools.preprocess.pdf import PdfProcessor
 from mcp_trentina_crunchtools.preprocess.structured import StructuredProcessor
+from mcp_trentina_crunchtools.unpack import child, pdf_worker
 from mcp_trentina_crunchtools.unpack import pdf as pdf_reader
-from mcp_trentina_crunchtools.unpack.pdf import _checked, _environment, read_pdf
+from mcp_trentina_crunchtools.unpack.pdf import _checked, read_pdf
 from mcp_trentina_crunchtools.unpack.scan import SCANNED_PAGE, unpack
 
 from .office_files import b64, zipped
@@ -80,12 +82,47 @@ class TestPagesAreRead:
         assert view.hidden == 0
 
     def test_a_scan_with_an_ocr_text_layer_is_read_as_the_page(self) -> None:
-        """Every OCR tool writes this: the page is an image, its text invisible."""
+        """Every OCR tool writes this: the page is an image, its text invisible.
+        The layer is the page's text and is not counted as hidden; the picture
+        under it is still unread, since nothing checked the two agree."""
         scan = pdf(show(_NOTE, before="3 Tr") + show("Second line.", y=680), image=True)
         view = unpack(b64(scan))
         assert "=== page 1 ===\n" + _NOTE in view.text
         assert "text not shown" not in view.text
-        assert (view.hidden, view.unread) == (0, ())
+        assert "(1 page(s) are images under a text layer;" in view.text
+        assert (view.hidden, view.unread) == (0, (SCANNED_PAGE,))
+
+    @pytest.mark.parametrize(
+        "misplaced",
+        [show(_NOTE, x=9000, before="3 Tr"), show(_NOTE, size=0.4, before="3 Tr")],
+        ids=["off-the-page", "under-a-point"],
+    )
+    def test_misplaced_text_on_an_image_page_is_not_an_ocr_layer(self, misplaced: str) -> None:
+        """An OCR layer sits on the picture at reading size. Text that is off
+        the page or too small to see is hidden text, image or no image."""
+        view = unpack(b64(pdf(misplaced, image=True)))
+        assert "=== page 1, text not shown ===\n" + _NOTE in view.text
+        assert "under a text layer" not in view.text
+        assert view.hidden == 1
+
+    def test_text_inside_a_form_is_read_and_not_judged_by_page_coordinates(self) -> None:
+        """A form has its own coordinate space. Text at (5000, 5000) inside one
+        drawn at a tenth of its size is on the page, and is not counted."""
+        view = unpack(b64(pdf(_SHOWN, form=show(_NOTE, x=5000, y=5000, size=120))))
+        assert _NOTE in view.text
+        assert "text not shown" not in view.text
+        assert view.hidden == 0
+
+    def test_invisible_text_inside_a_form_is_still_counted(self) -> None:
+        view = unpack(b64(pdf(_SHOWN, form=show(_NOTE, x=500, y=500, size=120, before="3 Tr"))))
+        assert "=== page 1, text not shown ===\n" + _NOTE in view.text
+        assert view.hidden == 1
+
+    def test_text_drawn_after_a_form_is_judged_by_page_coordinates_again(self) -> None:
+        after = "q 1 0 0 1 0 0 cm /Fm1 Do Q\n" + show(_NOTE, x=9000)
+        view = unpack(b64(pdf(_SHOWN + after, form=show("Inside the form.", x=50, y=50))))
+        assert "=== page 1, text not shown ===\n" + _NOTE in view.text
+        assert view.hidden == 1
 
     def test_invisible_text_beside_visible_text_on_a_page_with_an_image_is_counted(self) -> None:
         mixed = pdf(_SHOWN + show(_NOTE, y=680, before="3 Tr"), image=True)
@@ -148,9 +185,7 @@ class TestEverythingElseInTheFile:
         assert "=== attached: notes.txt ===\n" + _NOTE in unpack(b64(file)).text
 
     def test_an_embedded_file_past_the_cap_is_unread_and_the_pages_are_read(self) -> None:
-        from mcp_trentina_crunchtools.unpack.pdf_worker import MAX_ATTACHED
-
-        big = (_NOTE.encode() + b"\n") * (MAX_ATTACHED // len(_NOTE) + 2)
+        big = (_NOTE.encode() + b"\n") * (pdf_worker.MAX_ATTACHED // len(_NOTE) + 2)
         reading = read_pdf(pdf(_SHOWN, attachments={"big.txt": big}))
         assert reading is not None
         assert reading.pages[0][0] == "Quarterly report for the storage team."
@@ -186,9 +221,30 @@ class TestWhatStaysUnread:
         monkeypatch.setattr(pdf_reader, "DEADLINE", 0.001)
         assert read_pdf(pdf(_SHOWN)) is None
 
+    def test_why_a_pdf_is_unread_is_logged_in_our_words(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setattr(pdf_reader, "DEADLINE", 0.001)
+        with caplog.at_level("WARNING"):
+            assert read_pdf(pdf(show("a secret line of the file"))) is None
+            assert read_pdf(b"%PDF-1.7 not a pdf") is None
+        assert "pdf: unread, deadline" in caplog.text
+        assert "secret line" not in caplog.text
+
+    def test_an_object_with_a_nonzero_generation_is_read(self) -> None:
+        asked: list[tuple[int, int]] = []
+        reader = types.SimpleNamespace(
+            xref={0: {1: 10}, 3: {7: 99}},
+            xref_objStm={4: (2, 0)},
+            get_object=lambda ref: asked.append((ref.idnum, ref.generation)),
+            root_object={},
+        )
+        pdf_worker._Reading(reader).fields()
+        assert asked == [(1, 0), (4, 0), (7, 3)]
+
     def test_a_pdf_that_finds_every_slot_busy(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Waiting holds one of the gateway's worker threads, so it is short."""
-        monkeypatch.setattr(pdf_reader, "SLOT_WAIT", 0.01)
+        monkeypatch.setattr(child, "SLOT_WAIT", 0.01)
         held = [pdf_reader._slots.acquire() for _ in range(pdf_reader.CONCURRENCY)]
         try:
             assert all(held)
@@ -199,10 +255,8 @@ class TestWhatStaysUnread:
         assert read_pdf(pdf(_SHOWN)) is not None, "the slots come back"
 
     def test_too_many_pages(self) -> None:
-        from mcp_trentina_crunchtools.unpack.pdf_worker import MAX_PAGES
-
         writer = PdfWriter()
-        for _ in range(MAX_PAGES + 1):
+        for _ in range(pdf_worker.MAX_PAGES + 1):
             writer.add_blank_page(72, 72)
         buffer = io.BytesIO()
         writer.write(buffer)
@@ -213,12 +267,14 @@ class TestTheWorkerIsContained:
     def test_it_starts_with_no_credential(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-canary")
         monkeypatch.setenv("TRENTINA_OAUTH_JWT_SIGNING_KEY", "canary")
-        assert set(_environment()) == {"PYTHONPATH", "PYTHONSAFEPATH", "PYTHONDONTWRITEBYTECODE"}
-        assert "canary" not in json.dumps(_environment())
+        assert set(child.environment()) == {
+            "PYTHONPATH",
+            "PYTHONSAFEPATH",
+            "PYTHONDONTWRITEBYTECODE",
+        }
+        assert "canary" not in json.dumps(child.environment())
 
     def test_it_limits_its_own_cpu_and_memory(self) -> None:
-        from mcp_trentina_crunchtools.unpack import pdf_worker
-
         source = inspect.getsource(pdf_worker.main)
         assert "RLIMIT_CPU" in source
         assert "RLIMIT_AS" in source
@@ -244,7 +300,7 @@ class TestTheWorkerIsContained:
         self, answer: object, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         printed = subprocess.CompletedProcess([], 0, stdout=json.dumps(answer).encode(), stderr=b"")
-        monkeypatch.setattr(pdf_reader.subprocess, "run", lambda *_a, **_k: printed)
+        monkeypatch.setattr(child.subprocess, "run", lambda *_a, **_k: printed)
         assert read_pdf(b"%PDF-1.7") is None
 
     @pytest.mark.parametrize("stdout", [b"", b"not json", b"[1, 2", b"\xff\xfe"])
@@ -252,7 +308,7 @@ class TestTheWorkerIsContained:
         self, stdout: bytes, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         printed = subprocess.CompletedProcess([], 0, stdout=stdout, stderr=b"")
-        monkeypatch.setattr(pdf_reader.subprocess, "run", lambda *_a, **_k: printed)
+        monkeypatch.setattr(child.subprocess, "run", lambda *_a, **_k: printed)
         assert read_pdf(b"%PDF-1.7") is None
 
     def test_a_worker_that_failed_is_no_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -267,7 +323,7 @@ class TestTheWorkerIsContained:
             }
         ).encode()
         failed = subprocess.CompletedProcess([], 1, stdout=good, stderr=b"")
-        monkeypatch.setattr(pdf_reader.subprocess, "run", lambda *_a, **_k: failed)
+        monkeypatch.setattr(child.subprocess, "run", lambda *_a, **_k: failed)
         assert read_pdf(b"%PDF-1.7") is None
 
     def test_a_section_name_from_the_file_is_dropped(self) -> None:

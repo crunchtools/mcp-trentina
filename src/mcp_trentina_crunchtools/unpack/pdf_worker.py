@@ -19,7 +19,10 @@ The output is everything a tool handed the file could show an agent:
   (annotation contents, form values, link targets, JavaScript, document
   information, alternate text), reached by walking the cross-reference
   table and not the page tree, so an object nothing points to is read too;
-* the XMP metadata packet, the outline, and each embedded file's bytes.
+* the XMP metadata packet, and each embedded file's bytes up to
+  ``MAX_ATTACHED`` in all: a file past that is named with no content, and
+  the parent counts it unread. Outline entries are dictionaries with a
+  ``/Title``, so the walk above reads them with everything else.
 
 Invisible means drawn so by a named operator: text render mode 3 or 7, a
 size under a point once the matrices are applied or a position outside the
@@ -28,7 +31,9 @@ a white fill on a page that has painted nothing else. Two things
 that look the same are not counted, because they are how ordinary files are
 written: white text after a fill, a shading or an image (a dark slide), and
 a page that is an image with all of its text invisible (a scan with its OCR
-text layer, which is read as the page). Text in a hidden optional-content
+text layer). That text is read as the page's text and the page is reported
+as ``text_layers``: nothing here checks that the layer says what the
+picture shows, so the parent still counts the picture unread. Text in a hidden optional-content
 layer, behind an image or clipped away is read as visible (Known gaps).
 """
 
@@ -288,21 +293,23 @@ class _Reading:
 
     def fields(self) -> None:
         """Every text entry in ``FIELDS``, from every object the file has."""
-        # The numbers the cross-reference table defines, in a table or an
-        # object stream. Asking for one it does not define sends the parser
-        # searching the whole file for it.
-        numbers = {n for table in self.reader.xref.values() for n in table}
-        numbers.update(self.reader.xref_objStm)
-        if len(numbers) > MAX_OBJECTS:
+        # The objects the cross-reference table defines, each with its
+        # generation, in a table or an object stream. Asking for one it does
+        # not define sends the parser searching the whole file for it.
+        defined = {(n, generation) for generation, table in self.reader.xref.items() for n in table}
+        defined.update((n, 0) for n in self.reader.xref_objStm)
+        if len(defined) > MAX_OBJECTS:
             raise TooLargeError
         found: dict[str, dict[str, None]] = {}
-        for number in sorted(numbers):
-            target = self.reader.get_object(IndirectObject(number, 0, self.reader))
+        for number, generation in sorted(defined):
+            target = self.reader.get_object(IndirectObject(number, generation, self.reader))
             for entry in _dictionaries(target):
-                for key in FIELDS.keys() & entry.keys():
-                    text = _text_of(entry.get(key), stream=key in STREAM_KEYS)
-                    if text.strip() and text not in found.setdefault(FIELDS[key], {}):
-                        found[FIELDS[key]][self.spend(text)] = None
+                for key, section in FIELDS.items():  # in declared order: the output is stable
+                    text = (
+                        _text_of(entry.get(key), stream=key in STREAM_KEYS) if key in entry else ""
+                    )
+                    if text.strip() and text not in found.setdefault(section, {}):
+                        found[section][self.spend(text)] = None
         packet = self.reader.root_object.get("/Metadata")
         if packet is not None:
             found.setdefault("metadata", {})[self.spend(_text_of(packet, stream=True))] = None

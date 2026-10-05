@@ -50,12 +50,16 @@ import re
 import string
 from collections import Counter
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from . import office
 from .archive import OPENABLE, ZIP, Budget, Entry, open_archive
 from .pdf import SECTIONS, PdfReading, read_pdf
 from .signatures import OPAQUE, Kind, from_media_type, identify
 from .stats import UnpackStats
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 LABEL_FLOOR = 64
 """Base64 characters from which binary is labelled. Measured; see the module docstring."""
@@ -291,7 +295,9 @@ def _opened_pdf(decoded: bytes, state: _Pass) -> str | None:
     Each page's text, with what a reader would not see under its own
     heading; then every text entry the file carries outside its pages, by
     kind; then each embedded file, read like a file in an archive. A page
-    that is only an image is counted unread: the rest is still read.
+    that is an image is counted unread, with or without a text layer over
+    it: a layer is read as the page's text, and nothing has checked that it
+    says what the picture shows. The rest is still read.
     """
     reading: PdfReading | None = read_pdf(decoded)
     if reading is None:
@@ -300,20 +306,12 @@ def _opened_pdf(decoded: bytes, state: _Pass) -> str | None:
     state.hidden += reading.hidden
     count = len(reading.pages)
     parts = [f"({PDF}, {_size(len(decoded))}, {count} page{'' if count == 1 else 's'})"]
-    for number, (visible, unseen) in enumerate(reading.pages, start=1):
-        if visible:
-            parts.append(f"=== page {number} ===\n{visible}")
-        if unseen:
-            parts.append(f"=== page {number}, text not shown ===\n{unseen}")
-    for section in SECTIONS:
-        lines = reading.fields.get(section)
-        if lines:
-            parts.append(f"=== {section} ===\n" + "\n".join(lines))
-    if reading.scanned:
-        state.stats.binary_labelled += reading.scanned
-        state.stats.binary_unread += reading.scanned
+    parts.extend(_pdf_text(reading))
+    pictures = reading.scanned + reading.text_layers
+    if pictures:
+        state.stats.binary_labelled += pictures
+        state.stats.binary_unread += pictures
         state.unread.add(SCANNED_PAGE)
-        parts.append(f"({reading.scanned} page(s) are images with no text, not read)")
     state.nesting += 1
     try:
         for entry in reading.attachments:
@@ -323,6 +321,25 @@ def _opened_pdf(decoded: bytes, state: _Pass) -> str | None:
     finally:
         state.nesting -= 1
     return "\n".join(parts)
+
+
+def _pdf_text(reading: PdfReading) -> Iterator[str]:
+    """A PDF's own text, section by section, and a line for pages that are pictures."""
+    for number, (visible, unseen) in enumerate(reading.pages, start=1):
+        if visible:
+            yield f"=== page {number} ===\n{visible}"
+        if unseen:
+            yield f"=== page {number}, text not shown ===\n{unseen}"
+    for section in SECTIONS:
+        if reading.fields.get(section):
+            yield f"=== {section} ===\n" + "\n".join(reading.fields[section])
+    if reading.scanned:
+        yield f"({reading.scanned} page(s) are images with no text, not read)"
+    if reading.text_layers:
+        yield (
+            f"({reading.text_layers} page(s) are images under a text layer; "
+            "the text above is the layer, and the images are not read)"
+        )
 
 
 def _entry(entry: Entry, reading: office.Reading | None, state: _Pass) -> str:

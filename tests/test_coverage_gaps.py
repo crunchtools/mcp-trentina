@@ -73,12 +73,13 @@ def test_white_pdf_text_after_a_fill_is_read_but_not_counted() -> None:
     assert view.hidden == 0
 
 
-def test_a_pdf_ocr_layer_is_taken_at_its_word() -> None:
-    """#370: a page that is an image with all its text invisible is read as a
-    scan. Nothing checks that the text says what the picture shows."""
+def test_a_pdf_ocr_layer_is_read_but_its_picture_is_not() -> None:
+    """#370: a page that is an image with all its text invisible is a scan
+    with a text layer. The layer is read and not counted as hidden; nothing
+    checks that it says what the picture shows, so the page stays unread."""
     view = unpack(b64(pdf(show(_ATTACK, before="3 Tr"), image=True)))
     assert _ATTACK in view.text
-    assert (view.hidden, view.unread) == (0, ())
+    assert (view.hidden, view.unread) == (0, ("scanned PDF page",))
 
 
 def test_a_zip_with_a_stub_in_front_is_refused_not_read() -> None:

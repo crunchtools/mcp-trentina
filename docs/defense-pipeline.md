@@ -181,7 +181,7 @@ gaps below.
 | A Word, Excel or PowerPoint file (docx, xlsx, pptx) in a JSON string | its visible text as Markdown, `{"format": "docx", "as_markdown": ...}`; text the file marks hidden dropped and counted for L1 (#368) | that Markdown | judged |
 | The same with `trentina_preprocess: false`, or outside JSON | as it arrived | the text of every XML part, hidden text included and counted; embedded media labelled | judged; refused (`binary_unread`) if it embeds an image or a macro |
 | A PDF that `fetch` retrieved, or a base64 PDF in a JSON string | the text its pages show, as Markdown, with its links; invisible text dropped and counted for L1 (#369); a line for pages that are images and for embedded files left out | that Markdown | judged |
-| The same with `trentina_preprocess: false`, or a base64 PDF in other text (up to 140,000 characters) | as it arrived | each page's text, invisible text under its own heading and counted; notes, form values, links, JavaScript, document information and metadata from every object in the file; embedded files read like files in an archive | judged; refused (`binary_unread`) for a page that is only an image, an embedded file that cannot be read, a password, a file the reader could not finish in 20 CPU-seconds, or more than 500 pages or a million characters |
+| The same with `trentina_preprocess: false`, or a base64 PDF in other text (up to 140,000 characters) | as it arrived | each page's text, invisible text under its own heading and counted; notes, form values, links, JavaScript, document information and metadata from every object in the file; embedded files read like files in an archive | judged; refused (`binary_unread`) for a page that is an image, with or without an OCR text layer over it, an embedded file that cannot be read, a password, a file the reader could not finish in 20 CPU-seconds, or more than 500 pages or a million characters |
 | An image inside text or JSON, or a data URI; a 7z, rar or zstd archive; a legacy `.doc`, `.xls` or `.ppt` | as it arrived | a label; nothing reads inside it | refused (`binary_unread`), with `flag` offered; flag delivers it with the warning |
 | An MCP image block, or a resource blob an agent could open | as it arrived | nothing | refused (`binary_unread`), with `flag` offered |
 | An MCP resource blob that is a key or random bytes | as it arrived | nothing; counted by type | judged on the rest of the response |
@@ -280,9 +280,11 @@ one does; the rest name the benchmark that measured them.
     read the text: white text after any fill, shading or image; text sized
     or placed inside a form XObject; text in a hidden optional-content
     layer, behind an image or clipped away. A page that is an image with
-    all of its text invisible is read as a scan with an OCR layer, and the
-    layer is taken at its word: nothing checks that it says what the
-    picture shows. Tested.
+    all of its text invisible is a scan with an OCR layer: the layer is
+    read as the page's text and not counted, and because nothing checks
+    that it says what the picture shows, the page stays `binary_unread`
+    when the file itself is delivered. Stage 1 delivers the layer's text
+    and no picture. Tested.
 
 ### Attack coverage by layer (Prompt Guard 2, 2026-06)
 

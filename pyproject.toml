@@ -157,10 +157,10 @@ max-complexity = 10
 # which is what that text is written with; ASCII would make them less real.
 "tests/adversarial_corpus.py" = ["RUF001"]
 "src/mcp_trentina_crunchtools/dbus_interface.py" = ["UP037", "C901", "TRY300"]
-# S603: the PDF reader runs its parser in a child process so a hostile file
-# can be killed at a deadline (#369). argv is this interpreter and a constant
-# module name; the PDF goes in on stdin and is never part of a command.
-"src/mcp_trentina_crunchtools/unpack/pdf.py" = ["S603"]
+# S603: PDFs are parsed in a child process so a hostile file can be killed
+# at a deadline (#369). argv is this interpreter and a constant module name;
+# the payload goes in on stdin and is never part of a command.
+"src/mcp_trentina_crunchtools/unpack/child.py" = ["S603"]
 "src/mcp_trentina_crunchtools/gateway/app.py" = ["C901", "PLR0911", "PLR0912"]
 # Request handler: each early return is a distinct HTTP failure response
 # (401, 404, 500, ...). Same shape as gateway/app.py above.
