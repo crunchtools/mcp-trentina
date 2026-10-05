@@ -77,7 +77,8 @@ def run_gate(
         attacks: The attack texts. Each is classified once plain and once
             under every transform in :data:`TRANSFORMS`.
         detected: The model under test: True when it calls a text malicious
-            at its own threshold. Called ``len(attacks) * 7`` times.
+            at its own threshold. Called once per attack for plain and once
+            per attack for each transform.
         max_drop: Detections a transform may lose against plain and pass.
 
     Returns:
