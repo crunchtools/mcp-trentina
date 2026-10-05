@@ -127,34 +127,39 @@ class _Painter:
     misplaced_chunks: int = 0
     forms: int = 0
 
-    def after(self, operator: Any, _operands: Any, _cm: Any, _tm: Any) -> None:
+    def after(self, operator: Any, *_: Any) -> None:
+        """pypdf's ``visitor_operand_after``: a form's content has all been read."""
         if operator == b"Do":
             self.forms -= 1
 
-    def operand(self, operator: Any, operands: Any, _cm: Any, _tm: Any) -> None:
+    def operand(self, operator: Any, operands: Any, *_: Any) -> None:
+        """pypdf's ``visitor_operand_before``: track what decides visibility."""
         if operator == b"Do":
             self.forms += 1
         white = _white_fill(operator, operands)
         if white is not None:
             self.white = white
-        elif operator == b"Tr" and operands:
-            self.mode = int(operands[0])
-        elif operator == b"q":
-            self.stack.append((self.mode, self.white))
-        elif operator == b"Q" and self.stack:
-            self.mode, self.white = self.stack.pop()
-        elif operator in _PAINTS or (operator in _FILLS and not self.white):
-            self.images += operator == _INLINE_IMAGE
-            self.painted = True
-        elif operator in _SHOW:
-            # White text is unseen only on a page that has painted nothing: on
-            # a dark slide or over a figure it is the ordinary way to write.
-            unseen = self.mode in INVISIBLE_MODES or (self.white and not self.painted)
-            self.shown_hidden = self.shown_hidden or unseen
-            self.shown_visible = self.shown_visible or not unseen
+            return
+        match operator:
+            case b"Tr" if operands:
+                self.mode = int(operands[0])
+            case b"q":
+                self.stack.append((self.mode, self.white))
+            case b"Q" if self.stack:
+                self.mode, self.white = self.stack.pop()
+            case _ if operator in _PAINTS or (operator in _FILLS and not self.white):
+                self.images += operator == _INLINE_IMAGE
+                self.painted = True
+            case _ if operator in _SHOW:
+                # White text is unseen only on a page that has painted nothing:
+                # on a dark slide or over a figure it is the ordinary way to write.
+                unseen = self.mode in INVISIBLE_MODES or (self.white and not self.painted)
+                self.shown_hidden = self.shown_hidden or unseen
+                self.shown_visible = self.shown_visible or not unseen
 
-    def text(self, chunk: str, cm: Any, tm: Any, _font: Any, size: float) -> None:
-        """One run of text as pypdf hands it over, with the matrices in force.
+    def text(self, chunk: str, cm: Any, tm: Any, *font: Any) -> None:
+        """pypdf's ``visitor_text``: one run of text, with the matrices in force
+        and ``font`` its dictionary and size.
 
         A run can hold several show operators. It is hidden when none of
         them painted visibly, or when the whole run is too small or off the
@@ -166,7 +171,7 @@ class _Painter:
             return
         # Inside a form the matrices are the form's own, not the page's, so
         # size and position are judged only for text drawn on the page itself.
-        misplaced = self.forms == 0 and (_tiny(cm, tm, size) or self._off_page(cm, tm))
+        misplaced = self.forms == 0 and (_tiny(cm, tm, font[1]) or self._off_page(cm, tm))
         unseen = misplaced or (self.shown_hidden and not self.shown_visible)
         if misplaced or self.shown_hidden:
             self.hidden_chunks += 1

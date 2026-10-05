@@ -21,6 +21,8 @@ from pypdf.generic import (
 )
 
 LETTER = (612, 792)
+NOTE_BOX = (72, 600, 172, 620)
+"""Where an annotation sits on the page: left, bottom, right, top."""
 
 
 def show(text: str, x: float = 72, y: float = 700, size: float = 12, before: str = "") -> str:
@@ -87,7 +89,7 @@ def pdf(
                 {
                     NameObject("/Type"): NameObject("/Annot"),
                     NameObject("/Subtype"): NameObject("/Link" if "URI" in fields else "/Text"),
-                    NameObject("/Rect"): ArrayObject([FloatObject(v) for v in (72, 600, 172, 620)]),
+                    NameObject("/Rect"): ArrayObject([FloatObject(v) for v in NOTE_BOX]),
                 }
             )
             for key, value in fields.items():

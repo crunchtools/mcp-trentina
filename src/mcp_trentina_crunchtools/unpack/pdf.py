@@ -97,10 +97,9 @@ def read_pdf(packed: bytes) -> PdfReading | None:
     #   judged-by: nothing here; every string returned is read by the layers
     #   on-failure: fail-closed: None, and the caller counts the PDF unread
     #   owner: unpack.pdf.read_pdf
-    #   evidence: T1 the parser runs in a child with RLIMIT_CPU, RLIMIT_AS, a
-    #     wall-clock kill and an environment holding no secret; T1 argv is this
-    #     interpreter and a constant module name; T1 _checked() accepts only
-    #     the shapes below; T4 tests/test_unpack_pdf.py
+    #   evidence: T1 the child has RLIMIT_CPU, RLIMIT_AS, a wall-clock kill and
+    #     no secret in its environment; T1 argv is this interpreter and a constant
+    #     module; T1 _checked() accepts only its shapes; T4 tests/test_unpack_pdf.py
     with _slots:
         try:
             done = subprocess.run(

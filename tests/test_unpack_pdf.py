@@ -7,8 +7,10 @@ is invisible here for a stated reason.
 from __future__ import annotations
 
 import base64
+import inspect
 import io
 import json
+import subprocess
 
 import pytest
 from pypdf import PdfWriter
@@ -203,8 +205,6 @@ class TestTheWorkerIsContained:
         assert "canary" not in json.dumps(_environment())
 
     def test_it_limits_its_own_cpu_and_memory(self) -> None:
-        import inspect
-
         from mcp_trentina_crunchtools.unpack import pdf_worker
 
         source = inspect.getsource(pdf_worker.main)
@@ -231,8 +231,6 @@ class TestTheWorkerIsContained:
     def test_an_answer_of_the_wrong_shape_is_no_answer(
         self, answer: object, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import subprocess
-
         printed = subprocess.CompletedProcess([], 0, stdout=json.dumps(answer).encode(), stderr=b"")
         monkeypatch.setattr(pdf_reader.subprocess, "run", lambda *_a, **_k: printed)
         assert read_pdf(b"%PDF-1.7") is None
@@ -241,15 +239,11 @@ class TestTheWorkerIsContained:
     def test_output_that_is_not_json_is_no_answer(
         self, stdout: bytes, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import subprocess
-
         printed = subprocess.CompletedProcess([], 0, stdout=stdout, stderr=b"")
         monkeypatch.setattr(pdf_reader.subprocess, "run", lambda *_a, **_k: printed)
         assert read_pdf(b"%PDF-1.7") is None
 
     def test_a_worker_that_failed_is_no_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import subprocess
-
         good = json.dumps(
             {
                 "pages": [],

@@ -1,6 +1,6 @@
 # mcp-trentina-crunchtools Constitution
 
-> **Version:** 1.8.0
+> **Version:** 1.9.0
 > **Ratified:** 2026-09-22
 > **Amended:** 2026-10-05
 > **Status:** Active
@@ -185,7 +185,7 @@ justification in `gourmand-exceptions.toml`.
 | systemd service | `mcp-trentina.service` |
 | HTTP port | 8019 |
 | HTTP clients | httpx (application), httpx2 (MCP transport) |
-| Extra stack | beautifulsoup4, markdownify, SQLite |
+| Extra stack | beautifulsoup4, markdownify, SQLite, pypdf (run only in a child process, #369) |
 
 ## History
 
@@ -206,3 +206,4 @@ justification in `gourmand-exceptions.toml`.
 | 1.6.0 | 2026-10-03 | L2 is a pluggable local classifier (#350): Horizon-Labs prompt-injection-guard-small by default, Prompt Guard 2 86M selectable, polarity and threshold from a pinned-model manifest |
 | 1.7.0 | 2026-10-04 | Layers read the delivery unpacked, not the arrived bytes: nothing is delivered that the layers did not read, in its original or decoded form, or for binary by its type (#365, #367). Binary no layer can read is the `binary_unread` gap; `flag` delivers it with the warning, as it does an over-cap payload's tail |
 | 1.8.0 | 2026-10-05 | The L2 obfuscation gate is enforced (#362): run by the image build, recorded in the model manifest, checked at startup. The image ships one L2 model; Prompt Guard 2 86M fails the gate and is dropped |
+| 1.9.0 | 2026-10-05 | PDFs are read (#369): pypdf joins the stack, and runs only in a child process with CPU and memory limits and no credential in its environment |

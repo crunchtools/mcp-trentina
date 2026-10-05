@@ -10,6 +10,37 @@ under that name.
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-10-05
+
+### Added
+- PDFs are read (#369, Phase 3 of #365). Until now a PDF was refused: by
+  `fetch` as a redirect to a binary, anywhere else as `binary_unread`.
+  - **`fetch` accepts `application/pdf`** and delivers the text its pages
+    show, as Markdown, with its links. A base64 PDF in a JSON string
+    becomes `{"format": "pdf", "as_markdown": ...}`. Invisible text is
+    dropped and its count handed to L1; pages that are images and embedded
+    files are named in a line, not silently missing.
+  - **The unpack stage reads inside a PDF** that is delivered as it
+    arrived: each page's text, invisible text under its own heading; then
+    notes, form values, links, JavaScript, document information and XMP
+    metadata, collected from every object the file defines, reachable from
+    a page or not; then embedded files, read like files in an archive.
+  - **Invisible** is text render mode 3 or 7, under a point, off the page,
+    or white on a page that has painted nothing else. A scan with an OCR
+    text layer is read as the page and not counted.
+  - **A page that is only an image** stays `binary_unread` until #370.
+- The parser runs in a child process (`unpack/pdf_worker.py`) with a 20
+  second CPU limit, a 1 GiB address-space limit, no credential in its
+  environment and a 30 second wall-clock kill. Its output is checked field
+  by field. At most two PDFs are read at once.
+- Dependency: `pypdf` 6.19 or later (BSD-3-Clause, pure Python).
+  Constitution 1.9.0 adds it to the stack, child process only.
+
+### Changed
+- `PERIMETER_VERSION` is 10, so every cached verdict is judged again.
+- Known gap 1 is now images only; gap 16 is PDF invisibility that no
+  operator names.
+
 ## [0.60.0] - 2026-10-05
 
 ### Added
