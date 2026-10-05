@@ -172,8 +172,10 @@ _BENIGN = [
     "The co\u00adoperative published its inter\u00adnational report.",
     "\uff21\uff22\uff23\u682a\u5f0f\u4f1a\u793e announced quarterly results.",
     # a word wholly in another script is a word in another language
-    "\u041f\u0440\u0438\u0432\u0435\u0442"
-    " and \u03ba\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1 are greetings.",
+    (
+        "\u041f\u0440\u0438\u0432\u0435\u0442"
+        " and \u03ba\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1 are greetings."
+    ),
     # ordinary escapes
     "https://example.com/files/a%20b%2Fc%3Fd.txt",
     "Rock &amp; Roll &#8212; the caf\\u00e9 sessions",
