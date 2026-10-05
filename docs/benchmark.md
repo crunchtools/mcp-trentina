@@ -464,6 +464,7 @@ result (2026-10-05, production L2 at 0.7):
 | xlsx | 0 | 39 |
 | pptx | 0 | 39 |
 | pdf | 1 | 40 |
+| image, read by OCR | 1 | 34 |
 
 The framing reads like plain text to L2. The attack column drops as other
 content joins the attack in one window, most with two benign files beside
@@ -499,6 +500,57 @@ are judged only for text on the page itself; and the first enumeration of
 objects asked the parser for numbers the file did not define, which took
 82 s on the RFC and takes 0.8 s now. Anything past roughly 40 pages of
 text is over the admission cap whatever the reader does.
+
+## OCR for images (#370)
+
+Images are read by RapidOCR 3.9 (PP-OCRv6 small detection and recognition
+models, 31 MB, shipped inside its wheel) in a child process,
+`unpack/ocr_worker.py`, started once per payload for all of its images.
+The plan called for measuring size and latency before shipping; these are
+the numbers (lotor, 2026-10-05).
+
+**Size.** The image grows by about 235 MB on 1.1 GB: OpenCV 153 MB, the
+RapidOCR wheel with its models 33 MB, Pillow 22 MB, Shapely 13 MB and
+small pure-Python packages. RapidOCR asks for `opencv-python`, which needs
+libxcb and does not import in the image; `opencv-python-headless` provides
+the same module and a uv override removes the other.
+
+**Latency**, in the production image with no network, a read-only root
+and no capabilities, start-up included:
+
+| request | time |
+|---|---|
+| one 900 by 300 banner | 1.1 s |
+| six banners, one request | 2.2 s |
+| a 1920 by 1080 screenshot, 50 lines of 13 px type | 6.5 s |
+| a 1600 by 1800 page, 40 lines | 7.0 s |
+
+Memory: about 0.8 GB resident while the models run, in the child, freed
+when it exits. One request runs at a time and reads at most six images in
+a 40 second budget; what does not fit is `binary_unread`.
+
+**Three settings came out of measuring.**
+- The detector's default enlarges a small image until its shorter side is
+  736 pixels. A 900 by 300 banner took 2.0 s that way and 0.6 s capped at
+  the longer side with no enlarging, for the same two lines.
+- The second, contrast-stretched pass finds text five grey levels off its
+  background, which the first pass does not see. It also misreads text the
+  first pass read well (it amplifies JPEG ringing: `cowindov`, `clustel`),
+  so it detects on a 1200-pixel copy and recognizes only the boxes the
+  first pass did not cover. Detection was 4.1 s at 1800 pixels and 1.4 s at
+  1200 on the same page, with the same forty lines found.
+- Faint is a measured contrast, not "the second pass found it": the spread
+  between a box's light and dark in the image as it arrived, under 20 of
+  255. Slanted text is a few percent ink in its upright box, so the spread
+  is read at the 0.5 and 99.5 percentiles; at 3 and 97 a line at 45 degrees
+  measured as faint.
+
+**What it reads** (same host): text at 15, 45, 90 and 180 degrees; black
+on white, white on clear, through JPEG; an animation's third frame. At 8
+pixels tall a line came back with one space misplaced, at 6 pixels garbled,
+mirrored as noise. L2 on corpus text rendered to an image and read back:
+1 of 14 benign flagged, 34 of 44 attacks, against 0 and 41 for the same
+text plain. Five of the attacks are in scripts the test font cannot draw.
 
 ## L1 stage false positives (#363)
 

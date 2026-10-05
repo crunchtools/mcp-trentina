@@ -131,3 +131,19 @@ def env(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[pat
     yield tmp_path
     config_mod._config = None
     database_mod._db = None
+
+
+@pytest.fixture(autouse=True)
+def _no_ocr_process(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Images are left unread unless a test asks for OCR (``@pytest.mark.ocr``).
+
+    OCR is a child process that loads three models: about a second before the
+    first image is read. Hundreds of tests pass a few bytes with a PNG
+    signature through the unpack stage to see them counted unread, and none
+    of them should start it.
+    """
+    if "ocr" in request.keywords:
+        return
+    from mcp_trentina_crunchtools.unpack import scan
+
+    monkeypatch.setattr(scan, "read_images", lambda images: [None] * len(images))

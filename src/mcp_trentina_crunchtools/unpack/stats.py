@@ -18,3 +18,4 @@ class UnpackStats:
     binary_labelled: int = field(default=0)
     binary_unread: int = field(default=0)
     archives_opened: int = field(default=0)
+    images_read: int = field(default=0)

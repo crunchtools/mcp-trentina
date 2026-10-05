@@ -49,6 +49,7 @@ claim otherwise.
 from __future__ import annotations
 
 import asyncio
+import base64
 import ipaddress
 import json
 import logging
@@ -66,6 +67,7 @@ from ..modes import gaps_of
 from ..preprocess import SelectionContext
 from ..quarantine.prompts import RISK_LEVELS
 from ..reserved import WARNING_KEY, strip_reserved, with_stripped
+from ..unpack.ocr import MAX_IMAGE_BYTES
 from ..warning import build_warning
 from .context import profile_context
 from .drivers import build_preprocessors
@@ -79,7 +81,7 @@ from .proxy_utils import (
 from .selection import describe, run_l1
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
 
     from starlette.requests import Request
 
@@ -141,9 +143,13 @@ Client-Server API answers ``{}`` or a count, and OPTIONS is CORS."""
 _MEDIA_DOWNLOAD = re.compile(_MEDIA + r"(?:download|thumbnail)/.+")
 
 _BINARY_TYPES = ("image/", "audio/", "video/", "application/octet-stream")
-"""Media types a media download forwards unjudged. No layer reads pixels or
-sound, and an E2EE attachment is ``application/octet-stream`` ciphertext. A
-text, JSON or markup attachment is judged like any other response."""
+"""Media types a media download cannot be judged as text or JSON. An image
+is read by OCR and judged (#370). Nothing reads sound or moving pictures,
+and an E2EE attachment is ``application/octet-stream`` ciphertext, so under
+``unjudged: withhold`` those are refused (#371); ``annotate`` forwards them
+with the warning header. A text, JSON or markup attachment is judged like
+any other response."""
+
 
 # Only buffer-and-scan bodies up to this size; a larger one is refused,
 # under annotate too: it cannot be judged, stripped or annotated without
@@ -324,25 +330,24 @@ def register_matrix_routes(
 
 def _judgement(
     method: str, path: str, status: int, content_type: str
-) -> Literal["json", "text"] | None:
+) -> Literal["json", "text", "media"] | None:
     """How a response is judged before it forwards, or None if it is not.
 
     The one place the decision is made. Only a 200 is judged; of those,
-    the exempt set above forwards unjudged, JSON is judged as a document,
-    and anything else as text.
+    the exempt set above forwards unjudged, a binary media download is
+    ``media`` (``_media``: read if it is an image, withheld if not), JSON is
+    judged as a document, and anything else as text.
     """
     exempt = (
         status != 200
         or method in ("DELETE", "OPTIONS")
         or any(m == method and p.fullmatch(path) for m, p in _ACKS)
-        or (
-            method == "GET"
-            and _MEDIA_DOWNLOAD.fullmatch(path) is not None
-            and content_type.strip().lower().startswith(_BINARY_TYPES)
-        )
     )
     if exempt:
         return None
+    binary = content_type.strip().lower().startswith(_BINARY_TYPES)
+    if method == "GET" and _MEDIA_DOWNLOAD.fullmatch(path) is not None and binary:
+        return "media"
     return "json" if "json" in content_type.lower() else "text"
 
 
@@ -397,11 +402,14 @@ async def _proxy_matrix(
     resp_headers = filter_response_headers(list(resp.headers.items()))
     ct = resp.headers.get("content-type", "application/json")
 
-    judged_as = _judgement(request.method, path, resp.status_code, ct)
-    if judged_as == "json":
-        return await _scan_and_forward(resp, resp_headers, ct, profile, path)
-    if judged_as == "text":
-        return await _scan_text_and_forward(resp, resp_headers, ct, profile, path)
+    scanner = _SCANNERS.get(_judgement(request.method, path, resp.status_code, ct) or "")
+    if scanner is not None:
+        return await scanner(resp, resp_headers, ct, profile, path)
+    return _streamed(resp, resp_headers, ct)
+
+
+def _streamed(resp: httpx.Response, headers: dict[str, str], content_type: str) -> Response:
+    """Forward a body as it arrives, unjudged: the exempt set, and media under annotate."""
 
     async def stream_body() -> AsyncIterator[bytes]:
         try:
@@ -411,10 +419,7 @@ async def _proxy_matrix(
             await resp.aclose()
 
     return StreamingResponse(
-        stream_body(),
-        status_code=resp.status_code,
-        headers=resp_headers,
-        media_type=ct,
+        stream_body(), status_code=resp.status_code, headers=headers, media_type=content_type
     )
 
 
@@ -702,6 +707,10 @@ async def _scan_and_forward(
             ",".join(gaps.names()),
         )
 
+    if _withholds(profile):
+        unread = _withhold_undecrypted(payload, view)
+        if unread:
+            warning = {**(warning or {}), "undecrypted_withheld": unread}
     return _respond(
         payload,
         body,
@@ -736,23 +745,60 @@ async def _restrip(payload: Any) -> dict[str, Any] | None:
     return payload
 
 
-async def _scan_text_and_forward(
+async def _media(
     resp: httpx.Response,
     resp_headers: dict[str, str],
     content_type: str,
     profile: Profile,
     path: str,
 ) -> Response:
+    """A binary media download: read if it is an image, never forwarded unread
+    under withhold (#371).
+
+    An image is handed to the layers as base64, which the unpack stage reads
+    by OCR; one OCR cannot read is ``binary_unread`` and refused like any
+    other unjudged body. Audio, video and ``application/octet-stream`` (an
+    E2EE attachment is ciphertext under that type) have no reader, so they
+    are refused under withhold. Under annotate every one of them forwards
+    with the warning header, as the gap it is.
+    """
+    if not _withholds(profile):
+        return _streamed(resp, {**resp_headers, WARNING_HEADER: "unknown"}, content_type)
+    if content_type.strip().lower().startswith("image/"):
+        return await _scan_text_and_forward(
+            resp, resp_headers, content_type, profile, path, image=True
+        )
+    await resp.aclose()
+    logger.warning(
+        "matrix_proxy: withheld a media download no layer can read, %s for profile=%s",
+        redact_source(path),
+        profile.name,
+    )
+    return _refused()
+
+
+async def _scan_text_and_forward(
+    resp: httpx.Response,
+    resp_headers: dict[str, str],
+    content_type: str,
+    profile: Profile,
+    path: str,
+    *,
+    image: bool = False,
+) -> Response:
     """Judge a body that is not JSON as text, then forward or refuse it.
 
     No key in it can carry a warning, so a header does, holding only a risk
     level. Flagged forwards, as a flagged JSON body does; unjudged forwards
-    only under annotate.
+    only under annotate. An ``image`` is judged as its base64, which the
+    unpack stage reads by OCR; one too large to read is unjudged.
     """
     headers = {k: v for k, v in resp_headers.items() if k.lower() != "content-length"}
     buffered = await _buffer(resp, path)
     if isinstance(buffered, Response):
         return buffered
+    if image and len(buffered) > MAX_IMAGE_BYTES:
+        return _refused()
     ingress = profile.matrix_ingress
     deadline = (
         ingress.preprocess.deadline_seconds
@@ -763,7 +809,9 @@ async def _scan_text_and_forward(
     try:
         async with asyncio.timeout(deadline):
             verdict = await defend(
-                buffered.decode("utf-8", errors="replace"),
+                base64.b64encode(buffered).decode("ascii")
+                if image
+                else buffered.decode("utf-8", errors="replace"),
                 source=f"matrix:{profile.name}:{path}",
                 source_type="matrix_sync",
                 defense=profile.defense,
@@ -792,6 +840,10 @@ async def _scan_text_and_forward(
         )
         headers[WARNING_HEADER] = risk
     return Response(content=buffered, status_code=200, headers=headers, media_type=content_type)
+
+
+_SCANNERS = {"json": _scan_and_forward, "text": _scan_text_and_forward, "media": _media}
+"""How each of ``_judgement``'s answers is judged and forwarded."""
 
 
 def _withholds(profile: Profile) -> bool:
@@ -828,13 +880,70 @@ def _rebuild_room_event(node: dict[str, Any]) -> int:
     if not (isinstance(content, dict) and isinstance(node.get("type"), str)):
         return 0
     if "state_key" not in node and isinstance(node.get("event_id"), str):
-        relation = withheld_relation(content.get("m.relates_to"))
-        node["content"] = {"msgtype": "m.notice", "body": WITHHELD}
-        if relation is not None:
-            node["content"]["m.relates_to"] = relation
-        if node["type"] == "m.room.encrypted":
-            node["type"] = "m.room.message"
+        _as_notice(node, content)
     return 1
+
+
+def _as_notice(node: dict[str, Any], content: dict[str, Any]) -> None:
+    """Make a room event the withheld notice, keeping only its relation."""
+    relation = withheld_relation(content.get("m.relates_to"))
+    node["content"] = {"msgtype": "m.notice", "body": WITHHELD}
+    if relation is not None:
+        node["content"]["m.relates_to"] = relation
+    if node["type"] == "m.room.encrypted":
+        node["type"] = "m.room.message"
+
+
+def _withhold_undecrypted(payload: Any, view: Any) -> int:
+    """Withhold, in place, each encrypted room event the gateway did not read.
+
+    An agent's Matrix client holds the room keys and would decrypt it, so
+    forwarding the ciphertext delivers text no layer read (#371). Each such
+    event becomes the withheld notice; the rest of the response is judged
+    and forwards as it is. Returns how many.
+
+    Which events were read is the extractor's answer. One that decrypted
+    nothing (``select``, or ``matrix`` with no key) read none of them. One
+    that decrypted some lists the rest in ``undecryptable``, matched here on
+    the event ID, or on the session ID where an event has none. Only Megolm
+    room events are in question: an Olm to-device event carries its
+    ciphertext as an object, and is key traffic, not prose.
+    """
+    unread = getattr(view, "undecryptable", ())
+    all_unread = not getattr(view, "decrypted_events", 0)
+    by_id = {event.event_id for event in unread if event.event_id}
+    by_session = {event.session_id for event in unread if not event.event_id}
+    withheld = 0
+    for node, content in _megolm_room_events(payload):
+        event_id = node.get("event_id")
+        listed = event_id in by_id if event_id else content.get("session_id") in by_session
+        if all_unread or listed:
+            _as_notice(node, content)
+            withheld += 1
+    return withheld
+
+
+def _megolm_room_events(payload: Any) -> Iterator[tuple[dict[str, Any], dict[str, Any]]]:
+    """Every ``m.room.encrypted`` event with string ciphertext, and its content,
+    to ``_MAX_WALK_DEPTH``. Collected before any is rewritten."""
+    found: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    level: list[Any] = [payload]
+    for _ in range(_MAX_WALK_DEPTH + 1):
+        below: list[Any] = []
+        for node in level:
+            content = node.get("content") if isinstance(node, dict) else None
+            if (
+                isinstance(content, dict)
+                and node.get("type") == "m.room.encrypted"
+                and isinstance(content.get("ciphertext"), str)
+            ):
+                found.append((node, content))
+            elif isinstance(node, dict):
+                below.extend(node.values())
+            elif isinstance(node, list):
+                below.extend(node)
+        level = below
+    return iter(found)
 
 
 _PATH_STEPS = {("root", "to_device"): "to_device", ("to_device", "events"): "to_device.events"}

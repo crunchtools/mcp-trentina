@@ -10,6 +10,47 @@ under that name.
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-10-05
+
+### Added
+- Images are read by OCR (#370, Phase 4 of #365). An image inside text or
+  JSON, a data URI, an MCP image block or resource blob, a file in an
+  archive, and a PDF page that is a picture were all `binary_unread`. The
+  unpack stage now reads the text in them, and reads each twice: as it
+  arrived, and with its contrast stretched. Text in a box with almost no
+  contrast is reported apart and counted as hidden content.
+  - All the images of one payload, or of one MCP response, go to one OCR
+    request: at most six images, 6 MB each, in a 40 second budget. What
+    does not fit stays `binary_unread`.
+  - A token that opens as an image, a PDF or an archive is decoded whole up
+    to 8,000,000 characters; the 140,000-character cap still holds for
+    everything else.
+  - OCR runs in a child process (`unpack/ocr_worker.py`) like the PDF
+    parser: its own CPU and address-space limits, no credential in its
+    environment, a wall-clock kill.
+  - Dependencies: `rapidocr` 3.9 (Apache-2.0, PP-OCR models inside the
+    wheel) and `opencv-python-headless`. The image grows by about 235 MB.
+- Matrix media is no longer forwarded unread under `unjudged: withhold`
+  (#371). An image download is read by OCR and judged; audio, video and
+  `application/octet-stream` downloads are refused; an encrypted room event
+  the gateway could not decrypt becomes the withheld notice and is counted
+  in the warning as `undecrypted_withheld`.
+
+### Changed
+- **Behaviour under withhold, the default:** an agent in an end-to-end
+  encrypted Matrix room no longer receives attachments (they are ciphertext
+  to the gateway), and without `preprocess.decrypt` it no longer receives
+  encrypted messages. `unjudged: annotate` forwards both, marked.
+- Text hidden inside an image, office file or PDF that arrives as an MCP
+  image block or resource blob is now counted by L1. Since 0.60.0 it was
+  read and not counted.
+- `defend()` unpacks a payload whole up to 8,000,000 characters, since an
+  image is megabytes of base64 that unpack to a page of text. Admission
+  still counts what the layers will read.
+- `PERIMETER_VERSION` is 11, so every cached verdict is judged again.
+- Known gap 1 is now what OCR does not read; gap 14 is Matrix under
+  `annotate`. Constitution 1.10.0.
+
 ## [0.61.0] - 2026-10-05
 
 ### Added

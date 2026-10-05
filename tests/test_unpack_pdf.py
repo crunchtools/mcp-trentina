@@ -43,6 +43,7 @@ _EMPTY: dict[str, object] = {
     "text_layers": 0,
     "fields": {},
     "attachments": [],
+    "pictures": [],
 }
 """What the worker prints for a PDF with nothing in it."""
 _SHOWN = show("Quarterly report for the storage team.")
@@ -89,7 +90,7 @@ class TestPagesAreRead:
         view = unpack(b64(scan))
         assert "=== page 1 ===\n" + _NOTE in view.text
         assert "text not shown" not in view.text
-        assert "(1 page(s) are images under a text layer;" in view.text
+        assert "(1 page(s) are images under a text layer; the text above is the layer)" in view.text
         assert (view.hidden, view.unread) == (0, (SCANNED_PAGE,))
 
     @pytest.mark.parametrize(
@@ -241,6 +242,20 @@ class TestWhatStaysUnread:
         )
         pdf_worker._Reading(reader).fields()
         assert asked == [(1, 0), (4, 0), (7, 3)]
+
+    def test_a_worker_that_cannot_start_reads_nothing_and_frees_its_slot(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        def refuses(*_args: object, **_kwargs: object) -> None:
+            raise OSError("no such interpreter")
+
+        monkeypatch.setattr(child.subprocess, "run", refuses)
+        with caplog.at_level("WARNING"):
+            for _ in range(pdf_reader.CONCURRENCY + 1):
+                assert read_pdf(pdf(_SHOWN)) is None
+        assert caplog.text.count("pdf: unread, could not start") == pdf_reader.CONCURRENCY + 1
+        monkeypatch.undo()
+        assert read_pdf(pdf(_SHOWN)) is not None, "every slot was released"
 
     def test_a_pdf_that_finds_every_slot_busy(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Waiting holds one of the gateway's worker threads, so it is short."""

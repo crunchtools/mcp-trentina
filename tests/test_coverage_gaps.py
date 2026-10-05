@@ -12,12 +12,14 @@ OCR limits) are documented with the benchmark that measured them instead.
 from __future__ import annotations
 
 import base64
+import io
 
 import pytest
 
 from mcp_trentina_crunchtools.l1.pipeline import run_l1
 from mcp_trentina_crunchtools.unpack.scan import unpack
 
+from .image_files import picture
 from .office_files import b64, docx, paragraph, run, zipped
 from .pdf_files import pdf, show
 
@@ -36,23 +38,52 @@ def test_l1_reads_two_ciphers_and_three_escape_forms_and_no_others() -> None:
 @pytest.mark.parametrize(
     ("header", "kind"),
     [
-        (b"\x89PNG\r\n\x1a\n", "image/png"),
         (b"7z\xbc\xaf\x27\x1c", "7z archive"),
         (b"Rar!\x1a\x07\x00", "rar archive"),
         (b"\x28\xb5\x2f\xfd", "zstd"),
         (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "legacy office file"),
     ],
-    ids=["image", "7z", "rar", "zstd", "legacy-office"],
+    ids=["7z", "rar", "zstd", "legacy-office"],
 )
-def test_no_layer_reads_inside_images_or_these_archives(header: bytes, kind: str) -> None:
-    """#370: labelled, refused in block mode, but never read inside. Zip, tar,
-    gzip, bzip2, xz, the OOXML office formats (#368) and PDFs (#369) are read."""
+def test_no_layer_reads_inside_these_archives(header: bytes, kind: str) -> None:
+    """Labelled, refused in block mode, but never read inside. Zip, tar, gzip,
+    bzip2, xz, the OOXML office formats (#368), PDFs (#369) and images (#370)
+    are read."""
     blob = base64.b64encode(header + bytes(range(256)) * 4).decode()
     assert unpack(f"attachment: {blob}").unread == (kind,)
 
 
-def test_a_pdf_page_that_is_only_an_image_is_unread() -> None:
-    """#370: a scanned page has no text for the reader to find."""
+def test_an_image_ocr_does_not_read_is_unread() -> None:
+    """#370: an image is read when OCR reads it. This suite leaves OCR off
+    (``conftest._no_ocr_process``), which is every image OCR cannot open."""
+    view = unpack(b64(picture("Any text at all.")))
+    assert view.unread == ("image/png",)
+
+
+@pytest.mark.ocr
+def test_ocr_does_not_read_mirrored_text_or_type_too_small() -> None:
+    """#370: an OCR-level guarantee. Both images are read, wrongly: the text
+    that reaches the layers is not the text a person would make out."""
+    from PIL import Image, ImageOps
+
+    mirrored = io.BytesIO()
+    ImageOps.mirror(Image.open(io.BytesIO(picture(_PROSE)))).save(mirrored, "PNG")
+    small = io.BytesIO()
+    Image.open(io.BytesIO(picture(_PROSE))).resize((180, 60)).save(small, "PNG")
+    for image in (mirrored.getvalue(), small.getvalue()):
+        view = unpack(b64(image))
+        assert view.unread == ()
+        assert "quarterly numbers" not in view.text
+
+
+def test_audio_and_video_have_no_reader() -> None:
+    """#370 reads pictures. Sound and moving pictures stay unread."""
+    blob = base64.b64encode(b"OggS" + bytes(range(256)) * 4).decode()
+    assert unpack(f"attachment: {blob}").unread == ("audio or video",)
+
+
+def test_a_pdf_page_that_is_only_an_image_is_unread_when_ocr_cannot_read_it() -> None:
+    """#370: a scanned page is read from its picture, and unread without it."""
     view = unpack(b64(pdf(show(_PROSE), "", image=True)))
     assert _PROSE in view.text
     assert view.unread == ("scanned PDF page",)
@@ -73,10 +104,11 @@ def test_white_pdf_text_after_a_fill_is_read_but_not_counted() -> None:
     assert view.hidden == 0
 
 
-def test_a_pdf_ocr_layer_is_read_but_its_picture_is_not() -> None:
+def test_a_pdf_ocr_layer_is_read_and_its_picture_needs_ocr() -> None:
     """#370: a page that is an image with all its text invisible is a scan
-    with a text layer. The layer is read and not counted as hidden; nothing
-    checks that it says what the picture shows, so the page stays unread."""
+    with a text layer. The layer is read and not counted as hidden; the
+    picture is read by OCR beside it, and where OCR cannot read it the page
+    stays unread."""
     view = unpack(b64(pdf(show(_ATTACK, before="3 Tr"), image=True)))
     assert _ATTACK in view.text
     assert (view.hidden, view.unread) == (0, ("scanned PDF page",))

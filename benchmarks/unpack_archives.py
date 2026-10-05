@@ -28,6 +28,7 @@ from mcp_trentina_crunchtools.l1.pipeline import run_l1
 from mcp_trentina_crunchtools.quarantine.classifier import classify, is_classifier_available
 from mcp_trentina_crunchtools.unpack.scan import unpack
 from tests.adversarial_corpus import CORPUS
+from tests.image_files import page
 from tests.office_files import b64, docx, paragraph, pptx, run, xlsx, zipped
 from tests.pdf_files import pdf, show
 
@@ -57,6 +58,7 @@ CONTAINERS: dict[str, Callable[[str, list[str]], bytes]] = {
     "docx": lambda _, lines: docx(*(paragraph(run(line)) for line in lines)),
     "xlsx": lambda _, lines: xlsx({"Sheet1": [[line] for line in lines]}),
     "pptx": lambda _, lines: pptx(lines),
+    "image (OCR)": lambda text, _: page(text),
     "pdf": lambda text, _: pdf(
         "".join(
             show(line.encode("latin-1", "replace").decode("latin-1"), y=740 - 14 * row)

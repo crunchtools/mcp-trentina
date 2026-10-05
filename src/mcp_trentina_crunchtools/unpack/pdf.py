@@ -68,6 +68,10 @@ class PdfReading:
             it is unread, and nothing has checked the two agree.
         fields: Text entries by section name (``SECTIONS``).
         attachments: Embedded files, for the archive rules to read.
+        pictures: ``(page number, image)`` for pages that are pictures,
+            scanned or under a text layer, for OCR to read (#370). A page
+            counted in ``scanned`` or ``text_layers`` with no picture here
+            stays unread.
     """
 
     pages: list[tuple[str, str]] = field(default_factory=list)
@@ -76,6 +80,7 @@ class PdfReading:
     text_layers: int = 0
     fields: dict[str, list[str]] = field(default_factory=dict)
     attachments: list[Entry] = field(default_factory=list)
+    pictures: list[tuple[int, bytes]] = field(default_factory=list)
 
     def markdown(self) -> str:
         """The visible text of the pages, for stage 1 to deliver."""
@@ -141,6 +146,10 @@ def _checked(raw: object) -> PdfReading | None:
     if not isinstance(fields, dict):
         raise TypeError("fields is not an object")
     reading.fields = {name: _strings(fields[name]) for name in SECTIONS if name in fields}
+    for number, encoded in raw["pictures"]:
+        if not isinstance(encoded, str):
+            raise TypeError("not a picture")
+        reading.pictures.append((_count(number), base64.b64decode(encoded, validate=True)))
     for name, encoded in raw["attachments"]:
         if not isinstance(name, str) or not isinstance(encoded, (str, type(None))):
             raise TypeError("not an attachment")

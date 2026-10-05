@@ -50,9 +50,11 @@ import logging
 import os
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
+from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
 
 from ..defense import Provenance, defend
+from ..l1.hidden import HiddenStats
 from ..l1.pipeline import run_l1
 from ..logsafe import exc_kind, exc_where, redact_source
 from ..modes import (
@@ -64,14 +66,13 @@ from ..modes import (
     refusal_reason,
 )
 from ..quarantine.agent import quarantine_redact
-from ..unpack.scan import IMAGE_BLOCK, UNDECODABLE, image_too_small_to_draw, read_blob
+from ..unpack.scan import IMAGE_BLOCK, UNDECODABLE, image_too_small_to_draw, read_blobs
 from ..warning import build_warning
 from .service import judge_of, service_context, service_profile
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
-    from ..l1.hidden import HiddenStats
     from .profile import Profile
 
 logger = logging.getLogger(__name__)
@@ -282,72 +283,106 @@ def _collect_strings(value: Any, out: list[str]) -> None:
             stack.extend(reversed(node))
 
 
+@dataclass
+class _Collected:
+    """What one MCP tool result holds, as the layers will read it.
+
+    ``texts`` is in block order. An image block or a resource blob leaves a
+    None there and joins ``pending``; once every block has been walked they
+    are read together (``unpack.scan.read_blobs``), so the images of one
+    response share one OCR request.
+    """
+
+    texts: list[str | None] = dataclass_field(default_factory=list)
+    pending: list[tuple[int, str, str]] = dataclass_field(
+        default_factory=list
+    )  # (slot, blob, unread kind)
+    unscannable: dict[str, int] = dataclass_field(default_factory=lambda: {"images": 0, "blobs": 0})
+    unread: set[str] = dataclass_field(default_factory=set)
+    hidden: int = 0
+
+    def later(self, blob: object, kind: str) -> None:
+        """Queue a base64 payload to be read with the others; ``kind`` is
+        what it is counted as if it turns out not to be base64 at all."""
+        if isinstance(blob, str):
+            self.pending.append((len(self.texts), blob, kind))
+            self.texts.append(None)
+        else:
+            self.unread.add(kind)
+
+    def read_pending(self) -> None:
+        views = read_blobs([blob for _, blob, _ in self.pending])
+        for (slot, _, kind), view in zip(self.pending, views, strict=True):
+            if view is None:
+                self.unread.add(kind)
+                continue
+            self.texts[slot] = view.text
+            self.unread.update(view.unread)
+            self.hidden += view.hidden
+
+
 def _collect_response_texts(
     content_blocks: list[Any] | None,
     structured_content: Any,
-) -> tuple[list[str], dict[str, int], set[str]]:
+) -> tuple[list[str], dict[str, int], set[str], int]:
     """Pull every judgeable string out of an MCP tool result.
 
-    Returns the texts, a count of what CANNOT be read as text (image blocks
-    and binary resource blobs), and the kinds among those an agent's tools
-    could open and no layer reads (#367). Those are the ``binary_unread``
-    gap: block and redact refuse them, flag delivers them with the warning.
-    A blob that decodes to text joins the texts; one that is a key or random
-    bytes joins them as its label, read by its type.
+    Returns the texts; a count of the blocks that are not text (image blocks
+    and resource blobs); the kinds among those an agent's tools could open
+    and no layer read (#367), which are the ``binary_unread`` gap; and how
+    much text inside them was hidden from a reader (#368 to #370). An image
+    is read by OCR, a blob like one token of the unpack stage: to its text,
+    to what is inside it, or to its label.
     """
-    texts: list[str] = []
-    unscannable = {"images": 0, "blobs": 0}
-    unread: set[str] = set()
-
+    found = _Collected()
     for block in content_blocks or []:
         if isinstance(block, dict):
-            _collect_block(block, texts, unscannable, unread)
-
+            _collect_block(block, found)
+    found.read_pending()
+    texts = [text for text in found.texts if text]
     if structured_content is not None:
         _collect_strings(structured_content, texts)
+    return texts, found.unscannable, found.unread, found.hidden
 
-    return texts, unscannable, unread
 
-
-def _collect_block(
-    block: dict[str, Any], texts: list[str], unscannable: dict[str, int], unread: set[str]
-) -> None:
+def _collect_block(block: dict[str, Any], found: _Collected) -> None:
     btype = block.get("type")
     if btype == "text":
         text = block.get("text")
         if isinstance(text, str) and text:
-            texts.append(text)
+            found.texts.append(text)
     elif btype == "image":
-        unscannable["images"] += 1
+        found.unscannable["images"] += 1
         image = block.get("data")
         if isinstance(image, str) and image_too_small_to_draw(image):
-            texts.append(f"({IMAGE_BLOCK.name}, too small to draw text)")
+            found.texts.append(f"({IMAGE_BLOCK.name}, too small to draw text)")
         else:
-            unread.add(IMAGE_BLOCK.name)
+            found.later(image, IMAGE_BLOCK.name)
     elif btype == "resource" and isinstance(block.get("resource"), dict):
-        _collect_resource(block["resource"], texts, unscannable, unread)
+        resource = block["resource"]
+        rtext = resource.get("text")
+        if isinstance(rtext, str) and rtext:
+            found.texts.append(rtext)
+        if resource.get("blob") is not None:  # a resource may carry both, and each is read
+            found.unscannable["blobs"] += 1
+            found.later(resource["blob"], UNDECODABLE.name)
 
 
-def _collect_resource(
-    resource: dict[str, Any], texts: list[str], unscannable: dict[str, int], unread: set[str]
-) -> None:
-    """A resource's text, or its blob read as the unpack stage reads one token.
+async def _read_response(
+    content_blocks: list[Any] | None, structured_content: Any, hidden: HiddenStats | None
+) -> tuple[list[str], dict[str, int], set[str], HiddenStats | None]:
+    """The response's texts, what in it is not text or not read, and its hiding.
 
-    Text a blob decodes to is read like any text block; binary is read by its
-    label, or is unread; a blob that does not decode is unread.
+    Text hidden inside an image, an office file or a PDF that arrived as a
+    block is added to the hiding stage 1 found, for L1 to report.
     """
-    rtext = resource.get("text")
-    blob = resource.get("blob")
-    if isinstance(rtext, str) and rtext:
-        texts.append(rtext)
-    if blob is not None:  # a resource may carry both, and each is read
-        unscannable["blobs"] += 1
-        view = read_blob(blob) if isinstance(blob, str) else None
-        if view is None:
-            unread.add(UNDECODABLE.name)
-        else:
-            texts.append(view.text)
-            unread.update(view.unread)
+    # Decoding blobs is linear in their size; off the loop, like L1 (#295).
+    texts, unscannable, unread, inside = await asyncio.to_thread(
+        _collect_response_texts, content_blocks, structured_content
+    )
+    if inside:
+        hidden = (hidden or HiddenStats()) + HiddenStats(elements=inside)
+    return texts, unscannable, unread, hidden
 
 
 def _binary_only(
@@ -409,9 +444,8 @@ async def scan_tool_response(
     Flags are recorded to the detections table (source_type="tool_response")
     except on a verdict-cache hit.
     """
-    # Decoding blobs is linear in their size; off the loop, like L1 (#295).
-    texts, unscannable, unread = await asyncio.to_thread(
-        _collect_response_texts, content_blocks, structured_content
+    texts, unscannable, unread, hidden = await _read_response(
+        content_blocks, structured_content, hidden
     )
     joined = "\n".join(texts)
     mode = effective_mode(profile, mode)
