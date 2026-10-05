@@ -28,7 +28,9 @@ CONCURRENCY = 2
 """PDFs being read at once. Each is a process with up to a gigabyte to use."""
 
 SLOT_WAIT = 10.0
-"""Seconds a PDF waits for one of those slots before it is given up as unread."""
+"""Seconds a PDF waits for one of those slots before it is given up as unread.
+Callers are worker threads of the gateway's one pool: a thread waiting here is
+a thread L1 and the tokenizer cannot have, so the wait is short."""
 
 MAX_OUTPUT = 16 * 1024 * 1024
 """Bytes of worker output accepted. Its own text cap is far below this."""
@@ -104,9 +106,6 @@ def read_pdf(packed: bytes) -> PdfReading | None:
     #   evidence: T1 the child has RLIMIT_CPU, RLIMIT_AS, a wall-clock kill and
     #     no secret in its environment; T1 argv is this interpreter and a constant
     #     module; T1 _checked() accepts only its shapes; T4 tests/test_unpack_pdf.py
-    # Callers are worker threads of the gateway's one pool. A thread that
-    # waits here is a thread L1 and the tokenizer cannot have, so the wait
-    # for a slot is short and a PDF that does not get one is unread.
     if not _slots.acquire(timeout=SLOT_WAIT):
         return None
     try:
