@@ -216,9 +216,9 @@ def main(argv: list[str] | None = None) -> int:
         print("error: no L2 model loaded (set CLASSIFIER_MODEL_PATH)", file=sys.stderr)
         return 2
     rows = asyncio.run(_run(args.reps, args.concurrency, args.every))
+    print(_report(rows), flush=True)
     if args.json:
         args.json.write_text(json.dumps([asdict(r) for r in rows], indent=1))
-    print(_report(rows))
     return 0
 
 
