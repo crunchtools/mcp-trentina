@@ -431,6 +431,37 @@ spaces decodes to a DER signature and would have been read as
 `(DER certificate or key)`. An image, PDF or archive is labelled
 regardless, because that label is the `binary_unread` refusal.
 
+## Redact's extraction input (#360)
+
+Until 0.57.1 redact's extraction turn read a copy L1 had normalized. This is
+the measurement that retired it (`benchmarks/redact_input.py`, 2026-10-05,
+`google/gemini-2.5-flash-lite` through OpenRouter, the default L2). Each
+corpus payload sits inside a fixed carrier notice and redact is asked to
+summarize it, twice per input:
+
+- **judged**: the unpacked delivery, the text L1, L2 and L3 detect on.
+- **copy**: that text after L1's normalizing stages.
+
+The 44 attacks and 14 benign texts run plain and under the six transforms of
+the obfuscation gate. On 300 of the 406 payloads the two inputs differ; on
+the rest L1 normalizes nothing and they are the same string.
+
+| where the inputs differ (600 calls each) | judged | copy |
+|---|---|---|
+| delivered with an attack artifact | 22 | 22 |
+| delivered with both of the carrier's facts | 532 | 515 |
+
+An artifact is anything L1 counts in a delivered string, a URL from the
+payload, or 40 characters of the attack verbatim. Every one of the 44 found
+was the last kind, in both arms: no delimiter, invisible character, encoded
+blob or payload URL was delivered from either input. The copy bought no
+safety and cost 17 correct answers, so it was removed and redact reads what
+was judged.
+
+The same run shows what neither input fixes: a summary can quote a sentence
+of the attack and pass the output check and turn 3. That happened in 29 of
+876 calls on the judged text, attacks only.
+
 ## Continuous detection gate (CI)
 
 The periodic benchmark above is the deep, cross-provider comparison. For a
