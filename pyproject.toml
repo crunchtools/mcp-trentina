@@ -1,6 +1,6 @@
 [project]
 name = "mcp-trentina-crunchtools"
-version = "0.57.1"
+version = "0.58.0"
 description = "MCP gateway for AI agents — prompt-injection defense, token savings, deterministic policy, OAuth, per-agent profiles"
 requires-python = ">=3.11"
 license = "AGPL-3.0-or-later"
@@ -174,6 +174,7 @@ max-complexity = 10
 "benchmarks/l2_obfuscation.py" = ["E402"]
 "benchmarks/l1_briefing.py" = ["E402"]
 "benchmarks/redact_input.py" = ["E402"]
+"benchmarks/l1_false_positives.py" = ["E402"]
 # S311: a seeded generator makes the blob samples reproducible; nothing here is a secret.
 "benchmarks/l2_blob_length.py" = ["E402", "S311"]
 

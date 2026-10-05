@@ -26,6 +26,7 @@ mode — not this stage — decides whether flagged content reaches the agent.
 
 from __future__ import annotations
 
+import codecs
 import re
 from dataclasses import dataclass
 
@@ -223,14 +224,16 @@ _SOFT_BREAK = re.compile(
 class DirectiveStats:
     """Statistics from directive detection.
 
-    The two are disjoint: ``evasions_detected`` counts the lines that matched
-    only once ``l1/evasion.py`` undid a scramble, a typo or character spacing,
-    and those lines are not in ``directives_detected``. Both feed risk, which
-    sums every field.
+    The three are disjoint: ``evasions_detected`` counts the lines that
+    matched only once ``l1/evasion.py`` undid a scramble, a typo or character
+    spacing, ``ciphered_detected`` those that matched only once read in ROT13
+    or back to front (#363), and neither is in ``directives_detected``. All
+    feed risk, which sums every field.
     """
 
     directives_detected: int = 0
     evasions_detected: int = 0
+    ciphered_detected: int = 0
 
 
 def matches_exact(line: str) -> bool:
@@ -254,6 +257,22 @@ def _matches_evasion(line: str) -> bool:
     return False
 
 
+_MIN_CIPHERED = 12
+"""The shortest line read in ROT13 and reversed: no exact pattern is shorter."""
+
+
+def _matches_ciphered(line: str) -> bool:
+    """Whether ``line`` is an exact directive in ROT13 or written backwards.
+
+    Held to the exact patterns, which need several words in order: ordinary
+    text does not turn into one by rotation or reversal. Two more passes of
+    the same linear patterns over the line.
+    """
+    if len(line) < _MIN_CIPHERED:
+        return False
+    return matches_exact(codecs.decode(line, "rot13")) or matches_exact(line[::-1])
+
+
 def strip_directives(text: str) -> tuple[str, DirectiveStats]:
     """Count lines containing LLM directive patterns; return text unchanged.
 
@@ -270,6 +289,8 @@ def strip_directives(text: str) -> tuple[str, DirectiveStats]:
             stats.directives_detected += 1
         elif _matches_evasion(line):
             stats.evasions_detected += 1
+        elif _matches_ciphered(line):
+            stats.ciphered_detected += 1
         previous = line
 
     return text, stats

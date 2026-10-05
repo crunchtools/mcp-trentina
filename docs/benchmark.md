@@ -334,12 +334,12 @@ covered 502 payloads; L1 fired on 241, and only those have an ablated arm.
   attacks that L2 and L3 both passed. It also refused 29 benign texts
   carrying zero-width or tag characters that both other layers cleared,
   because four invisible characters is already high risk.
-- **L1 does not count two obfuscations.** Its patterns read through text
-  spaced out with soft hyphens or set in fullwidth letters: a known
-  directive still matches. Unlike zero-width characters, though, neither
-  obfuscation is counted as a finding in itself (#363). On this semantic
-  corpus L1 fired on the same 2 of 44 attacks with and without them. L2
-  reads through both.
+- **L1 did not count two obfuscations when this ran.** Its patterns read
+  through text spaced out with soft hyphens or set in fullwidth letters: a
+  known directive still matched, but neither obfuscation was a finding in
+  itself. On this semantic corpus L1 fired on the same 2 of 44 attacks with
+  and without them. Both are counted since 0.58.0 (#363). L2 reads through
+  both.
 - **Elsewhere:** L2 flags every benign payload wrapped in base64 (14 of 14),
   and L3 flags 16 of the 48 L1 near-miss lines. L1 fires on none of
   those, so both arms are the same.
@@ -430,6 +430,42 @@ Without the test, `MIIB` followed by an instruction written without
 spaces decodes to a DER signature and would have been read as
 `(DER certificate or key)`. An image, PDF or archive is labelled
 regardless, because that label is the `binary_unread` refusal.
+
+## L1 stage false positives (#363)
+
+`benchmarks/l1_false_positives.py` runs L1 over real text and reports every
+counter that fired, per file or per `--chunk N` lines. It is how a new L1
+stage earns its place in `suspicious_detections`: a counter that fires on
+ordinary operations text refuses ordinary calls under block (#204).
+
+```bash
+uv run python benchmarks/l1_false_positives.py docs src
+journalctl -n 40000 --no-pager | uv run python benchmarks/l1_false_positives.py --chunk 200 -
+```
+
+Result for the stages added in 0.58.0 (2026-10-05):
+
+| Text | Payloads | New counters that fired |
+|---|---|---|
+| The corpus: 44 attacks, 14 benign, 48 near-misses | 106 | none |
+| A production host's journal, 40,000 lines in 200-line payloads | 200 | none |
+| This repository's `docs/` and `src/` | per file | `forgery_gateway_verdicts` in `gateway/router.py`, `reserved.py` and `CHANGELOG.md`; `forgery_tool_calls` in the demo transcript; `addressed_ai_addressed_lines` in `l1/addressed.py` and the demo page |
+
+Every hit in the repository is a file that writes the thing counted: the
+gateway's own marker code, a transcript of a tool call, a detector's own
+examples, a demo injection. One of them, `l1/addressed.py`, moves from
+medium to high risk on its own docstring. A detector's source reads as what
+it detects.
+
+On the positive side, the corpus's 48 attack lines put through each
+transform are counted as follows (`tests/test_l1_stages.py` holds the
+floor): soft hyphens 47, fullwidth 43, Cyrillic lookalikes 45, ROT13 36,
+reversed 36, and 20 each for backslash, character-reference and percent
+escapes. The escape counter needs an instruction word in the decoded line,
+and the ciphered one a full directive match.
+
+L1 costs about 1.65 s per megabyte with the new stages. The ciphered check
+adds roughly 45% to the directives stage.
 
 ## Redact's extraction input (#360)
 

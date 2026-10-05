@@ -10,6 +10,31 @@ under that name.
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-10-05
+
+### Added
+- Eight count-only L1 stages (#363). Each counts a form that is a finding in
+  itself, and none changes what is delivered:
+  - `forgery_gateway_verdicts`: a `_trentina_*` key written as a key, or a
+    claim that Trentina cleared what follows.
+  - `forgery_tool_calls`: tool-call markup, or a call object in prose.
+  - `addressed_ai_addressed_lines`: a line that turns to the AI reading it.
+  - `unicode_soft_hyphen_words`, `unicode_fullwidth_runs` and
+    `unicode_mixed_script_words` (Cyrillic and Greek lookalikes).
+  - `encoded_escaped_payloads`: percent, backslash and character-reference
+    escapes that decode to an instruction word.
+  - `directives_ciphered_detected`: a directive in ROT13 or reversed.
+  - `exfiltration_exfiltration_links`, and the informational
+    `exfiltration_mismatched_links`, which does not raise L1's risk.
+- `benchmarks/l1_false_positives.py`, which measures L1's counters over real
+  text. The new stages fire on none of the corpus's benign or near-miss lines
+  and on none of 40,000 production journal lines.
+
+### Changed
+- `PERIMETER_VERSION` is 8, so every cached verdict is judged again.
+- Known gap 6 is now the encodings L1 still does not read (base32 and
+  others); soft hyphens and fullwidth are counted.
+
 ## [0.57.1] - 2026-10-05
 
 ### Changed
