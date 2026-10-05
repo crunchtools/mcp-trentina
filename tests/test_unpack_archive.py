@@ -220,6 +220,42 @@ class TestBytesNoListingAccountsFor:
             assert still_opens.namelist() == ["a.txt"]
         assert open_archive(bytes(spliced), archive.ZIP, Budget()) is None
 
+    def test_the_descriptor_flag_buys_no_slack(self) -> None:
+        """A flagged member's descriptor must be its own checksum and sizes:
+        the flag alone does not excuse bytes after its data."""
+        listed = bytearray(zipped({"a.txt": "listed"}))
+        directory_at = bytes(listed).index(b"PK\x01\x02")
+        smuggled = b"<= 24 bytes of text  "
+        spliced = bytearray(listed[:directory_at] + smuggled + listed[directory_at:])
+        struct.pack_into("<H", spliced, 6, 0x8)
+        struct.pack_into("<H", spliced, directory_at + len(smuggled) + 8, 0x8)
+        end = spliced.rindex(b"PK\x05\x06")
+        struct.pack_into("<I", spliced, end + 16, directory_at + len(smuggled))
+        with zipfile.ZipFile(io.BytesIO(bytes(spliced))) as still_opens:
+            assert still_opens.read("a.txt") == b"listed"
+        assert open_archive(bytes(spliced), archive.ZIP, Budget()) is None
+
+    def test_a_real_data_descriptor_is_accounted_for(self) -> None:
+        class _Unseekable(io.RawIOBase):
+            def __init__(self) -> None:
+                self.written = bytearray()
+
+            def writable(self) -> bool:
+                return True
+
+            def write(self, chunk: bytes) -> int:
+                self.written += chunk
+                return len(chunk)
+
+        sink = _Unseekable()
+        with zipfile.ZipFile(sink, "w", zipfile.ZIP_DEFLATED) as streamed:
+            streamed.writestr("a.txt", _NOTE)
+        packed = bytes(sink.written)
+        assert b"PK\x07\x08" in packed, "an unseekable sink makes zipfile write a descriptor"
+        entries = open_archive(packed, archive.ZIP, Budget())
+        assert entries is not None
+        assert entries[0].content == _NOTE.encode()
+
     def test_an_ordinary_zip_has_nothing_unlisted(self) -> None:
         assert open_archive(zipped({"a.txt": _NOTE, "b/c.txt": "x"}), archive.ZIP, Budget())
 
@@ -402,6 +438,23 @@ class TestOfficeFiles:
         assert _NOTE in view.text
         assert "Speaker notes here." in view.text
         assert view.hidden == 1
+
+    def test_a_chart_title_is_delivered_by_the_reducer(self) -> None:
+        from .office_files import CONTENT_TYPES, A, S
+
+        chart = f'<c xmlns:a="{A}"><a:p><a:r><a:t>Uptime by region</a:t></a:r></a:p></c>'
+        book = zipped(
+            {
+                "[Content_Types].xml": CONTENT_TYPES,
+                "xl/workbook.xml": f'<workbook xmlns="{S}"/>',
+                "xl/charts/chart1.xml": chart,
+                "docProps/app.xml": "<Properties><Application>Editor</Application></Properties>",
+            }
+        )
+        reduced = office.reduce_base64(b64(book), 140_000)
+        assert reduced is not None
+        assert reduced[1] == "## Other text\n\nUptime by region"
+        assert "Editor" in unpack(b64(book)).text, "the layers read every part"
 
     def test_a_zip_that_is_not_an_office_file_is_a_zip(self) -> None:
         plain = zipped({"word/document.xml": "<a>not a package</a>"})

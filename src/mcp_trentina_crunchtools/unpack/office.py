@@ -13,8 +13,11 @@ Two readers need two different answers, so both are kept:
   namespace prefix, and a part this module cannot parse is left for the
   caller to read as raw XML.
 * **The delivery**, when stage 1 reduces the file (``preprocess/structured``),
-  is the visible text of the content parts, as Markdown. Hidden text is
+  is the visible text of the content parts, as Markdown: the body, sheets
+  or slides, then notes, comments, charts and diagrams. Hidden text is
   dropped there and counted, as HTML conversion drops hidden elements.
+  Parts left out (document properties, themes, slide masters) are not
+  delivered at all, so nothing in them reaches the agent unjudged.
 
 Hidden means marked so by the format: Word's ``vanish``, ``webHidden`` and
 ``specVanish`` run properties, set on the run or inherited from a character
@@ -66,6 +69,8 @@ MAX_STYLE_HOPS = 20
 """``basedOn`` links followed before a style chain is given up as a loop."""
 
 _SLIDE_NUMBER = re.compile(r"(\d+)\.xml$")
+_OTHER_CONTENT = re.compile(r"/(?:charts|diagrams|drawings)/[^/]+\.xml$|[cC]omments?\d*\.xml$")
+"""Parts outside the main ones that hold text a reader sees."""
 _DOCX_EXTRA = re.compile(r"word/(footnotes|endnotes|comments|header\d*|footer\d*)\.xml$")
 
 
@@ -382,14 +387,20 @@ def read(entries: list[Entry], kind: str) -> Reading:
     if kind == XLSX:
         _read_xlsx(trees, reading)
     else:
-        sheet = trees.get("word/styles.xml")
-        styles = _Styles() if sheet is None else _Styles.read(sheet)
+        styles_part = trees.get("word/styles.xml")
+        styles = _Styles() if styles_part is None else _Styles.read(styles_part)
         for name, tree in trees.items():
             if name.endswith(".rels"):
                 continue
             slide_off = kind == PPTX and (attr(tree, "show") or "1").lower() in _OFF
             reading.parts[name] = _flow(tree, styles, hidden=slide_off)
         reading.titles = list(_docx_titles(trees) if kind == DOCX else _pptx_titles(trees))
+    titled = {name for name, _ in reading.titles}
+    for name in reading.parts:
+        # Text a reader sees that lives outside the main parts: a chart's
+        # title, a diagram's labels, a comment. Delivered under one heading.
+        if name not in titled and _OTHER_CONTENT.search(name):
+            reading.titles.append((name, "## Other text"))
     for name, tree in trees.items():
         if not name.endswith(".rels"):
             continue

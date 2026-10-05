@@ -77,8 +77,6 @@ decoder no memory limit. An entry using another method is unread."""
 _ENCRYPTED = 0x1
 _HAS_DESCRIPTOR = 0x8
 _LOCAL_HEADER = 30
-_MAX_DESCRIPTOR = 24
-"""A data descriptor: an optional signature, a CRC and two sizes, 8 bytes each under zip64."""
 _GZIP_WBITS = 31
 """zlib's window setting for a gzip wrapper."""
 _BROKEN = (
@@ -254,27 +252,48 @@ def _unlisted_bytes(packed: bytes, archive: zipfile.ZipFile) -> int:
     reader walks the local headers from the front, ``strings`` reads a stub,
     a recovery tool finds a file the directory left out. So every byte before
     the directory must belong to a listed file's header, its data, or the
-    optional descriptor after it. Anything more refuses the archive, which
-    costs a self-extracting stub its reading and closes the differential.
+    data descriptor after it, and a descriptor is counted only when its bytes
+    are that file's own checksum and sizes. Anything more refuses the
+    archive, which costs a self-extracting stub its reading and closes the
+    differential.
     """
     spans: list[tuple[int, int]] = []
-    allowed = 0
     for member in archive.infolist():
         header = packed[member.header_offset : member.header_offset + _LOCAL_HEADER]
         if len(header) < _LOCAL_HEADER or header[:4] != b"PK\x03\x04":
             raise zipfile.BadZipFile("missing local header")
         name_len, extra_len = struct.unpack("<HH", header[26:30])
-        start = member.header_offset
-        spans.append((start, start + _LOCAL_HEADER + name_len + extra_len + member.compress_size))
+        end = member.header_offset + _LOCAL_HEADER + name_len + extra_len + member.compress_size
         if member.flag_bits & _HAS_DESCRIPTOR:
-            allowed += _MAX_DESCRIPTOR
+            end += _descriptor_length(packed, end, member)
+        spans.append((member.header_offset, end))
     covered = 0
     reach = 0
     for start, end in sorted(spans):
         covered += max(0, end - max(start, reach))
         reach = max(reach, end)
     directory: int = archive.start_dir
-    return directory - covered - allowed
+    return directory - covered
+
+
+def _descriptor_length(packed: bytes, at: int, member: zipfile.ZipInfo) -> int:
+    """The length of ``member``'s data descriptor at ``at``, or 0 if none is there.
+
+    A descriptor repeats the checksum and sizes the directory already gives,
+    with or without a signature, in 32 or 64 bits. Only those exact bytes
+    count: the flag alone buys no slack to hide anything in.
+    """
+    for signature in (b"PK\x07\x08", b""):
+        for sizes in ("<III", "<IQQ"):
+            try:
+                expected = signature + struct.pack(
+                    sizes, member.CRC, member.compress_size, member.file_size
+                )
+            except struct.error:
+                continue
+            if packed.startswith(expected, at):
+                return len(expected)
+    return 0
 
 
 def _tar(packed: bytes, budget: Budget) -> list[Entry]:
