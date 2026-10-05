@@ -56,10 +56,19 @@ def _payloads(paths: list[str], chunk: int) -> list[tuple[str, str]]:
     return found
 
 
+def _non_negative(raw: str) -> int:
+    value = int(raw)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be zero (a whole file) or more")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("paths", nargs="+", help="files, directories, or - for stdin")
-    parser.add_argument("--chunk", type=int, default=0, help="lines per payload (default: a file)")
+    parser.add_argument(
+        "--chunk", type=_non_negative, default=0, help="lines per payload (default: a file)"
+    )
     parser.add_argument("--show", type=int, default=3, help="payloads named per counter")
     args = parser.parse_args(argv)
 

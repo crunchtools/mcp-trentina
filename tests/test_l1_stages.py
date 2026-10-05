@@ -230,3 +230,11 @@ def test_the_new_stages_stay_linear(unit: str) -> None:
 def test_the_new_counters_default_to_zero() -> None:
     flat = PipelineStats().to_flat_dict()
     assert all(flat[k] == 0 for k in _NEW)
+
+
+def test_the_false_positive_benchmark_refuses_a_negative_chunk() -> None:
+    from benchmarks import l1_false_positives
+
+    with pytest.raises(SystemExit):
+        l1_false_positives.main(["--chunk", "-5", str(_REPO / "README.md")])
+    assert l1_false_positives.main(["--chunk", "0", str(_REPO / "README.md")]) == 0
