@@ -29,7 +29,7 @@ A baked model's manifest carries its own threshold, and
 CLASSIFIER_MODELS_DIR = "/models"
 DEFAULT_CLASSIFIER_MODEL = "prompt-injection-guard-small"
 """The L2 model the image selects by name (#350): Horizon-Labs'
-prompt-injection-guard-small. ``prompt-guard-2-86m`` also ships; any other
+prompt-injection-guard-small, the one model it ships (#362). Any other
 model is a directory named by ``CLASSIFIER_MODEL_PATH``."""
 
 DEFAULT_CLASSIFIER_MAX_TOKENS = 32_768

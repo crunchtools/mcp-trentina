@@ -40,6 +40,7 @@ startup and logs one WARNING naming each gap:
 | `import_path_writable` | a `sys.path` directory is writable by the process |
 | `secret_in_environment` | a secret came in as `FOO`, not `FOO_FILE` |
 | `unverifiable` | `/proc/self` could not be read, so nothing was checked |
+| `l2_obfuscation_gate_failed`, `l2_obfuscation_gate_unrecorded` | the L2 model's manifest has no passing [obfuscation-gate](benchmark.md#l2-obfuscation-gate-359) record: a zero-width split or an encoding may blind it |
 
 Once profiles are loaded it checks again, for every secret name configuration
 read (`${VAR}` references, `llm_providers` keys, ingress tokens), because a

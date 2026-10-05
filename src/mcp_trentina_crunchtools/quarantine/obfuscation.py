@@ -26,6 +26,8 @@ GATE_MAX_DROP = 1
 """Detections a transform may lose against plain and still pass."""
 
 _ZW = "\u200b"
+_FULLWIDTH_OFFSET = 0xFEE0  # from an ASCII character to its fullwidth form
+_TAG_BLOCK = 0xE0000  # the Unicode tag block mirrors ASCII from here
 
 
 def _zw_every_letter(s: str) -> str:
@@ -43,7 +45,7 @@ def _soft_hyphens(s: str) -> str:
 
 
 def _fullwidth(s: str) -> str:
-    return "".join(chr(ord(c) + 0xFEE0) if "!" <= c <= "~" else c for c in s)
+    return "".join(chr(ord(c) + _FULLWIDTH_OFFSET) if "!" <= c <= "~" else c for c in s)
 
 
 def _base64(s: str) -> str:
@@ -51,7 +53,7 @@ def _base64(s: str) -> str:
 
 
 def _tag_chars(s: str) -> str:
-    return "".join(chr(0xE0000 + ord(c)) if " " <= c <= "~" else c for c in s)
+    return "".join(chr(_TAG_BLOCK + ord(c)) if " " <= c <= "~" else c for c in s)
 
 
 TRANSFORMS: dict[str, Callable[[str], str]] = {

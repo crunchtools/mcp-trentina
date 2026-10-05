@@ -108,13 +108,18 @@ uv run mcp-trentina-crunchtools
   unlinks one only when something reads its key, and an abandoned flow never
   is read again.
 - `CLASSIFIER_MODEL` — the L2 model, by name under `/models` (#350). Default
-  `prompt-injection-guard-small` (Horizon-Labs, Apache-2.0); `prompt-guard-2-86m`
-  also ships. A model directory carries `trentina-model.json` (id, pinned
+  `prompt-injection-guard-small` (Horizon-Labs, Apache-2.0), the one model the
+  image ships (#362 dropped `prompt-guard-2-86m`, which fails the obfuscation
+  gate). A model directory carries `trentina-model.json` (id, pinned
   revision, threshold, which outputs are malicious), written by
   `scripts/export_l2_model.py`; without one, labels come from `config.json`
   and any label not a known benign or malicious name refuses to load. The
-  model, revision, threshold and polarity are in
-  `perimeter_db.perimeter_stamp()`, so switching sweeps cached verdicts.
+  model, revision, threshold, polarity and gate state are in
+  `perimeter_db.perimeter_stamp()`, so switching sweeps cached verdicts. The
+  manifest's `obfuscation_gate` record is written by
+  `benchmarks/l2_obfuscation.py --record` (the Containerfile's `l2-gate`
+  stage); `posture.check_l2_gate` warns on a model without a passing one and
+  refuses under `TRENTINA_REQUIRE_HARDENED`.
 - `CLASSIFIER_MODEL_PATH` — any model directory; wins over `CLASSIFIER_MODEL`.
   How to try a model the image does not ship.
 - `CLASSIFIER_THRESHOLD` — overrides the model's own threshold (0.7 for
@@ -409,7 +414,7 @@ Layer contract (`docs/defense-pipeline.md#layer-contract`, enforced by
 not read, in its original or decoded form, or, for binary, by its type;
 every layer reads the delivery once, unpacked; layers share findings, never
 inputs; a model's weakness is fixed in the model or at selection
-(`benchmarks/l2_obfuscation.py`), never with an extra pass. #359 removed the
+(`benchmarks/l2_obfuscation.py`, enforced since #362), never with an extra pass. #359 removed the
 last workaround that broke it.
 
 Coverage (`docs/defense-pipeline.md#coverage`) is what is and is not

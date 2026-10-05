@@ -10,6 +10,25 @@ under that name.
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-10-05
+
+### Changed
+- The L2 obfuscation gate is enforced (#362). The image build runs
+  `benchmarks/l2_obfuscation.py --record` against the model it ships, which
+  writes the result into `trentina-model.json` and stops the build on a
+  failure. At startup the gateway logs `l2_obfuscation_gate_failed` or
+  `l2_obfuscation_gate_unrecorded` for a model without a passing record, and
+  refuses to start on one under `TRENTINA_REQUIRE_HARDENED`. The gate's state
+  joins the verdict stamp, so cached verdicts are judged again once.
+- The six transforms moved to `quarantine/obfuscation.py`.
+
+### Removed
+- **Breaking:** the image no longer ships `prompt-guard-2-86m`. It fails five
+  of the gate's six transforms. `CLASSIFIER_MODEL=prompt-guard-2-86m` now
+  names a directory that is not there, so L2 is absent and
+  `TRENTINA_REQUIRE_L2` decides; export it yourself and use
+  `CLASSIFIER_MODEL_PATH` to keep it. The build no longer takes `HF_TOKEN`.
+
 ## [0.58.0] - 2026-10-05
 
 ### Added

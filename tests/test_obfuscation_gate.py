@@ -6,6 +6,7 @@ manifest is two small files in a temporary directory.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from pathlib import Path
@@ -50,25 +51,24 @@ class TestRunGate:
         assert set(record["transforms"]) == set(TRANSFORMS)
 
     def test_a_model_one_transform_blinds_fails(self) -> None:
-        record = run_gate(_ATTACKS, lambda text: "​" not in text)
+        record = run_gate(_ATTACKS, lambda text: "\u200b" not in text)
         assert record["passed"] is False
         assert record["transforms"]["zero-width, every letter"] == 0
         assert record["transforms"]["fullwidth"] == len(_ATTACKS)
 
     def test_max_drop_is_the_allowance(self) -> None:
-        blind_to_one = lambda text: not text.startswith("Note: ") or "third" not in _decoded(text)  # noqa: E731
-        assert run_gate(_ATTACKS, blind_to_one, max_drop=1)["passed"] is True
-        assert run_gate(_ATTACKS, blind_to_one, max_drop=0)["passed"] is False
+        assert run_gate(_ATTACKS, _misses_one_in_base64, max_drop=1)["passed"] is True
+        assert run_gate(_ATTACKS, _misses_one_in_base64, max_drop=0)["passed"] is False
 
     def test_every_transform_changes_the_text(self) -> None:
         for name, transform in TRANSFORMS.items():
             assert transform(_ATTACKS[0]) != _ATTACKS[0], name
 
 
-def _decoded(text: str) -> str:
-    import base64
-
-    return base64.b64decode(text.removeprefix("Note: ")).decode()
+def _misses_one_in_base64(text: str) -> bool:
+    if not text.startswith("Note: "):
+        return True
+    return "third" not in base64.b64decode(text.removeprefix("Note: ")).decode()
 
 
 class TestGateState:
@@ -93,29 +93,30 @@ class TestGateState:
         assert classifier.resolve_model(_model_dir(tmp_path, _passing())).gate == "passed"
 
 
-class TestStartup:
-    def _check(self, gate: str | None) -> posture.Posture:
-        model = None if gate is None else classifier.ModelInfo("m", "r", 0.7, (1,), gate=gate)
-        with patch.object(classifier, "model_info", return_value=model):
-            return posture.check_l2_gate()
+def _startup_gaps(gate: str | None) -> list[str]:
+    model = None if gate is None else classifier.ModelInfo("m", "r", 0.7, (1,), gate=gate)
+    with patch.object(classifier, "model_info", return_value=model):
+        return posture.check_l2_gate().gaps
 
+
+class TestStartup:
     def test_a_passing_model_is_no_gap(self) -> None:
-        assert self._check("passed").gaps == []
+        assert _startup_gaps("passed") == []
 
     def test_no_model_is_not_this_gap(self) -> None:
-        assert self._check(None).gaps == []
+        assert _startup_gaps(None) == []
 
     @pytest.mark.parametrize("gate", ["failed", "unrecorded"])
     def test_any_other_state_is_named(self, gate: str, caplog: pytest.LogCaptureFixture) -> None:
         with caplog.at_level(logging.WARNING):
-            assert self._check(gate).gaps == [f"l2_obfuscation_gate_{gate}"]
+            assert _startup_gaps(gate) == [f"l2_obfuscation_gate_{gate}"]
         assert f"l2_obfuscation_gate_{gate}" in caplog.text
 
     def test_require_hardened_refuses_to_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRENTINA_REQUIRE_HARDENED", "true")
         with pytest.raises(ConfigError, match="l2_obfuscation_gate_unrecorded"):
-            self._check("unrecorded")
-        assert self._check("passed").gaps == []
+            _startup_gaps("unrecorded")
+        assert _startup_gaps("passed") == []
 
 
 def test_the_gate_state_is_in_the_perimeter_stamp() -> None:
@@ -135,7 +136,9 @@ class TestRecord:
         config = type("C", (), {"classifier_model_path": _model_dir(tmp_path)})()
         with (
             patch.object(l2_obfuscation, "is_classifier_available", return_value=True),
-            patch.object(l2_obfuscation, "_detected", side_effect=lambda t: detected or t.isascii()),
+            patch.object(
+                l2_obfuscation, "_detected", side_effect=lambda t: detected or t.isascii()
+            ),
             patch.object(l2_obfuscation, "get_config", return_value=config),
         ):
             return l2_obfuscation.main(["--record"])
