@@ -93,6 +93,12 @@ COPY src/ ./src/
 # `uv export` emits hashes, so this is also a verified install. The project
 # itself goes in second with --no-deps so pip cannot re-resolve around the lock.
 #
+# The requirements go in with --no-deps too (#370). The export is the whole
+# locked set, so pip has nothing to resolve, and letting it try is what broke
+# the build: rapidocr asks for `opencv-python`, the lock replaces that with
+# `opencv-python-headless` (pyproject.toml, [tool.uv]), and pip, reading
+# rapidocr's own metadata, went looking for the one the lock had removed.
+#
 # petit-log-crunchtools used to be held out of this export and installed from
 # a hashed source archive, because it resolved from a git tag and pip refuses
 # a VCS requirement under hash checking. It reached PyPI as of 4.1.1 (issue
@@ -101,7 +107,7 @@ COPY src/ ./src/
 RUN pip install --no-cache-dir uv \
  && uv export --frozen --no-dev --extra matrix --extra bridge --no-emit-project \
       --format requirements-txt -o /tmp/requirements.txt \
- && pip install --no-cache-dir --prefix=/usr -r /tmp/requirements.txt \
+ && pip install --no-cache-dir --prefix=/usr --no-deps -r /tmp/requirements.txt \
  && pip install --no-cache-dir --prefix=/usr --no-deps '.[matrix,bridge]'
 
 # onnxruntime >= 1.29 reads /etc/machine-id during module init. When that file

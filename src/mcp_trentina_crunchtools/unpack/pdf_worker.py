@@ -52,6 +52,8 @@ from pypdf import PdfReader, filters
 from pypdf.errors import PyPdfError
 from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject, StreamObject
 
+from .ocr import MAX_IMAGE_BYTES, MAX_IMAGES
+
 CPU_SECONDS = 20
 MEMORY_BYTES = 1024 * 1024 * 1024
 MAX_STREAM_BYTES = 32 * 1024 * 1024
@@ -62,12 +64,6 @@ MAX_OBJECTS = 100_000
 MAX_TEXT = 1_000_000
 """Characters of text collected before the file is given up as too large.
 Admission refuses long before this; the cap bounds the work."""
-
-MAX_PICTURES = 6
-"""Pages that are pictures whose image is handed back for OCR: as many
-images as one OCR request reads (``ocr.MAX_IMAGES``)."""
-
-MAX_PICTURE_BYTES = 6 * 1024 * 1024
 
 MAX_ATTACHED = 1024 * 1024
 """Bytes of embedded files returned, the archive stage's own budget."""
@@ -305,18 +301,19 @@ class _Reading:
     def picture(self, number: int, page: Any) -> None:
         """Hand back the largest image of a page that is a picture, for OCR.
 
-        Up to ``MAX_PICTURES`` pages and ``MAX_PICTURE_BYTES`` each. A page
+        Up to ``ocr.MAX_IMAGES`` pages and ``ocr.MAX_IMAGE_BYTES`` each: what
+        one OCR request reads. A page
         past either, or whose image this cannot decode (JBIG2 needs a decoder
         the image does not carry), sends nothing and stays unread.
         """
         pictures = self.out.setdefault("pictures", [])
-        if len(pictures) >= MAX_PICTURES:
+        if len(pictures) >= MAX_IMAGES:
             return
         try:
             largest = max((image.data for image in page.images), key=len, default=b"")
         except (PyPdfError, OSError, ValueError, KeyError, NotImplementedError, TypeError):
             return
-        if 0 < len(largest) <= MAX_PICTURE_BYTES:
+        if 0 < len(largest) <= MAX_IMAGE_BYTES:
             pictures.append([number, base64.b64encode(largest).decode("ascii")])
 
     def fields(self) -> None:

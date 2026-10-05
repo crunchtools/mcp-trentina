@@ -181,7 +181,7 @@ gaps below.
 | A Word, Excel or PowerPoint file (docx, xlsx, pptx) in a JSON string | its visible text as Markdown, `{"format": "docx", "as_markdown": ...}`; text the file marks hidden dropped and counted for L1 (#368) | that Markdown | judged |
 | The same with `trentina_preprocess: false`, or outside JSON | as it arrived | the text of every XML part, hidden text included and counted; embedded media labelled | judged; refused (`binary_unread`) if it embeds an image or a macro |
 | A PDF that `fetch` retrieved, or a base64 PDF in a JSON string | the text its pages show, as Markdown, with its links; invisible text dropped and counted for L1 (#369); a line for pages that are images and for embedded files left out | that Markdown | judged |
-| The same with `trentina_preprocess: false`, or a base64 PDF in other text (up to 140,000 characters) | as it arrived | each page's text, invisible text under its own heading and counted; notes, form values, links, JavaScript, document information and metadata from every object in the file; embedded files read like files in an archive | judged; refused (`binary_unread`) for a page that is an image, with or without an OCR text layer over it, an embedded file that cannot be read, a password, a file the reader could not finish in 20 CPU-seconds, or more than 500 pages or a million characters |
+| The same with `trentina_preprocess: false`, or a base64 PDF in other text (up to 140,000 characters) | as it arrived | each page's text, invisible text under its own heading and counted; notes, form values, links, JavaScript, document information and metadata from every object in the file; embedded files read like files in an archive | judged; a page that is a picture, scanned or under an OCR text layer, is read from its image by OCR (#370), and refused (`binary_unread`) when OCR could not read it or it is past the sixth such page; refused too for an embedded file that cannot be read, a password, a file the reader could not finish in 20 CPU-seconds, or more than 500 pages or a million characters |
 | An image (PNG, JPEG, GIF, WebP, BMP, TIFF, ICO) inside text or JSON, a data URI, an MCP image block or blob, or a page of a PDF that is a picture | as it arrived | the text OCR reads in it, and under its own heading the text too faint for a person to see, counted as hidden (#370) | judged; refused (`binary_unread`) for an image OCR could not read, one past 6 MB, the seventh and later images of one payload, or an animation of more than four frames |
 | Audio, video, HEIC; a 7z, rar or zstd archive; a legacy `.doc`, `.xls` or `.ppt` | as it arrived | a label; nothing reads inside it | refused (`binary_unread`), with `flag` offered; flag delivers it with the warning |
 | An MCP resource blob an agent could open and the rows above do not read | as it arrived | nothing | refused (`binary_unread`), with `flag` offered |
@@ -209,8 +209,10 @@ one does; the rest name the benchmark that measured them.
    or steganography, and an image built to fool a model. An image is
    `binary_unread` when OCR did not run on it: over 6 MB, the seventh and
    later images of a payload, more than four animation frames, or a format
-   Pillow does not open (HEIC). An image on a PDF page that also has text
-   is NOT read: the page is read by its text and the picture goes unread.
+   Pillow does not open (HEIC). A PDF page that is a picture, with or
+   without an OCR text layer, has its image read. A figure on a PDF page
+   that also has visible text does NOT: that page is read by its text, and
+   what the figure shows goes unread and uncounted.
    Audio and video have no reader. Archives and office files
    are read since 0.60.0 (#368), with these limits, each of which leaves the
    archive `binary_unread`: 7z, rar, zstd and legacy office files are not

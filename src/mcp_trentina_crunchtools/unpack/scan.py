@@ -135,6 +135,15 @@ class Unpacked:
 
 
 @dataclass
+class _Exposure:
+    """One image set aside: what it is, its bytes, and where its text will go."""
+
+    kind: str
+    image: bytes
+    mark: str
+
+
+@dataclass
 class _Darkroom:
     """The images of one payload, read together.
 
@@ -147,25 +156,22 @@ class _Darkroom:
     """
 
     token: str = field(default_factory=lambda: secrets.token_hex(8))
-    images: list[bytes] = field(default_factory=list)
-    kinds: list[str] = field(default_factory=list)
-    read: list[ImageText | None] | None = None
+    exposures: list[_Exposure] = field(default_factory=list)
+    read: dict[str, ImageText | None] | None = None
 
-    def expose(self, kind: str, decoded: bytes) -> str | None:
-        """Set an image aside and return its mark, or None if there is no room."""
-        if len(self.images) >= MAX_IMAGES or len(decoded) > MAX_IMAGE_BYTES:
+    def expose(self, kind: str, decoded: bytes) -> _Exposure | None:
+        """Set an image aside, or None if there is no room for it."""
+        if len(self.exposures) >= MAX_IMAGES or len(decoded) > MAX_IMAGE_BYTES:
             return None
-        self.images.append(decoded)
-        self.kinds.append(kind)
-        return self.mark(len(self.images) - 1)
+        exposure = _Exposure(kind, decoded, f"\x00{self.token}:{len(self.exposures)}\x00")
+        self.exposures.append(exposure)
+        return exposure
 
-    def mark(self, index: int) -> str:
-        return f"\x00{self.token}:{index}\x00"
-
-    def develop(self) -> list[ImageText | None]:
-        """What each image says, read once however many passes ask."""
+    def develop(self) -> dict[str, ImageText | None]:
+        """What each image says, by its mark; read once however many passes ask."""
         if self.read is None:
-            self.read = read_images(self.images) if self.images else []
+            said = read_images([e.image for e in self.exposures]) if self.exposures else []
+            self.read = {e.mark: text for e, text in zip(self.exposures, said, strict=True)}
         return self.read
 
 
@@ -177,7 +183,15 @@ class _Pass:
     nesting: int = 0
     budget: Budget = field(default_factory=Budget)
     darkroom: _Darkroom = field(default_factory=_Darkroom)
-    exposed: list[int] = field(default_factory=list)
+    exposed: list[_Exposure] = field(default_factory=list)
+
+    def expose(self, kind: str, decoded: bytes) -> str | None:
+        """Set an image aside for this pass and return its mark, or None."""
+        exposure = self.darkroom.expose(kind, decoded)
+        if exposure is None:
+            return None
+        self.exposed.append(exposure)
+        return exposure.mark
 
     def result(self, text: str) -> Unpacked:
         """The finished view: every image's mark replaced by what the image says.
@@ -186,10 +200,10 @@ class _Pass:
         too faint to see set apart and counted as hidden. One it could not
         read is labelled unread, like any other binary no layer opened.
         """
-        read = self.darkroom.develop() if self.exposed else []
-        for index in self.exposed:
-            kind, said = self.darkroom.kinds[index], read[index]
-            size = _size(len(self.darkroom.images[index]))
+        read = self.darkroom.develop() if self.exposed else {}
+        for exposure in self.exposed:
+            kind, said = exposure.kind, read[exposure.mark]
+            size = _size(len(exposure.image))
             self.stats.binary_labelled += 1
             if said is None:
                 self.stats.binary_unread += 1
@@ -199,13 +213,12 @@ class _Pass:
                 printed = [f"({kind}, {size}, no text found in it)"]
             else:
                 printed = [f"({kind}, {size}, text read from it below)", *said.text]
-                printed.extend(
-                    ["(text in it too faint to see:)", *said.faint] if said.faint else []
-                )
+                if said.faint:
+                    printed.extend(["(text in it too faint to see:)", *said.faint])
             if said is not None:
                 self.stats.images_read += 1
                 self.hidden += len(said.faint)
-            text = text.replace(self.darkroom.mark(index), "\n".join(printed))
+            text = text.replace(exposure.mark, "\n".join(printed))
         return Unpacked(text, self.stats, tuple(sorted(self.unread)), self.hidden)
 
 
@@ -388,12 +401,7 @@ def _image(kind: Kind, decoded: bytes, state: _Pass) -> str | None:
     is read), and for one there is no room to read: past ``ocr.MAX_IMAGES``
     in the payload or ``ocr.MAX_IMAGE_BYTES`` in size. Those stay unread.
     """
-    if _too_small_to_draw(decoded):
-        return None
-    mark = state.darkroom.expose(kind.name, decoded)
-    if mark is not None:
-        state.exposed.append(len(state.darkroom.images) - 1)
-    return mark
+    return None if _too_small_to_draw(decoded) else state.expose(kind.name, decoded)
 
 
 PDF = "application/pdf"
@@ -422,9 +430,8 @@ def _opened_pdf(decoded: bytes, state: _Pass) -> str | None:
     parts.extend(_pdf_text(reading))
     sent = 0
     for number, picture in reading.pictures:
-        mark = state.darkroom.expose(SCANNED_PAGE, picture)
+        mark = state.expose(SCANNED_PAGE, picture)
         if mark is not None:
-            state.exposed.append(len(state.darkroom.images) - 1)
             parts.append(f"=== page {number}, read from its image ===\n{mark}")
             sent += 1
     # A page that is a picture is read when OCR reads its image. One whose

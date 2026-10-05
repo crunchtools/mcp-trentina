@@ -64,7 +64,7 @@ class TestImages:
         assert resp.content == b"Matrix response could not be judged"
 
     def test_an_image_too_large_to_read_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(matrix_proxy, "_MAX_IMAGE_BYTES", len(_PNG) - 1)
+        monkeypatch.setattr(matrix_proxy, "MAX_IMAGE_BYTES", len(_PNG) - 1)
         _upstream(monkeypatch, _PNG, "image/png")
         calls = _count_judged(monkeypatch)
         assert _client().get(_DOWNLOAD).status_code == 502

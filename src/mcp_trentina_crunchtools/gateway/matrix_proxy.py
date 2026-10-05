@@ -67,6 +67,7 @@ from ..modes import gaps_of
 from ..preprocess import SelectionContext
 from ..quarantine.prompts import RISK_LEVELS
 from ..reserved import WARNING_KEY, strip_reserved, with_stripped
+from ..unpack.ocr import MAX_IMAGE_BYTES
 from ..warning import build_warning
 from .context import profile_context
 from .drivers import build_preprocessors
@@ -149,8 +150,6 @@ and an E2EE attachment is ``application/octet-stream`` ciphertext, so under
 with the warning header. A text, JSON or markup attachment is judged like
 any other response."""
 
-_MAX_IMAGE_BYTES = 6 * 1024 * 1024
-"""The largest image download read: ``unpack.ocr.MAX_IMAGE_BYTES``."""
 
 # Only buffer-and-scan bodies up to this size; a larger one is refused,
 # under annotate too: it cannot be judged, stripped or annotated without
@@ -798,7 +797,7 @@ async def _scan_text_and_forward(
     buffered = await _buffer(resp, path)
     if isinstance(buffered, Response):
         return buffered
-    if image and len(buffered) > _MAX_IMAGE_BYTES:
+    if image and len(buffered) > MAX_IMAGE_BYTES:
         return _refused()
     ingress = profile.matrix_ingress
     deadline = (
