@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 
 from . import office
 from .archive import OPENABLE, ZIP, Budget, Entry, open_archive
+from .pdf import SECTIONS, PdfReading, read_pdf
 from .signatures import OPAQUE, Kind, from_media_type, identify
 from .stats import UnpackStats
 
@@ -251,7 +252,11 @@ def _opened(kind: Kind, decoded: bytes, state: _Pass) -> str | None:
     not opened here, a corrupt file, a broken limit, or nesting past
     ``MAX_NESTING``.
     """
-    if kind.name not in OPENABLE or state.nesting >= MAX_NESTING:
+    if state.nesting >= MAX_NESTING:
+        return None
+    if kind.name == PDF:
+        return _opened_pdf(decoded, state)
+    if kind.name not in OPENABLE:
         return None
     entries = open_archive(decoded, kind.name, state.budget)
     if entries is None:
@@ -270,6 +275,51 @@ def _opened(kind: Kind, decoded: bytes, state: _Pass) -> str | None:
             body = _entry(entry, reading, state)
             if body:
                 parts.append(f"=== {entry.name} ===\n{body}")
+    finally:
+        state.nesting -= 1
+    return "\n".join(parts)
+
+
+PDF = "application/pdf"
+SCANNED_PAGE = "scanned PDF page"
+"""The ``unread`` kind for a PDF page that is a picture of a page (#370)."""
+
+
+def _opened_pdf(decoded: bytes, state: _Pass) -> str | None:
+    """What the layers read for a PDF, or None when it could not be read.
+
+    Each page's text, with what a reader would not see under its own
+    heading; then every text entry the file carries outside its pages, by
+    kind; then each embedded file, read like a file in an archive. A page
+    that is only an image is counted unread: the rest is still read.
+    """
+    reading: PdfReading | None = read_pdf(decoded)
+    if reading is None:
+        return None
+    state.stats.archives_opened += 1
+    state.hidden += reading.hidden
+    count = len(reading.pages)
+    parts = [f"({PDF}, {_size(len(decoded))}, {count} page{'' if count == 1 else 's'})"]
+    for number, (visible, unseen) in enumerate(reading.pages, start=1):
+        if visible:
+            parts.append(f"=== page {number} ===\n{visible}")
+        if unseen:
+            parts.append(f"=== page {number}, text not shown ===\n{unseen}")
+    for section in SECTIONS:
+        lines = reading.fields.get(section)
+        if lines:
+            parts.append(f"=== {section} ===\n" + "\n".join(lines))
+    if reading.scanned:
+        state.stats.binary_labelled += reading.scanned
+        state.stats.binary_unread += reading.scanned
+        state.unread.add(SCANNED_PAGE)
+        parts.append(f"({reading.scanned} page(s) are images with no text, not read)")
+    state.nesting += 1
+    try:
+        for entry in reading.attachments:
+            body = _entry(entry, None, state)
+            if body:
+                parts.append(f"=== attached: {entry.name} ===\n{body}")
     finally:
         state.nesting -= 1
     return "\n".join(parts)
