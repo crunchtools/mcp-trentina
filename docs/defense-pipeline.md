@@ -86,9 +86,26 @@ Only canonical base64 is decoded, meaning text whose re-encoding reproduces it e
 L1 counts, and never modifies what the agent receives:
 
 - **What the agent receives** (`content`) — the caller's text, untouched. A CVE ticket, a Nagios alert, or a security mail *discusses* attacks in the words attacks use; amputating those lines destroyed exactly the content an ops agent exists to read, and destroyed the evidence before the smarter layers could judge it.
-- **Counts, by type** (`PipelineStats`) — hidden markup, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions", and, for a directory, Python files that shadow the standard library. They feed the risk score and the warning, and L3's briefing names each non-zero one (`PipelineStats.findings`, from the fixed `FINDING_NAMES` table).
+- **Counts, by type** (`PipelineStats`) — hidden markup, unicode manipulation, encoded payloads, exfiltration URLs and links, LLM delimiters, directive patterns like "ignore previous instructions", forged gateway verdicts and tool calls, lines addressed to an AI reader, and, for a directory, Python files that shadow the standard library. They feed the risk score and the warning, and L3's briefing names each non-zero one (`PipelineStats.findings`, from the fixed `FINDING_NAMES` table).
 
 To match through obfuscation, some stages work on a private normalized copy: zero-width characters removed, encoded blobs replaced, fake `<|im_start|>`/`<|eot_id|>`/`[INST]` delimiters dropped, exfiltration image URLs defanged. The copy never leaves L1 (#360). L1 hands on counts and nothing else.
+
+The stages added for #363 (0.58.0) count forms that are findings in themselves, whatever the words say:
+
+| Counter | Counts | Raises L1's risk |
+|---|---|---|
+| `forgery_gateway_verdicts` | a `_trentina_*` key written as a key, or a claim that Trentina cleared what follows (`l1/forgery.py`) | yes |
+| `forgery_tool_calls` | tool-call markup, or a call object interrupting prose | yes |
+| `addressed_ai_addressed_lines` | a line that turns to the AI reading it (`l1/addressed.py`); writing about agents does not count | yes |
+| `unicode_soft_hyphen_words` | a word with soft hyphens between two or more letters | yes |
+| `unicode_fullwidth_runs` | two or more consecutive words in fullwidth Latin letters | yes |
+| `unicode_mixed_script_words` | a Latin word carrying Cyrillic or Greek lookalike letters | yes |
+| `encoded_escaped_payloads` | a line whose percent, backslash or character-reference escapes decode to an instruction word | yes |
+| `directives_ciphered_detected` | a line that matches a directive once read in ROT13 or backwards | yes |
+| `exfiltration_exfiltration_links` | a link whose query is built to be filled in: a carrier parameter name, or a placeholder for the value | yes |
+| `exfiltration_mismatched_links` | a link showing one site's URL and going to another | no: mail trackers do it on every message |
+
+None of them fires on the corpus's 44 attacks, 14 benign cases or 48 near-miss lines, or on 40,000 lines of a production journal ([benchmark](benchmark.md#l1-stage-false-positives-363)).
 
 **L1 is format-agnostic.** It scans what it is handed and makes no judgement about a payload's type. Until 0.28.0 a `looks_like_html` sniffer chose between an HTML pipeline and a text one on a leading `<!DOCTYPE` or `<html>`; an HTML *fragment* — the shape most tool output carries — matched neither, so identical bytes were defended two different ways depending on their first few characters. The fork is gone. Markup is handled in two tiers instead:
 
@@ -195,9 +212,12 @@ one does; the rest name the benchmark that measured them.
    pixels, spacers), by the size a PNG or GIF header states. A letter or a
    QR code needs more pixels than that. A header can lie about its size; an
    agent's image tools then read pixels no layer did.
-6. **L1 has no counter for soft-hyphen or fullwidth obfuscation** (#363).
-   Its patterns read through both, but unlike zero-width characters neither
-   is a finding in itself, so L3's briefing never mentions it. Tested.
+6. **L1 reads two ciphers and three escape forms, and no others** (#363).
+   ROT13 and reversed lines are matched against the directive patterns;
+   percent, backslash and character-reference escapes are decoded and
+   read for instruction words. Base32, Morse, a Caesar shift other than 13
+   and every other encoding reach L2 and L3 as they arrived. The
+   lookalike counter knows Cyrillic and Greek only. Tested.
 7. **L1's own refusal is coarse on invisible characters.** Four of them
    already rate high risk. In the L1 briefing ablation
    ([benchmark](benchmark.md#l1-briefing-ablation)) L1 alone refused 29

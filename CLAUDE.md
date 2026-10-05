@@ -447,7 +447,10 @@ replaced.
   through obfuscation; that copy never leaves `_run_stages` (#360). Redact's
   extraction reads `DefenseVerdict.read`, the unpacked text the layers
   judged. L1 also takes a directory's stdlib-shadow counts (`ShadowStats`),
-  merged in by the `dir` producer.
+  merged in by the `dir` producer. A new stage is count-only, gets a
+  `FINDING_NAMES` entry, a near-miss and a linearity case in
+  `tests/test_l1_stages.py`, and a run of `benchmarks/l1_false_positives.py`
+  before it joins `suspicious_detections` (#363).
 
   There is no "scan view" and no "delivery view". Those names were retired in
   0.29.0 along with `sanitize`/`scanview`: a reader cannot tell from "scan
