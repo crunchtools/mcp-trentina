@@ -21,7 +21,7 @@ import pytest
 
 from mcp_trentina_crunchtools.l1.pipeline import run_l1
 from mcp_trentina_crunchtools.preprocess.base import PreProcessContext
-from mcp_trentina_crunchtools.preprocess.detect import hiding_removed, office_hidden
+from mcp_trentina_crunchtools.preprocess.detect import document_hidden, hiding_removed
 from mcp_trentina_crunchtools.preprocess.structured import StructuredProcessor
 from mcp_trentina_crunchtools.unpack import archive, office
 from mcp_trentina_crunchtools.unpack.archive import Budget, open_archive
@@ -620,7 +620,7 @@ class TestStageOneReducer:
             details={"office_converted": 1, "office_hidden": 3},
         )
         assert hiding_removed([applied]) == 3
-        assert office_hidden([applied]) == 3
+        assert document_hidden([applied]) == 3
         clean = PreProcessResult(
             name="structured", cost=Cost.FREE, content="{}", applied=True, bytes_in=10, bytes_out=2
         )

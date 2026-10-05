@@ -29,6 +29,7 @@ from mcp_trentina_crunchtools.quarantine.classifier import classify, is_classifi
 from mcp_trentina_crunchtools.unpack.scan import unpack
 from tests.adversarial_corpus import CORPUS
 from tests.office_files import b64, docx, paragraph, pptx, run, xlsx, zipped
+from tests.pdf_files import pdf, show
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -56,6 +57,13 @@ CONTAINERS: dict[str, Callable[[str, list[str]], bytes]] = {
     "docx": lambda _, lines: docx(*(paragraph(run(line)) for line in lines)),
     "xlsx": lambda _, lines: xlsx({"Sheet1": [[line] for line in lines]}),
     "pptx": lambda _, lines: pptx(lines),
+    "pdf": lambda text, _: pdf(
+        "".join(
+            show(line.encode("latin-1", "replace").decode("latin-1"), y=740 - 14 * row)
+            for row, line in enumerate(text.splitlines())
+            if line.strip()
+        )
+    ),
 }
 """Each container, built from a text and from its lines escaped for XML."""
 

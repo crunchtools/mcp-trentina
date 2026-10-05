@@ -200,7 +200,7 @@ def _handle_content_type_error(exc: UnsupportedContentTypeError) -> dict[str, An
         # content type to the agent, unscanned.
         what_happened="The URL redirected to a non-text download.",
         why_suspicious=(
-            "A page that redirects to a binary download (ZIP, PDF, etc.) "
+            "A page that redirects to a binary download (a ZIP, an executable) "
             "is a known prompt-injection vector. The attacker wants the "
             "agent to download and extract the archive directly."
         ),

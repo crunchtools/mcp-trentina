@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from typing import NamedTuple
 
@@ -39,9 +40,13 @@ TEXT_CONTENT_TYPES = frozenset(
 )
 """Media types the defense pipeline can read as text.
 
-Anything outside this set — PDF, images, archives, office documents —
+Anything outside this set — images, archives, office documents —
 decodes into replacement characters that tokenize into hundreds of
 thousands of meaningless tokens."""
+
+PDF_CONTENT_TYPE = "application/pdf"
+"""The one binary type fetched (#369): it is handed on as base64 and read by
+``preprocess/pdf.py`` or, undelivered as text, by the unpack stage."""
 
 TEXT_CONTENT_SUFFIXES = ("+json", "+xml")
 """Structured-syntax suffixes (RFC 6839) that imply a text body."""
@@ -186,7 +191,8 @@ async def _fetch(url: str) -> Fetched:
                 raise FetchError(url, f"HTTP {status}", status_code=status, error_body=error_body)
 
             content_type = resp.headers.get("content-type", "text/html")
-            if not _is_text_content_type(content_type):
+            is_pdf = content_type.split(";", 1)[0].strip().lower() == PDF_CONTENT_TYPE
+            if not is_pdf and not _is_text_content_type(content_type):
                 raise UnsupportedContentTypeError(
                     url, content_type, redirect_chain=_build_redirect_chain(resp)
                 )
@@ -203,8 +209,16 @@ async def _fetch(url: str) -> Fetched:
                 if len(buf) > MAX_RESPONSE_SIZE:
                     raise FetchError(url, f"Response too large: exceeds {MAX_RESPONSE_SIZE} bytes")
 
+            # A PDF travels as canonical base64 (#369): stage 1 converts it to
+            # the text its pages show, and with `trentina_preprocess: false`
+            # the unpack stage reads inside the file itself.
+            body = (
+                base64.b64encode(bytes(buf)).decode("ascii")
+                if is_pdf
+                else bytes(buf).decode(resp.encoding or "utf-8", errors="replace")
+            )
             return Fetched(
-                bytes(buf).decode(resp.encoding or "utf-8", errors="replace"),
+                body,
                 content_type,
                 (*(str(hop.url) for hop in resp.history), str(resp.url)),
             )

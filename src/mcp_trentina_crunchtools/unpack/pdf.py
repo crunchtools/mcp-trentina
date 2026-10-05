@@ -30,6 +30,9 @@ CONCURRENCY = 2
 MAX_OUTPUT = 16 * 1024 * 1024
 """Bytes of worker output accepted. Its own text cap is far below this."""
 
+TOO_LARGE = "too large to read"
+"""Why an embedded file past the worker's byte cap has no content."""
+
 _slots = threading.BoundedSemaphore(CONCURRENCY)
 
 SECTIONS = (
@@ -55,6 +58,8 @@ class PdfReading:
         hidden: Runs of text drawn so a reader does not see them.
         scanned: Pages that draw an image and have no text: pictures of
             pages, which only OCR reads.
+        text_layers: Pages that are an image with an invisible text layer
+            over it, read as the page's text.
         fields: Text entries by section name (``SECTIONS``).
         attachments: Embedded files, for the archive rules to read.
     """
@@ -62,6 +67,7 @@ class PdfReading:
     pages: list[tuple[str, str]] = field(default_factory=list)
     hidden: int = 0
     scanned: int = 0
+    text_layers: int = 0
     fields: dict[str, list[str]] = field(default_factory=dict)
     attachments: list[Entry] = field(default_factory=list)
 
@@ -132,7 +138,11 @@ def _checked(raw: object) -> PdfReading | None:
     """The worker's JSON as a ``PdfReading``. Raises on any other shape."""
     if not isinstance(raw, dict) or raw.get("encrypted"):
         return None
-    reading = PdfReading(hidden=_count(raw["hidden"]), scanned=_count(raw["scanned"]))
+    reading = PdfReading(
+        hidden=_count(raw["hidden"]),
+        scanned=_count(raw["scanned"]),
+        text_layers=_count(raw["text_layers"]),
+    )
     for page in raw["pages"]:
         visible, unseen = _strings(page)
         reading.pages.append((visible, unseen))
@@ -140,6 +150,12 @@ def _checked(raw: object) -> PdfReading | None:
     if not isinstance(fields, dict):
         raise TypeError("fields is not an object")
     reading.fields = {name: _strings(fields[name]) for name in SECTIONS if name in fields}
-    for name, encoded in (_strings(pair) for pair in raw["attachments"]):
-        reading.attachments.append(Entry(name, base64.b64decode(encoded, validate=True)))
+    for name, encoded in raw["attachments"]:
+        if not isinstance(name, str) or not isinstance(encoded, (str, type(None))):
+            raise TypeError("not an attachment")
+        reading.attachments.append(
+            Entry(name, None, TOO_LARGE)
+            if encoded is None
+            else Entry(name, base64.b64decode(encoded, validate=True))
+        )
     return reading

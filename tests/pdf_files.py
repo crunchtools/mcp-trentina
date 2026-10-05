@@ -52,7 +52,8 @@ def pdf(
         }
     )
     font_ref = writer._add_object(font)
-    for content in pages:
+    for drawn in pages:
+        content = drawn
         page = writer.add_blank_page(*LETTER)
         resources = DictionaryObject(
             {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})}
