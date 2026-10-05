@@ -243,6 +243,20 @@ class TestWhatStaysUnread:
         pdf_worker._Reading(reader).fields()
         assert asked == [(1, 0), (4, 0), (7, 3)]
 
+    def test_a_worker_that_cannot_start_reads_nothing_and_frees_its_slot(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        def refuses(*_args: object, **_kwargs: object) -> None:
+            raise OSError("no such interpreter")
+
+        monkeypatch.setattr(child.subprocess, "run", refuses)
+        with caplog.at_level("WARNING"):
+            for _ in range(pdf_reader.CONCURRENCY + 1):
+                assert read_pdf(pdf(_SHOWN)) is None
+        assert caplog.text.count("pdf: unread, could not start") == pdf_reader.CONCURRENCY + 1
+        monkeypatch.undo()
+        assert read_pdf(pdf(_SHOWN)) is not None, "every slot was released"
+
     def test_a_pdf_that_finds_every_slot_busy(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Waiting holds one of the gateway's worker threads, so it is short."""
         monkeypatch.setattr(child, "SLOT_WAIT", 0.01)
