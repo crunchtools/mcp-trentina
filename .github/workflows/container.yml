@@ -67,7 +67,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            HF_TOKEN=${{ secrets.HF_TOKEN }}
             VERSION=${{ steps.pkgver.outputs.version }}
 
       - name: Run Trivy vulnerability scanner
@@ -137,5 +136,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            HF_TOKEN=${{ secrets.HF_TOKEN }}
             VERSION=${{ steps.pkgver.outputs.version }}

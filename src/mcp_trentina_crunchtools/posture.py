@@ -157,6 +157,25 @@ def check_secret_sources(names: Iterable[str], proc: Path = Path("/proc/self")) 
     return posture
 
 
+def check_l2_gate() -> Posture:
+    """Name an L2 model that has no passing obfuscation-gate record (#362).
+
+    The Layer contract makes reading through obfuscation the model's job, so
+    a model that one zero-width character blinds is a gap in the perimeter
+    the same way a missing seccomp filter is one in the container. Call
+    after the classifier has loaded. No model at all is not this gap:
+    ``TRENTINA_REQUIRE_L2`` decides that.
+    """
+    from .quarantine.classifier import model_info
+
+    posture = Posture()
+    model = model_info()
+    if model is not None and model.gate != "passed":
+        posture.gaps.append(f"l2_obfuscation_gate_{model.gate}")
+        _report(posture)
+    return posture
+
+
 def _report(posture: Posture) -> None:
     logger.warning(
         "posture: running without %s. See docs/deployment-hardening.md.",
