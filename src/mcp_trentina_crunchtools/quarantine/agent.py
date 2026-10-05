@@ -28,9 +28,9 @@ from ..egress import open_guarded
 from ..errors import (
     EgressRefusedError,
     MalformedResponseError,
-    TruncatedResponseError,
     QuarantineAgentError,
     SearchCanaryLeakedError,
+    TruncatedResponseError,
 )
 from ..l1.pipeline import run_l1
 from ..logsafe import exc_kind
@@ -191,9 +191,6 @@ async def _call_with_fallback(
         try:
             try:
                 return await call()
-            except TruncatedResponseError:
-                # The same request reaches the same cap, here or on a fallback.
-                raise
             except MalformedResponseError:
                 # Usually one bad sample, and under Matrix withholding an
                 # unjudged /sync costs the agent that sync's events (#227).
@@ -496,7 +493,7 @@ async def quarantine_extract(
     briefing: str | None = None,
     provider_name: str | None = None,
 ) -> dict[str, Any]:
-    """Turn 2: extract from L1's normalized text. Raises on any provider error.
+    """Turn 2: answer the request from the text the layers judged. Raises on any provider error.
 
     There is no fallback. It used to return the raw input as the
     "extraction" when the provider failed, unless QUARANTINE_FALLBACK=fail —

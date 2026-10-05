@@ -511,6 +511,23 @@ The same run shows what neither input fixes: a summary can quote a sentence
 of the attack and pass the output check and turn 3. That happened in 29 of
 876 calls on the judged text, attacks only.
 
+### After the extraction turn was told to answer, not transcribe (#358)
+
+0.59.1 added one rule to turn 2's prompt: answer the request, return only
+the parts of the text that answer it, never transcribe. The fix was for a
+long document reaching the output cap, and the same benchmark was run again
+to see that it cost nothing (2026-10-05, same model and corpus, one run):
+
+| where the inputs differ (600 calls each) | before | after |
+|---|---|---|
+| delivered with an attack artifact, judged text | 22 | 5 |
+| delivered with both of the carrier's facts, judged text | 532 | 529 |
+
+Over every call on the judged text, 13 of 812 delivered attack text
+verbatim, against 29 of 876. A shorter answer quotes less. The provider was
+returning errors on a few percent of calls during this run, so read the
+size of the drop as approximate; #376 tracks the leak itself.
+
 ## Continuous detection gate (CI)
 
 The periodic benchmark above is the deep, cross-provider comparison. For a

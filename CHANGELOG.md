@@ -10,6 +10,22 @@ under that name.
 
 ## [Unreleased]
 
+## [0.59.1] - 2026-10-05
+
+### Fixed
+- Redact answers a question about a long document (#358). Turn 2 transcribed
+  the document instead of answering, reached the 4,096-token output cap, and
+  the cut-off JSON was reported as malformed, asked for again and refused as
+  `t2_unavailable`. The extraction prompt now tells it to answer the request
+  and never transcribe. On the issue's 52 KB text a one-line question is
+  answered in 50 output tokens, 3 runs of 3. On the redact benchmark the
+  same rule cut extractions that carry attack text from 22 of 600 to 5,
+  with 529 of 600 still answering (532 before).
+- An extraction that does reach the cap is refused as `t2_truncated` after
+  one provider call, not `t2_unavailable` after two. Every provider driver
+  reports its stop reason (`ProviderResult.truncated`), and a truncated
+  answer is neither asked for again nor sent to a fallback provider.
+
 ## [0.59.0] - 2026-10-05
 
 ### Changed
