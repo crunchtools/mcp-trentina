@@ -47,6 +47,7 @@ import base64
 import binascii
 import math
 import re
+import secrets
 import string
 from collections import Counter
 from dataclasses import dataclass, field
@@ -54,6 +55,7 @@ from typing import TYPE_CHECKING
 
 from . import office
 from .archive import OPENABLE, ZIP, Budget, Entry, open_archive
+from .ocr import MAX_IMAGE_BYTES, MAX_IMAGES, ImageText, read_images
 from .pdf import SECTIONS, PdfReading, read_pdf
 from .signatures import OPAQUE, Kind, from_media_type, identify
 from .stats import UnpackStats
@@ -73,6 +75,11 @@ MAX_DEPTH = 2
 MAX_NESTING = 2
 """Archives opened inside one another: a zip in a tar.gz is read, a third
 level stays unread."""
+
+MAX_MEDIA_TOKEN = 8_000_000
+"""Characters of a token that opens as an image, a PDF or an archive and is
+decoded whole to be read inside (#370): a screenshot or a paper is megabytes
+of base64. Anything else stops at ``MAX_TOKEN``."""
 
 MAX_TOKEN = 140_000
 """Characters past which a token is left encoded. L1's decode cap
@@ -128,15 +135,75 @@ class Unpacked:
 
 
 @dataclass
+class _Darkroom:
+    """The images of one payload, read together.
+
+    OCR starts a process and loads three models, about a second before the
+    first image is read. So an image met while unpacking is not read on the
+    spot: it is set aside here and a mark is left in the text. When the pass
+    is over every image is read in one request, and each mark is replaced by
+    what its image says. The mark carries a random token, so no payload can
+    write one.
+    """
+
+    token: str = field(default_factory=lambda: secrets.token_hex(8))
+    images: list[bytes] = field(default_factory=list)
+    kinds: list[str] = field(default_factory=list)
+    read: list[ImageText | None] | None = None
+
+    def expose(self, kind: str, decoded: bytes) -> str | None:
+        """Set an image aside and return its mark, or None if there is no room."""
+        if len(self.images) >= MAX_IMAGES or len(decoded) > MAX_IMAGE_BYTES:
+            return None
+        self.images.append(decoded)
+        self.kinds.append(kind)
+        return self.mark(len(self.images) - 1)
+
+    def mark(self, index: int) -> str:
+        return f"\x00{self.token}:{index}\x00"
+
+    def develop(self) -> list[ImageText | None]:
+        """What each image says, read once however many passes ask."""
+        if self.read is None:
+            self.read = read_images(self.images) if self.images else []
+        return self.read
+
+
+@dataclass
 class _Pass:
     stats: UnpackStats = field(default_factory=UnpackStats)
     unread: set[str] = field(default_factory=set)
     hidden: int = 0
     nesting: int = 0
     budget: Budget = field(default_factory=Budget)
+    darkroom: _Darkroom = field(default_factory=_Darkroom)
+    exposed: list[int] = field(default_factory=list)
 
     def result(self, text: str) -> Unpacked:
+        """The finished view: every image's mark replaced by what the image says."""
+        read = self.darkroom.develop() if self.exposed else []
+        for index in self.exposed:
+            said = read[index]
+            text = text.replace(self.darkroom.mark(index), self._print(index, said))
         return Unpacked(text, self.stats, tuple(sorted(self.unread)), self.hidden)
+
+    def _print(self, index: int, said: ImageText | None) -> str:
+        """What the layers read in an image's place, and the counts for it."""
+        kind = self.darkroom.kinds[index]
+        size = _size(len(self.darkroom.images[index]))
+        self.stats.binary_labelled += 1
+        if said is None:
+            self.stats.binary_unread += 1
+            self.unread.add(kind)
+            return f"({kind}, {size}, not read)"
+        self.stats.images_read += 1
+        self.hidden += len(said.faint)
+        if not said.text and not said.faint:
+            return f"({kind}, {size}, no text found in it)"
+        parts = [f"({kind}, {size}, text read from it below)", *said.text]
+        if said.faint:
+            parts.extend(["(text in it too faint to see:)", *said.faint])
+        return "\n".join(parts)
 
 
 def unpack(text: str) -> Unpacked:
@@ -176,12 +243,7 @@ def _unpack(text: str, depth: int, state: _Pass) -> str:
 def _run(token: str, depth: int, state: _Pass) -> str | None:
     """The replacement for one run of base64 or hex characters, or None."""
     if len(token) > MAX_TOKEN:
-        # Too long to decode whole, so identified from its head. Admission
-        # refuses most of these on length, but flag reads an over-cap
-        # payload's head, so an openable format is still counted unread.
-        head = _strict_base64(token[:HEAD]) or b""
-        kind = identify(head)
-        return _label(kind, head, state, size=len(token) * 3 // 4) if kind.extractable else None
+        return _long(token, OPAQUE, state)
     if len(token) < MIN_TOKEN:
         return None
     if _HEX.fullmatch(token) and not len(token) % 2:
@@ -193,15 +255,31 @@ def _run(token: str, depth: int, state: _Pass) -> str | None:
     return None if decoded is None else _decoded(decoded, token, depth, state)
 
 
+def _long(token: str, declared: Kind, state: _Pass) -> str | None:
+    """A token past ``MAX_TOKEN``, identified from its head.
+
+    One that opens as an image, a PDF or an archive is decoded whole, up to
+    ``MAX_MEDIA_TOKEN``, and read inside. Past that, or when it does not
+    decode or open, it is labelled unread: flag reads an over-cap payload's
+    head, so an openable format must still be counted. Anything else is left
+    as it arrived, for admission to refuse on length.
+    """
+    head = _strict_base64(token[:HEAD]) or b""
+    kind = identify(head)
+    kind = kind if kind is not OPAQUE else declared
+    if not kind.extractable:
+        return None
+    whole = _strict_base64(token) if len(token) <= MAX_MEDIA_TOKEN else None
+    opened = None if whole is None else _opened(kind, whole, state)
+    return opened or _label(kind, head, state, size=len(token) * 3 // 4)
+
+
 def _data_uri(match: re.Match[str], depth: int, state: _Pass) -> str | None:
     """A data URI, labelled or decoded whole, or None to leave it as it is."""
     media_type = match["type"].lower()
     payload = match["payload"]
     if len(payload) > MAX_TOKEN:
-        head = _strict_base64(payload[:HEAD]) or b""
-        kind = identify(head)
-        kind = kind if kind is not OPAQUE else from_media_type(media_type)
-        return _label(kind, head, state, size=len(payload) * 3 // 4) if kind.extractable else None
+        return _long(payload, from_media_type(media_type), state)
     decoded = _strict_base64(payload) if payload else None
     if decoded is None:
         return None
@@ -258,6 +336,8 @@ def _opened(kind: Kind, decoded: bytes, state: _Pass) -> str | None:
     """
     if state.nesting >= MAX_NESTING:
         return None
+    if kind.name.startswith(IMAGE):
+        return _image(kind, decoded, state)
     if kind.name == PDF:
         return _opened_pdf(decoded, state)
     if kind.name not in OPENABLE:
@@ -284,6 +364,26 @@ def _opened(kind: Kind, decoded: bytes, state: _Pass) -> str | None:
     return "\n".join(parts)
 
 
+IMAGE = "image"
+"""How the name of every kind OCR can read begins: ``image/png``, or plain
+``image`` for one known only by a data URI's declared type."""
+
+
+def _image(kind: Kind, decoded: bytes, state: _Pass) -> str | None:
+    """A mark where an image's text will go, or None to leave it labelled.
+
+    None for an image too small to draw a letter (its label already says it
+    is read), and for one there is no room to read: past ``ocr.MAX_IMAGES``
+    in the payload or ``ocr.MAX_IMAGE_BYTES`` in size. Those stay unread.
+    """
+    if _too_small_to_draw(decoded):
+        return None
+    mark = state.darkroom.expose(kind.name, decoded)
+    if mark is not None:
+        state.exposed.append(len(state.darkroom.images) - 1)
+    return mark
+
+
 PDF = "application/pdf"
 SCANNED_PAGE = "scanned PDF page"
 """The ``unread`` kind for a PDF page that is a picture of a page (#370)."""
@@ -295,9 +395,10 @@ def _opened_pdf(decoded: bytes, state: _Pass) -> str | None:
     Each page's text, with what a reader would not see under its own
     heading; then every text entry the file carries outside its pages, by
     kind; then each embedded file, read like a file in an archive. A page
-    that is an image is counted unread, with or without a text layer over
-    it: a layer is read as the page's text, and nothing has checked that it
-    says what the picture shows. The rest is still read.
+    that is a picture, with or without a text layer over it, has its image
+    read by OCR with the payload's other images (#370): what the picture
+    says is read beside what its layer claims. A picture OCR did not read
+    leaves its page unread. The rest is still read.
     """
     reading: PdfReading | None = read_pdf(decoded)
     if reading is None:
@@ -307,10 +408,19 @@ def _opened_pdf(decoded: bytes, state: _Pass) -> str | None:
     count = len(reading.pages)
     parts = [f"({PDF}, {_size(len(decoded))}, {count} page{'' if count == 1 else 's'})"]
     parts.extend(_pdf_text(reading))
-    pictures = reading.scanned + reading.text_layers
-    if pictures:
-        state.stats.binary_labelled += pictures
-        state.stats.binary_unread += pictures
+    sent = 0
+    for number, picture in reading.pictures:
+        mark = state.darkroom.expose(SCANNED_PAGE, picture)
+        if mark is not None:
+            state.exposed.append(len(state.darkroom.images) - 1)
+            parts.append(f"=== page {number}, read from its image ===\n{mark}")
+            sent += 1
+    # A page that is a picture is read when OCR reads its image. One whose
+    # image did not come back, or that there was no room to send, is unread.
+    unsent = reading.scanned + reading.text_layers - sent
+    if unsent > 0:
+        state.stats.binary_labelled += unsent
+        state.stats.binary_unread += unsent
         state.unread.add(SCANNED_PAGE)
     state.nesting += 1
     try:
@@ -334,11 +444,11 @@ def _pdf_text(reading: PdfReading) -> Iterator[str]:
         if reading.fields.get(section):
             yield f"=== {section} ===\n" + "\n".join(reading.fields[section])
     if reading.scanned:
-        yield f"({reading.scanned} page(s) are images with no text, not read)"
+        yield f"({reading.scanned} page(s) are images with no text)"
     if reading.text_layers:
         yield (
             f"({reading.text_layers} page(s) are images under a text layer; "
-            "the text above is the layer, and the images are not read)"
+            "the text above is the layer)"
         )
 
 
@@ -432,17 +542,31 @@ def image_too_small_to_draw(encoded: str) -> bool:
 def read_blob(blob: str) -> Unpacked | None:
     """What the layers read for an MCP resource blob, or None if they cannot.
 
-    A blob is one base64 token, so it unpacks like one: to its text, to a
-    label, or, when short, to itself. None for a blob that is not canonical
-    base64 or is too long to decode: it cannot be identified, so the caller
-    counts it as unread, never as harmless.
+    A blob is one base64 token, so it unpacks like one: to its text, to what
+    is inside it, to a label, or, when short, to itself. None for a blob that
+    is not canonical base64 or is too long to decode: it cannot be
+    identified, so the caller counts it as unread, never as harmless.
     """
-    decoded = _strict_base64(blob) if len(blob) <= MAX_TOKEN else None
-    if decoded is None:
-        return None
-    state = _Pass()
-    text = _decoded(decoded, blob, 0, state)
-    return state.result(blob if text is None else text)
+    return read_blobs([blob])[0]
+
+
+def read_blobs(blobs: list[str]) -> list[Unpacked | None]:
+    """``read_blob`` for every blob of one response, their images read together.
+
+    One OCR request serves all of them: a response with three screenshots
+    starts the models once. Each blob still gets its own view and counts.
+    """
+    darkroom = _Darkroom()
+    passes: list[tuple[_Pass, str] | None] = []
+    for blob in blobs:
+        decoded = _strict_base64(blob) if len(blob) <= MAX_MEDIA_TOKEN else None
+        if decoded is None:
+            passes.append(None)
+            continue
+        state = _Pass(darkroom=darkroom)
+        text = _decoded(decoded, blob, 0, state)
+        passes.append((state, blob if text is None else text))
+    return [None if entry is None else entry[0].result(entry[1]) for entry in passes]
 
 
 UNDECODABLE = Kind("undecodable blob", extractable=True)

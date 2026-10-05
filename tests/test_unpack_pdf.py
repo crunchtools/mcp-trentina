@@ -43,6 +43,7 @@ _EMPTY: dict[str, object] = {
     "text_layers": 0,
     "fields": {},
     "attachments": [],
+    "pictures": [],
 }
 """What the worker prints for a PDF with nothing in it."""
 _SHOWN = show("Quarterly report for the storage team.")
@@ -89,7 +90,7 @@ class TestPagesAreRead:
         view = unpack(b64(scan))
         assert "=== page 1 ===\n" + _NOTE in view.text
         assert "text not shown" not in view.text
-        assert "(1 page(s) are images under a text layer;" in view.text
+        assert "(1 page(s) are images under a text layer; the text above is the layer)" in view.text
         assert (view.hidden, view.unread) == (0, (SCANNED_PAGE,))
 
     @pytest.mark.parametrize(

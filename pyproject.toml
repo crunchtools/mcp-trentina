@@ -216,6 +216,9 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "ocr: runs the real OCR worker, a child process that loads the PP-OCR models",
+]
 
 # petit-log ships no type information — it is a long-lived tool whose library
 # surface was added recently and whose internals carry no annotations. Only

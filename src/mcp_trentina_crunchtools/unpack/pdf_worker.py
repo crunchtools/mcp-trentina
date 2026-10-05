@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from pypdf import PdfReader, filters
+from pypdf.errors import PyPdfError
 from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject, StreamObject
 
 CPU_SECONDS = 20
@@ -61,6 +62,12 @@ MAX_OBJECTS = 100_000
 MAX_TEXT = 1_000_000
 """Characters of text collected before the file is given up as too large.
 Admission refuses long before this; the cap bounds the work."""
+
+MAX_PICTURES = 6
+"""Pages that are pictures whose image is handed back for OCR: as many
+images as one OCR request reads (``ocr.MAX_IMAGES``)."""
+
+MAX_PICTURE_BYTES = 6 * 1024 * 1024
 
 MAX_ATTACHED = 1024 * 1024
 """Bytes of embedded files returned, the archive stage's own budget."""
@@ -269,7 +276,8 @@ class _Reading:
         return text
 
     def pages(self) -> None:
-        pages, hidden, scanned, layers = [], 0, 0, 0
+        pages: list[list[str]] = []
+        hidden = scanned = layers = 0
         if len(self.reader.pages) > MAX_PAGES:
             raise TooLargeError
         for page in self.reader.pages:
@@ -287,9 +295,29 @@ class _Reading:
             unseen = self.spend("".join(unshown).strip())
             hidden += 0 if layered else painter.hidden_chunks
             layers += layered
-            scanned += pictured and not (visible or unseen)
+            if pictured and (layered or not (visible or unseen)):
+                # A page that is a picture: its image goes back for OCR (#370).
+                scanned += not layered
+                self.picture(len(pages) + 1, page)
             pages.append([visible, unseen])
         self.out.update(pages=pages, hidden=hidden, scanned=scanned, text_layers=layers)
+
+    def picture(self, number: int, page: Any) -> None:
+        """Hand back the largest image of a page that is a picture, for OCR.
+
+        Up to ``MAX_PICTURES`` pages and ``MAX_PICTURE_BYTES`` each. A page
+        past either, or whose image this cannot decode (JBIG2 needs a decoder
+        the image does not carry), sends nothing and stays unread.
+        """
+        pictures = self.out.setdefault("pictures", [])
+        if len(pictures) >= MAX_PICTURES:
+            return
+        try:
+            largest = max((image.data for image in page.images), key=len, default=b"")
+        except (PyPdfError, OSError, ValueError, KeyError, NotImplementedError, TypeError):
+            return
+        if 0 < len(largest) <= MAX_PICTURE_BYTES:
+            pictures.append([number, base64.b64encode(largest).decode("ascii")])
 
     def fields(self) -> None:
         """Every text entry in ``FIELDS``, from every object the file has."""
@@ -350,6 +378,7 @@ def main() -> int:
         json.dump({"encrypted": True}, sys.stdout)
         return 0
     reading = _Reading(reader)
+    reading.out["pictures"] = []
     reading.pages()
     reading.fields()
     reading.attachments()
