@@ -66,6 +66,7 @@ from ..modes import (
     refusal_reason,
 )
 from ..quarantine.agent import quarantine_redact
+from ..quarantine.packs import GENERIC_ID, pack_for
 from ..unpack.scan import IMAGE_BLOCK, UNDECODABLE, image_too_small_to_draw, read_blobs
 from ..warning import build_warning
 from .service import judge_of, service_context, service_profile
@@ -202,6 +203,12 @@ def _cache_key(profile: Profile, kind: str, text: str, judge: tuple[str, str]) -
     cfg = "model" if d.l2_threshold is None else f"{d.l2_threshold}"
     if judge != judge_of(None):
         cfg = f"{cfg}:{judge[0]}/{judge[1]}"
+    # The judge's prompt pack, by id and text (#354): editing a prompt sweeps
+    # the verdicts it reached. The generic prompts keep the old spelling, for
+    # the reason the default judge does; a change to them is a perimeter bump.
+    pack = pack_for(judge, d.l3_prompt_pack)
+    if pack.id != GENERIC_ID:
+        cfg = f"{cfg}:pack={pack.stamp}"
     return hashlib.sha256(f"{kind}:{cfg}:{text}".encode()).hexdigest()
 
 

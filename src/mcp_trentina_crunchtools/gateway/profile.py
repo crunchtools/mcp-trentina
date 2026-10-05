@@ -775,6 +775,19 @@ class DefenseConfig(BaseModel):
             "forces flag everywhere for the night block misfires."
         ),
     )
+    l3_prompt_pack: str | None = Field(
+        default=None,
+        description=(
+            "Path to an L3 prompt pack for this profile's judge (#354): the "
+            "three system prompts and the Layer 2 caveat for one exact "
+            "(provider, model). It applies to the model it names and no "
+            "other; a judge it does not name gets a shipped pack or the "
+            "generic prompts. Checked when profiles load: a file that is not "
+            "a pack, or drops the framing every pack must keep, refuses the "
+            "profile. TRENTINA_L3_PROMPT_PACK sets one for every profile "
+            "that does not. See docs/l3-prompt-tuning.md."
+        ),
+    )
     modes: list[ModeName] | None = Field(
         default=None,
         description=(
@@ -791,6 +804,17 @@ class DefenseConfig(BaseModel):
     @classmethod
     def _check_enforcement(cls, block: Any) -> Any:
         return _normalize_enforcement(block, key="defense")
+
+    @field_validator("l3_prompt_pack")
+    @classmethod
+    def _pack_loads(cls, path: str | None) -> str | None:
+        """Refuse a profile whose prompt pack is not one, at load and not at
+        the first scan. The error names a rule, never the file's text."""
+        if path is not None:
+            from ..quarantine.packs import load_pack
+
+            load_pack(path)
+        return path
 
     @model_validator(mode="after")
     def _default_is_permitted(self) -> DefenseConfig:
