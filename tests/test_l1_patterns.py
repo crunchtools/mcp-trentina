@@ -165,16 +165,10 @@ def test_one_enormous_word_stays_cheap() -> None:
     ],
 )
 def test_html_image_shapes(markup: str, expected: int) -> None:
-    """Counted, removed from L2's copy when suspicious, left alone otherwise, and
-    never touched in what the agent receives."""
+    """Counted when suspicious, and never touched in what the agent receives."""
     result = run_l1(markup)
     assert result.stats.exfiltration.exfiltration_urls == expected
     assert result.content == markup
-    if expected:
-        assert "evil.example" not in result.l2_input
-        assert "[image removed]" in result.l2_input
-    else:
-        assert result.l2_input == markup
 
 
 @pytest.mark.parametrize(

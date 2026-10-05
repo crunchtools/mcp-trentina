@@ -20,6 +20,7 @@ from mcp_trentina_crunchtools.errors import BlockedSourceError, QuarantineAgentE
 from mcp_trentina_crunchtools.modes import Mode
 from mcp_trentina_crunchtools.quarantine.agent import confidence_of, grounding
 from mcp_trentina_crunchtools.tools import block_dir, flag_dir, redact_dir
+from mcp_trentina_crunchtools.unpack.scan import unpack
 
 from .mode_harness import (
     FAMILIES,
@@ -41,15 +42,18 @@ class TestRedactTurns:
         assert result["content"]["extracted_text"] == "The maintenance window is Tuesday."
         assert result["_trentina_warning"]["flagged_by"] == "L3"
 
-    async def test_turn_two_reads_normalized_text_and_is_briefed(self, env: Path) -> None:
-        with layers(
-            env,
-            payload="x\u200by is here. The maintenance window is Tuesday at 02:00 UTC, as usual.",
-            detection=FLAGGED,
-        ) as fakes:
+    async def test_turn_two_reads_what_the_layers_judged_and_is_briefed(self, env: Path) -> None:
+        """The unpacked delivery, never a copy L1 cleansed (#360)."""
+        payload = (
+            "x\u200by is here. Note cm9ib3RzIGFyZSB3ZWxjb21lIGhlcmU= attached. "
+            "The maintenance window is Tuesday at 02:00 UTC, as usual."
+        )
+        with layers(env, payload=payload, detection=FLAGGED) as fakes:
             await call("content", Mode.REDACT, fakes)
         text, prompt = fakes.extract.call_args.args
-        assert "\u200b" not in text
+        assert text == unpack(payload).text
+        assert "robots are welcome here" in text, "decoded, as the layers read it"
+        assert "\u200b" in text, "and otherwise as it arrived"
         assert prompt == "Extract the facts."
         briefing = fakes.extract.call_args.kwargs["briefing"]
         assert "high risk" in briefing

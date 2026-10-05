@@ -71,7 +71,7 @@ Four rules shape every layer, and any change to a layer is held to them. `tests/
 3. **A layer's weakness is fixed inside that layer or at model selection.** The fix is a better model, a new L1 stage, or a benchmark gate that rejects a model a trick can blind (`benchmarks/l2_obfuscation.py`). The pipeline never gets an extra pass, a second input, or a reshaped copy to compensate.
 4. **Read time is linear in payload size, one pass per layer.** The admission cap (`CLASSIFIER_MAX_TOKENS`) is sized on that: 32K tokens is about 23 s of L2 on production CPU, well inside the 60 s MCP client timeout.
 
-Open (#360): redact's extraction turn still reads L1's normalized copy (`l2_input`) instead of the arrived bytes. No detector reads that copy. Whether the extraction should is being measured.
+Redact's extraction turn reads the same unpacked text (`DefenseVerdict.read`), so it extracts from what was judged. Until 0.57.1 it read a copy L1 had normalized, which made L1 a cleansing layer for that one consumer (#360).
 
 Only canonical base64 is decoded, meaning text whose re-encoding reproduces it exactly. A lenient decoder can read a non-canonical blob differently from the agent's own tools, so such blobs are read as they arrived. Decoded text carries no marker: any bracketed note in front of it made L2 flag 4 to 8 of the 14 benign corpus texts, against 1 without one ([benchmark](benchmark.md#unpack-stage-367)). L3's briefing names what was decoded and labelled instead. Archives, office files, PDFs and images are extracted in later phases (#368 to #370).
 
@@ -88,7 +88,7 @@ L1 counts, and never modifies what the agent receives:
 - **What the agent receives** (`content`) — the caller's text, untouched. A CVE ticket, a Nagios alert, or a security mail *discusses* attacks in the words attacks use; amputating those lines destroyed exactly the content an ops agent exists to read, and destroyed the evidence before the smarter layers could judge it.
 - **Counts, by type** (`PipelineStats`) — hidden markup, unicode manipulation, encoded payloads, exfiltration URLs, LLM delimiters, directive patterns like "ignore previous instructions", and, for a directory, Python files that shadow the standard library. They feed the risk score and the warning, and L3's briefing names each non-zero one (`PipelineStats.findings`, from the fixed `FINDING_NAMES` table).
 
-To match through obfuscation, some stages work on a private normalized copy, `l2_input`: zero-width characters removed, encoded blobs decoded, fake `<|im_start|>`/`<|eot_id|>`/`[INST]` delimiters dropped, exfiltration image URLs defanged. No detector reads that copy (the [Layer contract](#layer-contract)). Redact's extraction turn does, pending #360.
+To match through obfuscation, some stages work on a private normalized copy: zero-width characters removed, encoded blobs replaced, fake `<|im_start|>`/`<|eot_id|>`/`[INST]` delimiters dropped, exfiltration image URLs defanged. The copy never leaves L1 (#360). L1 hands on counts and nothing else.
 
 **L1 is format-agnostic.** It scans what it is handed and makes no judgement about a payload's type. Until 0.28.0 a `looks_like_html` sniffer chose between an HTML pipeline and a text one on a leading `<!DOCTYPE` or `<html>`; an HTML *fragment* — the shape most tool output carries — matched neither, so identical bytes were defended two different ways depending on their first few characters. The fork is gone. Markup is handled in two tiers instead:
 
@@ -336,7 +336,7 @@ The mode decides what is delivered, never which layers run (`modes.py`). The nam
 |------|----|----|-----------|------------|-----------|----------|
 | block | ✓ | ✓ | ✓ | — | — | nothing if any layer flagged; else the original |
 | flag | ✓ | ✓ | ✓ | — | — | the original, plus the verdict |
-| redact | ✓ | ✓ | ✓ | from L1's normalized copy (#360) | L1 ∥ L2 on the extraction, then L3 | a verified extraction; nothing if verify objects |
+| redact | ✓ | ✓ | ✓ | from the unpacked text the layers read | L1 ∥ L2 on the extraction, then L3 | a verified extraction; nothing if verify objects |
 
 Ten rules hold on every path (#187):
 

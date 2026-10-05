@@ -161,7 +161,7 @@ def risk_level_for_count(suspicious: int) -> str:
 
 @dataclass
 class PipelineResult:
-    """Result from the L1 pipeline: two views of one payload.
+    """Result from the L1 pipeline: the caller's text and what L1 counted in it.
 
     ``content`` is WHAT THE AGENT RECEIVES — the caller's text, unmodified. L1
     never strips: excising lines or tokens destroyed exactly the content an
@@ -170,20 +170,16 @@ class PipelineResult:
     could judge it. Disposition belongs to the profile's enforcement mode
     and the Q-Agent, not to a regex.
 
-    ``l2_input`` is L1's NORMALIZED COPY — the same text with obfuscation
-    undone: zero-width characters removed, encoded blobs replaced, delimiter
-    tokens dropped. NO DETECTOR READS IT: L2 reads ``content`` once, like
-    every layer (the Layer contract, ``docs/defense-pipeline.md``; #359
-    retired the second L2 pass over this copy). Its one reader is redact's
-    extraction turn, and whether that should stay is #360, which also owns
-    the name. It is never delivered.
+    L1 hands on COUNTS and nothing else (#360). To match through obfuscation
+    its stages work on a normalized copy, but that copy never leaves
+    ``_run_stages``: until 0.57.1 it was returned as ``l2_input`` and redact's
+    extraction turn read it, which made L1 a cleansing layer for one consumer.
 
     The owner's rule (2026-09-13): what the agent receives is byte-identical
     to what entered the perimeter, or nothing at all.
     """
 
     content: str
-    l2_input: str
     stats: PipelineStats
     input_size: int
     output_size: int
@@ -198,23 +194,23 @@ def _run_stages(content: str, stats: PipelineStats) -> PipelineResult:
     was also wrong often enough to matter (see the module docstring), so the
     fix was to delete the fork rather than to guard it.
 
-    The delivery text passes through untouched; every stage transforms only
-    the L2 input, except ``detect_hidden_markup``, which transforms nothing
-    and counts. It runs FIRST, because it is the only stage that reads markup
-    and the later stages rewrite the very characters it looks for.
+    The delivery text passes through untouched. Each stage reads the copy the
+    one before it normalized, so a directive split by zero-width characters
+    still matches; the copy is dropped when the last stage has counted (#360).
+    ``detect_hidden_markup`` transforms nothing and runs FIRST, because it is
+    the only stage that reads markup and the later stages rewrite the very
+    characters it looks for.
     """
-    l2_input = content
-    l2_input, stats.hidden = detect_hidden_markup(l2_input)
-    l2_input, stats.unicode = normalize_unicode(l2_input)
-    l2_input, stats.encoded = normalize_encoded(l2_input)
-    l2_input, stats.exfiltration = strip_exfiltration(l2_input)
-    l2_input, stats.delimiters = normalize_delimiters(l2_input)
-    l2_input, stats.directives = strip_directives(l2_input)
+    working, stats.hidden = detect_hidden_markup(content)
+    working, stats.unicode = normalize_unicode(working)
+    working, stats.encoded = normalize_encoded(working)
+    working, stats.exfiltration = strip_exfiltration(working)
+    working, stats.delimiters = normalize_delimiters(working)
+    _, stats.directives = strip_directives(working)
 
     size = len(content.encode("utf-8"))
     return PipelineResult(
         content=content,
-        l2_input=l2_input,
         stats=stats,
         input_size=size,
         output_size=size,

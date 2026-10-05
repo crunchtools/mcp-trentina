@@ -67,7 +67,7 @@ class TestTheCoverageChange:
         assert seeing.decrypted_events == 1
         assert seeing.undecryptable == ()
 
-    async def test_the_ciphertext_is_never_put_in_the_l2_input(self) -> None:
+    async def test_the_ciphertext_is_never_among_the_segments_read(self) -> None:
         """Decrypted plaintext goes in; the blob it came from does not."""
         v = Vectors()
         event = v.encrypted_event(INJECTION)

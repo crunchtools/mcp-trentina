@@ -30,13 +30,13 @@ def _verdict(
 ) -> DefenseVerdict:
     pipeline = PipelineResult(
         content=text,
-        l2_input=text,
         stats=PipelineStats(),
         input_size=len(text),
         output_size=len(text),
     )
     return DefenseVerdict(
         content=text,
+        read=text,
         pipeline=pipeline,
         classification=classification,
         l3_assessment=l3,

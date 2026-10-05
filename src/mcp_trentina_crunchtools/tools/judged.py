@@ -317,9 +317,9 @@ async def _redact(
     *,
     downgraded: bool = False,
 ) -> dict[str, Any]:
-    """Turns 2 and 3 over L1's normalized text; refuse if either objects."""
+    """Turns 2 and 3 over the text the layers judged; refuse if either objects."""
     result = await quarantine_redact(
-        verdict.pipeline.l2_input,
+        verdict.read,
         prompt,
         detection=verdict.l3_assessment,
     )

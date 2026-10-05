@@ -117,6 +117,10 @@ class DefenseVerdict:
     """
 
     content: str
+    read: str
+    """What L1, L2 and L3 read: ``content`` unpacked (``unpack.scan``). Never
+    delivered. Redact's extraction turn reads it too (#360), so it extracts
+    from the text that was judged."""
     pipeline: PipelineResult
     classification: ClassifierResult | None
     l3_assessment: dict[str, Any] | None
@@ -525,6 +529,7 @@ async def defend(
 
     return DefenseVerdict(
         content=content,
+        read=read,
         pipeline=pipeline,
         classification=classification,
         l3_assessment=l3_assessment,
@@ -559,7 +564,6 @@ def run_l1_json(
     value: Any,
     texts: list[str],
     stats: PipelineStats,
-    l2_inputs: list[str] | None = None,
 ) -> Any:
     """Recursively inspect every string leaf; the payload comes back unchanged.
 
@@ -570,8 +574,8 @@ def run_l1_json(
 
     Since L1 stopped modifying content there is no rebuild at all — the input
     object is returned as-is. What this produces is the accounting: merged
-    stats across every leaf, the original leaf texts (``texts``) joined for
-    L3, and the normalized leaf texts (``l2_inputs``) joined for L2. Leaves
+    stats across every leaf and the leaf texts (``texts``), joined for the
+    layers. Leaves
     are inspected individually but judged as ONE document — a classifier shown
     one field at a time cannot see an instruction split across two of them.
 
@@ -586,8 +590,6 @@ def run_l1_json(
         leaf = run_l1(text)
         merge_stats(stats, leaf.stats)
         texts.append(leaf.content)
-        if l2_inputs is not None:
-            l2_inputs.append(leaf.l2_input)
     return value
 
 
@@ -621,16 +623,14 @@ async def defend_json(
     so the token count decides before any inference runs.
     """
     texts: list[str] = []
-    l2_inputs: list[str] = []
     stats = PipelineStats()
     # L1 is CPU-bound and linear in the payload; on the loop, one large
     # Matrix message or alert stalls every profile (#295).
-    rebuilt = await asyncio.to_thread(run_l1_json, payload, texts, stats, l2_inputs)
+    rebuilt = await asyncio.to_thread(run_l1_json, payload, texts, stats)
     joined = "\n".join(texts)
 
     verdict = await _defend_texts(
         texts,
-        l2_inputs,
         stats,
         source=source,
         source_type=source_type,
@@ -646,7 +646,6 @@ async def defend_json(
 
 async def _defend_texts(
     texts: list[str],
-    l2_inputs: list[str],
     stats: PipelineStats,
     *,
     source: str,
@@ -669,7 +668,6 @@ async def _defend_texts(
     joined = "\n".join(texts)
     pipeline = PipelineResult(
         content=joined,
-        l2_input="\n".join(l2_inputs),
         stats=stats,
         input_size=len(joined),
         output_size=len(joined),
@@ -688,15 +686,12 @@ async def _defend_texts(
     )
 
 
-def _run_l1_segments(
-    segments: tuple[str, ...], texts: list[str], l2_inputs: list[str], stats: PipelineStats
-) -> None:
+def _run_l1_segments(segments: tuple[str, ...], texts: list[str], stats: PipelineStats) -> None:
     """L1 over each selected segment; run in a worker thread, never on the loop."""
     for segment in segments:
         leaf = run_l1(segment)
         merge_stats(stats, leaf.stats)
         texts.append(leaf.content)
-        l2_inputs.append(leaf.l2_input)
 
 
 async def defend_selection(
@@ -723,9 +718,8 @@ async def defend_selection(
     ``stop_on_partial`` included.
     """
     texts: list[str] = []
-    l2_inputs: list[str] = []
     stats = PipelineStats()
-    await asyncio.to_thread(_run_l1_segments, view.segments, texts, l2_inputs, stats)
+    await asyncio.to_thread(_run_l1_segments, view.segments, texts, stats)
 
     # Coverage goes to L3 on top of the standard briefing: "this scan read 4%
     # of the document" is context the judge should have before it concludes
@@ -750,7 +744,6 @@ async def defend_selection(
 
     return await _defend_texts(
         texts,
-        l2_inputs,
         stats,
         source=source,
         source_type=source_type,
