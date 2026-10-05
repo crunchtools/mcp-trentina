@@ -22,6 +22,8 @@ is actually answering: under the provider fallback chain that can be a
 different model from the profile's primary, and it gets its own pack or the
 generic one. An operator's pack (``defense.l3_prompt_pack`` or
 ``TRENTINA_L3_PROMPT_PACK``) applies to the model it names and to no other.
+Either setting may say ``generic`` instead of a path: no pack at all, for an
+operator who wants a shipped pack out of the way.
 
 A pack's id and a hash of its text are its ``stamp``. The stamp is in the
 verdict key (``gateway/ingress_defense._cache_key``), so editing a prompt
@@ -211,11 +213,15 @@ def operator_pack(path: str | None) -> PromptPack | None:
     """The pack at ``path``, or at ``TRENTINA_L3_PROMPT_PACK``, if there is one.
 
     Read again when the file changes. One that does not load is logged and
-    is not used: the generic prompts are always a safe answer.
+    is not used: the generic prompts are always a safe answer. The word
+    ``generic`` in place of a path is the generic pack itself, which is how
+    an operator turns shipped packs off.
     """
     path = path or os.environ.get(PACK_ENV, "").strip() or None
     if path is None:
         return None
+    if path == GENERIC_ID:
+        return GENERIC
     try:
         changed = Path(path).stat().st_mtime_ns
     except OSError:
@@ -227,9 +233,10 @@ def pack_for(judge: tuple[str, str], operator_path: str | None = None) -> Prompt
     """The pack the judge ``(provider, model)`` is prompted with.
 
     The operator's pack when it names exactly this judge; else a shipped
-    pack for exactly this judge; else the generic prompts.
+    pack for exactly this judge; else the generic prompts. An operator who
+    asks for ``generic`` gets it for every judge.
     """
     own = operator_pack(operator_path)
-    if own is not None and (own.provider, own.model) == judge:
+    if own is GENERIC or (own is not None and (own.provider, own.model) == judge):
         return own
     return shipped().get(judge, GENERIC)

@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+"""Score an L3 prompt pack, and tune one without fooling yourself (#354).
+
+A prompt pack is the judge's three system prompts and Layer 2 caveat for one
+exact ``(provider, model)`` (``quarantine/packs.py``). This harness runs the
+corpora through one provider with a pack in force and reports what the pack
+is worth. It needs a hosted API key and nothing else: no GPU, no local model.
+
+    # the generic prompts, on the held-out split: the number to beat
+    uv run python benchmarks/prompt_pack.py --provider openrouter \\
+        --prompt-pack generic --out results/generic.json
+
+    # a candidate, tuned on the train split: read its misses, edit, repeat
+    uv run python benchmarks/prompt_pack.py --provider openrouter \\
+        --prompt-pack my-pack.json --split train
+
+    # the candidate, once, on held-out; written out as a pack only if it wins
+    uv run python benchmarks/prompt_pack.py --provider openrouter \\
+        --prompt-pack my-pack.json --baseline results/generic.json \\
+        --emit src/mcp_trentina_crunchtools/quarantine/prompt_packs/my-model.json
+
+**The split is fixed.** Train is the external corpus's ``train`` split (the
+first ``--train-external`` rows) and one internal case in four, chosen by a
+hash of the case id. Held-out is the external ``test`` split and the other
+three internal cases in four. Tuning against the cases you report on is how
+a 90% pack turns out to be 70% in production, so a ``--split train`` run is
+labelled as tuning, lists its misses by id, and cannot ``--emit``.
+
+**A pack ships only if it wins.** Against ``--baseline``, on held-out: a
+higher catch rate, a false-positive rate no higher, and a ``detector_meta``
+catch rate no lower. That last one is the judge-attack gate: content aimed
+at the judge itself, where a pack tuned only for recall makes the judge
+easier to talk out of a verdict. ``--emit`` writes nothing when the gate
+fails, and exits 1.
+
+A malformed or cut-off answer is an unavailable judge, not a pass: it is
+counted against schema conformance and left out of the rates.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import hashlib
+import json
+import os
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from benchmarks import external_corpus
+from benchmarks.provider_benchmark import ProviderReport, resolved_model, run_provider
+from mcp_trentina_crunchtools.quarantine import packs
+from tests.adversarial_corpus import CORPUS, Case
+
+GENERIC = "generic"
+JUDGE_ATTACKS = "detector_meta"
+"""The category the gate protects: content that targets the judge itself."""
+
+INTERNAL_TRAIN_ONE_IN = 4
+TRAIN_EXTERNAL = 300
+"""Rows of the external train split a tuning run uses by default."""
+
+_UNPARSEABLE = ("MalformedResponseError", "TruncatedResponseError")
+
+
+def in_train(case_id: str) -> bool:
+    """Whether an internal case is in the train slice: fixed by its id alone."""
+    digest = hashlib.sha256(case_id.encode()).digest()
+    return int.from_bytes(digest[:4]) % INTERNAL_TRAIN_ONE_IN == 0
+
+
+def split_cases(split: str, train_external: int, cache_dir: Path) -> list[Case]:
+    """The cases of ``train`` or ``held-out``, internal first."""
+    train = split == "train"
+    internal = [case for case in CORPUS if in_train(case.id) == train]
+    external = external_corpus.load("train" if train else "test", cache_dir=cache_dir)
+    return internal + (external[:train_external] if train else external)
+
+
+def measure(report: ProviderReport) -> dict[str, Any]:
+    """What one run is worth, by corpus kept apart and for the gate together.
+
+    ``catch`` and ``false_positive`` are over the cases that got a verdict.
+    ``schema_conformance`` is the share of calls whose answer parsed.
+    """
+    scored = [r for r in report.results if not r.error]
+    attacks = [r for r in scored if r.expect_injection]
+    benign = [r for r in scored if not r.expect_injection]
+    caught = sum(r.detected for r in attacks)
+    flagged = sum(r.detected for r in benign)
+    unparseable = sum(any(mark in r.summary for mark in _UNPARSEABLE) for r in report.results)
+    by_category = {
+        name: {"caught": hit, "of": total}
+        for name, (hit, total) in sorted(report.detection_by_category().items())
+    }
+    return {
+        "calls": len(report.results),
+        "errors": report.errors,
+        "schema_conformance": 1 - unparseable / max(len(report.results), 1),
+        "attacks": len(attacks),
+        "benign": len(benign),
+        "catch": caught / max(len(attacks), 1),
+        "false_positive": flagged / max(len(benign), 1),
+        "precision": caught / max(caught + flagged, 1),
+        "by_category": by_category,
+        "false_positives_by_category": {
+            name: {"flagged": hit, "of": total}
+            for name, (hit, total) in sorted(report.fp_by_category().items())
+        },
+        "median_latency_ms": report.median_latency_ms,
+        "p95_latency_ms": report.p95_latency_ms,
+        "cost_per_1k_calls_usd": report.cost_per_1k_calls_usd,
+    }
+
+
+def _judge_attacks(measured: dict[str, Any]) -> float:
+    row = measured["by_category"].get(JUDGE_ATTACKS)
+    return row["caught"] / max(row["of"], 1) if row else 0.0
+
+
+def gate(candidate: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
+    """Why ``candidate`` may not ship against ``baseline``. Empty when it may."""
+    reasons = []
+    if candidate["catch"] <= baseline["catch"]:
+        reasons.append("it does not catch more than the baseline")
+    if candidate["false_positive"] > baseline["false_positive"]:
+        reasons.append("it flags more benign content than the baseline")
+    if _judge_attacks(candidate) < _judge_attacks(baseline):
+        reasons.append(f"it catches fewer {JUDGE_ATTACKS} attacks than the baseline")
+    return reasons
+
+
+def _summary(run: dict[str, Any]) -> dict[str, str]:
+    """One run's headline numbers, as table cells by row label."""
+    measured = run["measured"]
+    latency = f"{measured['median_latency_ms']:.0f} / {measured['p95_latency_ms']:.0f} ms"
+    return {
+        "pack": run["pack"],
+        "attacks caught": f"{measured['catch']:.1%} of {measured['attacks']}",
+        "benign flagged": f"{measured['false_positive']:.1%} of {measured['benign']}",
+        "precision": f"{measured['precision']:.1%}",
+        f"{JUDGE_ATTACKS} caught": f"{_judge_attacks(measured):.1%}",
+        "answers that parsed": f"{measured['schema_conformance']:.1%} of {measured['calls']}",
+        "latency, median / p95": latency,
+        "cost per 1,000 calls": f"${measured['cost_per_1k_calls_usd']:.2f}",
+    }
+
+
+def render(run: dict[str, Any], baseline: dict[str, Any] | None) -> str:
+    """The run as Markdown, beside the baseline when there is one."""
+    runs = {"this run": run} | ({"baseline": baseline} if baseline else {})
+    head = "| " + " | ".join(runs) + " |"
+    rule = "|---|" + "---|" * len(runs)
+    tuning = "  (a tuning run: not a result, and not what a pack ships on)"
+    lines = [
+        f"# L3 prompt pack: {run['pack']} on {run['provider']} / {run['model']}",
+        "",
+        f"Split: **{run['split']}**" + (tuning if run["split"] == "train" else ""),
+        "",
+        "| " + head,
+        rule,
+    ]
+    summaries = [_summary(each) for each in runs.values()]
+    for label in summaries[0]:
+        lines.append(f"| {label} | " + " | ".join(each[label] for each in summaries) + " |")
+    categories = [each["measured"]["by_category"] for each in runs.values()]
+    lines += ["", "| attack category " + head, rule]
+    for name in sorted({name for column in categories for name in column}):
+        cells = [
+            "{caught}/{of}".format(**column[name]) if name in column else ""
+            for column in categories
+        ]
+        lines.append(f"| {name} | " + " | ".join(cells) + " |")
+    if run["split"] == "train":
+        lines += ["", "Missed attacks: " + (", ".join(run["missed"]) or "none")]
+        lines += ["Benign flagged: " + (", ".join(run["flagged_benign"]) or "none")]
+    return "\n".join(lines)
+
+
+def emitted(pack_file: Path, run: dict[str, Any], baseline: dict[str, Any]) -> dict[str, Any]:
+    """The candidate's pack file with what it measured written into its header."""
+    pack = json.loads(pack_file.read_text())
+    pack["measured"] = {
+        "date": run["date"],
+        "split": run["split"],
+        "corpus": run["corpus"],
+        "pack": {k: v for k, v in run["measured"].items() if not k.endswith("by_category")},
+        "generic": {k: v for k, v in baseline["measured"].items() if not k.endswith("by_category")},
+    }
+    return pack
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--provider", required=True, help="gemini, openai, anthropic, openrouter…")
+    parser.add_argument(
+        "--prompt-pack",
+        default=None,
+        help=f"A pack file, or '{GENERIC}' for the generic prompts. Default: whatever ships.",
+    )
+    parser.add_argument("--split", choices=("train", "held-out"), default="held-out")
+    parser.add_argument("--train-external", type=int, default=TRAIN_EXTERNAL)
+    parser.add_argument("--baseline", help="A previous run's JSON to compare with and gate on.")
+    parser.add_argument("--emit", help="Write the pack here, measured, if it passes the gate.")
+    parser.add_argument("--out", help="Write this run's JSON here.")
+    parser.add_argument("--cache-dir", default=str(external_corpus.CACHE_DIR))
+    parser.add_argument("--concurrency", type=int, default=4)
+    parser.add_argument("--retries", type=int, default=2)
+    parser.add_argument("--limit", type=int, default=0, help="Cut the case list, for a smoke run.")
+    return parser.parse_args(argv)
+
+
+def use_pack(choice: str | None, judge: tuple[str, str]) -> packs.PromptPack:
+    """Put ``choice`` in force for this process and return the pack in use.
+
+    A file is set as the operator's pack, and must name ``judge`` exactly:
+    a pack for another model would be ignored and the run would silently
+    score the generic prompts under the candidate's name.
+    """
+    if choice == GENERIC:
+        os.environ[packs.PACK_ENV] = packs.GENERIC_ID
+    elif choice is not None:
+        os.environ[packs.PACK_ENV] = choice
+        named = packs.load_pack(choice)
+        if (named.provider, named.model) != judge:
+            raise SystemExit(
+                f"{choice} is a pack for {named.provider}/{named.model}; "
+                f"this run's judge is {judge[0]}/{judge[1]}"
+            )
+    return packs.pack_for(judge)
+
+
+async def main_async(args: argparse.Namespace) -> int:
+    judge = (args.provider, resolved_model(args.provider))
+    pack = use_pack(args.prompt_pack, judge)
+    baseline = json.loads(Path(args.baseline).read_text()) if args.baseline else None
+    if args.emit and (args.split != "held-out" or baseline is None or args.prompt_pack is None):
+        print("--emit needs a pack file, --baseline, and the held-out split", file=sys.stderr)
+        return 2
+    cases = await asyncio.to_thread(
+        split_cases, args.split, args.train_external, Path(args.cache_dir)
+    )
+    cases = cases[: args.limit] if args.limit else cases
+    print(f"{len(cases)} cases, {args.split}, pack {pack.stamp}, judge {judge}", file=sys.stderr)
+    report = await run_provider(args.provider, cases, args.concurrency, 0.0, args.retries)
+    scored = [r for r in report.results if not r.error]
+    run = {
+        "date": datetime.now(UTC).date().isoformat(),
+        "provider": judge[0],
+        "model": judge[1],
+        "pack": pack.stamp,
+        "split": args.split,
+        "corpus": {
+            "internal": sum(1 for c in cases if not c.id.startswith("ext-")),
+            "external": {
+                "dataset": external_corpus.DATASET,
+                "revision": external_corpus.REVISION,
+                "cases": sum(1 for c in cases if c.id.startswith("ext-")),
+            },
+        },
+        "measured": measure(report),
+        "missed": [r.id for r in scored if r.expect_injection and not r.detected],
+        "flagged_benign": [r.id for r in scored if not r.expect_injection and r.detected],
+    }
+    print(render(run, baseline))
+    if args.out:
+        Path(args.out).write_text(json.dumps(run, indent=2) + "\n")
+    if baseline is None:
+        return 0
+    if baseline["split"] != run["split"]:
+        print("\nThe baseline ran on the other split: nothing to conclude.", file=sys.stderr)
+        return 2
+    reasons = gate(run["measured"], baseline["measured"])
+    print("\nGate: " + ("PASS" if not reasons else "FAIL: " + "; ".join(reasons)))
+    if args.emit and not reasons:
+        out = emitted(Path(args.prompt_pack), run, baseline)
+        packs.parse_pack(out)  # what is written is what the gateway will load
+        Path(args.emit).write_text(json.dumps(out, indent=2) + "\n")
+        print(f"Wrote {args.emit}", file=sys.stderr)
+    return 1 if reasons else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    return asyncio.run(main_async(parse_args(argv)))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

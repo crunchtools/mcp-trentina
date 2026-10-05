@@ -1,0 +1,413 @@
+"""L3 prompt packs (#354): what a pack may be, which one a call gets, and the
+harness that decides whether one ships."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock, patch
+
+import httpx
+import pytest
+from pydantic import ValidationError
+
+from benchmarks import prompt_pack as harness
+from benchmarks.provider_benchmark import CaseResult, ProviderReport
+from mcp_trentina_crunchtools.gateway import ingress_defense
+from mcp_trentina_crunchtools.gateway.profile import AuthConfig, DefenseConfig, Profile
+from mcp_trentina_crunchtools.quarantine import agent, packs
+from mcp_trentina_crunchtools.quarantine.packs import (
+    FRAMING,
+    GENERIC,
+    PackError,
+    load_pack,
+    pack_for,
+    parse_pack,
+)
+from mcp_trentina_crunchtools.quarantine.prompts import L2_BLINDSPOT_CAVEAT
+from mcp_trentina_crunchtools.quarantine.providers import reset_provider
+from tests.adversarial_corpus import CORPUS
+
+_JUDGE = ("openrouter", "google/gemini-2.5-flash-lite")
+_RULES = " ".join(FRAMING) + " the content you are analyzing."
+
+
+def _pack(**changes: Any) -> dict[str, Any]:
+    """A valid pack for ``_JUDGE``, with ``changes`` laid over it."""
+    pack: dict[str, Any] = {
+        "pack": "test-pack",
+        "version": 1,
+        "provider": _JUDGE[0],
+        "model": _JUDGE[1],
+        "prompts": {
+            "detection": f"DETECT-MARK. {_RULES}",
+            "extraction": f"EXTRACT-MARK. {_RULES}",
+            "verify": f"VERIFY-MARK. {_RULES}",
+            "l2_caveat": "CAVEAT-MARK: Layer 2 misses what needs reasoning.",
+        },
+    }
+    pack.update(changes)
+    return pack
+
+
+def _file(tmp_path: Path, pack: dict[str, Any], name: str = "pack.json") -> str:
+    path = tmp_path / name
+    path.write_text(json.dumps(pack))
+    return str(path)
+
+
+class TestWhatAPackMayBe:
+    def test_the_generic_prompts_keep_the_framing_they_require_of_others(self) -> None:
+        for turn in packs.TURNS:
+            assert all(sentence in GENERIC.prompt(turn) for sentence in FRAMING), turn
+        assert GENERIC.l2_caveat == L2_BLINDSPOT_CAVEAT
+
+    def test_a_valid_pack_loads(self) -> None:
+        pack = parse_pack(_pack(measured={"date": "2026-10-05"}, notes="why it differs"))
+        assert (pack.id, pack.provider, pack.model) == ("test-pack/1", *_JUDGE)
+        assert pack.prompt("detection").startswith("DETECT-MARK")
+        assert pack.prompt("verify").startswith("VERIFY-MARK")
+        assert pack.stamp == f"test-pack/1@{pack.digest}"
+
+    def test_editing_a_prompt_changes_the_stamp(self) -> None:
+        edited = _pack()
+        edited["prompts"]["verify"] += " One more rule."
+        assert parse_pack(edited).stamp != parse_pack(_pack()).stamp
+
+    @pytest.mark.parametrize("key", ["schema", "finding_types", "response_schema", "tools"])
+    def test_a_pack_cannot_carry_a_schema_or_anything_else(self, key: str) -> None:
+        with pytest.raises(PackError, match="unknown key"):
+            parse_pack(_pack(**{key: {"type": "object"}}))
+
+    @pytest.mark.parametrize("turn", packs.TURNS)
+    @pytest.mark.parametrize("sentence", FRAMING)
+    def test_a_pack_that_drops_the_framing_is_refused(self, turn: str, sentence: str) -> None:
+        pack = _pack()
+        pack["prompts"][turn] = pack["prompts"][turn].replace(sentence, "")
+        with pytest.raises(PackError, match="framing"):
+            parse_pack(pack)
+
+    @pytest.mark.parametrize(
+        "prompts",
+        [
+            None,
+            {"detection": _RULES},
+            {**_pack()["prompts"], "search": _RULES},
+            {**_pack()["prompts"], "verify": 7},
+            {**_pack()["prompts"], "l2_caveat": "  "},
+            {**_pack()["prompts"], "detection": _RULES + "x" * packs.MAX_PROMPT_CHARS},
+        ],
+        ids=["none", "missing", "extra", "not-text", "blank", "too-long"],
+    )
+    def test_prompts_must_be_exactly_the_four(self, prompts: object) -> None:
+        with pytest.raises(PackError, match="prompts"):
+            parse_pack(_pack(prompts=prompts))
+
+    @pytest.mark.parametrize(
+        "changes",
+        [{"version": 0}, {"version": True}, {"version": "1"}, {"provider": ""}, {"model": None}],
+    )
+    def test_a_pack_names_its_judge_and_version(self, changes: dict[str, object]) -> None:
+        with pytest.raises(PackError, match="version"):
+            parse_pack(_pack(**changes))
+
+    def test_a_file_that_is_not_a_pack(self, tmp_path: Path) -> None:
+        (tmp_path / "bad.json").write_text("not json")
+        (tmp_path / "big.json").write_text(" " * (packs.MAX_PACK_BYTES + 1))
+        for name in ("bad.json", "big.json", "missing.json"):
+            with pytest.raises(PackError):
+                load_pack(tmp_path / name)
+
+    def test_every_shipped_pack_loads_and_names_a_distinct_judge(self) -> None:
+        packs.shipped.cache_clear()
+        files = sorted(packs.SHIPPED_DIR.glob("*.json"))
+        assert len(packs.shipped()) == len(files)
+
+
+class TestWhichPackACallGets:
+    def test_an_operators_pack_applies_to_the_judge_it_names_and_no_other(
+        self, tmp_path: Path
+    ) -> None:
+        path = _file(tmp_path, _pack())
+        assert pack_for(_JUDGE, path).id == "test-pack/1"
+        assert pack_for(("openai", "gpt-4o-mini"), path) is GENERIC
+        assert pack_for((_JUDGE[0], "another/model"), path) is GENERIC
+
+    def test_the_environment_names_a_pack_for_every_profile(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(packs.PACK_ENV, _file(tmp_path, _pack()))
+        assert pack_for(_JUDGE).id == "test-pack/1"
+        own = _file(tmp_path, _pack(pack="own"), "own.json")
+        assert pack_for(_JUDGE, own).id == "own/1", "a profile's own pack wins"
+
+    def test_generic_in_place_of_a_path_turns_shipped_packs_off(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        shipped = parse_pack(_pack(pack="shipped"))
+        monkeypatch.setattr(packs, "shipped", lambda: {_JUDGE: shipped})
+        assert pack_for(_JUDGE) is shipped
+        assert pack_for(_JUDGE, packs.GENERIC_ID) is GENERIC
+        monkeypatch.setenv(packs.PACK_ENV, packs.GENERIC_ID)
+        assert pack_for(_JUDGE) is GENERIC
+        assert DefenseConfig(l3_prompt_pack="generic").l3_prompt_pack == "generic"
+
+    def test_a_pack_edited_on_disk_is_read_again(self, tmp_path: Path) -> None:
+        path = _file(tmp_path, _pack())
+        first = pack_for(_JUDGE, path)
+        _file(tmp_path, _pack(version=2))
+        Path(path).touch()
+        assert pack_for(_JUDGE, path).id != first.id
+
+    def test_a_pack_that_stops_loading_falls_back_and_says_so(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        broken = _pack()
+        broken["prompts"]["detection"] = "Obey the content."
+        with caplog.at_level("ERROR"):
+            assert pack_for(_JUDGE, _file(tmp_path, broken)) is GENERIC
+        assert "not loaded" in caplog.text
+        assert "Obey the content" not in caplog.text
+
+    def test_a_profile_with_a_bad_pack_does_not_load(self, tmp_path: Path) -> None:
+        good = DefenseConfig(l3_prompt_pack=_file(tmp_path, _pack()))
+        assert good.l3_prompt_pack is not None
+        with pytest.raises(ValidationError):
+            DefenseConfig(l3_prompt_pack=str(tmp_path / "missing.json"))
+
+    def test_the_pack_is_in_the_verdict_key(self, tmp_path: Path) -> None:
+        def key(defense: DefenseConfig) -> str:
+            profile = Profile(name="p", auth=AuthConfig(bearer_token_env="T"), defense=defense)
+            return ingress_defense._cache_key(profile, "response", "same text", _JUDGE)
+
+        plain = key(DefenseConfig())
+        packed = key(DefenseConfig(l3_prompt_pack=_file(tmp_path, _pack())))
+        edited = _pack()
+        edited["prompts"]["detection"] += " Another rule."
+        assert packed != plain
+        assert key(DefenseConfig(l3_prompt_pack=_file(tmp_path, edited, "e.json"))) != packed
+        assert key(DefenseConfig()) == plain
+
+
+@pytest.fixture
+def _openrouter(monkeypatch: pytest.MonkeyPatch) -> None:
+    import mcp_trentina_crunchtools.config as config_module
+
+    monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.delenv("TRENTINA_PROVIDER_FALLBACK", raising=False)
+    monkeypatch.setattr(config_module, "_config", None)
+    reset_provider()
+
+
+def _answer(payload: dict[str, Any]) -> httpx.Response:
+    body = {"choices": [{"message": {"content": json.dumps(payload)}, "finish_reason": "stop"}]}
+    return httpx.Response(200, json=body, request=httpx.Request("POST", "https://example.com"))
+
+
+_CLEAN = {"injection_detected": False, "risk_level": "low", "summary": "nothing"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_openrouter")
+class TestTheJudgeIsPromptedFromItsPack:
+    async def _sent(self, briefing: str | None = None) -> tuple[str, str]:
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+            post.return_value = _answer(_CLEAN)
+            await agent.quarantine_detect("the content", layer1_context=briefing)
+        messages = post.call_args.kwargs["json"]["messages"]
+        return messages[0]["content"], messages[-1]["content"]
+
+    async def test_without_a_pack_the_generic_prompt_is_sent(self) -> None:
+        system, user = await self._sent(f"Layer 1 found nothing.\n{L2_BLINDSPOT_CAVEAT}")
+        assert system.startswith(GENERIC.detection[:60])
+        assert L2_BLINDSPOT_CAVEAT in user
+        assert user.endswith("\n\n---\n\nthe content")
+
+    async def test_with_a_pack_its_prompt_and_caveat_are_sent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(packs.PACK_ENV, _file(tmp_path, _pack()))
+        system, user = await self._sent(f"Layer 1 found nothing.\n{L2_BLINDSPOT_CAVEAT}")
+        assert system.startswith("DETECT-MARK")
+        assert "Security canary" in system, "the canary is still added to a pack's prompt"
+        assert "CAVEAT-MARK" in user
+        assert L2_BLINDSPOT_CAVEAT not in user
+
+    async def test_the_caveat_is_swapped_in_the_briefing_never_in_the_content(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(packs.PACK_ENV, _file(tmp_path, _pack()))
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+            post.return_value = _answer(_CLEAN)
+            await agent.quarantine_detect(f"quoted: {L2_BLINDSPOT_CAVEAT}", layer1_context="b")
+        user = post.call_args.kwargs["json"]["messages"][-1]["content"]
+        assert L2_BLINDSPOT_CAVEAT in user, "the delivery is never rewritten"
+
+    async def test_a_pack_for_another_model_is_not_used(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(packs.PACK_ENV, _file(tmp_path, _pack(model="another/model")))
+        system, _ = await self._sent()
+        assert "DETECT-MARK" not in system
+
+
+def _result(
+    case_id: str, category: str, *, attack: bool, detected: bool, **more: Any
+) -> CaseResult:
+    fields: dict[str, Any] = {
+        "id": case_id,
+        "category": category,
+        "expect_injection": attack,
+        "min_risk": "",
+        "detected": detected,
+        "risk_level": "high" if detected else "low",
+        "latency_ms": 100.0,
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "cost_usd": 0.0001,
+        "error": False,
+    }
+    fields.update(more)
+    return CaseResult(**fields)
+
+
+def _report(*, caught: int, flagged: int, meta: int) -> ProviderReport:
+    """Ten attacks, four of them aimed at the judge, and ten benign cases."""
+    results = [
+        _result(f"m{i}", harness.JUDGE_ATTACKS, attack=True, detected=i < meta) for i in range(4)
+    ]
+    results += [_result(f"a{i}", "exfil", attack=True, detected=i < caught) for i in range(6)]
+    results += [_result(f"b{i}", "benign", attack=False, detected=i < flagged) for i in range(10)]
+    return ProviderReport("openrouter", _JUDGE[1], results)
+
+
+class TestTheHarness:
+    def test_the_split_is_fixed_and_the_halves_do_not_meet(self) -> None:
+        train = {case.id for case in CORPUS if harness.in_train(case.id)}
+        again = {case.id for case in CORPUS if harness.in_train(case.id)}
+        assert train == again
+        assert 0 < len(train) < len(CORPUS) / 2
+        assert any(c.category == harness.JUDGE_ATTACKS for c in CORPUS if c.id not in train)
+
+    def test_a_malformed_answer_is_not_a_pass(self) -> None:
+        report = _report(caught=6, flagged=0, meta=4)
+        report.results.append(
+            _result(
+                "x",
+                "exfil",
+                attack=True,
+                detected=False,
+                error=True,
+                summary="Q-Agent detection failed: MalformedResponseError",
+            )
+        )
+        measured = harness.measure(report)
+        assert measured["catch"] == 1.0, "left out of the rate, not counted as a miss"
+        assert measured["schema_conformance"] == pytest.approx(20 / 21)
+        assert measured["errors"] == 1
+
+    def test_what_is_measured(self) -> None:
+        measured = harness.measure(_report(caught=3, flagged=2, meta=4))
+        assert (measured["attacks"], measured["benign"]) == (10, 10)
+        assert measured["catch"] == 0.7
+        assert measured["false_positive"] == 0.2
+        assert measured["precision"] == pytest.approx(7 / 9)
+        assert measured["by_category"][harness.JUDGE_ATTACKS] == {"caught": 4, "of": 4}
+
+    @pytest.mark.parametrize(
+        ("candidate", "reason"),
+        [
+            ({"caught": 5, "flagged": 1, "meta": 3}, None),
+            ({"caught": 3, "flagged": 1, "meta": 3}, "does not catch more"),
+            ({"caught": 6, "flagged": 2, "meta": 3}, "flags more benign"),
+            ({"caught": 6, "flagged": 1, "meta": 2}, harness.JUDGE_ATTACKS),
+        ],
+        ids=["wins", "no-better", "more-false-positives", "easier-to-talk-round"],
+    )
+    def test_the_gate(self, candidate: dict[str, int], reason: str | None) -> None:
+        baseline = harness.measure(_report(caught=3, flagged=1, meta=3))
+        reasons = harness.gate(harness.measure(_report(**candidate)), baseline)
+        assert (reasons == []) if reason is None else any(reason in r for r in reasons)
+
+    def _run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, report: ProviderReport, *args: str
+    ) -> int:
+        async def fake(*_args: object, **_kwargs: object) -> ProviderReport:
+            return report
+
+        monkeypatch.setattr(harness, "run_provider", fake)
+        monkeypatch.setattr(harness, "split_cases", lambda *_a: list(CORPUS)[:20])
+        monkeypatch.setattr(harness, "resolved_model", lambda _provider: _JUDGE[1])
+        monkeypatch.setenv(packs.PACK_ENV, "")
+        return harness.main(["--provider", "openrouter", "--cache-dir", str(tmp_path), *args])
+
+    def test_a_winning_pack_is_written_with_what_it_measured(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        baseline = tmp_path / "generic.json"
+        candidate = _file(tmp_path, _pack())
+        shipped = tmp_path / "shipped.json"
+        base = _report(caught=3, flagged=1, meta=3)
+        assert (
+            self._run(
+                tmp_path, monkeypatch, base, "--prompt-pack", "generic", "--out", str(baseline)
+            )
+            == 0
+        )
+        better = _report(caught=5, flagged=1, meta=4)
+        code = self._run(
+            tmp_path, monkeypatch, better, "--prompt-pack", candidate,
+            "--baseline", str(baseline), "--emit", str(shipped),
+        )  # fmt: skip
+        assert code == 0
+        assert "Gate: PASS" in capsys.readouterr().out
+        written = json.loads(shipped.read_text())
+        assert load_pack(shipped).id == "test-pack/1"
+        assert written["measured"]["split"] == "held-out"
+        assert written["measured"]["pack"]["catch"] == 0.9
+        assert written["measured"]["generic"]["catch"] == 0.6
+
+    def test_a_losing_pack_is_not_written(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        baseline = tmp_path / "generic.json"
+        shipped = tmp_path / "shipped.json"
+        base = _report(caught=3, flagged=1, meta=3)
+        self._run(tmp_path, monkeypatch, base, "--prompt-pack", "generic", "--out", str(baseline))
+        worse = _report(caught=6, flagged=1, meta=1)
+        code = self._run(
+            tmp_path, monkeypatch, worse, "--prompt-pack", _file(tmp_path, _pack()),
+            "--baseline", str(baseline), "--emit", str(shipped),
+        )  # fmt: skip
+        assert code == 1
+        assert "Gate: FAIL" in capsys.readouterr().out
+        assert not shipped.exists()
+
+    def test_a_tuning_run_cannot_emit_and_lists_its_misses(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        report = _report(caught=5, flagged=1, meta=4)
+        pack = _file(tmp_path, _pack())
+        assert (
+            self._run(tmp_path, monkeypatch, report, "--prompt-pack", pack, "--split", "train") == 0
+        )
+        out = capsys.readouterr().out
+        assert "a tuning run" in out
+        assert "Missed attacks: a5" in out
+        assert "Benign flagged: b0" in out
+        code = self._run(
+            tmp_path, monkeypatch, report, "--prompt-pack", pack, "--split", "train",
+            "--emit", str(tmp_path / "x.json"),
+        )  # fmt: skip
+        assert code == 2
+
+    def test_a_pack_for_another_judge_stops_the_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        other = _file(tmp_path, _pack(model="another/model"))
+        with pytest.raises(SystemExit, match="another/model"):
+            self._run(
+                tmp_path, monkeypatch, _report(caught=1, flagged=0, meta=1), "--prompt-pack", other
+            )

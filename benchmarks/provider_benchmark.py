@@ -75,6 +75,9 @@ PRICING: dict[str, tuple[float, float]] = {
     "openai": (0.15, 0.60),
     "anthropic": (1.00, 5.00),
     "ollama": (0.0, 0.0),
+    # OpenRouter's price is the model's. This is gemini-2.5-flash-lite, the
+    # default judge there; edit it when QUARANTINE_MODEL names another.
+    "openrouter": (0.10, 0.40),
 }
 
 PROVIDER_ENV_KEY: dict[str, str | None] = {

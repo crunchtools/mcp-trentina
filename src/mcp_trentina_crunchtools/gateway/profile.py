@@ -785,7 +785,8 @@ class DefenseConfig(BaseModel):
             "generic prompts. Checked when profiles load: a file that is not "
             "a pack, or drops the framing every pack must keep, refuses the "
             "profile. TRENTINA_L3_PROMPT_PACK sets one for every profile "
-            "that does not. See docs/l3-prompt-tuning.md."
+            "that does not. The word `generic` in place of a path turns "
+            "shipped packs off. See docs/l3-prompt-tuning.md."
         ),
     )
     modes: list[ModeName] | None = Field(
@@ -810,9 +811,9 @@ class DefenseConfig(BaseModel):
     def _pack_loads(cls, path: str | None) -> str | None:
         """Refuse a profile whose prompt pack is not one, at load and not at
         the first scan. The error names a rule, never the file's text."""
-        if path is not None:
-            from ..quarantine.packs import load_pack
+        from ..quarantine.packs import GENERIC_ID, load_pack
 
+        if path is not None and path != GENERIC_ID:
             load_pack(path)
         return path
 
