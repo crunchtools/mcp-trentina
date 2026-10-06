@@ -10,6 +10,30 @@ under that name.
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-10-05
+
+### Fixed
+- Redact refused about half of the extractions from a clean document that
+  had no heading (#379). The output check classified each delivered string
+  on its own, and L2 scores a two-word title such as `Maintenance Window`
+  0.92. L1 and L2 now read the title and the text as one document, the one
+  turn 3 reads, once. Measured: 12 refusals in 24 before, 0 in 24 after.
+- A redact summary could restate a planted permission as a fact of the
+  document and pass the output check and turn 3 (#376). When turn 1 found
+  something, turn 2 is now told to leave out anything the document calls
+  approved, authorized, pre-cleared or required of its reader. Measured on
+  616 attack calls: 7 such deliveries before, 0 after, and 602 answered
+  against 552. Briefing turn 3 instead was measured and not shipped: it
+  refused 117 of 150 clean extractions (`docs/benchmark.md`).
+- A PDF or an image waiting for its worker process held a thread of the pool
+  L1 and the tokenizer share, for up to a minute (#383). Everything that can
+  reach a worker now runs in the unpack stage's own threads
+  (`unpack.child.run_unpacking`).
+
+### Changed
+- `benchmarks/redact_input.py --json` records each call's delivered strings
+  and what the output check was asked.
+
 ## [0.63.0] - 2026-10-05
 
 ### Added

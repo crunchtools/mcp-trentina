@@ -254,6 +254,11 @@ scan and takes the gateway down with it. The same holds for L1 (#295):
 `database.snapshot_reader(path)`'s own connection. A new L1 regex goes into
 `tests/test_l1_patterns.py`'s linearity tests with the unit that repeats it.
 
+Anything that can reach a PDF or OCR worker (`unpack`, `read_blobs`, the
+stage-1 PDF and JSON reducers) runs under `unpack.child.run_unpacking`, never
+`asyncio.to_thread` (#383): a thread waits up to a minute on a child process,
+and the default pool is the one L1 and the tokenizer use.
+
 ## Tools
 
 ### Five tools, three modes, one policy (0.32.0; renamed 0.35.0)

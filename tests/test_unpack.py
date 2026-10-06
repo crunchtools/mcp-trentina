@@ -435,7 +435,7 @@ def test_l2_reads_harmless_base64_as_harmless() -> None:
 async def test_redact_refuses_an_answer_carrying_binary_no_layer_reads() -> None:
     png = b64(b"\x89PNG\r\n\x1a\n" + _RANDOM[:1200])
     with patch("mcp_trentina_crunchtools.quarantine.classifier.classify_async") as l2:
-        assert await agent._output_flagged({"answer": f"see {png}"})
+        assert await agent._output_flagged(f"see {png}")
     l2.assert_not_called()
 
 
@@ -448,5 +448,5 @@ async def test_redact_refuses_an_answer_that_decodes_to_an_attack() -> None:
         return flagged if "Ignore previous instructions" in text else benign
 
     with patch("mcp_trentina_crunchtools.quarantine.classifier.classify_async", side_effect=l2):
-        assert await agent._output_flagged({"answer": f"See {encoded}"})
-        assert not await agent._output_flagged({"answer": f"See {b64('the release is Thursday')}"})
+        assert await agent._output_flagged(f"See {encoded}")
+        assert not await agent._output_flagged(f"See {b64('the release is Thursday')}")

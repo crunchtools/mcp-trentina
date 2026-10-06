@@ -24,11 +24,11 @@ reads all of it, invisible text and embedded files included.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 
 from ..channels import Channel, Kind
+from ..unpack.child import run_unpacking
 from ..unpack.pdf import PdfReading, read_pdf
 from .base import Cost, PreProcessContext, PreProcessResult
 
@@ -93,7 +93,7 @@ class PdfProcessor:
         token = payload.strip()
         if not token.startswith(PDF_BASE64_PREFIX):
             return PreProcessResult.declined(self.name, self.cost, payload, reason="not_pdf")
-        reduced = await asyncio.to_thread(reduce_base64, token)
+        reduced = await run_unpacking(reduce_base64, token)
         if reduced is None:
             return PreProcessResult.declined(self.name, self.cost, payload, reason="unreadable_pdf")
         markdown, hidden = reduced

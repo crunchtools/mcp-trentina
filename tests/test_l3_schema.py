@@ -181,6 +181,13 @@ class TestRiskLevelIsTheClosedSet:
         brief = extraction_briefing({"injection_detected": True, "risk_level": PROSE})
         assert PROSE not in brief and "judged this content high risk" in brief
 
+    def test_turn_two_is_told_a_finding_may_be_worded_as_a_fact(self) -> None:
+        """#376: a planted approval came back as one more fact of the summary."""
+        found = extraction_briefing({"injection_detected": True, "risk_level": "high"})
+        clean = extraction_briefing({"injection_detected": False})
+        assert "worded as a fact" in found and "approved, authorized" in found
+        assert "worded as a fact" not in clean
+
     def test_an_assessment_without_a_verdict_is_a_gap(self) -> None:
         verdict = MagicMock()
         verdict.pipeline = run_l1("text")

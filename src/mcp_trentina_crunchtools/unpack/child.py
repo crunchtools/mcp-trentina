@@ -7,24 +7,40 @@ be stopped; a process can. Each worker module limits its own CPU and
 address space; this side gives it an environment with no credential, bounds
 how many run at once, and kills it at a wall-clock deadline.
 
+Waiting for a worker is a thread's job, so everything that can reach one
+runs in ``run_unpacking``'s threads, never in the pool ``asyncio.to_thread``
+shares between L1, the tokenizer and every other profile's request (#383).
+
 ``ask`` returns the worker's output, or a phrase saying why there is none.
 The phrases are this module's own, so they are safe to log.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import os
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import threading
+    from collections.abc import Callable
 
 SLOT_WAIT = 5.0
 """Seconds a request waits for a free slot before it is given up as unread.
-Callers are worker threads of the gateway's one pool: a thread waiting here
-is a thread L1 and the tokenizer cannot have, so the wait is short."""
+A burst of PDFs past ``UNPACK_THREADS`` holds every unpack thread for this
+long, and text waits behind it, so the wait is short."""
+
+UNPACK_THREADS = 32
+"""Threads that unpack. A thread holds its place while a worker runs (up to a
+minute for a page of images) or while it waits ``SLOT_WAIT`` for one, and
+plain text needs a free thread for its milliseconds; three workers run at
+once, so this is ten requests waiting per worker."""
+
+_POOL = ThreadPoolExecutor(max_workers=UNPACK_THREADS, thread_name_prefix="unpack")
 
 NO_SLOT = "no slot free"
 DEADLINE = "deadline"
@@ -40,6 +56,15 @@ def environment() -> dict[str, str]:
         "PYTHONSAFEPATH": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
+
+
+async def run_unpacking(reader: Callable[..., Any], *args: Any) -> Any:
+    """Run a function that may reach a worker, off the loop and off the shared pool.
+
+    The caller's context goes with it, as ``asyncio.to_thread`` would take it.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_POOL, contextvars.copy_context().run, reader, *args)
 
 
 def ask(

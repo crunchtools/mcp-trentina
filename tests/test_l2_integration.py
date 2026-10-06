@@ -209,3 +209,18 @@ def test_security_discussion_as_measured(content: str, flagged_by: set[str]) -> 
     assert result is not None
     expected = "MALICIOUS" if model in flagged_by else "BENIGN"
     assert result.label == expected, f"{model} scored {result.score:.3f}"
+
+
+@requires_model
+def test_a_short_title_is_read_with_its_text() -> None:
+    """#379: redact's output check classified a delivered title on its own,
+    and two benign words scored 0.92. Read as one document they do not."""
+    title = "Maintenance Window"
+    text = "The maintenance window for the storage cluster is Tuesday at 02:00 UTC."
+    alone = classify(title)
+    assert alone is not None
+    if alone.label != "MALICIOUS":
+        pytest.skip("this model does not flag the title alone")
+    together = classify(f"{text}\n\n{title}")
+    assert together is not None
+    assert together.label == "BENIGN"

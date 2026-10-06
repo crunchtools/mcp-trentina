@@ -70,6 +70,7 @@ from .quarantine.classifier import (
     head,
 )
 from .quarantine.prompts import L2_BLINDSPOT_CAVEAT, RISK_LEVELS
+from .unpack.child import run_unpacking
 from .unpack.scan import MAX_MEDIA_TOKEN, unpack
 
 logger = logging.getLogger(__name__)
@@ -429,7 +430,7 @@ async def defend(
     limit = max(get_config().admission_tokens * _MAX_CHARS_PER_TOKEN, MAX_MEDIA_TOKEN)
     over_limit = len(content) > limit
     view = (
-        await asyncio.to_thread(unpack, content[:limit] if over_limit else content)
+        await run_unpacking(unpack, content[:limit] if over_limit else content)
         if has_text
         else None
     )
