@@ -3,7 +3,9 @@ name: Benchmark - decoy tools
 # The decoy-tool spikes (#357). `decoys` is benchmarks/decoy_tools.py on every
 # judge that ships a prompt pack; `detonation` is benchmarks/detonation.py on
 # models picked for being easy to steer, with the judges' verdicts on the
-# same documents beside it. Started by hand, never by a push or a pull request: it
+# same documents beside it; `venn` is the same harness with every insert in
+# every carrier and several draws per document, joined document by document
+# with the judges' majority verdicts. Started by hand, never by a push or a pull request: it
 # spends money, and it runs the checked-out code with OPENROUTER_API_KEY in
 # its environment, so it runs merged code only, as live-l3 in ci.yml does.
 
@@ -13,7 +15,7 @@ on:
       job:
         description: "Which spike to run"
         type: choice
-        options: [detonation, decoys]
+        options: [detonation, venn, decoys]
         default: detonation
       external:
         description: "External corpus split (test is the held-out one)"
@@ -152,3 +154,101 @@ jobs:
           name: ${{ steps.slug.outputs.name }}
           path: detonation.json
           retention-days: 30
+
+  venn:
+    name: venn ${{ matrix.mode }} ${{ matrix.model }}
+    if: github.ref == 'refs/heads/main' && inputs.job == 'venn'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The four that tripped in the detonation run: five draws a document.
+          - { mode: detonate, model: meta-llama/llama-3.1-8b-instruct, flags: "--votes 5 --temperature 0.7" }
+          - { mode: detonate, model: openai/gpt-oss-20b, flags: "--votes 5 --temperature 0.7" }
+          - { mode: detonate, model: qwen/qwen-2.5-7b-instruct, flags: "--votes 5 --temperature 0.7" }
+          - { mode: detonate, model: google/gemma-3-12b-it, flags: "--votes 5 --temperature 0.7" }
+          # The shipped judges, three votes as their packs were measured.
+          - { mode: judge, model: google/gemini-2.5-flash-lite, flags: "--votes 3" }
+          - { mode: judge, model: google/gemini-3.5-flash-lite, flags: "--votes 3" }
+          - { mode: judge, model: anthropic/claude-haiku-4.5, flags: "--votes 3" }
+          - { mode: judge, model: google/gemini-3.8-flash, flags: "--votes 3", reasoning: minimal }
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      # Dependencies install without the key: no install hook ever sees it.
+      - name: Install dependencies
+        run: |
+          uv python install 3.14
+          uv sync --all-extras --locked
+
+      - name: Run the spike
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          QUARANTINE_MODEL: ${{ matrix.model }}
+          QUARANTINE_REASONING_EFFORT: ${{ matrix.reasoning }}
+          MODE: ${{ matrix.mode }}
+          FLAGS: ${{ matrix.flags }}
+        run: |
+          set -o pipefail
+          # FLAGS is a fixed list of options from the matrix above, split on purpose.
+          # shellcheck disable=SC2086
+          uv run --no-sync python benchmarks/detonation.py \
+            --mode "$MODE" --carriers all --tasks 0 --only clean,benign,attack \
+            --concurrency 16 $FLAGS --json detonation.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Artifact name
+        id: slug
+        env:
+          MODEL: ${{ matrix.model }}
+          MODE: ${{ matrix.mode }}
+        run: echo "name=venn-${MODE}-${MODEL//\//-}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload results
+        if: always() && hashFiles('detonation.json') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.slug.outputs.name }}
+          path: detonation.json
+          retention-days: 30
+
+  venn-report:
+    name: venn report
+    needs: venn
+    # Reads artifacts only: no key, and it runs even if one model's job failed.
+    if: always() && github.ref == 'refs/heads/main' && inputs.job == 'venn'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: |
+          uv python install 3.14
+          uv sync --all-extras --locked
+
+      - name: Download the run's artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" --pattern 'venn-*' --dir results
+
+      - name: Join judges and decoys, document by document
+        run: |
+          set -o pipefail
+          uv run --no-sync python benchmarks/detonation.py --mode venn \
+            --judge-json results/venn-judge-*/detonation.json \
+            --detonate-json results/venn-detonate-*/detonation.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
