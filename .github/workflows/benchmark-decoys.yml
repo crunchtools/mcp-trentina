@@ -1,0 +1,81 @@
+name: Benchmark - decoy tools
+
+# The decoy-tool spike (#357, benchmarks/decoy_tools.py) on every judge that
+# ships a prompt pack. Started by hand, never by a push or a pull request: it
+# spends money, and it runs the checked-out code with OPENROUTER_API_KEY in
+# its environment, so it runs merged code only, as live-l3 in ci.yml does.
+
+on:
+  workflow_dispatch:
+    inputs:
+      external:
+        description: "External corpus split (test is the held-out one)"
+        type: choice
+        options: [test, all, none]
+        default: test
+      design:
+        description: "two-call: a tools-only tripwire call. one-call: tools and schema together"
+        type: choice
+        options: [two-call, one-call]
+        default: two-call
+
+permissions:
+  contents: read
+
+jobs:
+  decoys:
+    name: ${{ matrix.model }}
+    # A dispatch can name any branch. Only main is reviewed code.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # One per file in src/trentina/quarantine/prompt_packs/.
+        include:
+          - model: google/gemini-2.5-flash-lite
+          - model: google/gemini-3.5-flash-lite
+          - model: google/gemini-3.8-flash
+            reasoning: minimal
+          - model: anthropic/claude-haiku-4.5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      # Dependencies install without the key: no install hook ever sees it.
+      - name: Install dependencies
+        run: |
+          uv python install 3.14
+          uv sync --all-extras --locked
+
+      - name: Run the spike
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          QUARANTINE_MODEL: ${{ matrix.model }}
+          QUARANTINE_REASONING_EFFORT: ${{ matrix.reasoning }}
+          EXTERNAL: ${{ inputs.external }}
+          DESIGN: ${{ inputs.design }}
+        run: |
+          set -o pipefail
+          uv run --no-sync python benchmarks/decoy_tools.py \
+            --external "$EXTERNAL" --design "$DESIGN" --json decoy-tools.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Artifact name
+        id: slug
+        env:
+          MODEL: ${{ matrix.model }}
+        run: echo "name=decoy-tools-${MODEL//\//-}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload results
+        if: always() && hashFiles('decoy-tools.json') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.slug.outputs.name }}
+          path: decoy-tools.json
+          retention-days: 30
