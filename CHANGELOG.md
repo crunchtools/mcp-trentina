@@ -10,6 +10,13 @@ under that name.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-06
+
+### Removed
+- The `mcp-trentina` image names are no longer pushed. The images are
+  `quay.io/crunchtools/trentina` and `ghcr.io/crunchtools/trentina`; the old
+  repositories keep what they have, up to 1.0.0.
+
 ## [1.0.0] - 2026-10-06
 
 Trentina is renamed from `mcp-trentina`. It stopped being an MCP server some
