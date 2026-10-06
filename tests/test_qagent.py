@@ -273,21 +273,31 @@ class TestPostExtractionL1:
     """Verify post-extraction Layer 1 pass on Q-Agent output."""
 
     @pytest.mark.asyncio
-    async def test_l1_and_l2_check_every_delivered_string(self) -> None:
-        """Title included: it is delivered, so it is checked (#187)."""
-        from mcp_trentina_crunchtools.quarantine.agent import _output_flagged
+    async def test_l1_l2_and_turn_3_read_the_delivered_strings_as_one_document(self) -> None:
+        """Title included: it is delivered, so it is checked (#187). It is read
+        with the text, not as two words on their own (#379)."""
+        from mcp_trentina_crunchtools.quarantine.agent import _judge_extraction
 
+        extraction = {"content": {"extracted_text": "body of the report", "title": "head"}}
         with (
             patch("mcp_trentina_crunchtools.quarantine.agent.run_l1", wraps=run_l1) as l1,
             patch(
                 "mcp_trentina_crunchtools.quarantine.classifier.classify_async",
                 new_callable=AsyncMock,
                 return_value=None,
-            ),
+            ) as l2,
+            patch(
+                "mcp_trentina_crunchtools.quarantine.agent.quarantine_verify",
+                new_callable=AsyncMock,
+                return_value={"injection_detected": False},
+            ) as turn_3,
         ):
-            flagged = await _output_flagged({"extracted_text": "body", "title": "head"})
-        assert not flagged
-        assert [c.args[0] for c in l1.call_args_list] == ["body", "head"]
+            result = await _judge_extraction(extraction, "body of the report")
+        assert result.refused_by is None
+        document = "body of the report\n\nhead"
+        assert [c.args[0] for c in l1.call_args_list] == [document]
+        assert [c.args[0] for c in l2.call_args_list] == [document]
+        assert turn_3.call_args.args == (document,)
 
     @pytest.mark.asyncio
     async def test_a_padded_extraction_is_classified_once_as_written(self) -> None:
@@ -301,7 +311,7 @@ class TestPostExtractionL1:
             new_callable=AsyncMock,
             return_value=None,
         ) as classify:
-            await _output_flagged({"extracted_text": padded})
+            await _output_flagged(padded)
         assert [c.args[0] for c in classify.call_args_list] == [padded]
 
     @pytest.mark.asyncio

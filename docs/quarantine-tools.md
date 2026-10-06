@@ -76,8 +76,8 @@ No payload text and no L3 prose appear in a refusal.
 ### redact runs L3 three times
 
 1. **Detect** on the original (the same detection every mode gets).
-2. **Extract** from the text the layers judged (the delivery, unpacked), briefed with turn 1's risk level and finding types.
-3. **Verify**: L1 and L2 check every string that will be delivered (text *and* title), then a third L3 pass judges them. Any objection refuses. There is no fourth turn — a retry after a failed verification is an attacker's retry loop.
+2. **Extract** from the text the layers judged (the delivery, unpacked), briefed with turn 1's risk level and finding types. When turn 1 found something, the briefing also says to leave out anything the document calls approved, authorized or required of its reader, however factual it sounds (#376).
+3. **Verify**: L1 and L2 check what will be delivered (text *and* title) as one document, then a third L3 pass judges that document. Any objection refuses. There is no fourth turn — a retry after a failed verification is an attacker's retry loop.
 
 A provider error at turn 2 or 3 refuses. Until 0.31.0 a provider error handed back the raw input labelled as an extraction.
 

@@ -76,7 +76,6 @@ payload must not stall the gateway's event loop.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import dataclass, field
 from functools import partial
@@ -86,6 +85,7 @@ from petit import pull_identifiers
 from petit.Filter import Filter
 
 from ..channels import Channel, Kind
+from ..unpack.child import run_unpacking
 from ..unpack.office import reduce_base64
 from .base import Cost, PreProcessContext, PreProcessResult
 from .pdf import reduce_base64 as reduce_pdf
@@ -474,7 +474,8 @@ class StructuredProcessor:
             )
 
         over_budget = ctx.target_bytes is not None and bytes_in > ctx.target_bytes
-        text, reducer, reason = await asyncio.to_thread(
+        # A field holding a PDF is read by a worker process (#383).
+        text, reducer, reason = await run_unpacking(
             partial(_parse_and_reduce, payload, truncate=over_budget)
         )
         if text is None:

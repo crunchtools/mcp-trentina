@@ -67,6 +67,7 @@ from ..modes import (
 )
 from ..quarantine.agent import quarantine_redact
 from ..quarantine.packs import GENERIC_ID, pack_for
+from ..unpack.child import run_unpacking
 from ..unpack.scan import IMAGE_BLOCK, UNDECODABLE, image_too_small_to_draw, read_blobs
 from ..warning import build_warning
 from .service import judge_of, service_context, service_profile
@@ -384,7 +385,7 @@ async def _read_response(
     block is added to the hiding stage 1 found, for L1 to report.
     """
     # Decoding blobs is linear in their size; off the loop, like L1 (#295).
-    texts, unscannable, unread, inside = await asyncio.to_thread(
+    texts, unscannable, unread, inside = await run_unpacking(
         _collect_response_texts, content_blocks, structured_content
     )
     if inside:

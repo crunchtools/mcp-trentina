@@ -82,8 +82,8 @@ async def test_l2_reads_clean_content_once() -> None:
     assert verdict.content == verdict.read == "plain words"
 
 
-async def test_redact_output_check_reads_each_string_once() -> None:
-    strings = {"answer": OBFUSCATED, "other": "plain words"}
+async def test_redact_output_check_reads_the_output_once() -> None:
+    document = f"plain words\n\n{OBFUSCATED}"
     reads: list[str] = []
 
     async def spy(text: str, **_: Any) -> ClassifierResult:
@@ -94,8 +94,8 @@ async def test_redact_output_check_reads_each_string_once() -> None:
         patch("mcp_trentina_crunchtools.quarantine.classifier.classify_async", side_effect=spy),
         patch.object(agent, "_BLOCKING_RISKS", frozenset()),
     ):
-        await agent._output_flagged(strings)
-    assert sorted(reads) == sorted(unpack(v).text for v in strings.values())
+        await agent._output_flagged(document)
+    assert reads == [unpack(document).text]
 
 
 def test_every_l1_counter_has_a_name_for_l3() -> None:

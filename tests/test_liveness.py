@@ -10,9 +10,12 @@ and no wall clock; and the webhooks read a reply of any size.
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
+import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -23,16 +26,108 @@ from mcp_trentina_crunchtools import client as client_mod
 from mcp_trentina_crunchtools import config as config_mod
 from mcp_trentina_crunchtools import database, defense, egress
 from mcp_trentina_crunchtools.errors import FetchError
-from mcp_trentina_crunchtools.gateway.context import profile_context
+from mcp_trentina_crunchtools.gateway import ingress_defense
+from mcp_trentina_crunchtools.gateway.context import get_current_profile, profile_context
 from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Profile
 from mcp_trentina_crunchtools.httpbody import EncodedBodyError, TooLargeError, request_capped
 from mcp_trentina_crunchtools.l1.pipeline import run_l1
-from mcp_trentina_crunchtools.preprocess import Selection
+from mcp_trentina_crunchtools.preprocess import PreProcessContext, Selection
+from mcp_trentina_crunchtools.preprocess.pdf import PdfProcessor
 from mcp_trentina_crunchtools.preprocess.select import SelectProcessor
+from mcp_trentina_crunchtools.preprocess.structured import StructuredProcessor
 from mcp_trentina_crunchtools.preprocess.view import SelectionContext
 from mcp_trentina_crunchtools.quarantine import agent as agent_mod
+from mcp_trentina_crunchtools.unpack import child
+from mcp_trentina_crunchtools.unpack import pdf as pdf_reader
+from mcp_trentina_crunchtools.unpack.scan import unpack
 from tests.egress_harness import PUBLIC_ADDRESS
+from tests.office_files import b64
+from tests.pdf_files import pdf, show
 from tests.test_egress_encoding import _Loopback as Loopback
+from tests.test_unpack import _defend
+
+_PDF = b64(pdf(show("Quarterly report for the storage team.")))
+
+
+async def _defended(token: str) -> None:
+    await _defend(f"report: {token}")
+
+
+async def _output_checked(token: str) -> None:
+    with patch(
+        "mcp_trentina_crunchtools.quarantine.classifier.classify_async",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        await agent_mod._output_flagged(token)
+
+
+async def _reduced(token: str) -> None:
+    await PdfProcessor().run(token, PreProcessContext("test"))
+
+
+async def _reduced_in_json(token: str) -> None:
+    await StructuredProcessor().run(json.dumps({"file": token}), PreProcessContext("test"))
+
+
+async def _arrived_as_a_block(token: str) -> None:
+    block = {"type": "resource", "resource": {"mimeType": "application/pdf", "blob": token}}
+    await ingress_defense._read_response([block], None, None)
+
+
+class TestWaitingForAWorker:
+    """#383: a PDF or an image is read by a child process, and the thread that
+    waits for it used to be one of the pool L1 and the tokenizer share."""
+
+    @pytest.mark.parametrize(
+        "reach",
+        [_defended, _output_checked, _reduced, _reduced_in_json, _arrived_as_a_block],
+    )
+    async def test_every_way_to_a_worker_is_through_the_unpack_threads(
+        self, reach: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        asked_from: list[str] = []
+
+        def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
+            asked_from.append(threading.current_thread().name)
+            return subprocess.CompletedProcess(argv, 1, stdout=b"", stderr=b"")
+
+        monkeypatch.setattr(child.subprocess, "run", run)
+        await reach(_PDF)
+        assert asked_from
+        assert all(name.startswith("unpack") for name in asked_from)
+
+    async def test_a_burst_of_pdfs_leaves_the_shared_pool_free(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        released = threading.Event()
+
+        def stalls(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess:
+            released.wait(10)
+            return subprocess.CompletedProcess(argv, 1, stdout=b"", stderr=b"")
+
+        monkeypatch.setattr(child.subprocess, "run", stalls)
+        monkeypatch.setattr(child, "SLOT_WAIT", 0.5)
+        shared = ThreadPoolExecutor(max_workers=1)
+        asyncio.get_running_loop().set_default_executor(shared)
+        burst = [
+            asyncio.ensure_future(child.run_unpacking(unpack, _PDF))
+            for _ in range(pdf_reader.CONCURRENCY + 2)
+        ]
+        try:
+            await asyncio.sleep(0.05)
+            assert not any(read.done() for read in burst), "every reader is waiting"
+            result = await asyncio.wait_for(asyncio.to_thread(run_l1, "plain words"), 0.4)
+            assert result.stats.total_detections() == 0
+        finally:
+            released.set()
+            await asyncio.gather(*burst)
+
+    async def test_the_callers_context_goes_with_it(self) -> None:
+        profile = Profile(name="alpha", auth=AuthConfig(bearer_token_env="X"))
+        with profile_context(profile):
+            seen = await child.run_unpacking(get_current_profile)
+        assert seen is profile
 
 
 def _recording_run_l1(threads: list[int]) -> Any:
@@ -75,7 +170,7 @@ class TestL1OffTheLoop:
                 return_value=None,
             ),
         ):
-            await agent_mod._output_flagged({"extracted_text": "body"})
+            await agent_mod._output_flagged("body")
         assert threads
         assert threading.get_ident() not in threads
 
