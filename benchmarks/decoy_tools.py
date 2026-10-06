@@ -309,6 +309,7 @@ class Row:
 
 
 def share(part: int, whole: int) -> str:
+    """``part of whole``, with the percentage when ``whole`` is not zero."""
     return f"{part} of {whole}" + (f" ({part / whole:.1%})" if whole else "")
 
 
