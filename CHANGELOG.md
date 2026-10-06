@@ -28,6 +28,16 @@ under that name.
   supply. Clean and benign-insert conditions measure tool habit, and the
   shipped judges read the same documents. The decision rules are in
   `docs/benchmark.md`, written before the run.
+- `detonation.py --votes`, `--carriers all` and `--mode venn` (#357): several
+  draws per document, every insert in every carrier, and a document-by-document
+  join of what a judge flags against what trips a decoy model, to measure
+  whether the two together catch what the judge misses.
+
+### Fixed
+- The detonation spike counted two habits as hijack: any memory save, and
+  an argument that was the fetched page copied out. A memory save is now a
+  trip only when it carries the insert's own words, and a copied page is
+  not evidence of what is in it.
 
 ## [1.0.1] - 2026-10-06
 
