@@ -70,50 +70,60 @@ def url(split: str) -> str:
     )
 
 
-def _download(split: str, transport: httpx.BaseTransport | None = None) -> bytes:
-    """Stream the split, refusing it past ``MAX_DOWNLOAD_BYTES``."""
+def download(target: str, transport: httpx.BaseTransport | None = None) -> bytes:
+    """Stream ``target``, refusing it past ``MAX_DOWNLOAD_BYTES``."""
     body = bytearray()
     with (
         httpx.Client(transport=transport, follow_redirects=True, timeout=60.0) as client,
-        client.stream("GET", url(split)) as response,
+        client.stream("GET", target) as response,
     ):
         response.raise_for_status()
         for chunk in response.iter_bytes():
             body += chunk
             if len(body) > MAX_DOWNLOAD_BYTES:
-                raise ValueError(f"{url(split)} exceeds {MAX_DOWNLOAD_BYTES} bytes")
+                raise ValueError(f"{target} exceeds {MAX_DOWNLOAD_BYTES} bytes")
     return bytes(body)
 
 
-def _split_bytes(split: str, cache_dir: Path, fetch: Callable[[str], bytes]) -> bytes:
-    """The split's CSV, from cache when its hash still matches, else fetched.
+def _download(split: str, transport: httpx.BaseTransport | None = None) -> bytes:
+    """The split's CSV at the pinned revision."""
+    return download(url(split), transport)
 
-    A fetched file that does not match the pinned hash is refused, never
-    cached: a benchmark measured on different rows than it names is worse
-    than one that does not run.
+
+def pinned(cached: Path, expected: str, fetch: Callable[[], bytes], what: str) -> bytes:
+    """A pinned file, from ``cached`` when its hash still matches, else fetched.
+
+    A fetched file that does not match ``expected`` (a SHA-256) is refused,
+    never cached: a benchmark measured on different rows than it names is
+    worse than one that does not run. ``what`` names the file in that error.
     """
-    expected = SPLIT_SHA256[split]
-    cached = cache_dir / f"jailbreak-classification-{split}-{REVISION[:12]}.csv"
     usable = cached.is_file() and not cached.is_symlink()
     if usable and cached.stat().st_size <= MAX_DOWNLOAD_BYTES:
-        cached_csv = cached.read_bytes()
-        if hashlib.sha256(cached_csv).hexdigest() == expected:
-            return cached_csv
-    fetched_csv = fetch(split)
-    actual = hashlib.sha256(fetched_csv).hexdigest()
+        held = cached.read_bytes()
+        if hashlib.sha256(held).hexdigest() == expected:
+            return held
+    fetched = fetch()
+    actual = hashlib.sha256(fetched).hexdigest()
     if actual != expected:
-        raise ValueError(
-            f"{DATASET}@{REVISION[:12]} {split}: sha256 {actual} does not match "
-            f"the pinned {expected}"
-        )
-    cache_dir.mkdir(parents=True, exist_ok=True)
+        raise ValueError(f"{what}: sha256 {actual} does not match the pinned {expected}")
+    cached.parent.mkdir(parents=True, exist_ok=True)
     # Written beside the cache and renamed over it: a symlink planted at the
     # cache path is replaced, never followed.
-    fd, partial = tempfile.mkstemp(dir=cache_dir, suffix=".part")
+    fd, partial = tempfile.mkstemp(dir=cached.parent, suffix=".part")
     with os.fdopen(fd, "wb") as out:
-        out.write(fetched_csv)
+        out.write(fetched)
     Path(partial).replace(cached)
-    return fetched_csv
+    return fetched
+
+
+def _split_bytes(split: str, cache_dir: Path, fetch: Callable[[str], bytes]) -> bytes:
+    """The split's CSV, checked against its pinned hash."""
+    return pinned(
+        cache_dir / f"jailbreak-classification-{split}-{REVISION[:12]}.csv",
+        SPLIT_SHA256[split],
+        lambda: fetch(split),
+        f"{DATASET}@{REVISION[:12]} {split}",
+    )
 
 
 def _cases(split: str, csv_bytes: bytes) -> list[Case]:

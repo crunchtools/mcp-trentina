@@ -52,9 +52,14 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import httpx
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+_T = TypeVar("_T")
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -247,9 +252,18 @@ def request(
     return body
 
 
-async def ask(client: httpx.AsyncClient, body: dict[str, Any]) -> Answer | None:
-    """Send one request. None when the provider gave no usable response."""
-    schema = "response_format" in body
+async def send(
+    client: httpx.AsyncClient,
+    body: dict[str, Any],
+    parse: Callable[[dict[str, Any], float], _T | None],
+) -> _T | None:
+    """Send one request and parse its reply. None when the provider gave
+    nothing ``parse`` could use after ``RETRIES``.
+
+    ``parse`` gets the reply's JSON and the call's latency in milliseconds;
+    returning None asks again. A model that refuses a request setting
+    ``temperature`` is asked without it, here and from then on.
+    """
     headers = {"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"}
     attempt = 0
     while attempt < RETRIES:
@@ -268,14 +282,20 @@ async def ask(client: httpx.AsyncClient, body: dict[str, Any]) -> Answer | None:
             continue
         if reply is not None and reply.status_code == HTTP_OK:
             try:
-                answer = Answer.of(reply.json(), latency, verdict=schema)
+                parsed = parse(reply.json(), latency)
             except ValueError:
-                answer = None  # a 200 whose body is not JSON: asked again
-            if answer is not None:
-                return answer
+                parsed = None  # a 200 whose body is not JSON: asked again
+            if parsed is not None:
+                return parsed
         await asyncio.sleep(2**attempt)
         attempt += 1
     return None
+
+
+async def ask(client: httpx.AsyncClient, body: dict[str, Any]) -> Answer | None:
+    """Send one request. None when the provider gave no usable response."""
+    schema = "response_format" in body
+    return await send(client, body, lambda reply, ms: Answer.of(reply, ms, verdict=schema))
 
 
 @dataclass

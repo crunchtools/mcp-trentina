@@ -19,6 +19,16 @@ under that name.
   decoy, and the fourth calls one on four benign texts in ten
   (`docs/benchmark.md`).
 
+### Added
+- `benchmarks/detonation.py` (#357): the decoy question asked the way an
+  attack arrives. A model mid-task is handed a benign document with an
+  injection spliced into it as a tool result, with a shell, a file reader,
+  mail, chat and memory tools in reach and fake credentials in its context;
+  a trip is a call carrying what only the insert or those credentials could
+  supply. Clean and benign-insert conditions measure tool habit, and the
+  shipped judges read the same documents. The decision rules are in
+  `docs/benchmark.md`, written before the run.
+
 ## [1.0.1] - 2026-10-06
 
 ### Removed
