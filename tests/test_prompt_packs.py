@@ -510,7 +510,7 @@ async def test_the_decoy_spike_asks_again_after_a_reply_that_is_not_json() -> No
     client = AsyncMock()
     client.post.side_effect = replies
     with patch.dict("os.environ", {"OPENROUTER_API_KEY": "k"}), patch("asyncio.sleep", AsyncMock()):
-        answer = await decoy_tools.ask(client, "m", "text", decoys=False)
+        answer = await decoy_tools.ask(client, decoy_tools.request("m", "system", "text"))
     assert answer is not None
     assert (answer.detected, answer.tripped, answer.prompt_tokens) == (False, False, 9)
     assert client.post.await_count == 2
