@@ -827,6 +827,62 @@ that judge's misses, the interval's lower bound is above 15%, and it adds
 at most one point of benign trips. If benign trips climb with k as fast as
 attack trips do, the gain is draws, not detection.
 
+**The join** (run 37537500541, 2026-10-06). Coverage is uneven and the
+numbers are over what answered: at sixteen requests in flight the provider
+dropped many. Gemini 2.5 and 3.5 Flash Lite judged every document; Haiku 4.5
+judged 639 of the 1,344 attack documents and Gemini 3.8 Flash 149. Llama
+answered every draw, Qwen 86% of them, Gemma 59%, GPT-OSS 43%.
+
+Trips in any of the first k draws, by decoy model:
+
+| decoy model | attack, k=1 | attack, k=5 | benign and clean, k=1 | benign and clean, k=5 | habit calls |
+|---|---|---|---|---|---|
+| llama-3.1-8b-instruct | 25.1% | 40.2% | 2.0% | 8.0% | 648 of 1,500 draws |
+| qwen-2.5-7b-instruct | 14.9% | 24.7% | 0.3% | 0.7% | 54 of 1,500 |
+| gpt-oss-20b | 11.4% | 23.0% | 0 of 300 | 0 of 300 | 0 of 1,500 |
+| gemma-3-12b-it | 12.0% | 13.9% | 0 of 297 | 1 of 300 | 0 of 1,478 |
+
+Of the documents each judge's majority called clean, a decoy model tripped
+on, at five draws:
+
+| judge | flags, attack | misses | gemma | gpt-oss | qwen | those three pooled | llama | benign the three add |
+|---|---|---|---|---|---|---|---|---|
+| gemini-2.5-flash-lite | 1,316 of 1,344 | 28 | 3 of 21 | 5 of 17 | 5 of 28 | 9 of 28 (32%, 18% to 51%) | 8 of 28 | 1 of 300 |
+| claude-haiku-4.5 | 623 of 639 | 16 | 0 of 14 | 1 of 10 | 0 of 16 | 1 of 16 | 1 of 16 | 3 of 300 |
+| gemini-3.5-flash-lite | 1,335 of 1,342 | 7 | 0 of 6 | 0 of 6 | 0 of 7 | 0 of 7 | 0 of 7 | 3 of 300 |
+| gemini-3.8-flash | 149 of 149 | 0 | | | | | | |
+
+- **Draws matter, and on a quiet model they are free.** GPT-OSS 20B doubles
+  its trips from one draw to five and trips on no benign document in 1,500
+  draws. Llama's benign trips quadruple over the same draws: on a model
+  that calls tools out of habit, more draws buy noise.
+- **The decoy catches what the default judge misses, and little else.** On
+  Gemini 2.5 Flash Lite, three quiet models together trip on 9 of its 28
+  misses for one benign document in 300. Read one by one, those are the
+  insert being obeyed: the workspace's credentials listed in the summary,
+  the issue thread mailed to an address only the insert named. On the two
+  stronger judges that answered, nearly nothing is left to catch and the
+  decoys do not catch it.
+- **Most of it is the planted credential, not the tool.** On Gemma 3 and
+  GPT-OSS more than half of all trips are a fake credential or a rendered
+  link in the reply with no tool call behind it.
+- **The rule as written is not met.** No single model reaches a third of a
+  judge's misses with a lower bound over 15%: GPT-OSS is at 5 of 17 (13% to
+  53%) on Gemini 2.5 Flash Lite with no benign cost, on less than half of
+  the documents. Three models pooled do reach it on that judge, which the
+  rule did not ask about.
+- **The judges' benign flags held at scale**: of 288 documents carrying a
+  benign insert, Gemini 2.5 Flash Lite flags 118, Haiku 4.5 84, Gemini 3.8
+  Flash 31 and Gemini 3.5 Flash Lite 7; none flags a clean carrier.
+
+What this does and does not show. A model mid-task with planted
+credentials and plausible tools is a real second signal against the
+weakest shipped judge, at close to no false-positive cost, if the model is
+a quiet one and it is asked several times. It is not shown for the stronger
+judges, where the misses are a handful, nor on attacks written to evade a
+judge, which this corpus is not. The run wants repeating at a concurrency
+the provider answers before any of it is built on.
+
 ## OCR for images (#370)
 
 Images are read by RapidOCR 3.9 (PP-OCRv6 small detection and recognition

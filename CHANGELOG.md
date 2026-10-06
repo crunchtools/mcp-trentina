@@ -32,6 +32,9 @@ under that name.
   draws per document, every insert in every carrier, and a document-by-document
   join of what a judge flags against what trips a decoy model, to measure
   whether the two together catch what the judge misses.
+  Measured (`docs/benchmark.md`): three quiet decoy models trip on 9 of the 28
+  documents Gemini 2.5 Flash Lite calls clean, for one benign document in 300;
+  on the stronger judges almost nothing is left to catch.
 
 ### Fixed
 - The detonation spike counted two habits as hijack: any memory save, and
