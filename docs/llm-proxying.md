@@ -20,7 +20,7 @@ Trentina exposes LLM API proxy endpoints at `/llm/{provider}/{path}` that mirror
 
 ### Per-Profile Keys and Rate-Limit Isolation
 
-Each profile injects **its own** provider key, declared in the profile's `llm_keys` section. This gives every consumer its own rate-limit bucket and its own token accounting on the provider's dashboard — heavy agentic traffic from one consumer can no longer exhaust another's quota (see [#53](https://github.com/crunchtools/mcp-trentina/issues/53)).
+Each profile injects **its own** provider key, declared in the profile's `llm_keys` section. This gives every consumer its own rate-limit bucket and its own token accounting on the provider's dashboard — heavy agentic traffic from one consumer can no longer exhaust another's quota (see [#53](https://github.com/crunchtools/trentina/issues/53)).
 
 Authentication is **mandatory**:
 

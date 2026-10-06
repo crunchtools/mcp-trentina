@@ -1,19 +1,40 @@
-# mcp-trentina-crunchtools Constitution
+# trentina Constitution
 
-> **Version:** 1.10.0
+> **Version:** 2.0.0
 > **Ratified:** 2026-09-22
-> **Amended:** 2026-10-05
+> **Amended:** 2026-10-06
 > **Status:** Active
-> **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.18.0
-> **Profile:** MCP Server
+> **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.19.1
+> **Profile:** Security Gateway
 
-This file holds what is specific to mcp-trentina. The fleet rules and the MCP
-Server profile (five-layer security model, two-layer tools, distribution
-channels, transport modes, quality gates, Gourmand, Gatehouse) apply at the
-inherited version and are checked against this repo's files by
+This file holds what is specific to Trentina. The fleet rules and the
+Security Gateway profile (image-only distribution, a judging path that fails
+closed, delivery of exactly what was judged, a versioned perimeter, declared
+coverage, measured detector changes, hostile parsers in child processes)
+apply at the inherited version and are checked against this repo's files by
 `constitution.yml`. They are not restated here.
 
-## Security Model Specifics
+## Threat Model
+
+Trentina stands between AI agents and everything they read or call. The
+attacker is whoever can put text in front of an agent: the author of a web
+page, a ticket, a mail, a chat message, a file, a tool description, or a
+tool's response. The attack is an instruction planted in that content, which
+the agent follows because it cannot tell data from instructions.
+
+- **Defended:** planted instructions in tool output and tool metadata,
+  whether plain, obfuscated, encoded, hidden in markup, or inside an archive,
+  office file, PDF or image; a server steering an agent toward tools that
+  bypass the gateway; an agent's own calls leaving its policy (tool filters,
+  parameter and response guards, egress).
+- **Assumed compromised:** the L3 judge. It reads hostile content, so it has
+  no tools, no memory and no ability to act, and its prose is never delivered.
+- **Not defended:** a user jailbreaking their own model directly (the judge
+  is not a chat-safety filter); an agent with a second path to the content
+  that does not cross the gateway; a compromised host or operator; and every
+  entry in the known gaps.
+
+## Limits and Credentials
 
 - **Credentials:** `GEMINI_API_KEY` is a Pydantic `SecretStr`, scrubbed from
   every error message by `errors.py`, and kept in an env file separate from
@@ -31,15 +52,15 @@ inherited version and are checked against this repo's files by
 - **Supply chain:** no google-genai SDK, which enforces the Q-Agent
   quarantine architecturally.
 
-## Gateway Exception to Dangerous-Operation Prevention
+## What the Gateway Never Does
 
-This server is a security gateway, not an API wrapper: it fetches and
-processes untrusted web content by design. Compliance with the profile's
-dangerous-operation layer is achieved by the server itself never executing
-arbitrary code, never shelling out, and limiting file tools to read-only text.
+Trentina fetches and processes untrusted content by design, so what it will
+not do with that content is fixed: it never executes it, never shells out on
+its behalf, and limits its file tools to read-only text. The parsers it runs
+in child processes (PDF, OCR) are its own modules, started with a constant
+argument list.
 
-- No `safe_exec` tool, permanently: it is incompatible with the MCP Server
-  profile.
+- No `safe_exec` tool, permanently.
 - File reading is scoped to text files: binary is rejected, read-only, no
   writes. This governs the file tools, the paths an agent names. It does not
   govern state the process owns: the SQLite stores (blocklist, perimeter
@@ -52,10 +73,14 @@ arbitrary code, never shelling out, and limiting file tools to read-only text.
   operator-run command that opens another client's crypto store read-only,
   never reachable from a tool or an agent.
 
-## Three-Layer Defense
+## Layer Contract
 
 Every untrusted payload crosses three independent layers, with no off switch
-per layer (see `docs/defense-pipeline.md`):
+per layer. The four rules a change to any layer is held to (nothing delivered
+unread and each layer reads once; layers share findings, never inputs; a
+layer's weakness is fixed inside that layer or at model selection; read time
+is linear) are written in `docs/defense-pipeline.md` under the same heading,
+and `tests/test_layer_contract.py` enforces the first two.
 
 - **L1 (deterministic):** `l1/` counts obfuscation, hidden markup, encoded
   blobs, exfiltration URLs, delimiters and directives, by type; its counts
@@ -162,11 +187,13 @@ declarations are sent, mode tests (every family x mode runs every layer in
 `test_mode_parity`; gaps refuse or warn in `test_mode_gaps`), file-read tests
 (binary rejection, size limits) and adversarial injection vectors.
 
-## Container Builds Are CI-Only
+## Known Gaps
 
-The image is never built locally: the model-export stage needs a gated
-HuggingFace credential that only CI holds. Push the branch and let
-`.github/workflows/container.yml` build it.
+The numbered list is `docs/defense-pipeline.md`, "Known gaps", beside the
+coverage table. `tests/test_coverage_gaps.py` holds both open: each gap has a
+test asserting it still exists, so closing or opening one changes the test
+and the document together. `PERIMETER_VERSION` (`perimeter_db.py`) moves with
+every change to what is decided.
 
 ## Gourmand Exception Reasons
 
@@ -178,11 +205,11 @@ justification in `gourmand-exceptions.toml`.
 
 | Context | Name |
 |---------|------|
-| GitHub repo | `crunchtools/mcp-trentina` |
-| PyPI package | `mcp-trentina-crunchtools` |
-| Python module | `mcp_trentina_crunchtools` |
-| Container image | `quay.io/crunchtools/mcp-trentina` |
-| systemd service | `mcp-trentina.service` |
+| GitHub repo | `crunchtools/trentina` (was `crunchtools/mcp-trentina`) |
+| Python module and commands | `trentina`, `trentina-bridge` |
+| Container image | `quay.io/crunchtools/trentina`, `ghcr.io/crunchtools/trentina` |
+| Service and address | `trentina.crunchtools.com` |
+| PyPI | not published; `mcp-trentina-crunchtools` stops at 0.54.1 |
 | HTTP port | 8019 |
 | HTTP clients | httpx (application), httpx2 (MCP transport) |
 | Extra stack | beautifulsoup4, markdownify, SQLite; pypdf, rapidocr and opencv-python-headless (each run only in a child process, #369, #370) |
@@ -208,3 +235,4 @@ justification in `gourmand-exceptions.toml`.
 | 1.8.0 | 2026-10-05 | The L2 obfuscation gate is enforced (#362): run by the image build, recorded in the model manifest, checked at startup. The image ships one L2 model; Prompt Guard 2 86M fails the gate and is dropped |
 | 1.9.0 | 2026-10-05 | PDFs are read (#369): pypdf joins the stack, and runs only in a child process with CPU and memory limits and no credential in its environment |
 | 1.10.0 | 2026-10-05 | Images are read by OCR (#370): rapidocr and opencv-python-headless join the stack, child process only. Matrix media and undecrypted events are not forwarded unread under withhold (#371) |
+| 2.0.0 | 2026-10-06 | Profile changed from MCP Server to Security Gateway (constitution v1.19.1): Trentina is a perimeter, not an API wrapper. Renamed from mcp-trentina to trentina (repo, module, commands, images, service); distributed as a container image only, no PyPI. Threat Model and Known Gaps sections added; Three-Layer Defense becomes Layer Contract; the CI-only build rule is now the profile's |

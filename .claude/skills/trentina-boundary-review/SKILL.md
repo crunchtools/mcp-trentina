@@ -218,32 +218,34 @@ it replaces the prose comment it would otherwise sit beside. Format:
 The `safe_*`/block versus `quarantine_*`/flag split that #90 describes is
 exactly a difference in `on-failure`, and should read that way.
 
-### Worked example 1: bookkeeping failure keeps the verdict (`src/mcp_trentina_crunchtools/defense.py`, in `defend`)
+### Worked example 1: bookkeeping failure keeps the verdict (`src/trentina/defense.py`, in `defend`)
 
 ```python
-    if flagged_by is not None and record:
-        # TRUST: detection bookkeeping after the verdict exists
-        #   untrusted: `source`, the caller's URL or path, reaches the row and the log
-        #   judged-by: nothing needed; the verdict above is final
-        #   on-failure: fail-closed on the verdict: a failed SQLite write or D-Bus emit
-        #     is an audit gap to alarm on, never a reason to lose flagged_by
-        #   owner: defense.defend
-        #   evidence: T3 docstring "never raises on a detection"; T3 #262 logging rule;
-        #     T1 `except Exception` leaves CancelledError to propagate
-        try:
-            ...
-        except Exception as exc:
-            logger.error(
-                "defense: failed to record detection for %s (verdict kept): %s at %s",
-                redact_source(source), exc_kind(exc), exc_where(exc),
-            )
+if flagged_by is not None and record:
+    # TRUST: detection bookkeeping after the verdict exists
+    #   untrusted: `source`, the caller's URL or path, reaches the row and the log
+    #   judged-by: nothing needed; the verdict above is final
+    #   on-failure: fail-closed on the verdict: a failed SQLite write or D-Bus emit
+    #     is an audit gap to alarm on, never a reason to lose flagged_by
+    #   owner: defense.defend
+    #   evidence: T3 docstring "never raises on a detection"; T3 #262 logging rule;
+    #     T1 `except Exception` leaves CancelledError to propagate
+    try:
+        ...
+    except Exception as exc:
+        logger.error(
+            "defense: failed to record detection for %s (verdict kept): %s at %s",
+            redact_source(source),
+            exc_kind(exc),
+            exc_where(exc),
+        )
 ```
 
 This `except Exception` is correct. It does not return a verdict; it keeps one
 that already exists. Contrast the reject pattern "we catch the exception and
 log it", where the `except` is what produces the verdict.
 
-### Worked example 2: a connection the guard never checked (`src/mcp_trentina_crunchtools/egress.py`, `PinnedBackend.connect_tcp`)
+### Worked example 2: a connection the guard never checked (`src/trentina/egress.py`, `PinnedBackend.connect_tcp`)
 
 ```python
         addresses = self._pins.get((host, port))
@@ -419,7 +421,7 @@ as a table. The JSON is what CI grades.
 {
   "findings": [
     {
-      "file": "src/mcp_trentina_crunchtools/tools/fetch.py",
+      "file": "src/trentina/tools/fetch.py",
       "line": 212,
       "obligation": "O9",
       "verdict": "UNSOUND",

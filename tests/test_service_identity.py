@@ -18,26 +18,26 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.config import get_config
-from mcp_trentina_crunchtools.gateway import ingress_defense as ing
-from mcp_trentina_crunchtools.gateway import router
-from mcp_trentina_crunchtools.gateway.compress import _call_compress_model
-from mcp_trentina_crunchtools.gateway.context import get_current_profile, profile_context
-from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-from mcp_trentina_crunchtools.gateway.loader import load_profiles, register_active_config
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.config import get_config
+from trentina.gateway import ingress_defense as ing
+from trentina.gateway import router
+from trentina.gateway.compress import _call_compress_model
+from trentina.gateway.context import get_current_profile, profile_context
+from trentina.gateway.errors import ProfileConfigError
+from trentina.gateway.loader import load_profiles, register_active_config
+from trentina.gateway.profile import (
     AuthConfig,
     Backend,
     DefenseConfig,
     Profile,
 )
-from mcp_trentina_crunchtools.gateway.service import (
+from trentina.gateway.service import (
     judge_of,
     service_context,
     service_profile,
 )
-from mcp_trentina_crunchtools.gateway.sessions import SessionRegistry
-from mcp_trentina_crunchtools.quarantine.providers.base import ProviderResult
+from trentina.gateway.sessions import SessionRegistry
+from trentina.quarantine.providers.base import ProviderResult
 
 _TENANT = """\
   tenant:
@@ -163,7 +163,7 @@ class TestServiceContext:
         chosen = profiles["tenant"]  # any Profile: the point is it is not re-resolved
 
         with (
-            patch("mcp_trentina_crunchtools.gateway.service.service_profile") as resolve,
+            patch("trentina.gateway.service.service_profile") as resolve,
             service_context(chosen) as bound,
         ):
             assert bound is chosen
@@ -318,7 +318,7 @@ class TestCompressionRunsAsTheOperator:
         _live(tmp_path, monkeypatch, _TENANT, _OPERATOR)
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.compress.get_provider",
+            "trentina.gateway.compress.get_provider",
             return_value=self._mock_provider(),
         ) as get:
             await _call_compress_model([("h", "A long description.")])
@@ -334,7 +334,7 @@ class TestCompressionRunsAsTheOperator:
         _live(tmp_path, monkeypatch, _TENANT)
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.compress.get_provider",
+            "trentina.gateway.compress.get_provider",
             return_value=self._mock_provider(),
         ) as get:
             await _call_compress_model([("h", "A long description.")])

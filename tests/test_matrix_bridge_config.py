@@ -16,11 +16,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from mcp_trentina_crunchtools.channels import Channel, Kind
-from mcp_trentina_crunchtools.gateway.drivers import CHANNEL_KIND, build_preprocessors
-from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-from mcp_trentina_crunchtools.gateway.loader import load_profiles, matrix_other_agents
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.channels import Channel, Kind
+from trentina.gateway.drivers import CHANNEL_KIND, build_preprocessors
+from trentina.gateway.errors import ProfileConfigError
+from trentina.gateway.loader import load_profiles, matrix_other_agents
+from trentina.gateway.profile import (
     MatrixBridgeConfig,
     MatrixBridgeLocalConfig,
     ProcessorChainConfig,

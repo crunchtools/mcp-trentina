@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcp_trentina_crunchtools.l1.delimiters import normalize_delimiters
+from trentina.l1.delimiters import normalize_delimiters
 
 
 class TestDelimiterNormalization:

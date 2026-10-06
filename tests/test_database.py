@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_trentina_crunchtools import database
+from trentina import database
 
 
 def _fresh_db() -> sqlite3.Connection:
@@ -188,7 +188,7 @@ class TestTTL:
     def test_an_expired_row_does_not_count(
         self, db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         monkeypatch.setenv("TRENTINA_BLOCKLIST_TTL_DAYS", "7")
         config_mod._config = None
@@ -221,7 +221,7 @@ class TestTTL:
         assert left == {"https://seen.test/", "https://new.test/"}
 
     def test_the_default_is_thirty_days(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         monkeypatch.delenv("TRENTINA_BLOCKLIST_TTL_DAYS", raising=False)
         assert config_mod.Config().blocklist_ttl_days == 30

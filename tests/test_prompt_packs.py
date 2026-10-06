@@ -15,10 +15,11 @@ from pydantic import ValidationError
 from benchmarks import prompt_pack as harness
 from benchmarks.external_corpus import CATEGORY_ATTACK
 from benchmarks.provider_benchmark import CaseResult, ProviderReport
-from mcp_trentina_crunchtools.gateway import ingress_defense
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, DefenseConfig, Profile
-from mcp_trentina_crunchtools.quarantine import agent, packs
-from mcp_trentina_crunchtools.quarantine.packs import (
+from tests.adversarial_corpus import CORPUS
+from trentina.gateway import ingress_defense
+from trentina.gateway.profile import AuthConfig, DefenseConfig, Profile
+from trentina.quarantine import agent, packs
+from trentina.quarantine.packs import (
     FRAMING,
     GENERIC,
     PackError,
@@ -26,9 +27,8 @@ from mcp_trentina_crunchtools.quarantine.packs import (
     pack_for,
     parse_pack,
 )
-from mcp_trentina_crunchtools.quarantine.prompts import L2_BLINDSPOT_CAVEAT
-from mcp_trentina_crunchtools.quarantine.providers import reset_provider
-from tests.adversarial_corpus import CORPUS
+from trentina.quarantine.prompts import L2_BLINDSPOT_CAVEAT
+from trentina.quarantine.providers import reset_provider
 
 _JUDGE = ("openrouter", "google/gemini-2.5-flash-lite")
 _RULES = " ".join(FRAMING) + " the content you are analyzing."
@@ -197,7 +197,7 @@ class TestWhichPackACallGets:
 
 @pytest.fixture
 def _openrouter(monkeypatch: pytest.MonkeyPatch) -> None:
-    import mcp_trentina_crunchtools.config as config_module
+    import trentina.config as config_module
 
     monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openrouter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")

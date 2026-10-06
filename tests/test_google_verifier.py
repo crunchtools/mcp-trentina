@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 import httpx2
 import pytest
 
-from mcp_trentina_crunchtools.gateway.google_verifier import (
+from trentina.gateway.google_verifier import (
     REJECTION_CACHE_MAX,
     REJECTION_TTL_SECONDS,
     GoogleTokeninfoVerifier,
@@ -148,7 +148,7 @@ class TestRejectionCache:
         verifier, recorder = _verifier(_status(400))
         assert await verifier.verify_token("bad") is None
 
-        import mcp_trentina_crunchtools.gateway.google_verifier as mod
+        import trentina.gateway.google_verifier as mod
 
         real = mod.time.monotonic
         monkeypatch.setattr(mod.time, "monotonic", lambda: real() + REJECTION_TTL_SECONDS + 1)

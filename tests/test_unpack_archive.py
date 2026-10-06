@@ -19,13 +19,13 @@ import zipfile
 
 import pytest
 
-from mcp_trentina_crunchtools.l1.pipeline import run_l1
-from mcp_trentina_crunchtools.preprocess.base import PreProcessContext
-from mcp_trentina_crunchtools.preprocess.detect import document_hidden, hiding_removed
-from mcp_trentina_crunchtools.preprocess.structured import StructuredProcessor
-from mcp_trentina_crunchtools.unpack import archive, office
-from mcp_trentina_crunchtools.unpack.archive import Budget, open_archive
-from mcp_trentina_crunchtools.unpack.scan import ENCRYPTED_ENTRY, read_blob, unpack
+from trentina.l1.pipeline import run_l1
+from trentina.preprocess.base import PreProcessContext
+from trentina.preprocess.detect import document_hidden, hiding_removed
+from trentina.preprocess.structured import StructuredProcessor
+from trentina.unpack import archive, office
+from trentina.unpack.archive import Budget, open_archive
+from trentina.unpack.scan import ENCRYPTED_ENTRY, read_blob, unpack
 
 from .adversarial_corpus import OWASP_TEST_ATTACKS
 from .office_files import b64, docx, paragraph, pptx, run, xlsx, zipped
@@ -639,7 +639,7 @@ class TestStageOneReducer:
         assert office.reduce_base64(b64(bytes(data)), 140_000) is None
 
     def test_the_hidden_count_is_handed_to_l1(self) -> None:
-        from mcp_trentina_crunchtools.preprocess.base import Cost, PreProcessResult
+        from trentina.preprocess.base import Cost, PreProcessResult
 
         applied = PreProcessResult(
             name="structured",

@@ -18,8 +18,8 @@ import json
 
 import pytest
 
-from mcp_trentina_crunchtools.defense import Provenance
-from mcp_trentina_crunchtools.preprocess import (
+from trentina.defense import Provenance
+from trentina.preprocess import (
     Cost,
     PetitProcessor,
     PreProcessContext,

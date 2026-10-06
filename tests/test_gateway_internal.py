@@ -10,8 +10,8 @@ import pytest
 from mcp.types import TextContent, ToolAnnotations
 from mcp.types import Tool as McpTool
 
-from mcp_trentina_crunchtools.gateway import internal
-from mcp_trentina_crunchtools.gateway.errors import BackendCallError
+from trentina.gateway import internal
+from trentina.gateway.errors import BackendCallError
 
 
 class _FakeFunctionTool:
@@ -214,7 +214,7 @@ async def test_real_trentina_server_lists_its_tools() -> None:
     Metadata only — no tool is executed, so this stays offline and DB-free. It
     guards the to_mcp_tool() path against the installed FastMCP version.
     """
-    from mcp_trentina_crunchtools.server import mcp
+    from trentina.server import mcp
 
     saved = internal._server
     try:

@@ -48,8 +48,8 @@ from typing import TYPE_CHECKING, NamedTuple
 import pytest
 import yaml
 
-from mcp_trentina_crunchtools.gateway.loader import load_profiles
-from mcp_trentina_crunchtools.gateway.profile import Backend
+from trentina.gateway.loader import load_profiles
+from trentina.gateway.profile import Backend
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

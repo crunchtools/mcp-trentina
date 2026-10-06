@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from mcp_trentina_crunchtools import __version__
+from trentina import __version__
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway.sessions import (
+from trentina.gateway.sessions import (
     REASON_CLIENT_DELETE,
     REASON_EVICTED,
     REASON_TTL_EXPIRED,
@@ -115,7 +115,7 @@ class TestProfileLookup:
     def test_profiles_for_backend_url(self, registry: SessionRegistry) -> None:
         from pydantic import SecretStr
 
-        from mcp_trentina_crunchtools.gateway.profile import (
+        from trentina.gateway.profile import (
             AuthConfig,
             Backend,
             Profile,

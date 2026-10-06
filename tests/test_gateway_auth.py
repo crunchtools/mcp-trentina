@@ -5,17 +5,17 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools.gateway.auth import (
+from trentina.gateway.auth import (
     resolve_profile_by_token,
     verify_bearer,
     verify_oauth,
 )
-from mcp_trentina_crunchtools.gateway.errors import (
+from trentina.gateway.errors import (
     AuthError,
     OAuthChallengeError,
     OAuthForbiddenError,
 )
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.gateway.profile import (
     AuthConfig,
     OAuthConfig,
     Profile,

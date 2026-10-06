@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from mcp_trentina_crunchtools.gateway.circuit import (
+from trentina.gateway.circuit import (
     CircuitBreaker,
     State,
 )
@@ -65,7 +65,7 @@ class TestCircuitBreaker:
         cb.record_failure(URL)
         assert cb.get_state(URL) is State.OPEN
 
-        with patch("mcp_trentina_crunchtools.gateway.circuit.time") as mock_time:
+        with patch("trentina.gateway.circuit.time") as mock_time:
             mock_time.monotonic.side_effect = [100.0, 200.0]
             cb._get(URL).opened_at = 90.0
             assert cb.allow(URL) is True
@@ -75,7 +75,7 @@ class TestCircuitBreaker:
         cb = self._breaker(threshold=1, cooldown=60.0)
         cb.record_failure(URL)
 
-        with patch("mcp_trentina_crunchtools.gateway.circuit.time") as mock_time:
+        with patch("trentina.gateway.circuit.time") as mock_time:
             mock_time.monotonic.return_value = 30.0
             cb._get(URL).opened_at = 0.0
             assert cb.allow(URL) is False
@@ -85,7 +85,7 @@ class TestCircuitBreaker:
         cb = self._breaker(threshold=1, cooldown=0.0)
         cb.record_failure(URL)
 
-        with patch("mcp_trentina_crunchtools.gateway.circuit.time") as mock_time:
+        with patch("trentina.gateway.circuit.time") as mock_time:
             mock_time.monotonic.return_value = 100.0
             cb._get(URL).opened_at = 0.0
             assert cb.allow(URL) is True
@@ -98,7 +98,7 @@ class TestCircuitBreaker:
         cb = self._breaker(threshold=1, cooldown=0.0)
         cb.record_failure(URL)
 
-        with patch("mcp_trentina_crunchtools.gateway.circuit.time") as mock_time:
+        with patch("trentina.gateway.circuit.time") as mock_time:
             mock_time.monotonic.side_effect = [100.0, 200.0]
             cb._get(URL).opened_at = 0.0
             assert cb.allow(URL) is True
@@ -110,7 +110,7 @@ class TestCircuitBreaker:
         cb = self._breaker(threshold=1, cooldown=0.0)
         cb.record_failure(URL)
 
-        with patch("mcp_trentina_crunchtools.gateway.circuit.time") as mock_time:
+        with patch("trentina.gateway.circuit.time") as mock_time:
             mock_time.monotonic.return_value = 100.0
             cb._get(URL).opened_at = 0.0
             assert cb.allow(URL) is True

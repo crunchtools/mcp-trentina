@@ -13,14 +13,14 @@ from pathlib import Path
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway.context import profile_context
-from mcp_trentina_crunchtools.gateway.errors import ScopeError
-from mcp_trentina_crunchtools.gateway.loader import (
+from trentina.gateway.context import profile_context
+from trentina.gateway.errors import ScopeError
+from trentina.gateway.loader import (
     load_profiles,
     register_active_config,
 )
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
-from mcp_trentina_crunchtools.gateway.scope import (
+from trentina.gateway.profile import AuthConfig, Backend, Profile
+from trentina.gateway.scope import (
     current_scope,
     require_caller,
     require_operator,

@@ -8,10 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.config import DEFAULT_MODEL
-from mcp_trentina_crunchtools.errors import QuarantineAgentError
-from mcp_trentina_crunchtools.l1.pipeline import run_l1
-from mcp_trentina_crunchtools.quarantine.agent import (
+from trentina.config import DEFAULT_MODEL
+from trentina.errors import QuarantineAgentError
+from trentina.l1.pipeline import run_l1
+from trentina.quarantine.agent import (
     _CANARY_PREFIX,
     MAX_EXTRACTED_TEXT,
     _build_request_body,
@@ -22,13 +22,13 @@ from mcp_trentina_crunchtools.quarantine.agent import (
     quarantine_detect,
     quarantine_extract,
 )
-from mcp_trentina_crunchtools.quarantine.prompts import (
+from trentina.quarantine.prompts import (
     DETECTION_RESPONSE_SCHEMA,
     DETECTION_SYSTEM_PROMPT,
     EXTRACTION_RESPONSE_SCHEMA,
     EXTRACTION_SYSTEM_PROMPT,
 )
-from mcp_trentina_crunchtools.quarantine.providers.base import ProviderResult
+from trentina.quarantine.providers.base import ProviderResult
 
 
 class TestRequestBodyConstruction:
@@ -118,8 +118,8 @@ class TestQuarantineExtract:
         mock_prov = _mock_provider(extraction_json)
 
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config"),
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
+            patch("trentina.quarantine.agent.get_config"),
+            patch("trentina.quarantine.agent.get_provider", return_value=mock_prov),
         ):
             resp = await quarantine_extract("page content", "Extract the summary")
 
@@ -139,8 +139,8 @@ class TestQuarantineExtract:
         mock_prov = _mock_provider(extraction_json)
 
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config"),
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
+            patch("trentina.quarantine.agent.get_config"),
+            patch("trentina.quarantine.agent.get_provider", return_value=mock_prov),
         ):
             resp = await quarantine_extract("test", "Extract")
             assert resp["content"]["injection_detected"] is True
@@ -153,7 +153,7 @@ class TestQuarantineExtract:
         mock_prov.generate = AsyncMock(side_effect=QuarantineAgentError("timeout"))
 
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
+            patch("trentina.quarantine.agent.get_provider", return_value=mock_prov),
             pytest.raises(QuarantineAgentError),
         ):
             await quarantine_extract("original content", "Extract")
@@ -172,7 +172,7 @@ class TestQuarantineDetect:
         mock_prov = _mock_provider(detection_json)
 
         with patch(
-            "mcp_trentina_crunchtools.quarantine.agent.get_provider",
+            "trentina.quarantine.agent.get_provider",
             return_value=mock_prov,
         ):
             resp = await quarantine_detect("clean content")
@@ -195,7 +195,7 @@ class TestQuarantineDetect:
         mock_prov = _mock_provider(detection_json)
 
         with patch(
-            "mcp_trentina_crunchtools.quarantine.agent.get_provider",
+            "trentina.quarantine.agent.get_provider",
             return_value=mock_prov,
         ):
             resp = await quarantine_detect("malicious content")
@@ -208,7 +208,7 @@ class TestQuarantineDetect:
         mock_prov.generate = AsyncMock(side_effect=QuarantineAgentError("timeout"))
 
         with patch(
-            "mcp_trentina_crunchtools.quarantine.agent.get_provider",
+            "trentina.quarantine.agent.get_provider",
             return_value=mock_prov,
         ):
             resp = await quarantine_detect("content")
@@ -276,18 +276,18 @@ class TestPostExtractionL1:
     async def test_l1_l2_and_turn_3_read_the_delivered_strings_as_one_document(self) -> None:
         """Title included: it is delivered, so it is checked (#187). It is read
         with the text, not as two words on their own (#379)."""
-        from mcp_trentina_crunchtools.quarantine.agent import _judge_extraction
+        from trentina.quarantine.agent import _judge_extraction
 
         extraction = {"content": {"extracted_text": "body of the report", "title": "head"}}
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.run_l1", wraps=run_l1) as l1,
+            patch("trentina.quarantine.agent.run_l1", wraps=run_l1) as l1,
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier.classify_async",
+                "trentina.quarantine.classifier.classify_async",
                 new_callable=AsyncMock,
                 return_value=None,
             ) as l2,
             patch(
-                "mcp_trentina_crunchtools.quarantine.agent.quarantine_verify",
+                "trentina.quarantine.agent.quarantine_verify",
                 new_callable=AsyncMock,
                 return_value={"injection_detected": False},
             ) as turn_3,
@@ -303,11 +303,11 @@ class TestPostExtractionL1:
     async def test_a_padded_extraction_is_classified_once_as_written(self) -> None:
         """Turn 2's output padded with ZWNJs is classified as written, once
         (the Layer contract, #359)."""
-        from mcp_trentina_crunchtools.quarantine.agent import _output_flagged
+        from trentina.quarantine.agent import _output_flagged
 
         padded = "summary" + "\u200c\u00a0" * 10 + "end"
         with patch(
-            "mcp_trentina_crunchtools.quarantine.classifier.classify_async",
+            "trentina.quarantine.classifier.classify_async",
             new_callable=AsyncMock,
             return_value=None,
         ) as classify:
@@ -324,8 +324,8 @@ class TestPostExtractionL1:
         mock_prov = _mock_provider(extraction_json)
 
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config"),
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
+            patch("trentina.quarantine.agent.get_config"),
+            patch("trentina.quarantine.agent.get_provider", return_value=mock_prov),
         ):
             resp = await quarantine_extract("page", "Extract")
             assert resp["content"]["extracted_text"] == "Clean content with no issues."
@@ -340,9 +340,9 @@ class TestPostExtractionL1:
         mock_prov = _mock_provider(extraction_json)
 
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config"),
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
-            patch("mcp_trentina_crunchtools.quarantine.agent.run_l1") as mock_l1,
+            patch("trentina.quarantine.agent.get_config"),
+            patch("trentina.quarantine.agent.get_provider", return_value=mock_prov),
+            patch("trentina.quarantine.agent.run_l1") as mock_l1,
         ):
             resp = await quarantine_extract("page", "Extract")
             assert resp["content"]["extracted_text"] == ""
@@ -362,7 +362,7 @@ class TestLayer1ContextInDetection:
         mock_prov = _mock_provider(detection_json)
 
         with patch(
-            "mcp_trentina_crunchtools.quarantine.agent.get_provider",
+            "trentina.quarantine.agent.get_provider",
             return_value=mock_prov,
         ):
             await quarantine_detect(
@@ -385,7 +385,7 @@ class TestLayer1ContextInDetection:
         mock_prov = _mock_provider(detection_json)
 
         with patch(
-            "mcp_trentina_crunchtools.quarantine.agent.get_provider",
+            "trentina.quarantine.agent.get_provider",
             return_value=mock_prov,
         ):
             await quarantine_detect("test content", layer1_context=None)
@@ -434,7 +434,7 @@ class TestSystemPrompts:
 
     def test_finding_type_is_a_closed_enum(self) -> None:
         """D2: the one L3 field that reaches an agent has no free text in it."""
-        from mcp_trentina_crunchtools.quarantine.prompts import FINDING_TYPES
+        from trentina.quarantine.prompts import FINDING_TYPES
 
         findings_props = DETECTION_RESPONSE_SCHEMA["properties"]["findings"]["items"]["properties"]
         assert findings_props["type"]["enum"] == list(FINDING_TYPES)
@@ -461,8 +461,8 @@ class TestPostExtractionTruncation:
         mock_prov = _mock_provider(extraction_json)
 
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config"),
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_provider", return_value=mock_prov),
+            patch("trentina.quarantine.agent.get_config"),
+            patch("trentina.quarantine.agent.get_provider", return_value=mock_prov),
         ):
             resp = await quarantine_extract("page", "Extract")
             assert len(resp["content"]["extracted_text"]) == MAX_EXTRACTED_TEXT

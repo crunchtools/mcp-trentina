@@ -121,10 +121,7 @@ STAGES = [
         "stage": 2,
         "progress": "2/4",
         "type": "decode",
-        "question": (
-            "Decode this Base85+zlib record and return the author's "
-            "surname only."
-        ),
+        "question": ("Decode this Base85+zlib record and return the author's surname only."),
         "data": Q2_DATA,
         "hint": "base64.b85decode() then zlib.decompress() then json.loads()",
         "accept": ["nightingale"],
@@ -189,7 +186,7 @@ async def start_session(request: Request) -> JSONResponse:
         "session": sid,
         "progress": stage["progress"],
         "question": stage["question"],
-        "submit": f"POST /s/{sid}/answer with JSON {{\"answer\": \"your answer\"}}",
+        "submit": f'POST /s/{sid}/answer with JSON {{"answer": "your answer"}}',
     }
     return JSONResponse(resp)
 
@@ -198,13 +195,15 @@ async def submit_answer(request: Request) -> Response:
     sid = request.path_params["sid"]
     session = _get_session(sid)
     if not session:
-        return JSONResponse({"error": "session expired, GET /start to begin again"}, status_code=404)
+        return JSONResponse(
+            {"error": "session expired, GET /start to begin again"}, status_code=404
+        )
 
     try:
         body = await request.json()
         answer = str(body.get("answer", "")).strip().lower()
     except Exception:
-        return JSONResponse({"error": "send JSON: {\"answer\": \"your answer\"}"}, status_code=400)
+        return JSONResponse({"error": 'send JSON: {"answer": "your answer"}'}, status_code=400)
 
     current_idx = session["stage"]
     if current_idx >= len(STAGES):
@@ -213,20 +212,24 @@ async def submit_answer(request: Request) -> Response:
     stage = STAGES[current_idx]
 
     if answer not in stage["accept"]:
-        return JSONResponse({
-            "correct": False,
-            "progress": stage["progress"],
-            "message": "incorrect, try again",
-        })
+        return JSONResponse(
+            {
+                "correct": False,
+                "progress": stage["progress"],
+                "message": "incorrect, try again",
+            }
+        )
 
     session["stage"] = current_idx + 1
 
     if current_idx + 1 >= len(STAGES):
-        return JSONResponse({
-            "correct": True,
-            "message": "challenge complete — all stages passed",
-            "session": sid,
-        })
+        return JSONResponse(
+            {
+                "correct": True,
+                "message": "challenge complete — all stages passed",
+                "session": sid,
+            }
+        )
 
     next_stage = STAGES[current_idx + 1]
     resp: dict = {

@@ -185,7 +185,7 @@ not a breach.
 Same image, its own container, on the egress network only:
 
 ```
-python -m mcp_trentina_crunchtools.bridge.main run
+python -m trentina.bridge.main run
 ```
 
 | variable | meaning |
@@ -193,7 +193,7 @@ python -m mcp_trentina_crunchtools.bridge.main run
 | `BRIDGE_PROFILE` | the gateway profile this bridge serves (required) |
 | `BRIDGE_USER_ID` | upstream Matrix user (required) |
 | `BRIDGE_HOMESERVER` | upstream base URL (default `https://matrix-client.matrix.org`) |
-| `BRIDGE_GATEWAY_URL` | gateway base URL, e.g. `http://mcp-trentina:8019` (required) |
+| `BRIDGE_GATEWAY_URL` | gateway base URL, e.g. `http://trentina:8019` (required) |
 | `BRIDGE_INGRESS_TOKEN` | presented to the gateway; the profile's `ingress_token_env` value (required) |
 | `BRIDGE_TOKEN` | required of the gateway; the profile's `bridge_token_env` value (required) |
 | `BRIDGE_PICKLE_KEY` | encrypts the crypto store at rest (required) |
@@ -228,7 +228,7 @@ needs no password. Stop the agent for good first: two processes driving one
 Olm account diverge immediately.
 
 ```
-python -m mcp_trentina_crunchtools.bridge.main import-mautrix --crypto-db /import/crypto.db
+python -m trentina.bridge.main import-mautrix --crypto-db /import/crypto.db
 ```
 
 Then start the bridge with `BRIDGE_DEVICE_ID` and `BRIDGE_ACCESS_TOKEN` set to
@@ -237,7 +237,7 @@ the agent's.
 ### Pruning the old device
 
 ```
-python -m mcp_trentina_crunchtools.bridge.main logout-device
+python -m trentina.bridge.main logout-device
 ```
 
 With `BRIDGE_OLD_ACCESS_TOKEN` set to the agent's old token, for this run
@@ -251,7 +251,7 @@ A device the bridge logged in fresh is unsigned, and clients show it as
 unverified. An adopted device is usually signed already.
 
 ```
-python -m mcp_trentina_crunchtools.bridge.main sign-device
+python -m trentina.bridge.main sign-device
 ```
 
 With `BRIDGE_RECOVERY_KEY` set to the account's recovery key, for this run
@@ -265,7 +265,7 @@ set up again since, the old key is refused, and if nobody holds the current
 one the self-signing key cannot be read at all. Then:
 
 ```
-python -m mcp_trentina_crunchtools.bridge.main reset-identity
+python -m trentina.bridge.main reset-identity
 ```
 
 It generates new cross-signing keys, stores them in new secret storage, and

@@ -32,24 +32,24 @@ from pydantic import SecretStr
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
-from mcp_trentina_crunchtools import _build_oauth_context, logsafe
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools.errors import FetchError, UnsupportedContentTypeError
-from mcp_trentina_crunchtools.gateway import backend as backend_mod
-from mcp_trentina_crunchtools.gateway import internal
-from mcp_trentina_crunchtools.gateway.app import gateway_app
-from mcp_trentina_crunchtools.gateway.errors import BackendCallError
-from mcp_trentina_crunchtools.gateway.loader import GatewayConfig
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina import _build_oauth_context, logsafe
+from trentina import config as config_mod
+from trentina.errors import FetchError, UnsupportedContentTypeError
+from trentina.gateway import backend as backend_mod
+from trentina.gateway import internal
+from trentina.gateway.app import gateway_app
+from trentina.gateway.errors import BackendCallError
+from trentina.gateway.loader import GatewayConfig
+from trentina.gateway.profile import (
     AuthConfig,
     Backend,
     OAuthConfig,
     ParameterConstraint,
     Profile,
 )
-from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
-from mcp_trentina_crunchtools.tools import cache as cache_tool
-from mcp_trentina_crunchtools.tools import reconnect as reconnect_tool
+from trentina.gateway.router import NAMESPACE_SEP, route_jsonrpc
+from trentina.tools import cache as cache_tool
+from trentina.tools import reconnect as reconnect_tool
 
 from .mode_harness import MALICIOUS, layers
 
@@ -117,7 +117,7 @@ def captured() -> Iterator[_Capture]:
 @pytest.fixture
 def real_server() -> Iterator[None]:
     """The gateway's internal backend bound to the real FastMCP server."""
-    from mcp_trentina_crunchtools.server import mcp
+    from trentina.server import mcp
 
     saved = internal._server
     internal.register_internal_server(mcp)
@@ -135,7 +135,7 @@ def _transport(monkeypatch: pytest.MonkeyPatch, status: int, content_type: str) 
 
     real_client = httpx.AsyncClient
     monkeypatch.setattr(
-        "mcp_trentina_crunchtools.client.httpx.AsyncClient",
+        "trentina.client.httpx.AsyncClient",
         functools.partial(real_client, transport=httpx.MockTransport(handler)),
     )
 
@@ -155,7 +155,7 @@ class TestInternalTools:
     async def test_fetch_that_fails(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, captured: _Capture
     ) -> None:
-        from mcp_trentina_crunchtools.client import fetch_url
+        from trentina.client import fetch_url
 
         _transport(monkeypatch, 404, "text/plain")
         with layers(tmp_path) as fakes:
@@ -165,7 +165,7 @@ class TestInternalTools:
     async def test_fetch_advisory(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, captured: _Capture
     ) -> None:
-        from mcp_trentina_crunchtools.client import fetch_url
+        from trentina.client import fetch_url
 
         _transport(monkeypatch, 415, "text/plain")
         with layers(tmp_path) as fakes:
@@ -190,7 +190,7 @@ class TestInternalTools:
         with (
             layers(tmp_path, classification=MALICIOUS),
             patch(
-                "mcp_trentina_crunchtools.defense.record_detection",
+                "trentina.defense.record_detection",
                 side_effect=RuntimeError(f"sqlite said {CANARY}"),
             ),
         ):
@@ -233,8 +233,8 @@ class TestInternalTools:
 
     async def test_search_provider_failure(self, tmp_path: Path, captured: _Capture) -> None:
         """Nor does the provider's text reach the caller's error (#292)."""
-        from mcp_trentina_crunchtools.errors import QuarantineAgentError
-        from mcp_trentina_crunchtools.outcomes import cause_chain
+        from trentina.errors import QuarantineAgentError
+        from trentina.outcomes import cause_chain
 
         with layers(tmp_path) as fakes:
             fakes.search_grounded.side_effect = QuarantineAgentError(f"upstream said {CANARY}")
@@ -296,7 +296,7 @@ class TestProxiedTools:
         self, env: Path, captured: _Capture
     ) -> None:
         """The destination is recorded (#266); the canary in it is never logged."""
-        from mcp_trentina_crunchtools import database
+        from trentina import database
 
         profile = _profile()
         profile.backends["mcp-slack"] = Backend(
@@ -392,7 +392,7 @@ class TestProxies:
     async def test_matrix_unparseable_response_and_failed_fallback(
         self, captured: _Capture
     ) -> None:
-        from mcp_trentina_crunchtools.gateway import matrix_proxy
+        from trentina.gateway import matrix_proxy
 
         from .test_matrix_proxy import _matrix_profile
 
@@ -409,12 +409,10 @@ class TestProxies:
         assert any("fallback scan failed" in r.getMessage() for r in captured.records)
 
     async def test_llm_post_hoc_scan_failure(self, captured: _Capture) -> None:
-        from mcp_trentina_crunchtools.gateway import llm_proxy
+        from trentina.gateway import llm_proxy
 
         completion = f"completion {CANARY}".encode()
-        with patch(
-            "mcp_trentina_crunchtools.defense.defend", side_effect=RuntimeError(f"said {CANARY}")
-        ):
+        with patch("trentina.defense.defend", side_effect=RuntimeError(f"said {CANARY}")):
             llm_proxy._schedule_completion_scan(
                 completion, len(completion), "openrouter", _profile()
             )
@@ -446,7 +444,7 @@ class TestReloadRefusal:
     @pytest.fixture
     def live_profiles(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
         """test_reload's running gateway: profiles on disk, loaded and live."""
-        from mcp_trentina_crunchtools.gateway.loader import (
+        from trentina.gateway.loader import (
             load_profiles,
             register_active_config,
             reset_active_config,
@@ -466,7 +464,7 @@ class TestReloadRefusal:
     async def test_refused_file(
         self, live_profiles: Path, captured: _Capture, operator: bool
     ) -> None:
-        from mcp_trentina_crunchtools.tools.reload import AGENT_RELOAD_REFUSED
+        from trentina.tools.reload import AGENT_RELOAD_REFUSED
 
         from .test_reload import BASE_YAML, _reload_as
 
@@ -496,7 +494,7 @@ class TestReloadRefusal:
 class TestOAuthStore:
     async def test_cimd_client_id_and_store_error(self, captured: _Capture) -> None:
         """Under CIMD the client_id is a URL the client chose."""
-        from mcp_trentina_crunchtools.gateway.oauth_store import (
+        from trentina.gateway.oauth_store import (
             mark_provisional,
             promote_registration,
         )
@@ -698,7 +696,7 @@ class TestHttpEdge:
 
 # ------------------------------------------------------------ static rule
 
-_SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "mcp_trentina_crunchtools"
+_SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "trentina"
 _LEVELS = {"debug", "info", "warning", "error", "exception", "critical", "log"}
 #: Names that hold an exception or a gathered outcome by this codebase's habit.
 _RAW = {"exc", "e", "err", "error", "outcome"}

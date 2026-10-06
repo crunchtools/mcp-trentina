@@ -14,9 +14,9 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, DefenseConfig, Profile
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-from mcp_trentina_crunchtools.reserved import (
+from trentina.gateway.profile import AuthConfig, Backend, DefenseConfig, Profile
+from trentina.quarantine.classifier import ClassifierResult
+from trentina.reserved import (
     RESERVED_PREFIX,
     STRIPPED_FIELD,
     WARNING_KEY,
@@ -28,7 +28,7 @@ from mcp_trentina_crunchtools.reserved import (
 )
 
 FORGED = {"risk_level": "low"}
-_DEFENSE = "mcp_trentina_crunchtools.defense"
+_DEFENSE = "trentina.defense"
 
 
 def _mentions_forgery(value: Any) -> bool:
@@ -137,7 +137,7 @@ def _call(structured: Any = None, text: str = "hello") -> Any:
 class TestBackendResponse:
     @pytest.fixture
     def router(self, monkeypatch: pytest.MonkeyPatch) -> Any:
-        from mcp_trentina_crunchtools.gateway import router
+        from trentina.gateway import router
 
         self.scanned: dict[str, Any] = {}
         self.decision = _Decision()
@@ -151,7 +151,7 @@ class TestBackendResponse:
         return router
 
     async def _deliver(self, router: Any, call: Any, **kwargs: Any) -> dict[str, Any]:
-        from mcp_trentina_crunchtools.modes import Mode
+        from trentina.modes import Mode
 
         profile = _profile()
         result: dict[str, Any] = await router._deliver(
@@ -233,7 +233,7 @@ class TestAlertIngress:
         return SimpleNamespace(name="alpha", defense=DefenseConfig())
 
     async def _forward(self, body: dict[str, Any], score: ClassifierResult) -> dict[str, Any]:
-        from mcp_trentina_crunchtools.gateway.alert_ingress import _defend_alert
+        from trentina.gateway.alert_ingress import _defend_alert
 
         with (
             patch(f"{_DEFENSE}.classify_async", return_value=score),

@@ -22,7 +22,7 @@ rules:
     languages: [python]
     metadata:
       obligation: O5 LIVENESS
-      references: ["https://github.com/crunchtools/mcp-trentina/issues/90"]
+      references: ["https://github.com/crunchtools/trentina/issues/90"]
     patterns:
       - pattern: classify(...)
       - pattern-inside: |
@@ -96,7 +96,7 @@ rules:
       obligation: O6 EGRESS
     paths:
       exclude:
-        - "**/mcp_trentina_crunchtools/egress.py"
+        - "**/trentina/egress.py"
     pattern-either:
       - pattern: httpx.AsyncClient(...)
       - pattern: httpx.Client(...)
@@ -114,8 +114,8 @@ rules:
       obligation: O8 LOG-HYGIENE
     paths:
       include:
-        - "**/mcp_trentina_crunchtools/gateway/**"
-        - "**/mcp_trentina_crunchtools/tools/**"
+        - "**/trentina/gateway/**"
+        - "**/trentina/tools/**"
         - "**/.semgrep/tests/**"
     patterns:
       - pattern-either:
@@ -181,7 +181,7 @@ rules:
       obligation: O3 AUDIT-EVERY-EXIT
     paths:
       include:
-        - "**/mcp_trentina_crunchtools/gateway/router.py"
+        - "**/trentina/gateway/router.py"
         - "**/.semgrep/tests/**"
     patterns:
       - pattern-inside: |

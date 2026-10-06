@@ -11,12 +11,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.dbus_interface import (
+from trentina.dbus_interface import (
     emit_detection_event,
     emit_request_event,
 )
-from mcp_trentina_crunchtools.events import reset_event_bus
-from mcp_trentina_crunchtools.report import Disposition
+from trentina.events import reset_event_bus
+from trentina.report import Disposition
 
 
 class TestEmitRequestEvent:
@@ -26,7 +26,7 @@ class TestEmitRequestEvent:
         reset_event_bus()
 
     def test_emits_request_processed(self) -> None:
-        from mcp_trentina_crunchtools.events import get_event_bus
+        from trentina.events import get_event_bus
 
         bus = get_event_bus()
         received: list[dict] = []
@@ -57,7 +57,7 @@ class TestEmitRequestEvent:
         assert received[0]["output_size"] == 3000
 
     def test_duration_calculated_from_start_time(self) -> None:
-        from mcp_trentina_crunchtools.events import get_event_bus
+        from trentina.events import get_event_bus
 
         bus = get_event_bus()
         received: list[dict] = []
@@ -91,7 +91,7 @@ class TestEmitDetectionEvent:
         reset_event_bus()
 
     def test_emits_detection_occurred(self) -> None:
-        from mcp_trentina_crunchtools.events import get_event_bus
+        from trentina.events import get_event_bus
 
         bus = get_event_bus()
         received: list[dict] = []
@@ -123,13 +123,13 @@ class TestDbusInterfaceMethods:
                 "dbus_fast.aio": MagicMock(),
             },
         ):
-            from mcp_trentina_crunchtools.dbus_interface import _build_interface
+            from trentina.dbus_interface import _build_interface
 
             interface = _build_interface()
             assert interface is not None
 
     def test_on_request_processed_callback(self) -> None:
-        from mcp_trentina_crunchtools.events import get_event_bus
+        from trentina.events import get_event_bus
 
         reset_event_bus()
         bus = get_event_bus()
@@ -160,7 +160,7 @@ class TestGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_start_dbus_without_dbus_fast(self) -> None:
-        import mcp_trentina_crunchtools.dbus_interface as dbi
+        import trentina.dbus_interface as dbi
 
         dbi._dbus_started = False
 
@@ -171,7 +171,7 @@ class TestGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_start_dbus_connection_failure(self) -> None:
-        import mcp_trentina_crunchtools.dbus_interface as dbi
+        import trentina.dbus_interface as dbi
 
         dbi._dbus_started = False
 
@@ -202,7 +202,7 @@ class TestEventDataShapes:
         reset_event_bus()
 
     def test_request_event_fields(self) -> None:
-        from mcp_trentina_crunchtools.events import get_event_bus
+        from trentina.events import get_event_bus
 
         bus = get_event_bus()
         events_captured: list[dict] = []
@@ -240,7 +240,7 @@ class TestEventDataShapes:
         assert expected_keys.issubset(set(d.keys()))
 
     def test_detection_event_fields(self) -> None:
-        from mcp_trentina_crunchtools.events import get_event_bus
+        from trentina.events import get_event_bus
 
         bus = get_event_bus()
         events_captured: list[dict] = []
@@ -260,7 +260,7 @@ class TestEventDataShapes:
 
 
 def test_l3_status_follows_the_provider_not_the_gemini_key() -> None:
-    from mcp_trentina_crunchtools.dbus_interface import l3_status
+    from trentina.dbus_interface import l3_status
 
     config = MagicMock(has_llm=True, has_api_key=False, provider="openrouter", model="m")
 
@@ -274,7 +274,7 @@ class TestBusView:
     """Nothing a caller wrote crosses the system bus (#298)."""
 
     def test_source_is_a_fingerprint(self) -> None:
-        from mcp_trentina_crunchtools.dbus_interface import bus_view
+        from trentina.dbus_interface import bus_view
 
         view = bus_view({"source": "https://secret.example/token=abc", "tool": "block_fetch"})
         assert view["source"].startswith("sha256:")
@@ -282,7 +282,7 @@ class TestBusView:
         assert view["tool"] == "block_fetch"
 
     def test_l3_prose_is_reduced_to_finding_types(self) -> None:
-        from mcp_trentina_crunchtools.dbus_interface import bus_view
+        from trentina.dbus_interface import bus_view
 
         view = bus_view(
             {
@@ -301,7 +301,7 @@ class TestBusView:
 
     def test_recent_events_are_viewed(self) -> None:
         """GetRecentEvents' body, called through the real dbus-fast interface."""
-        from mcp_trentina_crunchtools.dbus_interface import _build_interface
+        from trentina.dbus_interface import _build_interface
 
         reset_event_bus()
         emit_detection_event("L3", "/home/alice/secret.txt", "high", {"summary": "CANARY"})
@@ -317,7 +317,7 @@ class TestStartedOnTheServingLoop:
 
     def test_main_only_requests_it(self) -> None:
 
-        import mcp_trentina_crunchtools as pkg
+        import trentina as pkg
 
         src = inspect.getsource(pkg.main)
         assert "new_event_loop" not in src
@@ -326,8 +326,8 @@ class TestStartedOnTheServingLoop:
     @pytest.mark.asyncio
     async def test_the_lifespan_starts_it_on_the_running_loop(self) -> None:
 
-        import mcp_trentina_crunchtools.dbus_interface as dbi
-        from mcp_trentina_crunchtools import server
+        import trentina.dbus_interface as dbi
+        from trentina import server
 
         loops: list[asyncio.AbstractEventLoop] = []
 
@@ -345,7 +345,7 @@ class TestStartedOnTheServingLoop:
     @pytest.mark.asyncio
     async def test_signals_hop_onto_the_bus_loop(self) -> None:
         """A worker thread's event is signalled from the bus's loop, viewed."""
-        from mcp_trentina_crunchtools.dbus_interface import _build_interface
+        from trentina.dbus_interface import _build_interface
 
         interface = _build_interface(asyncio.get_running_loop())
         sent: list[tuple[str, int]] = []

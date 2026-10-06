@@ -1,7 +1,7 @@
 # Fixture for trentina-except-returns-benign.
 import logging
 
-from mcp_trentina_crunchtools.errors import BlockedSourceError
+from trentina.errors import BlockedSourceError
 
 log = logging.getLogger(__name__)
 BENIGN = object()

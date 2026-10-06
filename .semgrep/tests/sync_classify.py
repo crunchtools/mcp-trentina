@@ -1,7 +1,7 @@
 # Fixture for trentina-sync-classify-in-async.
 import asyncio
 
-from mcp_trentina_crunchtools.quarantine.classifier import classify, classify_async
+from trentina.quarantine.classifier import classify, classify_async
 
 
 async def scan_response(text):

@@ -24,8 +24,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_trentina_crunchtools.l1 import pipeline as l1_pipeline
-from mcp_trentina_crunchtools.modes import Mode
+from trentina.l1 import pipeline as l1_pipeline
+from trentina.modes import Mode
 
 from .mode_harness import FAMILIES, MODES, call, layers
 
@@ -38,8 +38,8 @@ async def test_every_cell_runs_every_layer(env: Path, family: str, mode: Mode) -
     with (
         layers(env) as fakes,
         patch.object(l1_pipeline, "run_l1", side_effect=real_run_l1) as l1,
-        patch("mcp_trentina_crunchtools.defense.run_l1", l1),
-        patch("mcp_trentina_crunchtools.tools.dir.run_l1", l1),
+        patch("trentina.defense.run_l1", l1),
+        patch("trentina.tools.dir.run_l1", l1),
     ):
         result = await call(family, mode, fakes)
 
@@ -75,7 +75,7 @@ async def test_block_and_flag_deliver_the_same_bytes(env: Path, family: str) -> 
 @pytest.mark.parametrize("family", FAMILIES)
 async def test_l3_detect_is_briefed_with_l1_and_l2(env: Path, family: str) -> None:
     """D1, on every path: L3 hears L2's score and the caveat about L2."""
-    from mcp_trentina_crunchtools.quarantine.prompts import L2_BLINDSPOT_CAVEAT
+    from trentina.quarantine.prompts import L2_BLINDSPOT_CAVEAT
 
     with layers(env) as fakes:
         await call(family, Mode.FLAG, fakes)

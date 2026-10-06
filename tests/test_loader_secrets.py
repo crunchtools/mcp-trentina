@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-from mcp_trentina_crunchtools.gateway.loader import (
+from trentina.gateway.errors import ProfileConfigError
+from trentina.gateway.loader import (
     _expand_env_refs,
     _require_env,
     load_profiles,
@@ -225,7 +225,7 @@ class TestBackendUrlSecrets:
             load_profiles(cfg)
 
     def test_safe_url_drops_path_query_and_userinfo(self) -> None:
-        from mcp_trentina_crunchtools.logsafe import safe_url
+        from trentina.logsafe import safe_url
 
         assert safe_url("http://u:zqx7canary@h:5000/api/mcp/zqx7canary?t=zqx7canary") == (
             "http://h:5000"
@@ -235,8 +235,8 @@ class TestBackendUrlSecrets:
     def test_circuit_and_cache_logs_carry_no_url_secret(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        from mcp_trentina_crunchtools.gateway import backend
-        from mcp_trentina_crunchtools.gateway.circuit import CircuitBreaker
+        from trentina.gateway import backend
+        from trentina.gateway.circuit import CircuitBreaker
 
         url = "http://h:5000/api/mcp/zqx7canary"
         caplog.set_level(logging.DEBUG)
@@ -284,7 +284,7 @@ class TestBackendUrlSecrets:
             load_profiles(cfg)
 
     def test_safe_url_on_a_malformed_port_is_a_fingerprint(self) -> None:
-        from mcp_trentina_crunchtools.logsafe import safe_url
+        from trentina.logsafe import safe_url
 
         out = safe_url("http://h:zqx7canary/x")
         assert "zqx7canary" not in out

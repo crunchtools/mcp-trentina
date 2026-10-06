@@ -16,10 +16,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from mcp_trentina_crunchtools.errors import BlockedSourceError
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
-from mcp_trentina_crunchtools.quarantine.classifier import classify_async, count_tokens, head
+from trentina.errors import BlockedSourceError
+from trentina.modes import Mode
+from trentina.quarantine.agent import quarantine_detect
+from trentina.quarantine.classifier import classify_async, count_tokens, head
 
 
 async def judge_oversize(content: str, *, source: str, mode: Mode, cap: int) -> dict[str, Any]:

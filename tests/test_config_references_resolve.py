@@ -61,7 +61,7 @@ def _patch_targets() -> list[tuple[Path, int, str]]:
             if (
                 isinstance(first, ast.Constant)
                 and isinstance(first.value, str)
-                and first.value.startswith("mcp_trentina_crunchtools.")
+                and first.value.startswith("trentina.")
             ):
                 out.append((path, node.lineno, first.value))
     return out

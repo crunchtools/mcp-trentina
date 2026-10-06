@@ -11,21 +11,21 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools.database import get_gateway_call_stats
-from mcp_trentina_crunchtools.gateway.backend import BackendCall
-from mcp_trentina_crunchtools.gateway.circuit import breaker
-from mcp_trentina_crunchtools.gateway.context import (
+from trentina.database import get_gateway_call_stats
+from trentina.gateway.backend import BackendCall
+from trentina.gateway.circuit import breaker
+from trentina.gateway.context import (
     get_current_profile,
     profile_context,
 )
-from mcp_trentina_crunchtools.gateway.errors import BackendCallError
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.gateway.errors import BackendCallError
+from trentina.gateway.profile import (
     AuthConfig,
     Backend,
     ParameterConstraint,
     Profile,
 )
-from mcp_trentina_crunchtools.gateway.router import (
+from trentina.gateway.router import (
     NAMESPACE_SEP,
     PROTOCOL_VERSION,
     _profile_tools_cache,
@@ -78,7 +78,7 @@ class TestRouter:
         resp = await route_jsonrpc(_profile(), {"jsonrpc": "2.0", "id": 1, "method": "initialize"})
         assert resp["id"] == 1
         assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
-        assert resp["result"]["serverInfo"]["name"] == "mcp-trentina-gateway:testp"
+        assert resp["result"]["serverInfo"]["name"] == "trentina-gateway:testp"
         assert "tools" in resp["result"]["capabilities"]
 
     async def test_ping_returns_empty_result(self) -> None:
@@ -102,7 +102,7 @@ class TestRouter:
             return [{"name": "jira_search", "description": "", "inputSchema": {}}]
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            "trentina.gateway.router.list_backend_tools",
             side_effect=fake_list,
         ):
             resp = await route_jsonrpc(
@@ -122,7 +122,7 @@ class TestRouter:
             return [{"name": "jira_search", "description": "", "inputSchema": {}}]
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            "trentina.gateway.router.list_backend_tools",
             side_effect=fake_list,
         ):
             resp = await route_jsonrpc(
@@ -150,7 +150,7 @@ class TestRouter:
             )
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+            "trentina.gateway.router.call_backend_tool",
             side_effect=fake_call,
         ):
             resp = await route_jsonrpc(
@@ -217,11 +217,11 @@ class TestRouter:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+                "trentina.gateway.router.list_backend_tools",
                 side_effect=fake_list,
             ),
             patch(
-                "mcp_trentina_crunchtools.gateway.router.list_internal_tools",
+                "trentina.gateway.router.list_internal_tools",
                 side_effect=fake_internal_list,
             ),
         ):
@@ -256,11 +256,11 @@ class TestRouter:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.router.call_internal_tool",
+                "trentina.gateway.router.call_internal_tool",
                 side_effect=fake_internal_call,
             ),
             patch(
-                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                "trentina.gateway.router.call_backend_tool",
                 side_effect=fail_http,
             ),
         ):
@@ -301,7 +301,7 @@ class TestRouter:
 
     async def test_tools_call_records_audit_on_success(self, tmp_path: Any) -> None:
         """Successful tools/call writes an audit row to gateway_calls."""
-        import mcp_trentina_crunchtools.database as db_mod
+        import trentina.database as db_mod
 
         db_mod._db = None
         db_path = str(tmp_path / "audit_test.db")
@@ -321,10 +321,10 @@ class TestRouter:
         tool_name = f"mcp-slack{NAMESPACE_SEP}slack_list_channels"
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                "trentina.gateway.router.call_backend_tool",
                 side_effect=fake_call,
             ),
-            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+            patch("trentina.database.get_config") as mock_cfg,
         ):
             mock_cfg.return_value.db_path = db_path
             mock_cfg.return_value.ensure_db_dir = lambda: None
@@ -348,7 +348,7 @@ class TestRouter:
 
     async def test_tools_call_records_audit_on_failure(self, tmp_path: Any) -> None:
         """Failed tools/call writes an audit row with error_message."""
-        import mcp_trentina_crunchtools.database as db_mod
+        import trentina.database as db_mod
 
         db_mod._db = None
         db_path = str(tmp_path / "audit_fail_test.db")
@@ -364,10 +364,10 @@ class TestRouter:
         tool_name = f"mcp-slack{NAMESPACE_SEP}slack_list_channels"
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                "trentina.gateway.router.call_backend_tool",
                 side_effect=fail_call,
             ),
-            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+            patch("trentina.database.get_config") as mock_cfg,
         ):
             mock_cfg.return_value.db_path = db_path
             mock_cfg.return_value.ensure_db_dir = lambda: None
@@ -395,10 +395,10 @@ class TestRouter:
         outside its allowlist was invisible — the exact signal you want for
         spotting a misbehaving or hijacked consumer.
         """
-        import mcp_trentina_crunchtools.database as db_mod
+        import trentina.database as db_mod
 
         db_mod._db = None
-        with patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg:
+        with patch("trentina.database.get_config") as mock_cfg:
             mock_cfg.return_value.db_path = str(tmp_path / "denied_allow.db")
             mock_cfg.return_value.ensure_db_dir = lambda: None
             resp = await route_jsonrpc(
@@ -426,7 +426,7 @@ class TestRouter:
 
     async def test_denied_guard_is_audited(self, tmp_path: Any) -> None:
         """A parameter-guard rejection must leave an audit row."""
-        import mcp_trentina_crunchtools.database as db_mod
+        import trentina.database as db_mod
 
         db_mod._db = None
         p = Profile(
@@ -447,7 +447,7 @@ class TestRouter:
         )
         p.auth.bearer_token = SecretStr("x")
 
-        with patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg:
+        with patch("trentina.database.get_config") as mock_cfg:
             mock_cfg.return_value.db_path = str(tmp_path / "denied_guard.db")
             mock_cfg.return_value.ensure_db_dir = lambda: None
             await route_jsonrpc(
@@ -476,7 +476,7 @@ class TestRouter:
         Reduction can paraphrase a literal out of existence, so the guard reads
         the RAW payload and nothing downstream runs once it fires.
         """
-        import mcp_trentina_crunchtools.database as db_mod
+        import trentina.database as db_mod
 
         db_mod._db = None
         secret = "NIGHTJAR ships on a date nobody outside may read"
@@ -513,12 +513,12 @@ class TestRouter:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                "trentina.gateway.router.call_backend_tool",
                 side_effect=memory_call,
             ),
-            patch("mcp_trentina_crunchtools.gateway.router.transform_response") as mock_transform,
-            patch("mcp_trentina_crunchtools.gateway.router.scan_tool_response") as mock_scan,
-            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+            patch("trentina.gateway.router.transform_response") as mock_transform,
+            patch("trentina.gateway.router.scan_tool_response") as mock_scan,
+            patch("trentina.database.get_config") as mock_cfg,
         ):
             mock_cfg.return_value.db_path = str(tmp_path / "denied_response.db")
             mock_cfg.return_value.ensure_db_dir = lambda: None
@@ -580,7 +580,7 @@ class TestRouter:
         p.auth.bearer_token = SecretStr("x")
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+            "trentina.gateway.router.call_backend_tool",
             side_effect=memory_call,
         ):
             resp = await route_jsonrpc(
@@ -601,7 +601,7 @@ class TestRouter:
 
     async def test_backend_reported_error_is_not_counted_as_ok(self, tmp_path: Any) -> None:
         """isError=True previously audited as a success, inflating the ok column."""
-        import mcp_trentina_crunchtools.database as db_mod
+        import trentina.database as db_mod
 
         db_mod._db = None
 
@@ -619,10 +619,10 @@ class TestRouter:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                "trentina.gateway.router.call_backend_tool",
                 side_effect=error_call,
             ),
-            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+            patch("trentina.database.get_config") as mock_cfg,
         ):
             mock_cfg.return_value.db_path = str(tmp_path / "tool_error.db")
             mock_cfg.return_value.ensure_db_dir = lambda: None
@@ -714,7 +714,7 @@ class TestRouter:
         )
         p.auth.bearer_token = SecretStr("x")
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+            "trentina.gateway.router.call_backend_tool",
             side_effect=fake_call,
         ):
             resp = await route_jsonrpc(
@@ -752,7 +752,7 @@ class TestRouter:
             return [{"name": f"{backend_name}_tool", "description": "", "inputSchema": {}}]
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            "trentina.gateway.router.list_backend_tools",
             side_effect=slow_list,
         ):
             resp = await route_jsonrpc(
@@ -792,7 +792,7 @@ class TestRouter:
             return _FakeToolsResult()
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.backend._do_list_tools",
+            "trentina.gateway.backend._do_list_tools",
             side_effect=fake_transport,
         ):
             resp = await route_jsonrpc(
@@ -842,7 +842,7 @@ class TestProfileToolsCache:
             return [{"name": "tool_a", "description": "", "inputSchema": {}}]
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            "trentina.gateway.router.list_backend_tools",
             side_effect=counting_list,
         ):
             await route_jsonrpc(
@@ -878,7 +878,7 @@ class TestProfileToolsCache:
         p2.auth.bearer_token = SecretStr("x")
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            "trentina.gateway.router.list_backend_tools",
             side_effect=fake_list,
         ):
             await route_jsonrpc(
@@ -911,7 +911,7 @@ class TestProfileToolsCache:
             return [{"name": f"{backend_name}_tool", "description": "", "inputSchema": {}}]
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            "trentina.gateway.router.list_backend_tools",
             side_effect=flaky_list,
         ):
             resp1 = await route_jsonrpc(
@@ -953,7 +953,7 @@ class TestProfileToolsCache:
             return [{"name": f"{backend_name}_tool", "description": "", "inputSchema": {}}]
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            "trentina.gateway.router.list_backend_tools",
             side_effect=slow_list,
         ):
             calls = [
@@ -1019,7 +1019,7 @@ class TestProfileContext:
             )
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.call_internal_tool",
+            "trentina.gateway.router.call_internal_tool",
             side_effect=fake_internal_call,
         ):
             await route_jsonrpc(
@@ -1050,7 +1050,7 @@ class TestOneAuditRowPerCall:
     async def _call(
         tmp_path: Any, decision: Any, content: list[dict[str, Any]], scan: Any = None
     ) -> tuple[dict[str, Any], Any]:
-        import mcp_trentina_crunchtools.database as db_mod
+        import trentina.database as db_mod
 
         db_mod._db = None
 
@@ -1062,14 +1062,14 @@ class TestOneAuditRowPerCall:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                "trentina.gateway.router.call_backend_tool",
                 side_effect=fake_call,
             ),
             patch(
-                "mcp_trentina_crunchtools.gateway.router.scan_tool_response",
+                "trentina.gateway.router.scan_tool_response",
                 side_effect=scan or fake_scan,
             ),
-            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+            patch("trentina.database.get_config") as mock_cfg,
         ):
             mock_cfg.return_value.db_path = str(tmp_path / "one_row.db")
             mock_cfg.return_value.ensure_db_dir = lambda: None
@@ -1117,7 +1117,7 @@ class TestOneAuditRowPerCall:
         assert "risk=high" in rows[0]["error_message"]
 
     async def test_a_delivered_response_carries_both_sizes(self, tmp_path: Any) -> None:
-        from mcp_trentina_crunchtools.gateway.surface import wire_bytes
+        from trentina.gateway.surface import wire_bytes
 
         decision = SimpleNamespace(blocked=False, warning=None, refusal=None, extraction=None)
         content = [{"type": "text", "text": "x" * 500}]
@@ -1131,8 +1131,8 @@ class TestOneAuditRowPerCall:
 
     async def test_an_internal_tool_has_no_arrived_size(self, tmp_path: Any) -> None:
         """It minified inside itself: what reached the router is already delivered."""
-        import mcp_trentina_crunchtools.database as db_mod
-        from mcp_trentina_crunchtools.gateway.surface import wire_bytes
+        import trentina.database as db_mod
+        from trentina.gateway.surface import wire_bytes
 
         db_mod._db = None
 
@@ -1145,10 +1145,10 @@ class TestOneAuditRowPerCall:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.router.call_internal_tool",
+                "trentina.gateway.router.call_internal_tool",
                 side_effect=fake_internal,
             ),
-            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+            patch("trentina.database.get_config") as mock_cfg,
         ):
             mock_cfg.return_value.db_path = str(tmp_path / "internal.db")
             mock_cfg.return_value.ensure_db_dir = lambda: None
@@ -1196,13 +1196,13 @@ class TestSurfaceRecording:
             return [{"name": "jira_search", "description": "d" * 50, "inputSchema": {}}]
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.list_backend_tools",
+            "trentina.gateway.router.list_backend_tools",
             side_effect=fake_list,
         ):
             return await route_jsonrpc(profile, {"jsonrpc": "2.0", "id": 5, "method": "tools/list"})
 
     async def test_stages_match_the_list_served(self) -> None:
-        from mcp_trentina_crunchtools.gateway.surface import surface_report, wire_bytes
+        from trentina.gateway.surface import surface_report, wire_bytes
 
         resp = await self._list(_profile())
         report = surface_report("testp")
@@ -1215,8 +1215,8 @@ class TestSurfaceRecording:
         assert report["by_backend"]["mcp-slack"]["allowed"]["tools"] == 1
 
     async def test_invalidation_drops_the_surface(self) -> None:
-        from mcp_trentina_crunchtools.gateway.router import invalidate_profile_cache
-        from mcp_trentina_crunchtools.gateway.surface import surface_report
+        from trentina.gateway.router import invalidate_profile_cache
+        from trentina.gateway.surface import surface_report
 
         await self._list(_profile())
         invalidate_profile_cache("testp")
@@ -1277,8 +1277,8 @@ class TestArgumentHygiene:
         warning: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any] | None, Any]:
         """(response, arguments the backend saw or None, the audit row)."""
-        import mcp_trentina_crunchtools.database as db_mod
-        from mcp_trentina_crunchtools.gateway.backend import _tool_list_cache
+        import trentina.database as db_mod
+        from trentina.gateway.backend import _tool_list_cache
 
         db_mod._db = None
         backend = backend or Backend(url="http://luna:8000/mcp", tools_allow=["*"])
@@ -1311,14 +1311,14 @@ class TestArgumentHygiene:
         try:
             with (
                 patch(
-                    "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+                    "trentina.gateway.router.call_backend_tool",
                     side_effect=fake_call,
                 ),
                 patch(
-                    "mcp_trentina_crunchtools.gateway.router.scan_tool_response",
+                    "trentina.gateway.router.scan_tool_response",
                     side_effect=fake_scan,
                 ),
-                patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+                patch("trentina.database.get_config") as mock_cfg,
             ):
                 mock_cfg.return_value.db_path = str(tmp_path / "hygiene.db")
                 mock_cfg.return_value.ensure_db_dir = lambda: None

@@ -13,16 +13,16 @@ from pathlib import Path
 
 import pytest
 
-from mcp_trentina_crunchtools.database import record_detection, record_gateway_call
-from mcp_trentina_crunchtools.gateway import compress
-from mcp_trentina_crunchtools.gateway.compress import set_profiles
-from mcp_trentina_crunchtools.gateway.context import profile_context
-from mcp_trentina_crunchtools.gateway.loader import (
+from trentina.database import record_detection, record_gateway_call
+from trentina.gateway import compress
+from trentina.gateway.compress import set_profiles
+from trentina.gateway.context import profile_context
+from trentina.gateway.loader import (
     load_profiles,
     register_active_config,
 )
-from mcp_trentina_crunchtools.outcomes import Outcome
-from mcp_trentina_crunchtools.tools.stats import get_trentina_stats
+from trentina.outcomes import Outcome
+from trentina.tools.stats import get_trentina_stats
 
 pytestmark = pytest.mark.asyncio
 
@@ -148,7 +148,7 @@ class TestUnknownCaller:
 class TestSurface:
     @pytest.fixture
     def surfaces(self, gateway: dict) -> Iterator[dict]:
-        from mcp_trentina_crunchtools.gateway import surface as s
+        from trentina.gateway import surface as s
 
         def one(offered: int, allowed: int, shaped: int) -> s.BackendSurface:
             return s.BackendSurface(s.Stage(10, offered), s.Stage(4, allowed), s.Stage(4, shaped))

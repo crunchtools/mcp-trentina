@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.preprocess import Cost, PreProcessContext, PreProcessResult
-from mcp_trentina_crunchtools.preprocess.detect import (
+from trentina.preprocess import Cost, PreProcessContext, PreProcessResult
+from trentina.preprocess.detect import (
     DetectProcessor,
     Format,
     detect,
@@ -110,7 +110,7 @@ class TestChains:
     async def test_a_broken_inner_processor_declines_the_whole_result(self) -> None:
         broken = PreProcessResult.declined("html", Cost.FREE, PAGE, reason="worker_error")
         with patch(
-            "mcp_trentina_crunchtools.preprocess.html.HtmlProcessor.run",
+            "trentina.preprocess.html.HtmlProcessor.run",
             AsyncMock(return_value=broken),
         ):
             result = await _run(PAGE, "text/html")

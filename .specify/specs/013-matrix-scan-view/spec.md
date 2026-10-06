@@ -160,10 +160,10 @@ proposed here.
 ## Module changes
 
 ### New files
-- `src/mcp_trentina_crunchtools/scanview/{base,shapes,walk,full,generic}.py`
-- `src/mcp_trentina_crunchtools/gateway/scanview.py` — registry, channel lock
-- `src/mcp_trentina_crunchtools/gateway/warning.py` — shared annotation builder
-- `src/mcp_trentina_crunchtools/matrix/{recovery_key,megolm,keybackup}.py` (phase 3)
+- `src/trentina/scanview/{base,shapes,walk,full,generic}.py`
+- `src/trentina/gateway/scanview.py` — registry, channel lock
+- `src/trentina/gateway/warning.py` — shared annotation builder
+- `src/trentina/matrix/{recovery_key,megolm,keybackup}.py` (phase 3)
 
 ### Modified
 - `gateway/profile.py` — `ScanViewName`, `ScanViewConfig`, `SCAN_VIEW_AGENT_FIELDS`

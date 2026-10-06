@@ -13,10 +13,10 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools import _build_oauth_context, logsafe
-from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-from mcp_trentina_crunchtools.gateway.loader import GatewayConfig
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina import _build_oauth_context, logsafe
+from trentina.gateway.errors import ProfileConfigError
+from trentina.gateway.loader import GatewayConfig
+from trentina.gateway.profile import (
     AuthConfig,
     OAuthConfig,
     Profile,
@@ -280,7 +280,7 @@ class TestStartupLogsCarryNoSecrets:
         marker (#341), which is what ``_assert_no_secret`` refuses."""
         logsafe.hold(self.UPSTREAM_SECRET, "TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET")
         with caplog.at_level("DEBUG"):
-            logging.getLogger("mcp_trentina_crunchtools").info("canary %s", self.UPSTREAM_SECRET)
+            logging.getLogger("trentina").info("canary %s", self.UPSTREAM_SECRET)
         assert self.UPSTREAM_SECRET not in caplog.text
         assert "[REDACTED:TRENTINA_OAUTH_GOOGLE_CLIENT_SECRET]" in caplog.text
         with pytest.raises(AssertionError):

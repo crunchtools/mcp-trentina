@@ -24,17 +24,17 @@ from Crypto.Signature import eddsa
 from nio.crypto.sessions import OlmAccount
 from nio.store import SqliteStore
 
-from mcp_trentina_crunchtools.bridge import crosssign
-from mcp_trentina_crunchtools.bridge import main as main_mod
-from mcp_trentina_crunchtools.bridge.crosssign import (
+from trentina.bridge import crosssign
+from trentina.bridge import main as main_mod
+from trentina.bridge.crosssign import (
     CrossSignError,
     _hkdf,
     canonical_json,
     reset_identity,
     sign_own_device,
 )
-from mcp_trentina_crunchtools.bridge.settings import BridgeSettings
-from mcp_trentina_crunchtools.matrix.recovery_key import (
+from trentina.bridge.settings import BridgeSettings
+from trentina.matrix.recovery_key import (
     PREFIX,
     RecoveryKeyError,
     decode_recovery_key,
@@ -334,7 +334,7 @@ def _settings(tmp_path: Path) -> BridgeSettings:
         user_id=USER,
         store_dir=tmp_path,
         pickle_key="pk",
-        gateway_url="http://mcp-trentina:8019",
+        gateway_url="http://trentina:8019",
         ingress_token="i",
         bridge_token="b",
         listen_host="127.0.0.1",

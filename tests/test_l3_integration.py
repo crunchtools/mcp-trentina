@@ -21,9 +21,9 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools.l1.pipeline import run_l1
-from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
 from tests.adversarial_corpus import CORPUS, Case
+from trentina.l1.pipeline import run_l1
+from trentina.quarantine.agent import quarantine_detect
 
 _DETECTOR_META_CASES = [c for c in CORPUS if c.category == "detector_meta"]
 
@@ -360,8 +360,8 @@ class TestL3UniqueCatches:
     async def test_l3_catches(self, payload: str) -> None:
         """Verify Q-Agent detects the injection via semantic reasoning."""
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("mcp_trentina_crunchtools.quarantine.providers.get_config") as mock_prov_config,
+            patch("trentina.quarantine.agent.get_config") as mock_config,
+            patch("trentina.quarantine.providers.get_config") as mock_prov_config,
             patch(
                 "httpx.AsyncClient.post",
                 new_callable=AsyncMock,
@@ -392,8 +392,8 @@ class TestL3BenignNoFalsePositives:
     async def test_benign_not_flagged(self, content: str) -> None:
         """Normal content should not be flagged as injection."""
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("mcp_trentina_crunchtools.quarantine.providers.get_config") as mock_prov_config,
+            patch("trentina.quarantine.agent.get_config") as mock_config,
+            patch("trentina.quarantine.providers.get_config") as mock_prov_config,
             patch(
                 "httpx.AsyncClient.post",
                 new_callable=AsyncMock,
@@ -443,8 +443,8 @@ class TestL3DetectorMetaAttacks:
     async def test_l3_flags_meta_attack(self, case: Case) -> None:
         """The Q-Agent must flag attacks on itself as injection."""
         with (
-            patch("mcp_trentina_crunchtools.quarantine.agent.get_config") as mock_config,
-            patch("mcp_trentina_crunchtools.quarantine.providers.get_config") as mock_prov_config,
+            patch("trentina.quarantine.agent.get_config") as mock_config,
+            patch("trentina.quarantine.providers.get_config") as mock_prov_config,
             patch(
                 "httpx.AsyncClient.post",
                 new_callable=AsyncMock,

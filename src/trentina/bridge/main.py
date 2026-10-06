@@ -1,10 +1,10 @@
-"""``mcp-trentina-bridge``: run one profile's bridge, or prepare its store.
+"""``trentina-bridge``: run one profile's bridge, or prepare its store.
 
-    mcp-trentina-bridge run
-    mcp-trentina-bridge import-mautrix --crypto-db /import/crypto.db
-    mcp-trentina-bridge logout-device        # BRIDGE_OLD_ACCESS_TOKEN
-    mcp-trentina-bridge sign-device          # BRIDGE_RECOVERY_KEY
-    mcp-trentina-bridge reset-identity       # recovery key lost
+    trentina-bridge run
+    trentina-bridge import-mautrix --crypto-db /import/crypto.db
+    trentina-bridge logout-device        # BRIDGE_OLD_ACCESS_TOKEN
+    trentina-bridge sign-device          # BRIDGE_RECOVERY_KEY
+    trentina-bridge reset-identity       # recovery key lost
 
 ``logout-device`` exists for cutover: once the bridge holds an account, the
 agent's old device is pruned, which is what leaves the agent with no upstream
@@ -42,7 +42,7 @@ from .crosssign import CrossSignError, reset_identity, sign_own_device
 from .import_mautrix import import_mautrix
 from .settings import BridgeSettings
 
-logger = logging.getLogger("mcp_trentina_crunchtools.bridge")
+logger = logging.getLogger("trentina.bridge")
 
 # Seconds for each request of a one-shot command against the homeserver.
 _ONE_SHOT_TIMEOUT = 30.0
@@ -175,7 +175,7 @@ def _device_keys(settings: BridgeSettings, session: dict[str, str]) -> dict[str,
 
 def main(argv: list[str] | None = None) -> None:
     logsafe.configure("BRIDGE_LOG_LEVEL", default="WARNING")
-    parser = argparse.ArgumentParser(prog="mcp-trentina-bridge")
+    parser = argparse.ArgumentParser(prog="trentina-bridge")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("run", help="run the bridge")
     imp = sub.add_parser("import-mautrix", help="adopt a mautrix device into the store")

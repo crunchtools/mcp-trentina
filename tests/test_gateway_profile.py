@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-from mcp_trentina_crunchtools.gateway.loader import load_profiles
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.gateway.errors import ProfileConfigError
+from trentina.gateway.loader import load_profiles
+from trentina.gateway.profile import (
     AuthConfig,
     Backend,
     DefenseConfig,
@@ -636,20 +636,20 @@ class TestBearerPathWithNoStaticToken:
     )
 
     def test_verify_bearer_refuses_and_says_why(self) -> None:
-        from mcp_trentina_crunchtools.gateway.auth import AuthError, verify_bearer
+        from trentina.gateway.auth import AuthError, verify_bearer
 
         with pytest.raises(AuthError, match="no static bearer token"):
             verify_bearer("Bearer anything", self.OAUTH_ONLY)
 
     def test_token_lookup_skips_it_rather_than_crashing(self) -> None:
         """resolve_profile_by_token walks every profile in the registry."""
-        from mcp_trentina_crunchtools.gateway.auth import resolve_profile_by_token
+        from trentina.gateway.auth import resolve_profile_by_token
 
         registry = {"claude-web": self.OAUTH_ONLY}
         assert resolve_profile_by_token("Bearer whatever", registry) is None
 
     def test_loader_does_not_demand_an_env_var(self) -> None:
-        from mcp_trentina_crunchtools.gateway.loader import _resolve_bearer_token
+        from trentina.gateway.loader import _resolve_bearer_token
 
         profile = Profile(
             name="claude-web",
@@ -674,7 +674,7 @@ class TestEnforcementModeNames:
     """
 
     def test_the_default_is_flag(self) -> None:
-        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+        from trentina.gateway.profile import DefenseConfig
 
         assert DefenseConfig().enforcement == "flag"
 
@@ -688,7 +688,7 @@ class TestEnforcementModeNames:
         """
         import pydantic
 
-        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+        from trentina.gateway.profile import DefenseConfig
 
         with pytest.raises(pydantic.ValidationError):
             DefenseConfig(enforcement=old)
@@ -703,7 +703,7 @@ class TestEnforcementModeNames:
         """
         from pydantic import ValidationError
 
-        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+        from trentina.gateway.profile import DefenseConfig
 
         with pytest.raises(ValidationError, match="cannot be a default"):
             DefenseConfig(enforcement="redact")
@@ -712,7 +712,7 @@ class TestEnforcementModeNames:
         """Both push and pull paths, or the gap just moves."""
         from pydantic import ValidationError
 
-        from mcp_trentina_crunchtools.gateway.profile import AlertIngressConfig
+        from trentina.gateway.profile import AlertIngressConfig
 
         with pytest.raises(ValidationError, match="cannot be a default"):
             AlertIngressConfig(token_env="T", forward_url="http://x:1/h", enforcement="redact")
@@ -720,7 +720,7 @@ class TestEnforcementModeNames:
     def test_a_bogus_mode_is_still_refused(self) -> None:
         from pydantic import ValidationError
 
-        from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
+        from trentina.gateway.profile import DefenseConfig
 
         with pytest.raises(ValidationError):
             DefenseConfig(enforcement="ignore")
@@ -742,7 +742,7 @@ class TestPushPathEnforcement:
         worse than forwarding a flagged one, and the warning lands ahead of
         the payload so the receiving agent reads the caution first.
         """
-        from mcp_trentina_crunchtools.gateway.profile import AlertIngressConfig
+        from trentina.gateway.profile import AlertIngressConfig
 
         assert AlertIngressConfig.model_fields["enforcement"].default == "flag"
 
@@ -750,7 +750,7 @@ class TestPushPathEnforcement:
         """Refusing a Matrix response does not drop a message — it breaks the
         client's /sync loop, which is the proxy eating the agent's traffic
         rather than filtering it. A mode here would have to be per-EVENT."""
-        from mcp_trentina_crunchtools.gateway.profile import MatrixIngressConfig
+        from trentina.gateway.profile import MatrixIngressConfig
 
         assert "enforcement" not in MatrixIngressConfig.model_fields
 
@@ -761,7 +761,7 @@ class TestL3Briefing:
     def test_the_limit_is_accepted_and_one_past_it_is_not(self) -> None:
         from pydantic import ValidationError
 
-        from mcp_trentina_crunchtools.gateway.profile import MAX_L3_BRIEFING_CHARS, Backend
+        from trentina.gateway.profile import MAX_L3_BRIEFING_CHARS, Backend
 
         at_limit = Backend(url="http://ops:8000/mcp", l3_briefing="x" * MAX_L3_BRIEFING_CHARS)
         assert at_limit.l3_briefing is not None
@@ -769,6 +769,6 @@ class TestL3Briefing:
             Backend(url="http://ops:8000/mcp", l3_briefing="x" * (MAX_L3_BRIEFING_CHARS + 1))
 
     def test_unset_is_none(self) -> None:
-        from mcp_trentina_crunchtools.gateway.profile import Backend
+        from trentina.gateway.profile import Backend
 
         assert Backend(url="http://ops:8000/mcp").l3_briefing is None

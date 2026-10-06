@@ -7,7 +7,7 @@ keys and the OAuth signing key. A file-write or code-execution primitive
 inside it compromises every agent it serves and lets the attacker mint OAuth
 tokens. The code defends the boundary; the container has to make a bug in
 that code a contained one. This page is what to run it with.
-[`contrib/quadlet/mcp-trentina.container`](../contrib/quadlet/mcp-trentina.container)
+[`contrib/quadlet/trentina.container`](../contrib/quadlet/trentina.container)
 is a reference unit with all of it applied.
 
 ## Containment flags

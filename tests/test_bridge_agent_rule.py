@@ -17,8 +17,8 @@ from typing import Any
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools.bridge.client import ROOM_ANNOUNCE, ROOM_LEFT
-from mcp_trentina_crunchtools.bridge.settings import BridgeSettings, SettingsError
+from trentina.bridge.client import ROOM_ANNOUNCE, ROOM_LEFT
+from trentina.bridge.settings import BridgeSettings, SettingsError
 
 from .test_bridge_process import ROOM as UPSTREAM_ROOM
 from .test_bridge_process import SCOTT, _bridge, _sync, _text_event

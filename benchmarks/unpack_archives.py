@@ -24,13 +24,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from mcp_trentina_crunchtools.l1.pipeline import run_l1
-from mcp_trentina_crunchtools.quarantine.classifier import classify, is_classifier_available
-from mcp_trentina_crunchtools.unpack.scan import unpack
 from tests.adversarial_corpus import CORPUS
 from tests.image_files import page
 from tests.office_files import b64, docx, paragraph, pptx, run, xlsx, zipped
 from tests.pdf_files import pdf, show
+from trentina.l1.pipeline import run_l1
+from trentina.quarantine.classifier import classify, is_classifier_available
+from trentina.unpack.scan import unpack
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -16,10 +16,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-from mcp_trentina_crunchtools.tools import (
+from trentina import config as config_mod
+from trentina.modes import Mode
+from trentina.quarantine.classifier import ClassifierResult
+from trentina.tools import (
     block_content,
     block_dir,
     block_fetch,
@@ -139,37 +139,37 @@ def layers(
         )
         fakes = Layers(
             classify=p(
-                "mcp_trentina_crunchtools.defense.classify_async",
+                "trentina.defense.classify_async",
                 new_callable=AsyncMock,
                 return_value=classification,
             ),
             detect=p(
-                "mcp_trentina_crunchtools.defense.quarantine_detect",
+                "trentina.defense.quarantine_detect",
                 new_callable=AsyncMock,
                 return_value=detection or CLEAN_DETECT,
             ),
             extract=p(
-                "mcp_trentina_crunchtools.quarantine.agent.quarantine_extract",
+                "trentina.quarantine.agent.quarantine_extract",
                 new_callable=AsyncMock,
                 **extract_kw,
             ),
             verify=p(
-                "mcp_trentina_crunchtools.quarantine.agent.quarantine_verify",
+                "trentina.quarantine.agent.quarantine_verify",
                 new_callable=AsyncMock,
                 return_value=verification or CLEAN_DETECT,
             ),
             output_classify=p(
-                "mcp_trentina_crunchtools.quarantine.classifier.classify_async",
+                "trentina.quarantine.classifier.classify_async",
                 new_callable=AsyncMock,
                 return_value=output_classification,
             ),
             fetch_url=p(
-                "mcp_trentina_crunchtools.tools.fetch.fetch_url",
+                "trentina.tools.fetch.fetch_url",
                 new_callable=AsyncMock,
                 return_value=(payload, "text/plain", ()),
             ),
             search_grounded=p(
-                "mcp_trentina_crunchtools.tools.search.search_grounded",
+                "trentina.tools.search.search_grounded",
                 new_callable=AsyncMock,
                 return_value={
                     "text": payload,
@@ -181,7 +181,7 @@ def layers(
             workdir=workdir,
         )
         p(
-            "mcp_trentina_crunchtools.tools.search.resolve_grounding_urls",
+            "trentina.tools.search.resolve_grounding_urls",
             new_callable=AsyncMock,
             side_effect=lambda sources: sources,
         )

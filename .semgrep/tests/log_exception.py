@@ -1,7 +1,7 @@
 # Fixture for trentina-log-exception-text.
 import logging
 
-from mcp_trentina_crunchtools.logsafe import exc_kind, exc_where, redact_source
+from trentina.logsafe import exc_kind, exc_where, redact_source
 
 log = logging.getLogger(__name__)
 logger = logging.getLogger("x")

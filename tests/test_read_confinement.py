@@ -17,14 +17,14 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools.errors import BlockedSourceError, ConfigError, FileReadError
-from mcp_trentina_crunchtools.gateway.loader import load_profiles, register_active_config
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.tools import confine
-from mcp_trentina_crunchtools.tools import read as read_mod
-from mcp_trentina_crunchtools.tools.dir import MAX_DIR_ENTRIES, list_dir
-from mcp_trentina_crunchtools.tools.read import MAX_FILE_SIZE, _read_confined
+from trentina import config as config_mod
+from trentina.errors import BlockedSourceError, ConfigError, FileReadError
+from trentina.gateway.loader import load_profiles, register_active_config
+from trentina.modes import Mode
+from trentina.tools import confine
+from trentina.tools import read as read_mod
+from trentina.tools.dir import MAX_DIR_ENTRIES, list_dir
+from trentina.tools.read import MAX_FILE_SIZE, _read_confined
 
 GATEWAY_YAML = """\
 profiles:
@@ -104,7 +104,7 @@ class TestDenylist:
 
     @pytest.mark.parametrize(
         "path",
-        ["/config/profiles.yaml", "/config/mcp-trentina-trust.json", "/data/quarantine.db"],
+        ["/config/profiles.yaml", "/config/trentina-trust.json", "/data/quarantine.db"],
     )
     def test_gateway_config_and_state_are_denied_under_root_slash(
         self, path: str, monkeypatch: pytest.MonkeyPatch
@@ -275,8 +275,8 @@ class TestSwapIsARefusal:
         }
 
     def test_it_audits_as_blocked_defense(self) -> None:
-        from mcp_trentina_crunchtools.gateway.errors import BackendCallError
-        from mcp_trentina_crunchtools.outcomes import Outcome, classify_exception
+        from trentina.gateway.errors import BackendCallError
+        from trentina.outcomes import Outcome, classify_exception
 
         refusal = confine.refused(FileReadError("changed_during_read"), Mode.BLOCK)
         wrapped = BackendCallError("internal tool 'read_tool' call failed")
@@ -433,8 +433,8 @@ class TestNoExistenceOracle:
 
 @pytest.fixture
 def real_server() -> Iterator[None]:
-    from mcp_trentina_crunchtools.gateway import internal
-    from mcp_trentina_crunchtools.server import mcp
+    from trentina.gateway import internal
+    from trentina.server import mcp
 
     saved = internal._server
     internal.register_internal_server(mcp)
@@ -461,10 +461,10 @@ class TestAudit:
     ) -> None:
         from pydantic import SecretStr
 
-        from mcp_trentina_crunchtools.database import get_db
-        from mcp_trentina_crunchtools.gateway.names import NAMESPACE_SEP
-        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
-        from mcp_trentina_crunchtools.gateway.router import route_jsonrpc
+        from trentina.database import get_db
+        from trentina.gateway.names import NAMESPACE_SEP
+        from trentina.gateway.profile import AuthConfig, Backend, Profile
+        from trentina.gateway.router import route_jsonrpc
 
         profile = Profile(
             short_names=False,

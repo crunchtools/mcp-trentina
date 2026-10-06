@@ -1,4 +1,6 @@
-name: Publish to PyPI + RPM
+# Trentina is distributed as a container image only (Security Gateway profile,
+# I). It was on PyPI through 0.54.1; nothing is published there any more.
+name: Publish the Cockpit RPM
 
 on:
   release:
@@ -6,31 +8,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish-pypi:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write  # Required for trusted publishing
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "latest"
-
-      # Single-version job: pinned to the NEWEST supported Python, which is
-      # what the container runs. Anything that cannot run across the whole
-      # matrix is tested on production's version. See constitution III.
-      - name: Set up Python
-        run: uv python install 3.14
-
-      - name: Build package
-        run: uv build
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-
   build-rpm:
     runs-on: ubuntu-latest
     permissions:

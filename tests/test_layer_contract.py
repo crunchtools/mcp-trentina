@@ -17,14 +17,14 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from mcp_trentina_crunchtools.defense import DefenseVerdict, build_l3_briefing, defend
-from mcp_trentina_crunchtools.l1.pipeline import FINDING_NAMES, PipelineStats, run_l1
-from mcp_trentina_crunchtools.quarantine import agent
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-from mcp_trentina_crunchtools.unpack.scan import unpack
+from trentina.defense import DefenseVerdict, build_l3_briefing, defend
+from trentina.l1.pipeline import FINDING_NAMES, PipelineStats, run_l1
+from trentina.quarantine import agent
+from trentina.quarantine.classifier import ClassifierResult
+from trentina.unpack.scan import unpack
 
-_D = "mcp_trentina_crunchtools.defense"
-_SRC = Path(__file__).resolve().parents[1] / "src" / "mcp_trentina_crunchtools"
+_D = "trentina.defense"
+_SRC = Path(__file__).resolve().parents[1] / "src" / "trentina"
 _BENIGN = ClassifierResult(label="BENIGN", score=0.05, latency_ms=1.0)
 
 # Everything L1 normalizes: a zero-width split, base64, a fake delimiter, an
@@ -91,7 +91,7 @@ async def test_redact_output_check_reads_the_output_once() -> None:
         return _BENIGN
 
     with (
-        patch("mcp_trentina_crunchtools.quarantine.classifier.classify_async", side_effect=spy),
+        patch("trentina.quarantine.classifier.classify_async", side_effect=spy),
         patch.object(agent, "_BLOCKING_RISKS", frozenset()),
     ):
         await agent._output_flagged(document)

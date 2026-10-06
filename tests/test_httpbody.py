@@ -10,7 +10,7 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from mcp_trentina_crunchtools.httpbody import TooLargeError, read_capped, where_invalid
+from trentina.httpbody import TooLargeError, read_capped, where_invalid
 
 LIMIT = 64
 

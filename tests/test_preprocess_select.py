@@ -14,15 +14,15 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools.channels import Channel
-from mcp_trentina_crunchtools.gateway.profile import MatrixPreProcessConfig
-from mcp_trentina_crunchtools.gateway.selection import describe, read_everything, run_l1
-from mcp_trentina_crunchtools.preprocess import (
+from trentina.channels import Channel
+from trentina.gateway.profile import MatrixPreProcessConfig
+from trentina.gateway.selection import describe, read_everything, run_l1
+from trentina.preprocess import (
     SelectionContext,
     SelectProcessor,
     SkipReason,
 )
-from mcp_trentina_crunchtools.preprocess.shapes import classify_skip, looks_random, wordy
+from trentina.preprocess.shapes import classify_skip, looks_random, wordy
 
 from .adversarial_corpus import CORPUS
 

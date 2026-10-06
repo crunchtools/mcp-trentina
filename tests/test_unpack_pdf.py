@@ -16,20 +16,20 @@ import types
 import pytest
 from pypdf import PdfWriter
 
-from mcp_trentina_crunchtools.preprocess.base import PreProcessContext
-from mcp_trentina_crunchtools.preprocess.detect import (
+from trentina.preprocess.base import PreProcessContext
+from trentina.preprocess.detect import (
     DetectProcessor,
     Format,
     detect,
     document_hidden,
     hiding_removed,
 )
-from mcp_trentina_crunchtools.preprocess.pdf import PdfProcessor
-from mcp_trentina_crunchtools.preprocess.structured import StructuredProcessor
-from mcp_trentina_crunchtools.unpack import child, pdf_worker
-from mcp_trentina_crunchtools.unpack import pdf as pdf_reader
-from mcp_trentina_crunchtools.unpack.pdf import _checked, read_pdf
-from mcp_trentina_crunchtools.unpack.scan import SCANNED_PAGE, unpack
+from trentina.preprocess.pdf import PdfProcessor
+from trentina.preprocess.structured import StructuredProcessor
+from trentina.unpack import child, pdf_worker
+from trentina.unpack import pdf as pdf_reader
+from trentina.unpack.pdf import _checked, read_pdf
+from trentina.unpack.scan import SCANNED_PAGE, unpack
 
 from .office_files import b64, zipped
 from .pdf_files import pdf, show
@@ -427,7 +427,7 @@ class TestFetch:
     async def test_a_fetched_pdf_is_handed_on_as_base64(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from mcp_trentina_crunchtools.client import fetch_url
+        from trentina.client import fetch_url
 
         from .test_client import mock_http
 

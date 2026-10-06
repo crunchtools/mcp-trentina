@@ -1,4 +1,4 @@
-"""Error hierarchy for mcp-trentina-crunchtools.
+"""Error hierarchy for trentina.
 
 All errors scrub credentials from messages before surfacing to users.
 """

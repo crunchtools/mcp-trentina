@@ -1,4 +1,4 @@
-"""SQLite blocklist database for mcp-trentina-crunchtools.
+"""SQLite blocklist database for trentina.
 
 Write access is deterministic code ONLY. The Q-Agent cannot write to this database.
 The Q-Agent's detection output is returned as structured JSON, parsed by the server's

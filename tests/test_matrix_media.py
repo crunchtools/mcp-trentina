@@ -14,16 +14,16 @@ from typing import Any
 import pytest
 from starlette.testclient import TestClient
 
-from mcp_trentina_crunchtools.gateway import matrix_proxy
-from mcp_trentina_crunchtools.gateway.matrix_proxy import (
+from trentina.gateway import matrix_proxy
+from trentina.gateway.matrix_proxy import (
     WARNING_HEADER,
     _withhold_undecrypted,
 )
-from mcp_trentina_crunchtools.modes import Gaps
-from mcp_trentina_crunchtools.preprocess.view import UndecryptableEvent
-from mcp_trentina_crunchtools.reserved import WARNING_KEY
-from mcp_trentina_crunchtools.unpack import scan
-from mcp_trentina_crunchtools.unpack.ocr import ImageText
+from trentina.modes import Gaps
+from trentina.preprocess.view import UndecryptableEvent
+from trentina.reserved import WARNING_KEY
+from trentina.unpack import scan
+from trentina.unpack.ocr import ImageText
 
 from .image_files import picture
 from .test_matrix_proxy import AGENT_PEER, _count_judged, _matrix_app, _matrix_profile, _upstream

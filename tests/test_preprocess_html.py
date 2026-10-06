@@ -6,9 +6,9 @@ import asyncio
 
 import pytest
 
-from mcp_trentina_crunchtools.channels import Channel, Kind
-from mcp_trentina_crunchtools.preprocess.base import Cost, PreProcessContext
-from mcp_trentina_crunchtools.preprocess.html import HtmlProcessor, to_markdown
+from trentina.channels import Channel, Kind
+from trentina.preprocess.base import Cost, PreProcessContext
+from trentina.preprocess.html import HtmlProcessor, to_markdown
 
 
 class TestConversion:

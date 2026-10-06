@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway.ratelimit import (
+from trentina.gateway.ratelimit import (
     RateLimiter,
     UnauthenticatedWriteGuard,
     client_address,
@@ -326,7 +326,7 @@ class TestRouteWiring:
         outermost first."""
         from starlette.routing import Route
 
-        from mcp_trentina_crunchtools import _harden
+        from trentina import _harden
 
         async def endpoint(_scope: Any, _receive: Any, _send: Any) -> None:
             return
@@ -386,7 +386,7 @@ class TestRouteWiring:
         while doing it would 405 the real traffic."""
         from starlette.routing import Route
 
-        from mcp_trentina_crunchtools import _harden
+        from trentina import _harden
 
         async def endpoint(_scope: Any, _receive: Any, _send: Any) -> None:
             return
@@ -404,6 +404,6 @@ class TestRouteWiring:
         """Rebuilding the routes must not hand a caller a fresh allowance —
         that would make the limit resettable by anything that re-reads them."""
         monkeypatch.delenv("TRENTINA_RATE_LIMIT", raising=False)
-        from mcp_trentina_crunchtools import _limiter
+        from trentina import _limiter
 
         assert _limiter("/register") is _limiter("/register")

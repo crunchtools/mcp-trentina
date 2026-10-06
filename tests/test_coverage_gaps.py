@@ -16,8 +16,8 @@ import io
 
 import pytest
 
-from mcp_trentina_crunchtools.l1.pipeline import run_l1
-from mcp_trentina_crunchtools.unpack.scan import unpack
+from trentina.l1.pipeline import run_l1
+from trentina.unpack.scan import unpack
 
 from .image_files import picture
 from .office_files import b64, docx, paragraph, run, zipped

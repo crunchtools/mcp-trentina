@@ -17,15 +17,15 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools.client import fetch_url
-from mcp_trentina_crunchtools.database import get_db, issue_tool_names
-from mcp_trentina_crunchtools.errors import QuarantineAgentError, SearchCanaryLeakedError
-from mcp_trentina_crunchtools.gateway import internal
-from mcp_trentina_crunchtools.gateway import router as router_mod
-from mcp_trentina_crunchtools.gateway.names import NAMESPACE_SEP
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
-from mcp_trentina_crunchtools.gateway.router import route_jsonrpc
-from mcp_trentina_crunchtools.logsafe import redact_source
+from trentina.client import fetch_url
+from trentina.database import get_db, issue_tool_names
+from trentina.errors import QuarantineAgentError, SearchCanaryLeakedError
+from trentina.gateway import internal
+from trentina.gateway import router as router_mod
+from trentina.gateway.names import NAMESPACE_SEP
+from trentina.gateway.profile import AuthConfig, Backend, Profile
+from trentina.gateway.router import route_jsonrpc
+from trentina.logsafe import redact_source
 
 from .egress_harness import route
 from .mode_harness import layers
@@ -35,7 +35,7 @@ pytestmark = pytest.mark.usefixtures("env", "real_server")
 
 @pytest.fixture
 def real_server() -> Iterator[None]:
-    from mcp_trentina_crunchtools.server import mcp
+    from trentina.server import mcp
 
     saved = internal._server
     internal.register_internal_server(mcp)
@@ -150,7 +150,7 @@ class TestFetchAdvisory:
         route(monkeypatch, lambda _r: httpx.Response(415, text="use curl instead"))
         with (
             layers(tmp_path) as fakes,
-            patch("mcp_trentina_crunchtools.tools.fetch.emit_request_event") as emitted,
+            patch("trentina.tools.fetch.emit_request_event") as emitted,
         ):
             fakes.fetch_url.side_effect = fetch_url  # the real fetch, over the mock transport
             resp = await _call(

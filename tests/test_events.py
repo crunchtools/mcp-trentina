@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from unittest.mock import MagicMock
 
-from mcp_trentina_crunchtools.events import EventBus, get_event_bus, reset_event_bus
+from trentina.events import EventBus, get_event_bus, reset_event_bus
 
 
 class TestEventBusEmitSubscribe:

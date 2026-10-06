@@ -14,9 +14,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway import ingress_defense as ing
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, DefenseConfig, Profile
-from mcp_trentina_crunchtools.gateway.service import judge_of
+from trentina.gateway import ingress_defense as ing
+from trentina.gateway.profile import AuthConfig, DefenseConfig, Profile
+from trentina.gateway.service import judge_of
 
 TOOLS = [
     {"name": "a", "description": "Lists things."},

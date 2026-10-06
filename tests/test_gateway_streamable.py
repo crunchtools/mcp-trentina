@@ -15,20 +15,20 @@ from mcp_types.version import (
 from pydantic import SecretStr
 from starlette.testclient import TestClient
 
-from mcp_trentina_crunchtools import _wire_circuit_notifications
-from mcp_trentina_crunchtools.gateway.app import (
+from trentina import _wire_circuit_notifications
+from trentina.gateway.app import (
     MCP_SESSION_ID_HEADER,
     SSE_RETRY_MS,
     _sse_event_stream,
     gateway_app,
 )
-from mcp_trentina_crunchtools.gateway.circuit import CircuitBreaker, State
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
-from mcp_trentina_crunchtools.gateway.router import (
+from trentina.gateway.circuit import CircuitBreaker, State
+from trentina.gateway.profile import AuthConfig, Backend, Profile
+from trentina.gateway.router import (
     NAMESPACE_SEP,
     _negotiate_protocol_version,
 )
-from mcp_trentina_crunchtools.gateway.sessions import SessionRegistry
+from trentina.gateway.sessions import SessionRegistry
 
 TEST_TOKEN = "alice-token"
 
@@ -612,7 +612,7 @@ class TestBackwardsCompatibility:
             }
         )
         with patch(
-            "mcp_trentina_crunchtools.gateway.app.route_jsonrpc",
+            "trentina.gateway.app.route_jsonrpc",
             mock_route,
         ):
             _, client = _make_registry_and_client()
@@ -637,7 +637,7 @@ class TestCircuitInvalidatesOnlyHolders:
 
     @pytest.mark.asyncio
     async def test_unaffected_profiles_aggregate_survives(self) -> None:
-        from mcp_trentina_crunchtools.gateway import router
+        from trentina.gateway import router
 
         holder = _make_profile()  # backend http://mcp-slack:8000/mcp
         bystander = holder.model_copy(update={"name": "bob", "backends": {}})

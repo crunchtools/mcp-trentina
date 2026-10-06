@@ -1,4 +1,4 @@
-"""D-Bus interface for mcp-trentina-crunchtools.
+"""D-Bus interface for trentina.
 
 Exposes com.crunchtools.Trentina1 on the system bus with methods for
 querying pipeline state and signals for live event streaming.

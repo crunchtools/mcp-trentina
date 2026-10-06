@@ -1,7 +1,7 @@
 # Fixture for trentina-httpx-client-outside-egress.
 import httpx
 
-from mcp_trentina_crunchtools.egress import open_guarded
+from trentina.egress import open_guarded
 
 
 async def fetch(url):

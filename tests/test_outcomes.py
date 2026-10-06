@@ -16,15 +16,15 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools.errors import (
+from trentina.errors import (
     BlockedSourceError,
     ConfigError,
     FetchError,
     UnscannableContentError,
     UnsupportedContentTypeError,
 )
-from mcp_trentina_crunchtools.gateway.errors import BackendCallError
-from mcp_trentina_crunchtools.outcomes import (
+from trentina.gateway.errors import BackendCallError
+from trentina.outcomes import (
     BLOCKED_OUTCOMES,
     FAILED_OUTCOMES,
     Outcome,
@@ -102,7 +102,7 @@ class TestAuditRecording:
 
     @pytest.fixture
     def db(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
-        import mcp_trentina_crunchtools.database as db_mod
+        import trentina.database as db_mod
 
         db_mod._db = None
         cfg = type(
@@ -167,7 +167,7 @@ class TestAuditRecording:
         CREATE TABLE IF NOT EXISTS leaves an old table untouched, so without
         _migrate the new column never reaches production.
         """
-        import mcp_trentina_crunchtools.database as db_mod
+        import trentina.database as db_mod
 
         path = str(tmp_path / "old.db")
         old = sqlite3.connect(path)
@@ -203,9 +203,9 @@ class TestAuditRecording:
 
 
 def test_refusal_of_finds_a_nested_refusal() -> None:
-    from mcp_trentina_crunchtools.errors import BlockedSourceError
-    from mcp_trentina_crunchtools.gateway.errors import BackendCallError
-    from mcp_trentina_crunchtools.outcomes import refusal_of
+    from trentina.errors import BlockedSourceError
+    from trentina.gateway.errors import BackendCallError
+    from trentina.outcomes import refusal_of
 
     inner = BlockedSourceError("s", "flagged by L3", refusal={"alternatives": ["redact"]})
     outer = BackendCallError("wrapped")
@@ -217,7 +217,7 @@ def test_refusal_of_finds_a_nested_refusal() -> None:
 class TestDeliverySizes:
     @pytest.fixture
     def db(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
-        import mcp_trentina_crunchtools.database as db_mod
+        import trentina.database as db_mod
 
         db_mod._db = None
         cfg = type(
@@ -250,7 +250,7 @@ class TestDeliverySizes:
         assert db.get_gateway_call_stats(profile="p", days=1)["delivery"]["bytes_arrived"] == 10
 
     def test_migration_adds_size_columns(self, tmp_path: Any) -> None:
-        import mcp_trentina_crunchtools.database as db_mod
+        import trentina.database as db_mod
 
         path = str(tmp_path / "old_sizes.db")
         old = sqlite3.connect(path)

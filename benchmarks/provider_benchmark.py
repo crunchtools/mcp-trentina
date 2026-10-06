@@ -59,13 +59,13 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from benchmarks import external_corpus, l2_sweep
-from mcp_trentina_crunchtools.config import DEFAULT_CLASSIFIER_THRESHOLD, get_config
-from mcp_trentina_crunchtools.defense import _stage_one
-from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
-from mcp_trentina_crunchtools.quarantine.classifier import is_classifier_available, model_info
-from mcp_trentina_crunchtools.quarantine.prompts import DETECTION_SYSTEM_PROMPT
-from mcp_trentina_crunchtools.unpack.scan import unpack
 from tests.adversarial_corpus import CORPUS, RISK_ORDER, Case
+from trentina.config import DEFAULT_CLASSIFIER_THRESHOLD, get_config
+from trentina.defense import _stage_one
+from trentina.quarantine.agent import quarantine_detect
+from trentina.quarantine.classifier import is_classifier_available, model_info
+from trentina.quarantine.prompts import DETECTION_SYSTEM_PROMPT
+from trentina.unpack.scan import unpack
 
 TOKENS_PER_MILLION = 1_000_000
 HTTP_OK = 200

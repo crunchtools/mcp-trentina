@@ -8,10 +8,10 @@ safe.
 
 from __future__ import annotations
 
-from mcp_trentina_crunchtools.defense import DefenseVerdict, Layer
-from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, PipelineStats
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-from mcp_trentina_crunchtools.report import (
+from trentina.defense import DefenseVerdict, Layer
+from trentina.l1.pipeline import PipelineResult, PipelineStats
+from trentina.quarantine.classifier import ClassifierResult
+from trentina.report import (
     Disposition,
     LayerState,
     build_report,

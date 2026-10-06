@@ -1,6 +1,6 @@
 # Security Design Document
 
-This document describes the security architecture of mcp-trentina-crunchtools, the MCP gateway. Deployment containment is in [docs/deployment-hardening.md](docs/deployment-hardening.md).
+This document describes the security architecture of trentina, the MCP gateway. Deployment containment is in [docs/deployment-hardening.md](docs/deployment-hardening.md).
 
 ## 1. Threat Model
 
@@ -120,6 +120,6 @@ Before each release:
 
 ## 5. Reporting Security Issues
 
-Report security vulnerabilities using [GitHub's private security advisory](https://github.com/crunchtools/mcp-trentina/security/advisories/new).
+Report security vulnerabilities using [GitHub's private security advisory](https://github.com/crunchtools/trentina/security/advisories/new).
 
 Do NOT open public issues for security vulnerabilities.

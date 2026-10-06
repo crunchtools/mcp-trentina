@@ -12,12 +12,12 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools.gateway import loader
+from trentina import config as config_mod
+from trentina.gateway import loader
 
 # Imported before conftest's autouse fixture swaps the module attribute for a
 # no-op, so this is the real function.
-from mcp_trentina_crunchtools.gateway.envscrub import STARTUP_ONLY_SECRETS, scrub_startup_secrets
+from trentina.gateway.envscrub import STARTUP_ONLY_SECRETS, scrub_startup_secrets
 
 
 @pytest.fixture(autouse=True)
@@ -115,9 +115,9 @@ def test_proc_self_environ_still_holds_a_popped_secret() -> None:
 
 class TestSigningKeyFile:
     def _signing_key(self, monkeypatch: pytest.MonkeyPatch) -> Any:
-        from mcp_trentina_crunchtools import _build_oauth_context
-        from mcp_trentina_crunchtools.gateway.loader import GatewayConfig
-        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, OAuthConfig, Profile
+        from trentina import _build_oauth_context
+        from trentina.gateway.loader import GatewayConfig
+        from trentina.gateway.profile import AuthConfig, OAuthConfig, Profile
 
         profile = Profile(
             name="gem",
@@ -131,7 +131,7 @@ class TestSigningKeyFile:
             seen["signing_key"] = kwargs["signing_key"]
             return object(), "https://issuer/", ()
 
-        with patch("mcp_trentina_crunchtools._build_proxy_provider", side_effect=build):
+        with patch("trentina._build_proxy_provider", side_effect=build):
             _build_oauth_context(GatewayConfig(profiles={"gem": profile}))
         return seen["signing_key"]
 
@@ -161,7 +161,7 @@ class TestSigningKeyFile:
     def test_a_missing_file_fails_closed(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
+        from trentina.gateway.errors import ProfileConfigError
 
         monkeypatch.setenv("TRENTINA_OAUTH_JWT_SIGNING_KEY_FILE", str(tmp_path / "absent"))
         with pytest.raises(ProfileConfigError, match="TRENTINA_OAUTH_JWT_SIGNING_KEY_FILE"):

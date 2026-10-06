@@ -11,12 +11,12 @@ import logging
 import time
 from typing import Any
 
-from mcp_trentina_crunchtools.errors import BlockedSourceError
-from mcp_trentina_crunchtools.gateway.errors import BackendCallError
-from mcp_trentina_crunchtools.gateway.router import _audit, _err, _ok
-from mcp_trentina_crunchtools.logsafe import exc_kind, exc_where
-from mcp_trentina_crunchtools.outcomes import Outcome, classify_exception, refusal_of
-from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
+from trentina.errors import BlockedSourceError
+from trentina.gateway.errors import BackendCallError
+from trentina.gateway.router import _audit, _err, _ok
+from trentina.logsafe import exc_kind, exc_where
+from trentina.outcomes import Outcome, classify_exception, refusal_of
+from trentina.quarantine.agent import quarantine_detect
 
 log = logging.getLogger(__name__)
 

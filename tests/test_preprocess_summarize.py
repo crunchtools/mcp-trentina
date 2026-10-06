@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.defense import Provenance
-from mcp_trentina_crunchtools.errors import QuarantineAgentError
-from mcp_trentina_crunchtools.preprocess import (
+from trentina.defense import Provenance
+from trentina.errors import QuarantineAgentError
+from trentina.preprocess import (
     PreProcessContext,
     SummarizeProcessor,
     run_preprocessors,
@@ -24,7 +24,7 @@ from mcp_trentina_crunchtools.preprocess import (
 
 pytestmark = pytest.mark.asyncio
 
-_S = "mcp_trentina_crunchtools.preprocess.summarize"
+_S = "trentina.preprocess.summarize"
 
 BIG_PAYLOAD = (
     "An operational log line that resists petit because every sentence differs in words. " * 200

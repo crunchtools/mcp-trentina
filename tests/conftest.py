@@ -8,18 +8,18 @@ from collections.abc import Iterator
 
 import pytest
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools import database as database_mod
-from mcp_trentina_crunchtools import logsafe
-from mcp_trentina_crunchtools import perimeter_db as perimeter_db_mod
-from mcp_trentina_crunchtools.gateway.backend import reset_tool_list_cache
-from mcp_trentina_crunchtools.gateway.circuit import breaker
-from mcp_trentina_crunchtools.gateway.ingress_defense import reset_verdict_cache
-from mcp_trentina_crunchtools.gateway.loader import reset_active_config
-from mcp_trentina_crunchtools.gateway.matrix_proxy import reset_extractors
-from mcp_trentina_crunchtools.gateway.router import reset_profile_tools_cache
-from mcp_trentina_crunchtools.quarantine.limiter import reset_limiters
-from mcp_trentina_crunchtools.quarantine.providers import reset_provider
+from trentina import config as config_mod
+from trentina import database as database_mod
+from trentina import logsafe
+from trentina import perimeter_db as perimeter_db_mod
+from trentina.gateway.backend import reset_tool_list_cache
+from trentina.gateway.circuit import breaker
+from trentina.gateway.ingress_defense import reset_verdict_cache
+from trentina.gateway.loader import reset_active_config
+from trentina.gateway.matrix_proxy import reset_extractors
+from trentina.gateway.router import reset_profile_tools_cache
+from trentina.quarantine.limiter import reset_limiters
+from trentina.quarantine.providers import reset_provider
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +60,7 @@ def _isolated_perimeter_store(tmp_path: pathlib.Path, monkeypatch: pytest.Monkey
     """Never let a test write the developer's real perimeter store.
 
     ``scan_tool_list`` persists every verdict it reaches, so without this a
-    unit test leaves rows in ~/.local/share/mcp-trentina/perimeter.db — and
+    unit test leaves rows in ~/.local/share/trentina/perimeter.db — and
     a verdict cached from a mocked pipeline is exactly the kind of row that
     should not outlive the test that invented it.
     """
@@ -90,7 +90,7 @@ def _no_startup_scrub(monkeypatch: pytest.MonkeyPatch) -> None:
     for every test after it. ``tests/test_envscrub.py`` imports the real
     function directly and exercises it under ``monkeypatch``.
     """
-    from mcp_trentina_crunchtools.gateway import envscrub
+    from trentina.gateway import envscrub
 
     monkeypatch.setattr(envscrub, "scrub_startup_secrets", lambda _extra=(): [])
 
@@ -144,6 +144,6 @@ def _no_ocr_process(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPa
     """
     if "ocr" in request.keywords:
         return
-    from mcp_trentina_crunchtools.unpack import scan
+    from trentina.unpack import scan
 
     monkeypatch.setattr(scan, "read_images", lambda images: [None] * len(images))

@@ -1,4 +1,4 @@
-"""Internal event bus for mcp-trentina-crunchtools.
+"""Internal event bus for trentina.
 
 Fire-and-forget event emission for D-Bus, Cockpit, and future consumers.
 Thread-safe ring buffer stores recent events for GetRecentEvents queries.

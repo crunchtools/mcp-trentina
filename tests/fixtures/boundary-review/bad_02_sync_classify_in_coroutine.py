@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp_trentina_crunchtools.quarantine.classifier import classify
+from trentina.quarantine.classifier import classify
 
 MALICIOUS_THRESHOLD = 0.5
 

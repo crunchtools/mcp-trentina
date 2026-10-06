@@ -16,30 +16,30 @@ from unittest.mock import patch
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools import database as db
-from mcp_trentina_crunchtools.gateway import compress
-from mcp_trentina_crunchtools.gateway.backend import BackendCall
-from mcp_trentina_crunchtools.gateway.compress import set_profiles
-from mcp_trentina_crunchtools.gateway.context import profile_context
-from mcp_trentina_crunchtools.gateway.destination import (
+from trentina import config as config_mod
+from trentina import database as db
+from trentina.gateway import compress
+from trentina.gateway.backend import BackendCall
+from trentina.gateway.compress import set_profiles
+from trentina.gateway.context import profile_context
+from trentina.gateway.destination import (
     MAX_DESTINATION_CHARS,
     NON_SCALAR,
     DestinationKind,
     destination_of,
 )
-from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-from mcp_trentina_crunchtools.gateway.loader import load_profiles, register_active_config
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.gateway.errors import ProfileConfigError
+from trentina.gateway.loader import load_profiles, register_active_config
+from trentina.gateway.profile import (
     AuthConfig,
     Backend,
     ParameterConstraint,
     Profile,
 )
-from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
-from mcp_trentina_crunchtools.outcomes import Outcome
-from mcp_trentina_crunchtools.tools.reload import _lost_destination_rules
-from mcp_trentina_crunchtools.tools.stats import get_trentina_stats
+from trentina.gateway.router import NAMESPACE_SEP, route_jsonrpc
+from trentina.outcomes import Outcome
+from trentina.tools.reload import _lost_destination_rules
+from trentina.tools.stats import get_trentina_stats
 
 CHECK = Path(__file__).resolve().parents[1] / "contrib" / "nagios" / "check_trentina_fanout"
 
@@ -259,10 +259,10 @@ async def test_fetch_search_and_a_declared_tool_are_recorded() -> None:
 
     url = "https://docs.example.org/page?id=7"
     with (
-        patch("mcp_trentina_crunchtools.gateway.router.call_internal_tool", side_effect=internal),
-        patch("mcp_trentina_crunchtools.gateway.router.call_backend_tool", side_effect=remote),
-        patch("mcp_trentina_crunchtools.gateway.router.transform_response") as transform,
-        patch("mcp_trentina_crunchtools.gateway.router.scan_tool_response") as scan,
+        patch("trentina.gateway.router.call_internal_tool", side_effect=internal),
+        patch("trentina.gateway.router.call_backend_tool", side_effect=remote),
+        patch("trentina.gateway.router.transform_response") as transform,
+        patch("trentina.gateway.router.scan_tool_response") as scan,
     ):
         transform.side_effect = _passthrough_transform
         scan.side_effect = _clean_scan
@@ -467,7 +467,7 @@ class TestFanoutCheck:
 
 def test_a_lost_audit_row_is_logged_not_raised(caplog: pytest.LogCaptureFixture) -> None:
     """The audit never fails the call, and never loses a row silently (#281)."""
-    from mcp_trentina_crunchtools.gateway import router
+    from trentina.gateway import router
 
     with patch.object(router, "record_gateway_call", side_effect=OSError("disk full C0SECRET")):
         router._audit("kage", "slack", "send_message", Outcome.OK, 1)

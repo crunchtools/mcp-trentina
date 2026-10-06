@@ -47,17 +47,17 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from benchmarks import external_corpus
-from mcp_trentina_crunchtools.config import get_config
-from mcp_trentina_crunchtools.quarantine.prompts import (
+from tests.adversarial_corpus import CORPUS, Case
+from trentina.config import get_config
+from trentina.quarantine.prompts import (
     DETECTION_RESPONSE_SCHEMA,
     DETECTION_SYSTEM_PROMPT,
 )
-from mcp_trentina_crunchtools.quarantine.providers.openai import (
+from trentina.quarantine.providers.openai import (
     OPENROUTER_API_BASE,
     OPENROUTER_ROUTING,
     _add_additional_properties,
 )
-from tests.adversarial_corpus import CORPUS, Case
 
 HTTP_OK = 200
 RETRIES = 3

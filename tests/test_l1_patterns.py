@@ -13,16 +13,16 @@ import time
 
 import pytest
 
-from mcp_trentina_crunchtools.l1.directives import PATTERNS, strip_directives
-from mcp_trentina_crunchtools.l1.encoded import _DATA_URI_PATTERN
-from mcp_trentina_crunchtools.l1.evasion import (
+from trentina.l1.directives import PATTERNS, strip_directives
+from trentina.l1.encoded import _DATA_URI_PATTERN
+from trentina.l1.evasion import (
     KEYWORDS,
     collapsed_spacing,
     corrected_keyword,
     scrambled_keyword,
     within_one_edit,
 )
-from mcp_trentina_crunchtools.l1.pipeline import run_l1
+from trentina.l1.pipeline import run_l1
 
 from .adversarial_corpus import L1_PATTERN_CASES, OWASP_TEST_ATTACKS, PatternCase
 

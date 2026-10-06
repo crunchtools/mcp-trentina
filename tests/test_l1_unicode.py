@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcp_trentina_crunchtools.l1.unicode import normalize_unicode
+from trentina.l1.unicode import normalize_unicode
 
 
 class TestUnicodeNormalization:

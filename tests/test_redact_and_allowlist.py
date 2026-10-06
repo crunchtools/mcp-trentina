@@ -15,12 +15,12 @@ from pathlib import Path
 
 import pytest
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools.errors import BlockedSourceError, QuarantineAgentError
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.quarantine.agent import confidence_of, grounding
-from mcp_trentina_crunchtools.tools import block_dir, flag_dir, redact_dir
-from mcp_trentina_crunchtools.unpack.scan import unpack
+from trentina import config as config_mod
+from trentina.errors import BlockedSourceError, QuarantineAgentError
+from trentina.modes import Mode
+from trentina.quarantine.agent import confidence_of, grounding
+from trentina.tools import block_dir, flag_dir, redact_dir
+from trentina.unpack.scan import unpack
 
 from .mode_harness import (
     FAMILIES,

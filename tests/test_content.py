@@ -13,8 +13,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_trentina_crunchtools.errors import BlockedSourceError, ContentSizeError
-from mcp_trentina_crunchtools.tools.content import block_content, flag_content, redact_content
+from trentina.errors import BlockedSourceError, ContentSizeError
+from trentina.tools.content import block_content, flag_content, redact_content
 
 from .mode_harness import layers
 
@@ -26,7 +26,7 @@ def _hash(text: str) -> str:
 async def test_oversized_content_is_rejected_before_judging(
     env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from mcp_trentina_crunchtools import config as config_mod
+    from trentina import config as config_mod
 
     monkeypatch.setenv("QUARANTINE_CONTEXT_TOKENS", "10")
     config_mod._config = None
@@ -40,7 +40,7 @@ async def test_the_blocklist_is_keyed_by_hash(env: Path) -> None:
     with (
         layers(env),
         patch(
-            "mcp_trentina_crunchtools.tools.judged.is_blocked",
+            "trentina.tools.judged.is_blocked",
             return_value=True,
         ) as is_blocked,
         pytest.raises(BlockedSourceError),

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway.matrix_relation import withheld_relation
+from trentina.gateway.matrix_relation import withheld_relation
 
 
 class TestWithheldRelation:

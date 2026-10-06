@@ -2,7 +2,7 @@
 
 Run by ``ocr.read_images`` and by nothing else:
 
-    python -m mcp_trentina_crunchtools.unpack.ocr_worker < request.json
+    python -m trentina.unpack.ocr_worker < request.json
 
 The request is ``{"images": [<base64>, ...], "seconds": <budget>}``; the
 answer has one entry per image, ``{"text": [...], "faint": [...]}``, or null

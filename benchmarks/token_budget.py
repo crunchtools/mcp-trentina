@@ -9,7 +9,7 @@ also runs tool calls and reports each result's size, minified and exact
 
 Standard library only, so it runs on the gateway host without a venv:
 
-    ssh host01 'set -a; . /srv/.../mcp-trentina.env; \
+    ssh host01 'set -a; . /srv/.../trentina.env; \
         python3 - --profile agent1' < benchmarks/token_budget.py
 
 The bearer token is read from ``TRENTINA_PROFILE_<PROFILE>_TOKEN`` and never

@@ -1,4 +1,4 @@
-"""Configuration for mcp-trentina-crunchtools."""
+"""Configuration for trentina."""
 
 from __future__ import annotations
 
@@ -332,7 +332,7 @@ class Config:
             os.environ.get("CLASSIFIER_THREADS", str(DEFAULT_CLASSIFIER_THREADS))
         )
 
-        home_db = str(Path.home() / ".local" / "share" / "mcp-trentina" / "trentina.db")
+        home_db = str(Path.home() / ".local" / "share" / "trentina" / "trentina.db")
         self.db_path: str = os.environ.get("QUARANTINE_DB", home_db)
 
         # The perimeter's own store, deliberately a SEPARATE database file
@@ -358,7 +358,7 @@ class Config:
 
         trust_config_path = os.environ.get(
             "QUARANTINE_TRUST_CONFIG",
-            str(Path.home() / ".config" / "mcp-env" / "mcp-trentina-trust.json"),
+            str(Path.home() / ".config" / "mcp-env" / "trentina-trust.json"),
         )
         self.trust_config_path: str = trust_config_path
         try:

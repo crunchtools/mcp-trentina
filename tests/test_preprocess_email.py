@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from mcp_trentina_crunchtools.preprocess import (
+from trentina.preprocess import (
     Cost,
     EmailProcessor,
     PreProcessContext,

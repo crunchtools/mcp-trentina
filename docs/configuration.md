@@ -56,10 +56,10 @@ these variables control the process itself. Profile tokens
 | `TRENTINA_L3_CONCURRENCY_START` | `4` | L3 calls in flight per (provider, model, API key) before the adaptive limiter has learned anything. It grows from here until the provider throttles. |
 | `TRENTINA_L3_CONCURRENCY_MAX` | `64` | Ceiling for the adaptive L3 limiter, per (provider, model, API key). A safety cap, not a target. |
 | `TRENTINA_L3_THROTTLE_BUDGET` | `20` | Seconds a user-facing L3 call may spend waiting out 429s on one provider before falling back. `0` falls back at once. The boot warm-up uses 300. |
-| `QUARANTINE_DB` | `~/.local/share/mcp-trentina/trentina.db` (container: `/data/quarantine.db`) | Path to the main SQLite database (blocklist, audit log). See [Audit Log](audit-log.md) and [Blocklist](blocklist.md). |
+| `QUARANTINE_DB` | `~/.local/share/trentina/trentina.db` (container: `/data/quarantine.db`) | Path to the main SQLite database (blocklist, audit log). See [Audit Log](audit-log.md) and [Blocklist](blocklist.md). |
 | `TRENTINA_PERIMETER_DB` | `<QUARANTINE_DB's directory>/perimeter.db` | Path to the perimeter verdict-cache database, deliberately separate from `QUARANTINE_DB`. |
 | `TRENTINA_READ_ROOTS` | unset | `os.pathsep`-separated absolute directories `read_tool` and `dir_tool` may reach. Unset behind a gateway refuses every path (production's setting); unset standalone reads anywhere. Kernel and Trentina state/config directories are refused regardless. See [Quarantine Tools](quarantine-tools.md#where-read-and-dir-may-look). |
-| `QUARANTINE_TRUST_CONFIG` | `~/.config/mcp-env/mcp-trentina-trust.json` | Path to the trust-level configuration JSON. See [Quarantine Tools](quarantine-tools.md). |
+| `QUARANTINE_TRUST_CONFIG` | `~/.config/mcp-env/trentina-trust.json` | Path to the trust-level configuration JSON. See [Quarantine Tools](quarantine-tools.md). |
 | `TRENTINA_FETCH_ALLOW_PRIVATE` | `false` | Lets `fetch` reach loopback, private, link-local and other non-global addresses. Scheme, port (80/443) and redirect rules still apply. Logs a warning at startup. See [Quarantine Tools](quarantine-tools.md). |
 | `TRENTINA_RATE_LIMIT` | on | Set to `off`/`0`/`false` to disable rate limiting on the unauthenticated OAuth write paths. An escape hatch for an operator locked out during an incident — not a normal setting. |
 | `TRENTINA_MAX_REGISTRATION_BYTES` | `8192` | Largest `POST /register` body accepted, rejected before it is parsed. `0` or negative disables the cap. |
