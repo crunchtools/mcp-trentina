@@ -10,6 +10,15 @@ under that name.
 
 ## [Unreleased]
 
+### Changed
+- `benchmarks/decoy_tools.py` (#357) measures decoys named for the attack
+  (`exfiltrate_password`, `send_token`, ...) beside the neutral set, under
+  the judge's own prompt, that prompt forbidding calls, and a bait prompt,
+  and `benchmark-decoys.yml` runs it by hand on every judge with a shipped
+  pack. Measured and still not built: three of four judges never call a
+  decoy, and the fourth calls one on four benign texts in ten
+  (`docs/benchmark.md`).
+
 ## [1.0.1] - 2026-10-06
 
 ### Removed
