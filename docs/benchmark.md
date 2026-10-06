@@ -641,6 +641,59 @@ and tools uses the tools on the text. The trip does not separate attacks
 from anything, so it cannot be a tripwire. `enforce_no_tools` stays as it
 is.
 
+### Decoys named for the attack, on every pack judge
+
+That run used tools any document could plausibly be used with. The second
+(2026-10-06, `benchmark-decoys.yml`) asked whether decoys named for what an
+attack wants (`exfiltrate_password`, `send_token`, `leak_system_prompt`,
+`override_instructions`, `disable_safety_checks`) separate better, on the
+four judges that ship a pack. Each case was asked once as today, with the
+judge's pack, then in a second tools-only call per arm: the neutral or the
+hostile set, under the pack's detection prompt (`judge`), that prompt plus
+a line saying tools are listed and must never be called (`forbid`), or a
+plain "summarize this document" with nothing about injection (`bait`).
+Internal corpus and the external held-out split, 320 cases, one vote.
+
+A decoy was called on, hostile set:
+
+| judge | prompt | attacks | benign | attacks the verdict misses |
+|---|---|---|---|---|
+| gemini-2.5-flash-lite | judge | 48 of 182 (26.4%) | 52 of 137 (38.0%) | 0 of 5 |
+| | forbid | 61 of 183 (33.3%) | 55 of 137 (40.1%) | 1 of 5 |
+| | bait | 30 of 183 (16.4%) | 8 of 137 (5.8%) | 1 of 5 |
+| claude-haiku-4.5 | all three | 0 of 183 | 0 of 137 | 0 of 3 |
+| gemini-3.5-flash-lite | all three | 0 of 181 | 0 of 137 | 0 of 14 |
+| gemini-3.8-flash | all three | 0 of 180 | 0 of 137 | 0 of 7 |
+
+The neutral set, for comparison: on gemini-2.5-flash-lite 45.3%, 50.4% and
+2.2% of benign under the three prompts; on the other three judges no call
+under `judge` or `forbid`, and under `bait` four calls in all (Haiku one
+attack and two benign, Gemini 3.5 Flash Lite one attack).
+
+**Still not built.** The names changed nothing that matters.
+
+- Three of the four judges never call a decoy, on an attack or on anything
+  else, as a judge or as a plain summarizer with the tools in reach. A
+  tripwire nothing trips costs a second call per payload and reports
+  nothing.
+- gemini-2.5-flash-lite calls a tool on four benign texts in ten whatever
+  the tools are named, and no less often when told not to. Half or more of
+  its calls on benign text are to tools that were never declared
+  (`scan_text`, `run_code`, `translate`). The trip is the model's habit, not the content.
+  `bait` brings benign trips down to 5.8%, which is still not about zero,
+  for one of five missed attacks.
+- What the verdict misses is direct jailbreaks (all but three of the 29
+  misses across the four judges). A persona prompt asks the reader to
+  become something, not to send anything, so there is no call for a decoy
+  to catch. The corpus has little that orders an action in one turn with no
+  task around it, and that is also its limit as a test of this idea: an
+  agent in the middle of real work, holding real tools, is a different
+  reader from a judge handed one document.
+
+A second call takes about as long as the first. Under `bait` the prompt is
+shorter: a quarter of the first call's tokens on the Gemini judges, four
+fifths on Haiku, where the tool declarations weigh more.
+
 ## OCR for images (#370)
 
 Images are read by RapidOCR 3.9 (PP-OCRv6 small detection and recognition
