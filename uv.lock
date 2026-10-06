@@ -1537,7 +1537,7 @@ wheels = [
 
 [[package]]
 name = "mcp-trentina-crunchtools"
-version = "0.64.0"
+version = "0.65.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },

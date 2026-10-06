@@ -528,7 +528,7 @@ one vote and once with three.
 | gpt-4o-mini | generic | 95.8% of 72 | 5.2% | 90.8% | 2 of 3 | |
 | gpt-4o-mini | the same wording | 97.2% of 72 | 1.5% | 97.2% | 2 of 3 | passes, on what it would read |
 
-**No pack ships.** The rule in #354 is that a pack must beat the generic
+**No pack shipped in 0.63.0** (four ship in 0.65.0, below). The rule in #354 was that a pack must beat the generic
 prompts on held-out at an equal or lower false-positive rate, and the gate
 reads that as: no fewer attacks caught, no more benign flagged, better at
 one. The candidate is better at one by a wide margin and worse at the other
@@ -571,6 +571,48 @@ be tuned.
 
 The tuning split, for the record, since it is not a result: generic 94.6%
 and 18.1%; candidate 94.6% and 1.8%.
+
+### The packs that ship (0.65.0)
+
+The gate above refused any lost catch, and the trade it refused was a good
+one. It was changed (2026-10-06, a product decision): a pack still may not
+lose a planted-instruction case in any category of the internal corpus, but
+it may give up as much as 10% of the external set's direct jailbreaks when
+it spares more benign refusals than the jailbreaks it gives up.
+
+The same wording was then measured on five judges. Held-out split, three
+votes, through OpenRouter, 2026-10-06:
+
+| judge | attacks caught, generic → pack | benign flagged, generic → pack | direct jailbreaks given up | median call | ships |
+|---|---|---|---|---|---|
+| gemini-2.5-flash-lite | 98.3% → 97.1% | 18.7% → 2.2% | 2 of 139 | 1.1 s | yes |
+| claude-haiku-4.5 | 99.4% → 97.7% | 14.2% → 2.2% | 3 of 139 | 3.1 s | yes |
+| gemini-3.8-flash | 99.4% → 96.4% | 47.0% → 0.0% | 6 of 137 | 6.3 s | yes |
+| gemini-3.5-flash-lite | 95.9% → 91.8% | 9.7% → 0.0% | 7 of 136 | 1.1 s | yes |
+| gpt-6-luna | 97.3% → 86.8%, of 75 | 47.8% → 2.2% | 7 of 51 | 2.8 s | no |
+
+On every judge, every category of planted instructions was caught as often
+with the pack as without; on Gemini 3.5 Flash Lite the pack also caught the
+one `detector_meta` case the generic prompts missed. All of what was given
+up is direct jailbreaks.
+
+- **Gemini 3.8 Flash** is a reasoning model. It was measured with
+  `QUARANTINE_REASONING_EFFORT=minimal`, and still takes six seconds a
+  call. At its default it took 6 to 17. The generic prompts flag nearly half
+  of benign content on it; without the pack it is not a usable judge.
+- **Gemini 3.5 Flash Lite** passes the gate and is the weakest judge here:
+  with or without the pack it catches fewer attacks than its predecessor.
+- **GPT-6 Luna cannot be the judge on this route**, for the reason
+  gpt-4o-mini could not: OpenRouter serves it from Azure, whose content
+  filter answered most attacks with nothing to parse (68% of answers
+  parsed). Its rates are over the 75 attacks it read.
+- Gemini 3.8 Flash and GPT-6 Luna refuse a request that sets `temperature`.
+  Until 0.65.0 every call to either was a 404 and an unavailable judge; the
+  OpenRouter driver now asks once more without it.
+
+A pack is keyed by the exact provider and model, and all of these were
+measured through OpenRouter. The same model reached through its vendor's
+own API has no shipped pack until it is measured there.
 
 ## Decoy tools (#357)
 

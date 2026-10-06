@@ -10,6 +10,33 @@ under that name.
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-10-06
+
+### Added
+- Prompt Packs ship for four L3 judges through OpenRouter: Gemini 2.5 Flash
+  Lite (production's judge), Claude Haiku 4.5, Gemini 3.8 Flash and Gemini
+  3.5 Flash Lite. On held-out benign content the false-positive rate falls
+  from 18.7% to 2.2%, 14.2% to 2.2%, 47.0% to 0.0% and 9.7% to 0.0%; every
+  planted-instruction case the generic prompts catch is still caught. A
+  judge with a shipped pack uses it on upgrade, and its cached verdicts are
+  judged again. `TRENTINA_L3_PROMPT_PACK=generic` keeps the old prompts.
+- `QUARANTINE_REASONING_EFFORT` (`minimal`, `low`, `medium`, `high`): how
+  long a reasoning judge thinks, sent as OpenRouter's `reasoning.effort`.
+  Gemini 3.8 Flash was measured at `minimal`.
+
+### Changed
+- The gate a pack ships through (#354). It may now give up as much as 10% of
+  the external set's direct jailbreaks when it spares more benign refusals
+  than it gives up. It still may not lose a planted-instruction case in any
+  category. Under the first gate no pack shipped.
+- An operator's pack that stops loading now falls back to the shipped pack
+  for that judge, when there is one, instead of the generic prompts.
+
+### Fixed
+- Gemini 3.8 Flash and GPT-6 Luna could not be the judge through OpenRouter:
+  both refuse a request that sets `temperature`, so every call was a 404 and
+  an unavailable judge. The driver asks once more without it and remembers.
+
 ## [0.64.0] - 2026-10-05
 
 ### Fixed
