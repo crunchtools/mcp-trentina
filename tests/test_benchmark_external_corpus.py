@@ -207,7 +207,7 @@ def _transport(status: int, body: bytes, seen: list[httpx.Request]) -> httpx.Moc
 
 def test_download_fetches_the_pinned_revision() -> None:
     seen: list[httpx.Request] = []
-    assert external_corpus._download("test", _transport(200, CSV, seen)) == CSV
+    assert external_corpus.download(external_corpus.url("test"), _transport(200, CSV, seen)) == CSV
     (request,) = seen
     assert str(request.url) == external_corpus.url("test")
     assert external_corpus.REVISION in str(request.url)
@@ -215,13 +215,13 @@ def test_download_fetches_the_pinned_revision() -> None:
 
 def test_download_raises_on_http_error() -> None:
     with pytest.raises(httpx.HTTPStatusError):
-        external_corpus._download("test", _transport(404, b"", []))
+        external_corpus.download(external_corpus.url("test"), _transport(404, b"", []))
 
 
 def test_download_refuses_past_the_size_cap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(external_corpus, "MAX_DOWNLOAD_BYTES", 10)
     with pytest.raises(ValueError, match="exceeds"):
-        external_corpus._download("test", _transport(200, CSV, []))
+        external_corpus.download(external_corpus.url("test"), _transport(200, CSV, []))
 
 
 def test_parsing_leaves_the_csv_field_limit_as_it_found_it() -> None:
@@ -342,7 +342,9 @@ def test_download_follows_the_resolve_redirect() -> None:
             return httpx.Response(200, content=CSV)
         return httpx.Response(302, headers={"Location": target})
 
-    assert external_corpus._download("test", httpx.MockTransport(handler)) == CSV
+    assert (
+        external_corpus.download(external_corpus.url("test"), httpx.MockTransport(handler)) == CSV
+    )
     assert [str(r.url) for r in seen] == [external_corpus.url("test"), target]
 
 
