@@ -76,18 +76,25 @@ commerce keeps flowing, and nothing dangerous gets in.
    runs L1 ∥ L2, then L3 briefed with both. The profile's mode decides delivery,
    never detection: `block` refuses, `flag` delivers the exact bytes with a
    verdict, `redact` returns an answer L3 extracted and a second pass verified.
-2. **[Content Tools](docs/quarantine-tools.md).** `fetch`, `read`, `dir`,
+2. **[Prompt Packs](docs/l3-prompt-tuning.md).** The L3 judge's prompts,
+   tuned and measured for one exact model. On held-out benign content the
+   generic prompts flag 19% on Gemini 2.5 Flash Lite and 47% on Gemini 3.8
+   Flash; the shipped packs bring that to 2% and 0%, and catch every
+   planted-instruction case the generic prompts catch. Packs ship for four
+   judges, each through a held-out gate, and an operator can tune their own
+   for any model.
+3. **[Content Tools](docs/quarantine-tools.md).** `fetch`, `read`, `dir`,
    `content` and `search`, built-in tools that bring outside content in
    through the pipeline. Fetches go through an egress guard that refuses
    private addresses and checks every redirect. Reads are confined to
    configured roots.
-3. **[Cumulative Detection Memory](docs/blocklist.md).** A refused source stays
+4. **[Cumulative Detection Memory](docs/blocklist.md).** A refused source stays
    refused for that profile until its entry expires, whatever a probabilistic
    layer thinks on the next run.
-4. **[Matrix Bridge](docs/matrix-bridge.md).** Terminates end-to-end
+5. **[Matrix Bridge](docs/matrix-bridge.md).** Terminates end-to-end
    encryption in a separate process so every message, in both directions,
    crosses the pipeline.
-5. **[Deployment Hardening](docs/deployment-hardening.md).** Container flags,
+6. **[Deployment Hardening](docs/deployment-hardening.md).** Container flags,
    secrets from files, network isolation, and a startup check that warns or
    refuses on containment gaps.
 
@@ -205,6 +212,7 @@ Then point Claude Code at it:
 | [Authentication](docs/authentication.md) | Static bearer, OAuth proxy with DCR or a provisioned client, delegated issuers |
 | [Defense Pipeline](docs/defense-pipeline.md) | L1/L2/L3, modes, coverage and known gaps |
 | [Benchmark](docs/benchmark.md) | Detection rates per layer and per L3 provider |
+| [Prompt Packs](docs/l3-prompt-tuning.md) | The judge's prompts tuned per model: shipped packs, the gate, tuning your own |
 | [Content Tools](docs/quarantine-tools.md) | fetch, read, dir, content, search |
 | [Blocklist](docs/blocklist.md) | Cumulative detection memory |
 | [Tool Filtering](docs/tool-filtering.md) | Allowlists, denylists, glob patterns |

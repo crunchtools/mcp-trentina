@@ -167,6 +167,67 @@ class TestOpenAIProvider:
 class TestOpenRouterProvider:
     """OpenRouter is the OpenAI driver pointed at OpenRouter, with host routing."""
 
+    def _provider(self) -> OpenAIProvider:
+        return OpenAIProvider(
+            api_key="sk-or-test",
+            model="google/gemini-3.8-flash",
+            base_url=OPENROUTER_API_BASE,
+            routing=OPENROUTER_ROUTING,
+        )
+
+    @staticmethod
+    def _not_found(message: str) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={"error": {"message": message, "code": 404}},
+            request=httpx.Request("POST", "https://example.com"),
+        )
+
+    async def test_a_judge_that_fixes_its_own_temperature_is_asked_without_it(self) -> None:
+        """Gemini 3.8 Flash and GPT-6 Luna have no host that takes ``temperature``
+        under ``require_parameters``: every call was a 404 and an unavailable judge."""
+        provider = self._provider()
+        refused = self._not_found("No endpoints found that can handle the requested parameters.")
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.side_effect = [refused, _openai_response("one"), _openai_response("two")]
+            first = await provider.generate("sys", "user")
+            second = await provider.generate("sys", "user")
+        assert (first.text, second.text) == ("one", "two")
+        sent = [call.kwargs["json"] for call in mock_post.call_args_list]
+        assert ["temperature" in body for body in sent] == [True, False, False]
+        assert all(body["provider"] == OPENROUTER_ROUTING for body in sent)
+
+    async def test_reasoning_effort_is_sent_only_when_set(self) -> None:
+        thinking = OpenAIProvider(
+            api_key="k", base_url=OPENROUTER_API_BASE, routing=OPENROUTER_ROUTING,
+            reasoning_effort="minimal",
+        )  # fmt: skip
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = _openai_response("ok")
+            await thinking.generate("sys", "user")
+            await self._provider().generate("sys", "user")
+        first, second = (call.kwargs["json"] for call in mock_post.call_args_list)
+        assert first["reasoning"] == {"effort": "minimal"}
+        assert "reasoning" not in second
+
+    async def test_a_model_that_does_not_exist_is_not_asked_twice(self) -> None:
+        provider = self._provider()
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = self._not_found("No such model.")
+            with pytest.raises(QuarantineAgentError) as raised:
+                await provider.generate("sys", "user")
+        assert raised.value.status_code == 404
+        assert mock_post.call_count == 1
+
+    async def test_a_judge_that_refuses_something_else_fails_after_one_more_ask(self) -> None:
+        provider = self._provider()
+        refused = self._not_found("No endpoints found that can handle the requested parameters.")
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = refused
+            with pytest.raises(QuarantineAgentError):
+                await provider.generate("sys", "user")
+        assert mock_post.call_count == 2
+
     async def test_posts_to_openrouter_with_routing(self) -> None:
         provider = OpenAIProvider(
             api_key="sk-or-test",
@@ -362,3 +423,17 @@ class TestGetProviderFactory:
         p = get_provider(None)
         assert isinstance(p, GeminiProvider)
         config_mod._config = None
+
+
+class TestReasoningEffort:
+    def test_an_unknown_effort_refuses_startup(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from mcp_trentina_crunchtools.config import Config
+        from mcp_trentina_crunchtools.errors import ConfigError
+
+        monkeypatch.setenv("QUARANTINE_REASONING_EFFORT", "none")
+        with pytest.raises(ConfigError, match="QUARANTINE_REASONING_EFFORT"):
+            Config()
+        monkeypatch.setenv("QUARANTINE_REASONING_EFFORT", "minimal")
+        assert Config().reasoning_effort == "minimal"
+        monkeypatch.setenv("QUARANTINE_REASONING_EFFORT", "")
+        assert Config().reasoning_effort is None

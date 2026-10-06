@@ -19,7 +19,7 @@ __all__ = ["Provider", "ProviderResult", "get_fallback_providers", "get_provider
 _DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 
-def _openrouter(key_value: str, model: str) -> Provider:
+def _openrouter(key_value: str, model: str, reasoning_effort: str | None) -> Provider:
     """The OpenAI driver pointed at OpenRouter, where model ids carry a vendor."""
     from .openai import OPENROUTER_API_BASE, OPENROUTER_ROUTING, OpenAIProvider
 
@@ -32,6 +32,7 @@ def _openrouter(key_value: str, model: str) -> Provider:
         model=model,
         base_url=OPENROUTER_API_BASE,
         routing=OPENROUTER_ROUTING,
+        reasoning_effort=reasoning_effort,
     )
 
 
@@ -105,6 +106,7 @@ def get_provider(
             provider = _openrouter(
                 (api_key or config.openrouter_api_key).get_secret_value(),
                 resolved_model,
+                config.reasoning_effort,
             )
 
         case "anthropic":

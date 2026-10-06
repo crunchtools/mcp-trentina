@@ -202,6 +202,24 @@ def _read_roots_env() -> tuple[tuple[Path, ...], tuple[Path, ...]]:
     return tuple(roots), tuple(written)
 
 
+REASONING_EFFORTS = ("minimal", "low", "medium", "high")
+"""How long a reasoning judge may think (OpenRouter's ``reasoning.effort``).
+Unset, the model's own default applies: Gemini 3.8 Flash then takes 6 to 17
+seconds a call, against a median of six at ``minimal`` (docs/benchmark.md)."""
+
+
+def _reasoning_effort() -> str | None:
+    """``QUARANTINE_REASONING_EFFORT``, or None when it is unset or empty."""
+    effort = os.environ.get("QUARANTINE_REASONING_EFFORT") or None
+    if effort not in (None, *REASONING_EFFORTS):
+        from .errors import ConfigError
+
+        raise ConfigError(
+            f"QUARANTINE_REASONING_EFFORT must be one of {', '.join(REASONING_EFFORTS)}"
+        )
+    return effort
+
+
 class Config:
     """Trentina configuration from environment variables.
 
@@ -232,6 +250,7 @@ class Config:
         self.ollama_model: str = os.environ.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
 
         self.model: str = os.environ.get("QUARANTINE_MODEL", DEFAULT_MODEL)
+        self.reasoning_effort: str | None = _reasoning_effort()
         self.search_model: str = os.environ.get("QUARANTINE_SEARCH_MODEL", DEFAULT_SEARCH_MODEL)
         if "QUARANTINE_FALLBACK" in os.environ:
             from .errors import ConfigError

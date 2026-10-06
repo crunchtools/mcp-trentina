@@ -53,6 +53,7 @@ from dataclasses import asdict, dataclass
 from dataclasses import field as dataclass_field
 from typing import TYPE_CHECKING, Any
 
+from ..config import get_config
 from ..defense import Provenance, defend
 from ..l1.hidden import HiddenStats
 from ..l1.pipeline import run_l1
@@ -201,15 +202,19 @@ def _cache_key(profile: Profile, kind: str, text: str, judge: tuple[str, str]) -
     d = profile.defense
     # Unset defers to the model's own threshold, which the store's stamp
     # carries (#350); an explicit one keeps its pre-0.55 spelling.
-    cfg = "model" if d.l2_threshold is None else f"{d.l2_threshold}"
-    if judge != judge_of(None):
-        cfg = f"{cfg}:{judge[0]}/{judge[1]}"
-    # The judge's prompt pack, by id and text (#354): editing a prompt sweeps
-    # the verdicts it reached. The generic prompts keep the old spelling, for
-    # the reason the default judge does; a change to them is a perimeter bump.
     pack = pack_for(judge, d.l3_prompt_pack)
-    if pack.id != GENERIC_ID:
-        cfg = f"{cfg}:pack={pack.stamp}"
+    effort = get_config().reasoning_effort
+    # Each part is written only when it differs from the default, so a key
+    # stored before that part existed still matches. The pack is named by id
+    # and text (#354): editing a prompt sweeps the verdicts it reached. How
+    # long the judge thinks changes what it concludes, so that is here too.
+    parts = {
+        "model" if d.l2_threshold is None else f"{d.l2_threshold}": True,
+        f"{judge[0]}/{judge[1]}": judge != judge_of(None),
+        f"pack={pack.stamp}": pack.id != GENERIC_ID,
+        f"effort={effort}": effort is not None,
+    }
+    cfg = ":".join(part for part, written in parts.items() if written)
     return hashlib.sha256(f"{kind}:{cfg}:{text}".encode()).hexdigest()
 
 

@@ -235,7 +235,8 @@ def pack_for(judge: tuple[str, str], operator_path: str | None = None) -> Prompt
 
     The operator's pack when it names exactly this judge; else a shipped
     pack for exactly this judge; else the generic prompts. An operator who
-    asks for ``generic`` gets it for every judge.
+    asks for ``generic`` gets it for every judge, and one whose own pack no
+    longer loads gets what they would have had without it.
     """
     own = operator_pack(operator_path)
     if own is GENERIC or (own is not None and (own.provider, own.model) == judge):
