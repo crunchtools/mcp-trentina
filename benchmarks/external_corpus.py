@@ -85,11 +85,6 @@ def download(target: str, transport: httpx.BaseTransport | None = None) -> bytes
     return bytes(body)
 
 
-def _download(split: str, transport: httpx.BaseTransport | None = None) -> bytes:
-    """The split's CSV at the pinned revision."""
-    return download(url(split), transport)
-
-
 def pinned(cached: Path, expected: str, fetch: Callable[[], bytes], what: str) -> bytes:
     """A pinned file, from ``cached`` when its hash still matches, else fetched.
 
@@ -155,7 +150,7 @@ def load(
     split: str = "test",
     *,
     cache_dir: Path = CACHE_DIR,
-    fetch: Callable[[str], bytes] = _download,
+    fetch: Callable[[str], bytes] | None = None,
 ) -> list[Case]:
     """The dataset as benchmark ``Case``s.
 
@@ -173,4 +168,5 @@ def load(
     if split not in SPLITS:
         raise ValueError(f"unknown split {split!r}; expected one of {SPLITS}")
     names = list(ALL_ORDER) if split == "all" else [split]
-    return [c for name in names for c in _cases(name, _split_bytes(name, cache_dir, fetch))]
+    get = fetch or (lambda name: download(url(name)))
+    return [c for name in names for c in _cases(name, _split_bytes(name, cache_dir, get))]
