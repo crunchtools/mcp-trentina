@@ -26,17 +26,17 @@ import pytest
 import uvicorn.config
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools import logsafe
-from mcp_trentina_crunchtools.gateway import ingress_defense, loader
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+from trentina import config as config_mod
+from trentina import logsafe
+from trentina.gateway import ingress_defense, loader
+from trentina.gateway.profile import AuthConfig, Backend, Profile
 
 #: A secret with no shape of its own, so only ``hold`` can know it.
 SECRET = "hunter2-" + "zqv9" * 6
 NAME = "TEST_UPSTREAM_CREDENTIAL"
 MARK = f"[REDACTED:{NAME}]"
 
-_SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "mcp_trentina_crunchtools"
+_SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "trentina"
 
 
 class _Capture(logging.Handler):
@@ -138,7 +138,7 @@ _CARRIERS = {
 }
 
 
-@pytest.mark.parametrize("logger_name", ["mcp_trentina_crunchtools.x", "some.thirdparty.sdk"])
+@pytest.mark.parametrize("logger_name", ["trentina.x", "some.thirdparty.sdk"])
 @pytest.mark.parametrize("carrier", sorted(_CARRIERS))
 def test_a_secret_never_prints(logger_name: str, carrier: str) -> None:
     logsafe.hold(SECRET, NAME)
@@ -157,7 +157,7 @@ def test_a_traceback_cannot_be_rendered_again() -> None:
         def emit(self, record: logging.LogRecord) -> None:
             records.append(record)
 
-    logger = logging.getLogger("mcp_trentina_crunchtools.x")
+    logger = logging.getLogger("trentina.x")
     handler = _Keep()
     logger.addHandler(handler)
     try:
@@ -178,7 +178,7 @@ def test_a_clean_traceback_keeps_its_exc_info() -> None:
         def emit(self, record: logging.LogRecord) -> None:
             records.append(record)
 
-    logger = logging.getLogger("mcp_trentina_crunchtools.x")
+    logger = logging.getLogger("trentina.x")
     handler = _Keep()
     logger.addHandler(handler)
     try:
@@ -217,7 +217,7 @@ class _PrintsExtras(logging.Handler):
         self.lines.append(logging.Formatter("%(message)s %(cred)s %(ctx)s %(n)d").format(record))
 
 
-@pytest.mark.parametrize("logger_name", ["mcp_trentina_crunchtools.x", "some.thirdparty.sdk"])
+@pytest.mark.parametrize("logger_name", ["trentina.x", "some.thirdparty.sdk"])
 def test_an_extra_field_is_scrubbed(logger_name: str) -> None:
     """``extra`` is merged into the record after the record factory returns."""
     logsafe.hold(SECRET, NAME)
@@ -592,7 +592,7 @@ def test_configure_sets_the_root_level_when_the_root_has_a_handler(
 #: Imports the bridge and drives petit, then prints the root logger's handlers.
 _ROOT_PROBE = """
 import logging
-import mcp_trentina_crunchtools.bridge.main
+import trentina.bridge.main
 from petit import analyze_text
 analyze_text("\\n".join(f"host app[{i}]: request {i} done in {i}ms" for i in range(200)))
 print(len(logging.getLogger().handlers))
@@ -626,7 +626,7 @@ def test_a_setting_read_like_a_secret_is_not_held(monkeypatch: pytest.MonkeyPatc
 def test_bridge_settings_hold_the_secrets_and_not_the_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from mcp_trentina_crunchtools.bridge.settings import BridgeSettings
+    from trentina.bridge.settings import BridgeSettings
 
     for name, value in {
         "BRIDGE_PROFILE": "takeda-profile",
@@ -641,9 +641,7 @@ def test_bridge_settings_hold_the_secrets_and_not_the_names(
         monkeypatch.setenv(name, value)
         monkeypatch.delenv(f"{name}_FILE", raising=False)
     monkeypatch.delenv("BRIDGE_ACCESS_TOKEN", raising=False)
-    monkeypatch.setattr(
-        "mcp_trentina_crunchtools.bridge.settings.private_url", lambda value: value.rstrip("/")
-    )
+    monkeypatch.setattr("trentina.bridge.settings.private_url", lambda value: value.rstrip("/"))
     settings = BridgeSettings.from_env()
     assert (
         logsafe.scrub(f"bridge[{settings.profile}]: resumed") == "bridge[takeda-profile]: resumed"

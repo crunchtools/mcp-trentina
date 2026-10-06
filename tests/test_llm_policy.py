@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway.llm_policy import (
+from trentina.gateway.llm_policy import (
     LlmApi,
     LlmRefusedError,
     Reason,

@@ -23,15 +23,15 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_trentina_crunchtools.defense import (
+from trentina.defense import (
     Layer,
     Provenance,
     defend,
 )
-from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
+from trentina.gateway.profile import DefenseConfig
+from trentina.quarantine.classifier import ClassifierResult
 
-_D = "mcp_trentina_crunchtools.defense"
+_D = "trentina.defense"
 
 BENIGN_ZERO = ClassifierResult(label="BENIGN", score=0.0, latency_ms=1.0)
 BENIGN_MID = ClassifierResult(label="BENIGN", score=0.5, latency_ms=1.0)
@@ -198,7 +198,7 @@ class TestTheOnlyPermittedSkips:
         clean_* path — skipped detection, and it called that a design. It
         was the hole #187 closes. redact now detects first, then extracts and
         verifies; see tests/test_mode_parity.py for every family and mode."""
-        import mcp_trentina_crunchtools.defense as defense_mod
+        import trentina.defense as defense_mod
 
         assert not hasattr(defense_mod, "advise")
 
@@ -216,8 +216,8 @@ class TestDeprecatedKeyIsRejected:
         an operator who still sets it is reasoning about a gate that has not
         existed for seventeen minor releases.
         """
-        from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-        from mcp_trentina_crunchtools.gateway.loader import load_profiles
+        from trentina.gateway.errors import ProfileConfigError
+        from trentina.gateway.loader import load_profiles
 
         monkeypatch.setenv("TEST_TOK", "x")
         cfg = tmp_path / "profiles.yaml"

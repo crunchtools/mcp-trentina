@@ -40,12 +40,12 @@ from nio.exceptions import EncryptionError
 from nio.store import SqliteStore
 from starlette.testclient import TestClient
 
-from mcp_trentina_crunchtools.bridge import client as client_mod
-from mcp_trentina_crunchtools.bridge import main as main_mod
-from mcp_trentina_crunchtools.bridge.api import build_app
-from mcp_trentina_crunchtools.bridge.client import Bridge, SendError, membership_digest
-from mcp_trentina_crunchtools.bridge.import_mautrix import SessionImportError, import_mautrix
-from mcp_trentina_crunchtools.bridge.settings import BridgeSettings, SettingsError
+from trentina.bridge import client as client_mod
+from trentina.bridge import main as main_mod
+from trentina.bridge.api import build_app
+from trentina.bridge.client import Bridge, SendError, membership_digest
+from trentina.bridge.import_mautrix import SessionImportError, import_mautrix
+from trentina.bridge.settings import BridgeSettings, SettingsError
 
 USER = "@agent1-bot:matrix.org"
 ROOM = "!ops:matrix.org"
@@ -140,7 +140,7 @@ def _bridge(
         user_id=USER,
         store_dir=tmp_path,
         pickle_key="pk",
-        gateway_url="http://mcp-trentina:8019",
+        gateway_url="http://trentina:8019",
         ingress_token="ingress-secret",
         bridge_token="bridge-secret",
         listen_host="127.0.0.1",
@@ -492,7 +492,7 @@ def _settings_with(tmp_path: Path, **changes: Any) -> BridgeSettings:
         user_id=USER,
         store_dir=tmp_path,
         pickle_key="pk",
-        gateway_url="http://mcp-trentina:8019",
+        gateway_url="http://trentina:8019",
         ingress_token="ingress-secret",
         bridge_token="bridge-secret",
         listen_host="127.0.0.1",
@@ -638,7 +638,7 @@ class TestSettings:
         "BRIDGE_PROFILE": "agent1",
         "BRIDGE_USER_ID": USER,
         "BRIDGE_PICKLE_KEY": "pk",
-        "BRIDGE_GATEWAY_URL": "http://mcp-trentina:8019/",
+        "BRIDGE_GATEWAY_URL": "http://trentina:8019/",
         "BRIDGE_INGRESS_TOKEN": "i",
         "BRIDGE_TOKEN": "b",
     }
@@ -653,7 +653,7 @@ class TestSettings:
         self._env(monkeypatch)
         settings = BridgeSettings.from_env()
         assert settings.homeserver == "https://matrix-client.matrix.org"
-        assert settings.gateway_url == "http://mcp-trentina:8019"
+        assert settings.gateway_url == "http://trentina:8019"
         assert (settings.listen_host, settings.listen_port) == ("127.0.0.1", 8471)
         assert settings.store_dir == Path("/data")
         assert (settings.password, settings.access_token) == ("", "")
@@ -905,7 +905,7 @@ class TestForgedRedaction:
 class TestSettingsUrls:
     @pytest.mark.parametrize(
         ("name", "value"),
-        [("BRIDGE_HOMESERVER", "ftp://matrix.org"), ("BRIDGE_GATEWAY_URL", "mcp-trentina:8019")],
+        [("BRIDGE_HOMESERVER", "ftp://matrix.org"), ("BRIDGE_GATEWAY_URL", "trentina:8019")],
     )
     def test_a_url_must_be_http(
         self, monkeypatch: pytest.MonkeyPatch, name: str, value: str
@@ -1152,7 +1152,7 @@ class TestPrivateWrites:
 class TestGatewayUrl:
     @pytest.mark.parametrize(
         "url",
-        ["https://gateway.example.com", "http://8.8.8.8:8019", "http://u:p@mcp-trentina:8019"],
+        ["https://gateway.example.com", "http://8.8.8.8:8019", "http://u:p@trentina:8019"],
     )
     def test_the_gateway_must_be_private(self, monkeypatch: pytest.MonkeyPatch, url: str) -> None:
         TestSettings()._env(monkeypatch, BRIDGE_GATEWAY_URL=url)

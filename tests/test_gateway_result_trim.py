@@ -15,18 +15,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools.gateway.backend import BackendCall
-from mcp_trentina_crunchtools.gateway.ingress_defense import IngressDecision
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.gateway.backend import BackendCall
+from trentina.gateway.ingress_defense import IngressDecision
+from trentina.gateway.profile import (
     AuthConfig,
     Backend,
     DefenseConfig,
     PreProcessConfig,
     Profile,
 )
-from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
+from trentina.gateway.router import NAMESPACE_SEP, route_jsonrpc
 
-ROUTER = "mcp_trentina_crunchtools.gateway.router"
+ROUTER = "trentina.gateway.router"
 DOC = {"issues": [{"key": "RT-1", "summary": "disk full"}], "total": 1}
 
 

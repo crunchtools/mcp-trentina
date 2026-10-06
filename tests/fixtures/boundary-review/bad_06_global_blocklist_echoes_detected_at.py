@@ -10,7 +10,7 @@ import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
-from mcp_trentina_crunchtools.errors import BlockedSourceError
+from trentina.errors import BlockedSourceError
 
 _db = sqlite3.connect("/data/trentina.db")
 _db.row_factory = sqlite3.Row

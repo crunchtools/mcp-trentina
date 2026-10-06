@@ -18,9 +18,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools.errors import QuarantineAgentError
-from mcp_trentina_crunchtools.gateway.backend import BackendCall
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.errors import QuarantineAgentError
+from trentina.gateway.backend import BackendCall
+from trentina.gateway.profile import (
     AlertIngressConfig,
     AuthConfig,
     Backend,
@@ -29,7 +29,7 @@ from mcp_trentina_crunchtools.gateway.profile import (
     MatrixIngressConfig,
     Profile,
 )
-from mcp_trentina_crunchtools.gateway.router import route_jsonrpc
+from trentina.gateway.router import route_jsonrpc
 
 PAYLOAD = "Quarterly report: revenue up, costs flat, nothing unusual to note here."
 
@@ -44,9 +44,7 @@ def judged() -> Iterator[list[tuple[str, str | None]]]:
         calls.append((kwargs["provider_name"], key.get_secret_value() if key else None))
         raise QuarantineAgentError("recorded")
 
-    with patch(
-        "mcp_trentina_crunchtools.quarantine.agent._call_throttle_aware", side_effect=record
-    ):
+    with patch("trentina.quarantine.agent._call_throttle_aware", side_effect=record):
         yield calls
 
 
@@ -77,10 +75,10 @@ async def test_a_proxied_tool_response(judged: list[tuple[str, str | None]]) -> 
     )
     with (
         patch(
-            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+            "trentina.gateway.router.call_backend_tool",
             AsyncMock(return_value=reply),
         ),
-        patch("mcp_trentina_crunchtools.gateway.router._audit"),
+        patch("trentina.gateway.router._audit"),
     ):
         await route_jsonrpc(
             _profile(),
@@ -96,7 +94,7 @@ async def test_a_proxied_tool_response(judged: list[tuple[str, str | None]]) -> 
 
 @pytest.mark.asyncio
 async def test_an_llm_completion(judged: list[tuple[str, str | None]]) -> None:
-    from mcp_trentina_crunchtools.gateway import llm_proxy
+    from trentina.gateway import llm_proxy
 
     llm_proxy._schedule_completion_scan(PAYLOAD.encode(), len(PAYLOAD), "openai", _profile())
     await asyncio.gather(*llm_proxy._scan_tasks)
@@ -124,8 +122,8 @@ def test_a_matrix_sync(
 ) -> None:
     from starlette.testclient import TestClient
 
-    from mcp_trentina_crunchtools.gateway import matrix_proxy
     from tests.test_matrix_proxy import AGENT_NET, AGENT_PEER, _FakeUpstream, _matrix_app
+    from trentina.gateway import matrix_proxy
 
     sync = {
         "rooms": {
@@ -158,7 +156,7 @@ def test_a_matrix_sync(
 def test_a_profile_without_its_own_key_is_warned_about(
     provider: str, keys: dict[str, Any], warns: bool, caplog: pytest.LogCaptureFixture
 ) -> None:
-    from mcp_trentina_crunchtools.gateway.loader import _check_judges
+    from trentina.gateway.loader import _check_judges
 
     profile = Profile(
         short_names=False,  # calls below use <backend>__<tool>
@@ -183,10 +181,10 @@ async def test_a_profile_without_its_key_never_falls_back_to_the_global_one(
     )
     with (
         patch(
-            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+            "trentina.gateway.router.call_backend_tool",
             AsyncMock(return_value=reply),
         ),
-        patch("mcp_trentina_crunchtools.gateway.router._audit"),
+        patch("trentina.gateway.router._audit"),
     ):
         resp = await route_jsonrpc(
             profile,

@@ -12,8 +12,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.tools.fetch import block_fetch, fetch_page, flag_fetch, redact_fetch
+from trentina.modes import Mode
+from trentina.tools.fetch import block_fetch, fetch_page, flag_fetch, redact_fetch
 
 from .mode_harness import layers
 
@@ -56,7 +56,7 @@ async def test_a_converter_that_raises_delivers_the_page_unminified(env: Path) -
     with (
         layers(env) as fakes,
         patch(
-            "mcp_trentina_crunchtools.preprocess.html.HtmlProcessor.run",
+            "trentina.preprocess.html.HtmlProcessor.run",
             side_effect=RuntimeError("parser exploded"),
         ),
     ):

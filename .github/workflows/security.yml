@@ -104,12 +104,12 @@ jobs:
 
       - name: Build container image
         run: |
-          docker build -f Containerfile -t mcp-trentina:scan .
+          docker build -f Containerfile -t trentina:scan .
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: "mcp-trentina:scan"
+          image-ref: "trentina:scan"
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH"

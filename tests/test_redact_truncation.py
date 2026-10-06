@@ -15,22 +15,22 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools.errors import (
+from trentina.errors import (
     MalformedResponseError,
     QuarantineAgentError,
     TruncatedResponseError,
 )
-from mcp_trentina_crunchtools.quarantine import agent
-from mcp_trentina_crunchtools.quarantine.prompts import (
+from trentina.quarantine import agent
+from trentina.quarantine.prompts import (
     EXTRACTION_RESPONSE_SCHEMA,
     EXTRACTION_SYSTEM_PROMPT,
 )
-from mcp_trentina_crunchtools.quarantine.providers import reset_provider
-from mcp_trentina_crunchtools.quarantine.providers.anthropic import AnthropicProvider
-from mcp_trentina_crunchtools.quarantine.providers.base import Provider, ProviderResult
-from mcp_trentina_crunchtools.quarantine.providers.gemini import GeminiProvider
-from mcp_trentina_crunchtools.quarantine.providers.ollama import OllamaProvider
-from mcp_trentina_crunchtools.quarantine.providers.openai import OpenAIProvider
+from trentina.quarantine.providers import reset_provider
+from trentina.quarantine.providers.anthropic import AnthropicProvider
+from trentina.quarantine.providers.base import Provider, ProviderResult
+from trentina.quarantine.providers.gemini import GeminiProvider
+from trentina.quarantine.providers.ollama import OllamaProvider
+from trentina.quarantine.providers.openai import OpenAIProvider
 
 # Captured on lotor 2026-10-05, google/gemini-2.5-flash-lite through
 # OpenRouter: finish_reason "length", native MAX_TOKENS, 4096 completion
@@ -117,7 +117,7 @@ async def test_a_detection_turn_cut_short_is_unavailable_never_clean() -> None:
 
 @pytest.fixture
 def _openrouter(monkeypatch: pytest.MonkeyPatch) -> None:
-    import mcp_trentina_crunchtools.config as config_module
+    import trentina.config as config_module
 
     monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openrouter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
@@ -145,7 +145,7 @@ async def test_the_captured_response_refuses_as_truncated_after_one_call(
 async def test_a_fallback_provider_is_not_tried_on_truncation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import mcp_trentina_crunchtools.config as config_module
+    import trentina.config as config_module
 
     monkeypatch.setenv("TRENTINA_PROVIDER_FALLBACK", "openai")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")

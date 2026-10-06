@@ -34,8 +34,8 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
 from tests.adversarial_corpus import ATTACKS, Case
+from trentina.quarantine.agent import quarantine_detect
 
 DETECTION_FLOOR = 0.90
 MIN_COMPLETION = 0.75

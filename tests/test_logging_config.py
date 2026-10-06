@@ -18,8 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools import DEFAULT_PORT, _run_with_gateway, logsafe, main
-from mcp_trentina_crunchtools.gateway.loader import GatewayConfig
+from trentina import DEFAULT_PORT, _run_with_gateway, logsafe, main
+from trentina.gateway.loader import GatewayConfig
 
 
 @pytest.fixture(autouse=True)
@@ -109,16 +109,16 @@ def test_run_with_gateway_forwards_log_level_to_uvicorn() -> None:
     mock_server = MagicMock()
 
     with (
-        patch("mcp_trentina_crunchtools.gateway.load_profiles", return_value=empty_config),
-        patch("mcp_trentina_crunchtools.gateway.register_internal_server"),
-        patch("mcp_trentina_crunchtools.gateway.register_with_fastmcp"),
-        patch("mcp_trentina_crunchtools._wire_circuit_notifications"),
-        patch("mcp_trentina_crunchtools.gateway.llm_proxy.load_llm_providers", return_value={}),
-        patch("mcp_trentina_crunchtools.gateway.llm_proxy.register_llm_routes"),
-        patch("mcp_trentina_crunchtools.gateway.alert_ingress.register_alert_routes"),
-        patch("mcp_trentina_crunchtools.gateway.compress.load_compression_cache"),
-        patch("mcp_trentina_crunchtools.gateway.compress.set_profiles"),
-        patch("mcp_trentina_crunchtools.gateway.backend.load_tool_list_cache"),
+        patch("trentina.gateway.load_profiles", return_value=empty_config),
+        patch("trentina.gateway.register_internal_server"),
+        patch("trentina.gateway.register_with_fastmcp"),
+        patch("trentina._wire_circuit_notifications"),
+        patch("trentina.gateway.llm_proxy.load_llm_providers", return_value={}),
+        patch("trentina.gateway.llm_proxy.register_llm_routes"),
+        patch("trentina.gateway.alert_ingress.register_alert_routes"),
+        patch("trentina.gateway.compress.load_compression_cache"),
+        patch("trentina.gateway.compress.set_profiles"),
+        patch("trentina.gateway.backend.load_tool_list_cache"),
     ):
         _run_with_gateway(mock_server, host="127.0.0.1", port=8019, log_level="WARNING")
 
@@ -138,12 +138,12 @@ def test_main_sse_forwards_log_level(monkeypatch: pytest.MonkeyPatch) -> None:
     _run_with_gateway — that call site needs its own coverage."""
     monkeypatch.setenv("TRENTINA_LOG_LEVEL", "WARNING")
     monkeypatch.delenv("TRENTINA_GATEWAY_ENABLED", raising=False)
-    monkeypatch.setattr("sys.argv", ["mcp-trentina-crunchtools", "--transport", "sse", "--no-dbus"])
+    monkeypatch.setattr("sys.argv", ["trentina", "--transport", "sse", "--no-dbus"])
     mock_mcp = MagicMock()
 
     with (
-        patch("mcp_trentina_crunchtools.database.get_db"),
-        patch("mcp_trentina_crunchtools.server.mcp", mock_mcp),
+        patch("trentina.database.get_db"),
+        patch("trentina.server.mcp", mock_mcp),
     ):
         main()
 
@@ -159,13 +159,13 @@ def test_main_streamable_http_forwards_log_level(monkeypatch: pytest.MonkeyPatch
     monkeypatch.delenv("TRENTINA_GATEWAY_ENABLED", raising=False)
     monkeypatch.setattr(
         "sys.argv",
-        ["mcp-trentina-crunchtools", "--transport", "streamable-http", "--no-dbus"],
+        ["trentina", "--transport", "streamable-http", "--no-dbus"],
     )
     mock_mcp = MagicMock()
 
     with (
-        patch("mcp_trentina_crunchtools.database.get_db"),
-        patch("mcp_trentina_crunchtools.server.mcp", mock_mcp),
+        patch("trentina.database.get_db"),
+        patch("trentina.server.mcp", mock_mcp),
     ):
         main()
 
@@ -191,32 +191,32 @@ class TestStartupCacheVisibility:
         mock_server = MagicMock()
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.load_profiles",
+                "trentina.gateway.load_profiles",
                 return_value=GatewayConfig(profiles={}),
             ),
-            patch("mcp_trentina_crunchtools.gateway.register_internal_server"),
-            patch("mcp_trentina_crunchtools.gateway.register_with_fastmcp"),
-            patch("mcp_trentina_crunchtools._wire_circuit_notifications"),
+            patch("trentina.gateway.register_internal_server"),
+            patch("trentina.gateway.register_with_fastmcp"),
+            patch("trentina._wire_circuit_notifications"),
             patch(
-                "mcp_trentina_crunchtools.gateway.llm_proxy.load_llm_providers",
+                "trentina.gateway.llm_proxy.load_llm_providers",
                 return_value={},
             ),
-            patch("mcp_trentina_crunchtools.gateway.llm_proxy.register_llm_routes"),
-            patch("mcp_trentina_crunchtools.gateway.alert_ingress.register_alert_routes"),
+            patch("trentina.gateway.llm_proxy.register_llm_routes"),
+            patch("trentina.gateway.alert_ingress.register_alert_routes"),
             patch(
-                "mcp_trentina_crunchtools.gateway.compress.load_compression_cache",
+                "trentina.gateway.compress.load_compression_cache",
                 return_value=7,
             ),
-            patch("mcp_trentina_crunchtools.gateway.compress.set_profiles"),
+            patch("trentina.gateway.compress.set_profiles"),
             patch(
-                "mcp_trentina_crunchtools.gateway.backend.load_tool_list_cache",
+                "trentina.gateway.backend.load_tool_list_cache",
                 return_value=26,
             ),
             patch(
-                "mcp_trentina_crunchtools.gateway.ingress_defense.load_verdict_cache",
+                "trentina.gateway.ingress_defense.load_verdict_cache",
                 return_value=verdicts,
             ),
-            caplog.at_level(logging.WARNING, logger="mcp_trentina_crunchtools"),
+            caplog.at_level(logging.WARNING, logger="trentina"),
         ):
             _run_with_gateway(mock_server, host="127.0.0.1", port=8019, log_level="WARNING")
         return "\n".join(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)

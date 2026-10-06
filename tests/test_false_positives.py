@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import base64
 
-from mcp_trentina_crunchtools.l1.pipeline import run_l1
+from trentina.l1.pipeline import run_l1
 
 
 def test_coloured_container_logs() -> None:

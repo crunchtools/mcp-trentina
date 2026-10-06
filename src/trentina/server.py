@@ -1,4 +1,4 @@
-"""MCP server registration for mcp-trentina-crunchtools."""
+"""MCP server registration for trentina."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ async def _lifespan(_server: FastMCP[Any]) -> AsyncIterator[dict[str, Any]]:
 
 
 mcp = FastMCP(
-    "mcp-trentina-crunchtools",
+    "trentina",
     lifespan=_lifespan,
     # Sourced from the package, never a literal: this sat at "0.4.0" through
     # every release up to 0.7.0, so every client that asked the server its

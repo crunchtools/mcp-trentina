@@ -1,4 +1,4 @@
-"""mcp-trentina-crunchtools: the MCP gateway between AI agents and everything they touch."""
+"""trentina: the MCP gateway between AI agents and everything they touch."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from .gateway.profile import Profile
     from .gateway.sessions import SessionRegistry
 
-__version__ = "0.65.0"
+__version__ = "1.0.0"
 
 DEFAULT_PORT = 8019
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -36,10 +36,10 @@ if TYPE_CHECKING:
 
 
 def main() -> None:
-    """Entry point for mcp-trentina-crunchtools."""
+    """Entry point for trentina."""
     log_level = logsafe.configure("TRENTINA_LOG_LEVEL")
     parser = argparse.ArgumentParser(
-        prog="mcp-trentina-crunchtools",
+        prog="trentina",
         description="MCP gateway: injection defense, token savings, policy and auth for AI agents",
     )
     parser.add_argument(

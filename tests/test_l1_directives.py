@@ -9,7 +9,7 @@ count is right, and the text came back byte-identical.
 
 from __future__ import annotations
 
-from mcp_trentina_crunchtools.l1.directives import strip_directives
+from trentina.l1.directives import strip_directives
 
 
 class TestDirectiveDetection:

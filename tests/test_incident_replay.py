@@ -19,18 +19,18 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools import logsafe
-from mcp_trentina_crunchtools.database import record_detection
-from mcp_trentina_crunchtools.errors import BlockedSourceError
-from mcp_trentina_crunchtools.gateway.backend import BackendCall
-from mcp_trentina_crunchtools.gateway.context import profile_context
-from mcp_trentina_crunchtools.gateway.errors import BackendCallError
-from mcp_trentina_crunchtools.gateway.ingress_defense import IngressDecision
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
-from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.outcomes import Outcome, classify_exception
-from mcp_trentina_crunchtools.tools.fetch import fetch_page
+from trentina import logsafe
+from trentina.database import record_detection
+from trentina.errors import BlockedSourceError
+from trentina.gateway.backend import BackendCall
+from trentina.gateway.context import profile_context
+from trentina.gateway.errors import BackendCallError
+from trentina.gateway.ingress_defense import IngressDecision
+from trentina.gateway.profile import AuthConfig, Backend, Profile
+from trentina.gateway.router import NAMESPACE_SEP, route_jsonrpc
+from trentina.modes import Mode
+from trentina.outcomes import Outcome, classify_exception
+from trentina.tools.fetch import fetch_page
 
 from .egress_harness import route
 from .mode_harness import layers
@@ -38,7 +38,7 @@ from .mode_harness import layers
 if TYPE_CHECKING:
     from pathlib import Path
 
-ROUTER = "mcp_trentina_crunchtools.gateway.router"
+ROUTER = "trentina.gateway.router"
 CANARY = "zqx7replay"
 
 

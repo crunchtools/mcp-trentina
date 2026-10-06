@@ -8,14 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools.database import issued_tool_names
-from mcp_trentina_crunchtools.gateway.backend import BackendCall
-from mcp_trentina_crunchtools.gateway.ingress_defense import IngressDecision
-from mcp_trentina_crunchtools.gateway.names import _issued, assign, base_names
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
-from mcp_trentina_crunchtools.gateway.router import reset_profile_tools_cache, route_jsonrpc
+from trentina.database import issued_tool_names
+from trentina.gateway.backend import BackendCall
+from trentina.gateway.ingress_defense import IngressDecision
+from trentina.gateway.names import _issued, assign, base_names
+from trentina.gateway.profile import AuthConfig, Backend, Profile
+from trentina.gateway.router import reset_profile_tools_cache, route_jsonrpc
 
-ROUTER = "mcp_trentina_crunchtools.gateway.router"
+ROUTER = "trentina.gateway.router"
 
 
 @pytest.mark.parametrize(

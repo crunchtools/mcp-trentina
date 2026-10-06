@@ -15,15 +15,15 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools.errors import QuarantineAgentError
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.errors import QuarantineAgentError
+from trentina.gateway.profile import (
     AuthConfig,
     DefenseConfig,
     LlmKeyOverride,
     Profile,
 )
-from mcp_trentina_crunchtools.quarantine import agent
-from mcp_trentina_crunchtools.quarantine.agent import (
+from trentina.quarantine import agent
+from trentina.quarantine.agent import (
     _build_openrouter_search_body,
     _citation_sources,
     _enforce_openrouter_search_quarantine,
@@ -31,7 +31,7 @@ from mcp_trentina_crunchtools.quarantine.agent import (
     search_grounded,
 )
 
-_AGENT = "mcp_trentina_crunchtools.quarantine.agent"
+_AGENT = "trentina.quarantine.agent"
 
 
 def _cfg(openrouter: str = "", gemini: str = "", provider: str = "openrouter") -> MagicMock:
@@ -361,7 +361,7 @@ class TestRoute:
             await search_grounded("bootc")
 
     async def test_a_body_exactly_at_the_limit_is_parsed(self) -> None:
-        from mcp_trentina_crunchtools.client import MAX_RESPONSE_SIZE
+        from trentina.client import MAX_RESPONSE_SIZE
 
         reply = json.dumps(_openrouter_reply()).encode()
         cls, _ = _http(body=reply + b" " * (MAX_RESPONSE_SIZE - len(reply)))
@@ -423,7 +423,7 @@ class TestLLMAvailable:
 
 class TestConfigHasLLM:
     def test_openrouter_with_no_gemini_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from mcp_trentina_crunchtools.config import Config
+        from trentina.config import Config
 
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openrouter")
@@ -434,7 +434,7 @@ class TestConfigHasLLM:
         assert cfg.has_api_key is False
 
     def test_a_provider_with_no_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from mcp_trentina_crunchtools.config import Config
+        from trentina.config import Config
 
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "anthropic")
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -442,14 +442,14 @@ class TestConfigHasLLM:
         assert Config().has_llm is False
 
     def test_global_ollama_needs_no_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from mcp_trentina_crunchtools.config import Config
+        from trentina.config import Config
 
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "ollama")
 
         assert Config().has_llm is True
 
     def test_an_ollama_fallback_counts(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from mcp_trentina_crunchtools.config import Config
+        from trentina.config import Config
 
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "anthropic")
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -458,7 +458,7 @@ class TestConfigHasLLM:
         assert Config().has_llm is True
 
     def test_a_keyed_fallback_counts(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from mcp_trentina_crunchtools.config import Config
+        from trentina.config import Config
 
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "anthropic")
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

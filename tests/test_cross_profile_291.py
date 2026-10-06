@@ -22,24 +22,24 @@ from mcp.types import ListToolsResult, Tool
 from pydantic import SecretStr
 from starlette.testclient import TestClient
 
-from mcp_trentina_crunchtools import egress
-from mcp_trentina_crunchtools.client import fetch_url
-from mcp_trentina_crunchtools.errors import EgressRefusedError, QuarantineAgentError
-from mcp_trentina_crunchtools.gateway import compress
-from mcp_trentina_crunchtools.gateway.app import MCP_SESSION_ID_HEADER, gateway_app
-from mcp_trentina_crunchtools.gateway.compress import set_profiles
-from mcp_trentina_crunchtools.gateway.context import profile_context
-from mcp_trentina_crunchtools.gateway.ingress_defense import scan_tool_response
-from mcp_trentina_crunchtools.gateway.loader import GatewayConfig, register_active_config
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
-from mcp_trentina_crunchtools.gateway.router import _profile_backend_urls, _profile_tools_cache
-from mcp_trentina_crunchtools.gateway.sessions import SessionRegistry
-from mcp_trentina_crunchtools.quarantine import classifier
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-from mcp_trentina_crunchtools.quarantine.limiter import limited_generate, limiter_for
-from mcp_trentina_crunchtools.quarantine.providers import Provider, ProviderResult, get_provider
-from mcp_trentina_crunchtools.tools.reconnect import reconnect_backend
 from tests.egress_harness import route
+from trentina import egress
+from trentina.client import fetch_url
+from trentina.errors import EgressRefusedError, QuarantineAgentError
+from trentina.gateway import compress
+from trentina.gateway.app import MCP_SESSION_ID_HEADER, gateway_app
+from trentina.gateway.compress import set_profiles
+from trentina.gateway.context import profile_context
+from trentina.gateway.ingress_defense import scan_tool_response
+from trentina.gateway.loader import GatewayConfig, register_active_config
+from trentina.gateway.profile import AuthConfig, Backend, Profile
+from trentina.gateway.router import _profile_backend_urls, _profile_tools_cache
+from trentina.gateway.sessions import SessionRegistry
+from trentina.quarantine import classifier
+from trentina.quarantine.classifier import ClassifierResult
+from trentina.quarantine.limiter import limited_generate, limiter_for
+from trentina.quarantine.providers import Provider, ProviderResult, get_provider
+from trentina.tools.reconnect import reconnect_backend
 
 SHARED_URL = "http://mcp-shared:8000/mcp"
 
@@ -69,7 +69,7 @@ class TestResponseVerdictCache:
             oversize=None,
         )
         with patch(
-            "mcp_trentina_crunchtools.gateway.ingress_defense.defend",
+            "trentina.gateway.ingress_defense.defend",
             AsyncMock(return_value=verdict),
         ) as judged:
             for profile in (alpha, alpha, beta):
@@ -136,7 +136,7 @@ class TestReconnectInvalidation:
         try:
             with (
                 profile_context(alpha),
-                patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok),
+                patch("trentina.gateway.backend._do_list_tools", side_effect=ok),
             ):
                 result = await reconnect_backend("shared")
         finally:

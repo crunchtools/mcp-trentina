@@ -3,7 +3,7 @@
 # Built entirely on Hummingbird Python images (Red Hat hardened, minimal)
 #
 # Build: the GHA pipeline, and only the GHA pipeline.
-# .github/workflows/container.yml builds and pushes quay.io/crunchtools/mcp-trentina.
+# .github/workflows/container.yml builds and pushes quay.io/crunchtools/trentina.
 # Do NOT build this image by hand — building outside the pipeline causes drift.
 #
 # No build secret is needed: the one L2 model the image ships is ungated.
@@ -13,10 +13,10 @@
 #
 # Run (Streamable HTTP on port 8019):
 #   podman run --rm \
-#     --env-file ~/.config/mcp-env/mcp-trentina.env \
-#     -v ~/.local/share/mcp-trentina:/data:Z \
+#     --env-file ~/.config/mcp-env/trentina.env \
+#     -v ~/.local/share/trentina:/data:Z \
 #     -p 127.0.0.1:8019:8019 \
-#     quay.io/crunchtools/mcp-trentina \
+#     quay.io/crunchtools/trentina \
 #     --transport streamable-http --host 0.0.0.0 --port 8019
 #
 # Optional D-Bus integration (for Cockpit plugin / mcp-assayer):
@@ -25,11 +25,11 @@
 #   when the socket is not mounted).
 #
 # With Claude Code (stdio):
-#   claude mcp add mcp-trentina-crunchtools \
+#   claude mcp add trentina \
 #     -- podman run -i --rm \
-#     --env-file ~/.config/mcp-env/mcp-trentina.env \
-#     -v ~/.local/share/mcp-trentina:/data:Z \
-#     quay.io/crunchtools/mcp-trentina
+#     --env-file ~/.config/mcp-env/trentina.env \
+#     -v ~/.local/share/trentina:/data:Z \
+#     quay.io/crunchtools/trentina
 
 # ============================================================
 # Stage 1: ONNX model conversion (Hummingbird builder — discarded)
@@ -145,15 +145,15 @@ FROM quay.io/hummingbird/python:latest
 # a local build still works; CI always overrides it.
 ARG VERSION=0.0.0-dev
 
-LABEL name="mcp-trentina-crunchtools" \
+LABEL name="trentina" \
       version="${VERSION}" \
       summary="MCP gateway for AI agents: injection defense, token savings, policy and auth" \
       description="MCP gateway between AI agents and their tools, the web and Matrix: three-layer prompt-injection defense, smaller tool lists and responses, gateway-enforced parameter and response guards, OAuth/DCR, and per-agent profiles" \
       maintainer="crunchtools.com" \
-      url="https://github.com/crunchtools/mcp-trentina" \
+      url="https://github.com/crunchtools/trentina" \
       io.k8s.display-name="MCP Trentina CrunchTools" \
       io.openshift.tags="mcp,mcp-gateway,security,prompt-injection,oauth,token-efficiency" \
-      org.opencontainers.image.source="https://github.com/crunchtools/mcp-trentina" \
+      org.opencontainers.image.source="https://github.com/crunchtools/trentina" \
       org.opencontainers.image.description="MCP gateway for AI agents: injection defense, token savings, policy and auth" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later" \
       com.crunchtools.l2.default="Horizon-Labs/prompt-injection-guard-small (Apache-2.0)"
@@ -200,4 +200,4 @@ ENV PYTHONSAFEPATH=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 EXPOSE 8019
-ENTRYPOINT ["python", "-m", "mcp_trentina_crunchtools"]
+ENTRYPOINT ["python", "-m", "trentina"]

@@ -13,10 +13,10 @@ import subprocess
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway.ingress_defense import _collect_response_texts
-from mcp_trentina_crunchtools.unpack import child, ocr, ocr_worker, scan
-from mcp_trentina_crunchtools.unpack.ocr import ImageText, read_images
-from mcp_trentina_crunchtools.unpack.scan import MAX_TOKEN, SCANNED_PAGE, read_blobs, unpack
+from trentina.gateway.ingress_defense import _collect_response_texts
+from trentina.unpack import child, ocr, ocr_worker, scan
+from trentina.unpack.ocr import ImageText, read_images
+from trentina.unpack.scan import MAX_TOKEN, SCANNED_PAGE, read_blobs, unpack
 
 from .image_files import CLEAR, NEAR_WHITE, WHITE, noise, picture
 from .office_files import b64, zipped

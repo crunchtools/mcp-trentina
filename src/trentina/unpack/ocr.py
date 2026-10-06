@@ -19,7 +19,7 @@ from .child import ask
 
 logger = logging.getLogger(__name__)
 
-WORKER = "mcp_trentina_crunchtools.unpack.ocr_worker"
+WORKER = "trentina.unpack.ocr_worker"
 MALFORMED = "answer malformed"
 
 MAX_IMAGES = 6

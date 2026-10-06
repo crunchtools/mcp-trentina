@@ -1,5 +1,5 @@
 /*
- * cockpit-trentina — Cockpit plugin for mcp-trentina-crunchtools
+ * cockpit-trentina — Cockpit plugin for trentina
  *
  * Connects to com.crunchtools.Trentina1 on the system D-Bus and renders
  * live pipeline events using PatternFly 6 CSS classes (no React).

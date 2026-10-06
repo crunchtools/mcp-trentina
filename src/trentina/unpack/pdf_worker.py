@@ -2,7 +2,7 @@
 
 Run as a child process by ``pdf.read_pdf`` and by nothing else:
 
-    python -m mcp_trentina_crunchtools.unpack.pdf_worker < file.pdf
+    python -m trentina.unpack.pdf_worker < file.pdf
 
 A PDF is the most complicated thing this gateway opens, in a pure-Python
 parser with a history of inputs that loop or allocate without end. A thread

@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 import yaml
 
-from mcp_trentina_crunchtools.gateway import profile_lint
-from mcp_trentina_crunchtools.gateway.profile_lint import (
+from trentina.gateway import profile_lint
+from trentina.gateway.profile_lint import (
     check_require_defaults,
     classify,
     held_tools,

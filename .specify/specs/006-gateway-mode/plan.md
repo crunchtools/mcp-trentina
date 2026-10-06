@@ -165,7 +165,7 @@ auth check awkward, and complicates the future defense-pipeline injection point
 
 - [ ] Push branch → GHA build (or build the overlay image) → image carrying Option C
 - [ ] Provision `/srv/<service>/config/profiles.yaml` with real `agent2` + `agent1` profiles, each carrying the `web` (`internal://web`) backend + their http backend matrix
-- [ ] Generate `TRENTINA_GATEWAY_AGENT2_TOKEN` + `TRENTINA_GATEWAY_AGENT1_TOKEN` (`secrets.token_hex(32)`), add to `mcp-trentina.env`
+- [ ] Generate `TRENTINA_GATEWAY_AGENT2_TOKEN` + `TRENTINA_GATEWAY_AGENT1_TOKEN` (`secrets.token_hex(32)`), add to `trentina.env`
 - [ ] Add `TRENTINA_GATEWAY_ENABLED=true` + `TRENTINA_PROFILES_PATH=/etc/trentina/profiles.yaml`; mount profiles.yaml into the container
 - [ ] systemctl restart; verify `/gateway/<profile>/mcp` lists tools across an http backend AND `web__safe_fetch_tool`; confirm `/mcp` 404 is deliberate
 - [ ] **Cut agent1 over first** (smaller blast radius, autonomous agent): one `mcp_servers:` entry in Hermes `config.yaml`; verify prompt-token count drops from ~146K toward <50K
@@ -180,15 +180,15 @@ auth check awkward, and complicates the future defense-pipeline injection point
 
 | File | Purpose |
 |------|---------|
-| `src/mcp_trentina_crunchtools/gateway/__init__.py` | Subpackage exports |
-| `src/mcp_trentina_crunchtools/gateway/profile.py` | Pydantic profile models |
-| `src/mcp_trentina_crunchtools/gateway/loader.py` | YAML loader + env resolution |
-| `src/mcp_trentina_crunchtools/gateway/auth.py` | Bearer-token check |
-| `src/mcp_trentina_crunchtools/gateway/backend.py` | Backend MCP connection pool |
-| `src/mcp_trentina_crunchtools/gateway/filter.py` | Tools/list allowlist filter |
-| `src/mcp_trentina_crunchtools/gateway/router.py` | JSON-RPC dispatch |
-| `src/mcp_trentina_crunchtools/gateway/app.py` | Starlette gateway app |
-| `src/mcp_trentina_crunchtools/gateway/errors.py` | Gateway error responses |
+| `src/trentina/gateway/__init__.py` | Subpackage exports |
+| `src/trentina/gateway/profile.py` | Pydantic profile models |
+| `src/trentina/gateway/loader.py` | YAML loader + env resolution |
+| `src/trentina/gateway/auth.py` | Bearer-token check |
+| `src/trentina/gateway/backend.py` | Backend MCP connection pool |
+| `src/trentina/gateway/filter.py` | Tools/list allowlist filter |
+| `src/trentina/gateway/router.py` | JSON-RPC dispatch |
+| `src/trentina/gateway/app.py` | Starlette gateway app |
+| `src/trentina/gateway/errors.py` | Gateway error responses |
 | `tests/test_gateway_profile.py` | Profile + loader tests |
 | `tests/test_gateway_auth.py` | Auth tests |
 | `tests/test_gateway_filter.py` | Filter tests |
@@ -199,8 +199,8 @@ auth check awkward, and complicates the future defense-pipeline injection point
 
 | File | Changes |
 |------|---------|
-| `src/mcp_trentina_crunchtools/server.py` | Wrap FastMCP app in parent Starlette; mount gateway routes when enabled |
-| `src/mcp_trentina_crunchtools/config.py` | Add `TRENTINA_GATEWAY_ENABLED`, `TRENTINA_PROFILES_PATH` |
+| `src/trentina/server.py` | Wrap FastMCP app in parent Starlette; mount gateway routes when enabled |
+| `src/trentina/config.py` | Add `TRENTINA_GATEWAY_ENABLED`, `TRENTINA_PROFILES_PATH` |
 | `pyproject.toml` | Add `pyyaml>=6.0`; bump `version` to `0.4.0` |
 
 ---

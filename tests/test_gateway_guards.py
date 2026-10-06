@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from mcp_trentina_crunchtools.gateway.guards import (
+from trentina.gateway.guards import (
     check_parameter_guards,
     check_response_guards,
 )
-from mcp_trentina_crunchtools.gateway.profile import Backend, ParameterConstraint
+from trentina.gateway.profile import Backend, ParameterConstraint
 
 
 def _backend(

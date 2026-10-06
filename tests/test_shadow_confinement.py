@@ -19,14 +19,14 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools.errors import FileReadError
-from mcp_trentina_crunchtools.l1 import shadows as shadows_mod
-from mcp_trentina_crunchtools.l1.shadows import _scan_for_obfuscation, detect_module_shadows
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.tools import confine
-from mcp_trentina_crunchtools.tools import dir as dir_mod
-from mcp_trentina_crunchtools.tools.read import _read_confined
+from trentina import config as config_mod
+from trentina.errors import FileReadError
+from trentina.l1 import shadows as shadows_mod
+from trentina.l1.shadows import _scan_for_obfuscation, detect_module_shadows
+from trentina.modes import Mode
+from trentina.tools import confine
+from trentina.tools import dir as dir_mod
+from trentina.tools.read import _read_confined
 
 PAYLOAD = "exec(bytes.fromhex('6f73'))\n"
 

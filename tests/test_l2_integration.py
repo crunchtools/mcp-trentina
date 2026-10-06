@@ -19,8 +19,8 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools.l1.pipeline import run_l1
-from mcp_trentina_crunchtools.quarantine.classifier import (
+from trentina.l1.pipeline import run_l1
+from trentina.quarantine.classifier import (
     classify,
     is_classifier_available,
     model_info,

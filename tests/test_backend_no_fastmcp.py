@@ -92,7 +92,7 @@ class TestSerializersWithoutFastmcp:
         result = _run_without_fastmcp(
             """
             from mcp.types import Tool
-            from mcp_trentina_crunchtools.gateway.backend import _serialize_tool
+            from trentina.gateway.backend import _serialize_tool
 
             tool = Tool(
                 name="probe",
@@ -118,7 +118,7 @@ class TestSerializersWithoutFastmcp:
         result = _run_without_fastmcp(
             """
             from mcp.types import ImageContent, TextContent
-            from mcp_trentina_crunchtools.gateway.backend import (
+            from trentina.gateway.backend import (
                 _serialize_content_block,
             )
 
@@ -144,7 +144,7 @@ class TestSerializersWithoutFastmcp:
         result = _run_without_fastmcp(
             """
             from mcp.types import CallToolResult, TextContent
-            from mcp_trentina_crunchtools.gateway.backend import _field
+            from trentina.gateway.backend import _field
 
             failed = CallToolResult(
                 content=[TextContent(type="text", text="boom")],

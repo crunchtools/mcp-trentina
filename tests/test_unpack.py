@@ -11,22 +11,22 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_trentina_crunchtools.defense import DefenseVerdict, defend
-from mcp_trentina_crunchtools.defense import admission as defense_admission
-from mcp_trentina_crunchtools.l1.hidden import HiddenStats
-from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, run_l1
-from mcp_trentina_crunchtools.l1.shadows import ShadowStats
-from mcp_trentina_crunchtools.modes import gaps_of
-from mcp_trentina_crunchtools.quarantine import agent
-from mcp_trentina_crunchtools.quarantine.classifier import (
+from trentina.defense import DefenseVerdict, defend
+from trentina.defense import admission as defense_admission
+from trentina.l1.hidden import HiddenStats
+from trentina.l1.pipeline import PipelineResult, run_l1
+from trentina.l1.shadows import ShadowStats
+from trentina.modes import gaps_of
+from trentina.quarantine import agent
+from trentina.quarantine.classifier import (
     ClassifierResult,
     classify,
     is_classifier_available,
     model_info,
     reset_classifier,
 )
-from mcp_trentina_crunchtools.unpack.scan import LABEL_FLOOR, MAX_MEDIA_TOKEN, read_blob, unpack
-from mcp_trentina_crunchtools.unpack.signatures import OPAQUE, from_media_type
+from trentina.unpack.scan import LABEL_FLOOR, MAX_MEDIA_TOKEN, read_blob, unpack
+from trentina.unpack.signatures import OPAQUE, from_media_type
 
 
 def b64(data: bytes | str) -> str:
@@ -296,7 +296,7 @@ class TestShape:
         assert timings[1] < max(timings[0] * 4, 0.05)
 
 
-_D = "mcp_trentina_crunchtools.defense"
+_D = "trentina.defense"
 _BENIGN = ClassifierResult(label="BENIGN", score=0.05, latency_ms=1.0)
 
 
@@ -434,7 +434,7 @@ def test_l2_reads_harmless_base64_as_harmless() -> None:
 
 async def test_redact_refuses_an_answer_carrying_binary_no_layer_reads() -> None:
     png = b64(b"\x89PNG\r\n\x1a\n" + _RANDOM[:1200])
-    with patch("mcp_trentina_crunchtools.quarantine.classifier.classify_async") as l2:
+    with patch("trentina.quarantine.classifier.classify_async") as l2:
         assert await agent._output_flagged(f"see {png}")
     l2.assert_not_called()
 
@@ -447,6 +447,6 @@ async def test_redact_refuses_an_answer_that_decodes_to_an_attack() -> None:
     async def l2(text: str, **_: object) -> ClassifierResult:
         return flagged if "Ignore previous instructions" in text else benign
 
-    with patch("mcp_trentina_crunchtools.quarantine.classifier.classify_async", side_effect=l2):
+    with patch("trentina.quarantine.classifier.classify_async", side_effect=l2):
         assert await agent._output_flagged(f"See {encoded}")
         assert not await agent._output_flagged(f"See {b64('the release is Thursday')}")

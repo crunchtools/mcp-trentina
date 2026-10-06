@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_trentina_crunchtools import posture
-from mcp_trentina_crunchtools.errors import ConfigError
+from trentina import posture
+from trentina.errors import ConfigError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -112,7 +112,7 @@ def test_no_proc_is_unverifiable_and_fails_closed(
 def test_llm_keys_take_a_file_form_that_wins(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, attr: str
 ) -> None:
-    from mcp_trentina_crunchtools.config import Config
+    from trentina.config import Config
 
     secret = tmp_path / "key"
     secret.write_text("from-file\n")
@@ -138,7 +138,7 @@ def test_secret_sources_cover_names_configuration_read(
 
 
 def test_read_secret_env_records_every_name(monkeypatch: pytest.MonkeyPatch) -> None:
-    from mcp_trentina_crunchtools.gateway import loader
+    from trentina.gateway import loader
 
     monkeypatch.setattr(loader, "_secret_env_names", set())
     loader.read_secret_env("SOME_PROFILE_SECRET")
@@ -158,8 +158,8 @@ def test_writable_zip_on_import_path_is_a_gap(tmp_path: Path) -> None:
 def test_entrypoint_checks_network_transports_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transport: str, checked: bool
 ) -> None:
-    import mcp_trentina_crunchtools as pkg
-    from mcp_trentina_crunchtools import server
+    import trentina as pkg
+    from trentina import server
 
     class _RefusedError(Exception):
         pass
@@ -186,7 +186,7 @@ def test_missing_import_entry_under_writable_parent_is_a_gap(tmp_path: Path) -> 
 
 
 def test_bridge_run_checks_posture_before_running(monkeypatch: pytest.MonkeyPatch) -> None:
-    from mcp_trentina_crunchtools.bridge import main as bridge_main
+    from trentina.bridge import main as bridge_main
 
     class _RefusedError(Exception):
         pass
@@ -206,8 +206,8 @@ def test_bridge_run_checks_posture_before_running(monkeypatch: pytest.MonkeyPatc
 
 
 def test_ready_to_serve_checks_configured_secret_names(monkeypatch: pytest.MonkeyPatch) -> None:
-    import mcp_trentina_crunchtools as pkg
-    from mcp_trentina_crunchtools.gateway import envscrub, loader
+    import trentina as pkg
+    from trentina.gateway import envscrub, loader
 
     seen: list[set[str]] = []
     monkeypatch.setattr(loader, "_secret_env_names", {"BACKEND_TOKEN", "OPENROUTER_API_KEY"})

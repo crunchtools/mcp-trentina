@@ -12,8 +12,8 @@ import time
 
 import pytest
 
-from mcp_trentina_crunchtools.l1.hidden import detect_hidden_markup
-from mcp_trentina_crunchtools.l1.pipeline import run_l1
+from trentina.l1.hidden import detect_hidden_markup
+from trentina.l1.pipeline import run_l1
 
 
 class TestFingerprints:
@@ -291,7 +291,7 @@ class TestRiskWiring:
     def test_converted_markdown_has_nothing_left_to_find(self) -> None:
         """Tier 1 and tier 2 compose: once the converter has run, the stage
         finds nothing, because the vocabulary is gone rather than missed."""
-        from mcp_trentina_crunchtools.preprocess.html import to_markdown
+        from trentina.preprocess.html import to_markdown
 
         markdown, _ = to_markdown('<p>Visible.</p><div style="display:none">payload</div>')
         stats = run_l1(markdown).stats

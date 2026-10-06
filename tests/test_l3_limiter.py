@@ -9,10 +9,10 @@ import time
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools.config import get_config
-from mcp_trentina_crunchtools.errors import QuarantineAgentError
-from mcp_trentina_crunchtools.quarantine import classifier
-from mcp_trentina_crunchtools.quarantine.limiter import (
+from trentina.config import get_config
+from trentina.errors import QuarantineAgentError
+from trentina.quarantine import classifier
+from trentina.quarantine.limiter import (
     AdaptiveLimiter,
     Outcome,
     Priority,
@@ -21,8 +21,8 @@ from mcp_trentina_crunchtools.quarantine.limiter import (
     limited_generate,
     limiter_for,
 )
-from mcp_trentina_crunchtools.quarantine.providers import get_provider
-from mcp_trentina_crunchtools.quarantine.providers.base import (
+from trentina.quarantine.providers import get_provider
+from trentina.quarantine.providers.base import (
     Provider,
     ProviderResult,
     parse_retry_after,

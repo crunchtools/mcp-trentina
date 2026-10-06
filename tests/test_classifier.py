@@ -7,11 +7,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.config import (
+from trentina.config import (
     DEFAULT_CLASSIFIER_MODEL,
     DEFAULT_CLASSIFIER_THRESHOLD,
 )
-from mcp_trentina_crunchtools.quarantine.classifier import (
+from trentina.quarantine.classifier import (
     ClassifierResult,
     ModelInfo,
     classify,
@@ -55,7 +55,7 @@ class TestClassifierConfig:
     def test_config_has_classifier_fields(self) -> None:
         unset = {"CLASSIFIER_THRESHOLD": "", "CLASSIFIER_MODEL": "", "CLASSIFIER_MODEL_PATH": ""}
         with patch.dict("os.environ", unset, clear=False):
-            from mcp_trentina_crunchtools.config import Config
+            from trentina.config import Config
 
             config = Config()
             # Unset: the model's manifest decides (#350).
@@ -69,7 +69,7 @@ class TestClassifierConfig:
             "CLASSIFIER_MODEL_PATH": "/custom/model",
         }
         with patch.dict("os.environ", env, clear=False):
-            from mcp_trentina_crunchtools.config import Config
+            from trentina.config import Config
 
             config = Config()
             assert config.classifier_threshold == 0.8
@@ -151,20 +151,20 @@ class TestClassifyWithMockedModel:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._tokenizer",
+                "trentina.quarantine.classifier._tokenizer",
                 mock_tokenizer,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._session",
+                "trentina.quarantine.classifier._session",
                 mock_session,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._loaded",
+                "trentina.quarantine.classifier._loaded",
                 True,
             ),
-            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
+            patch("trentina.quarantine.classifier._model", THREE_CLASS),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
+                "trentina.quarantine.classifier._load_attempted",
                 True,
             ),
         ):
@@ -190,20 +190,20 @@ class TestClassifyWithMockedModel:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._tokenizer",
+                "trentina.quarantine.classifier._tokenizer",
                 mock_tokenizer,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._session",
+                "trentina.quarantine.classifier._session",
                 mock_session,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._loaded",
+                "trentina.quarantine.classifier._loaded",
                 True,
             ),
-            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
+            patch("trentina.quarantine.classifier._model", THREE_CLASS),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
+                "trentina.quarantine.classifier._load_attempted",
                 True,
             ),
         ):
@@ -228,20 +228,20 @@ class TestClassifyWithMockedModel:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._tokenizer",
+                "trentina.quarantine.classifier._tokenizer",
                 mock_tokenizer,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._session",
+                "trentina.quarantine.classifier._session",
                 mock_session,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._loaded",
+                "trentina.quarantine.classifier._loaded",
                 True,
             ),
-            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
+            patch("trentina.quarantine.classifier._model", THREE_CLASS),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
+                "trentina.quarantine.classifier._load_attempted",
                 True,
             ),
         ):
@@ -271,20 +271,20 @@ class TestSegmentSplitting:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._tokenizer",
+                "trentina.quarantine.classifier._tokenizer",
                 mock_tokenizer,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._session",
+                "trentina.quarantine.classifier._session",
                 mock_session,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._loaded",
+                "trentina.quarantine.classifier._loaded",
                 True,
             ),
-            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
+            patch("trentina.quarantine.classifier._model", THREE_CLASS),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
+                "trentina.quarantine.classifier._load_attempted",
                 True,
             ),
         ):
@@ -318,20 +318,20 @@ class TestSegmentSplitting:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._tokenizer",
+                "trentina.quarantine.classifier._tokenizer",
                 mock_tokenizer,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._session",
+                "trentina.quarantine.classifier._session",
                 mock_session,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._loaded",
+                "trentina.quarantine.classifier._loaded",
                 True,
             ),
-            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
+            patch("trentina.quarantine.classifier._model", THREE_CLASS),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
+                "trentina.quarantine.classifier._load_attempted",
                 True,
             ),
         ):
@@ -371,20 +371,20 @@ class TestSegmentSplitting:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._tokenizer",
+                "trentina.quarantine.classifier._tokenizer",
                 mock_tokenizer,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._session",
+                "trentina.quarantine.classifier._session",
                 mock_session,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._loaded",
+                "trentina.quarantine.classifier._loaded",
                 True,
             ),
-            patch("mcp_trentina_crunchtools.quarantine.classifier._model", THREE_CLASS),
+            patch("trentina.quarantine.classifier._model", THREE_CLASS),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier._load_attempted",
+                "trentina.quarantine.classifier._load_attempted",
                 True,
             ),
         ):
@@ -401,14 +401,14 @@ class TestStatsReportsClassifier:
     async def test_stats_includes_classifier_section(self) -> None:
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.stats.get_config",
+                "trentina.tools.stats.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.tools.stats.get_blocklist_stats",
+                "trentina.tools.stats.get_blocklist_stats",
                 return_value={"total": 0, "sources": []},
             ),
             patch(
-                "mcp_trentina_crunchtools.tools.stats.is_classifier_available",
+                "trentina.tools.stats.is_classifier_available",
                 return_value=False,
             ),
         ):
@@ -419,7 +419,7 @@ class TestStatsReportsClassifier:
             mock_config.return_value.classifier_model = "prompt-guard-2-86m"
             mock_config.return_value.classifier_model_path = "/models/prompt-guard-2-86m"
 
-            from mcp_trentina_crunchtools.tools.stats import get_trentina_stats
+            from trentina.tools.stats import get_trentina_stats
 
             result = await get_trentina_stats()
 

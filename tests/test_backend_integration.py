@@ -33,14 +33,14 @@ import httpx
 import pytest
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
 
-from mcp_trentina_crunchtools.gateway.app import MCP_SESSION_ID_HEADER
-from mcp_trentina_crunchtools.gateway.backend import (
+from trentina.gateway.app import MCP_SESSION_ID_HEADER
+from trentina.gateway.backend import (
     _disable_output_validation,
     call_backend_tool,
     list_backend_tools,
 )
-from mcp_trentina_crunchtools.gateway.errors import BackendCallError
-from mcp_trentina_crunchtools.gateway.profile import Backend
+from trentina.gateway.errors import BackendCallError
+from trentina.gateway.profile import Backend
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -290,7 +290,7 @@ class TestOutputValidationOverride:
     async def test_patches_a_validator_that_actually_exists(self, backend: Backend) -> None:
         from mcp import ClientSession
 
-        from mcp_trentina_crunchtools.gateway.backend import (
+        from trentina.gateway.backend import (
             _connect_streamable_http,
             _noop_validate,
         )

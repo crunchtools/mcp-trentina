@@ -10,11 +10,11 @@ from urllib.parse import urlparse
 
 import httpx
 
-from mcp_trentina_crunchtools.errors import FetchError
+from trentina.errors import FetchError
 
 FETCH_TIMEOUT = 30.0
 MAX_RESPONSE_SIZE = 5_000_000
-USER_AGENT = "mcp-trentina-crunchtools/0.1.0 (security-scanner)"
+USER_AGENT = "trentina/0.1.0 (security-scanner)"
 _BLOCKED_HOSTS = frozenset({"localhost", "127.0.0.1", "169.254.169.254", "metadata.google.internal"})
 
 

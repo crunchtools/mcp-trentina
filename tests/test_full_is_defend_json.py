@@ -33,14 +33,14 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from mcp_trentina_crunchtools.defense import defend_json, defend_selection
-from mcp_trentina_crunchtools.gateway.selection import read_everything
-from mcp_trentina_crunchtools.preprocess import SelectionContext
+from trentina.defense import defend_json, defend_selection
+from trentina.gateway.selection import read_everything
+from trentina.preprocess import SelectionContext
 
 from .adversarial_corpus import CORPUS
 
 if TYPE_CHECKING:
-    from mcp_trentina_crunchtools.l1.pipeline import PipelineStats
+    from trentina.l1.pipeline import PipelineStats
 
 CTX = SelectionContext(source="test", profile_name="p", path="/x")
 

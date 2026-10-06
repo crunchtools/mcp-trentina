@@ -369,7 +369,7 @@ async def route_jsonrpc(profile: Profile, request: dict[str, Any]) -> dict[str, 
                 "protocolVersion": _negotiate_protocol_version(params.get("protocolVersion")),
                 "capabilities": {"tools": {"listChanged": True}},
                 "serverInfo": {
-                    "name": f"mcp-trentina-gateway:{profile.name}",
+                    "name": f"trentina-gateway:{profile.name}",
                     "version": __version__,
                 },
                 "instructions": instructions,

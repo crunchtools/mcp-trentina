@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from mcp_trentina_crunchtools.matrix.recovery_key import (
+from trentina.matrix.recovery_key import (
     KEY_BYTES,
     PREFIX,
     RecoveryKeyError,

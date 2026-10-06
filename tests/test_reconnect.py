@@ -20,21 +20,21 @@ from unittest.mock import patch
 import pytest
 from mcp.types import ListToolsResult, Tool
 
-from mcp_trentina_crunchtools.gateway import compress
-from mcp_trentina_crunchtools.gateway.backend import _tool_list_cache
-from mcp_trentina_crunchtools.gateway.circuit import State, breaker
-from mcp_trentina_crunchtools.gateway.compress import set_profiles
-from mcp_trentina_crunchtools.gateway.context import profile_context
-from mcp_trentina_crunchtools.gateway.loader import (
+from trentina.gateway import compress
+from trentina.gateway.backend import _tool_list_cache
+from trentina.gateway.circuit import State, breaker
+from trentina.gateway.compress import set_profiles
+from trentina.gateway.context import profile_context
+from trentina.gateway.loader import (
     GatewayConfig,
     register_active_config,
 )
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
-from mcp_trentina_crunchtools.gateway.router import (
+from trentina.gateway.profile import AuthConfig, Backend, Profile
+from trentina.gateway.router import (
     _profile_backend_urls,
     _profile_tools_cache,
 )
-from mcp_trentina_crunchtools.tools.reconnect import _safe_endpoint, reconnect_backend
+from trentina.tools.reconnect import _safe_endpoint, reconnect_backend
 
 POSTIZ_URL = "http://mcp-postiz:5000/api/mcp/token-a"
 
@@ -93,7 +93,7 @@ class TestReconnectBackend:
         async def ok(_url: str, _headers: Any) -> ListToolsResult:
             return _tools_result(["integrationList", "listPostsTool"])
 
-        with patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok):
+        with patch("trentina.gateway.backend._do_list_tools", side_effect=ok):
             result = await reconnect_backend("postiz")
 
         assert result["reconnected"] is True
@@ -120,7 +120,7 @@ class TestReconnectBackend:
         async def boom(_url: str, _headers: Any) -> Any:
             raise ConnectionRefusedError("still down")
 
-        with patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=boom):
+        with patch("trentina.gateway.backend._do_list_tools", side_effect=boom):
             result = await reconnect_backend("postiz")
 
         assert result["reconnected"] is False
@@ -148,7 +148,7 @@ class TestReconnectBackend:
         async def ok(_url: str, _headers: Any) -> ListToolsResult:
             return _tools_result(["integrationList"])
 
-        with patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok):
+        with patch("trentina.gateway.backend._do_list_tools", side_effect=ok):
             result = await reconnect_backend("postiz")
 
         assert result["reconnected"] is True
@@ -166,7 +166,7 @@ class TestReconnectBackend:
         async def ok(_url: str, _headers: Any) -> ListToolsResult:
             return _tools_result(["integrationList"])
 
-        with patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok):
+        with patch("trentina.gateway.backend._do_list_tools", side_effect=ok):
             await reconnect_backend("postiz")
 
         assert "agent2" not in _profile_tools_cache
@@ -227,7 +227,7 @@ class TestAgentScope:
 
         with (
             profile_context(agent3),
-            patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok),
+            patch("trentina.gateway.backend._do_list_tools", side_effect=ok),
         ):
             result = await reconnect_backend("postiz")
 

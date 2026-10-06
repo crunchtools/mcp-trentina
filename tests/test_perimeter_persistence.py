@@ -25,15 +25,15 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_trentina_crunchtools import perimeter_db
-from mcp_trentina_crunchtools.gateway import ingress_defense
-from mcp_trentina_crunchtools.gateway.ingress_defense import (
+from trentina import perimeter_db
+from trentina.gateway import ingress_defense
+from trentina.gateway.ingress_defense import (
     _cache_get,
     _cache_put,
     load_verdict_cache,
     reset_verdict_cache,
 )
-from mcp_trentina_crunchtools.perimeter_db import (
+from trentina.perimeter_db import (
     delete_all_verdicts,
     get_all_verdicts,
     get_perimeter_db,
@@ -195,14 +195,14 @@ class TestStoreSeparation:
         """Two stores, deliberately. The split is worth nothing today and
         everything if these ever move to a database with real grants — and
         it cannot be retrofitted once callers assume one connection."""
-        from mcp_trentina_crunchtools import database
-        from mcp_trentina_crunchtools import perimeter_db as store
+        from trentina import database
+        from trentina import perimeter_db as store
 
         assert "verdict_cache" not in database.SCHEMA
         assert "verdict_cache" in store.SCHEMA
 
     def test_the_two_stores_are_different_files(self) -> None:
-        from mcp_trentina_crunchtools.config import get_config
+        from trentina.config import get_config
 
         config = get_config()
         assert Path(config.perimeter_db_path) != Path(config.db_path)
@@ -250,7 +250,7 @@ class TestStampCarriesTheL2Model:
         """The stamp for ``model``, or for one that fails to resolve when None."""
         effect = ValueError("unresolvable") if model is None else None
         with patch(
-            "mcp_trentina_crunchtools.quarantine.classifier.resolve_model",
+            "trentina.quarantine.classifier.resolve_model",
             return_value=model,
             side_effect=effect,
         ):
@@ -260,7 +260,7 @@ class TestStampCarriesTheL2Model:
         assert self._stamp(None) == f"{perimeter_db.PERIMETER_VERSION}:l2-absent"
 
     def test_the_stamp_names_model_revision_and_threshold(self) -> None:
-        from mcp_trentina_crunchtools.quarantine.classifier import ModelInfo
+        from trentina.quarantine.classifier import ModelInfo
 
         a = ModelInfo(id="a", revision="r1", threshold=0.7, malicious=(1,))
         stamp = self._stamp(a)
@@ -272,7 +272,7 @@ class TestStampCarriesTheL2Model:
         assert stamp != self._stamp(polarity), "a manifest's polarity changes the verdicts"
 
     def test_another_models_verdicts_are_swept_on_load(self) -> None:
-        from mcp_trentina_crunchtools.quarantine.classifier import ModelInfo
+        from trentina.quarantine.classifier import ModelInfo
 
         old = self._stamp(ModelInfo(id="old", revision="", threshold=0.5, malicious=(1,)))
         save_verdict("k", FLAG, old)

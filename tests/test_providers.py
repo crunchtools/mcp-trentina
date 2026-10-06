@@ -9,12 +9,12 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools.errors import QuarantineAgentError
-from mcp_trentina_crunchtools.quarantine.providers import get_provider, reset_provider
-from mcp_trentina_crunchtools.quarantine.providers.anthropic import AnthropicProvider
-from mcp_trentina_crunchtools.quarantine.providers.gemini import GeminiProvider
-from mcp_trentina_crunchtools.quarantine.providers.ollama import OllamaProvider
-from mcp_trentina_crunchtools.quarantine.providers.openai import (
+from trentina.errors import QuarantineAgentError
+from trentina.quarantine.providers import get_provider, reset_provider
+from trentina.quarantine.providers.anthropic import AnthropicProvider
+from trentina.quarantine.providers.gemini import GeminiProvider
+from trentina.quarantine.providers.ollama import OllamaProvider
+from trentina.quarantine.providers.openai import (
     OPENROUTER_API_BASE,
     OPENROUTER_ROUTING,
     OpenAIProvider,
@@ -311,7 +311,7 @@ class TestGetProviderFactory:
     def test_gemini_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.delenv("TRENTINA_MODEL_PROVIDER", raising=False)
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         config_mod._config = None
         provider = get_provider()
@@ -321,7 +321,7 @@ class TestGetProviderFactory:
     def test_openai_provider(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openai")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         config_mod._config = None
         provider = get_provider()
@@ -332,7 +332,7 @@ class TestGetProviderFactory:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openrouter")
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
         monkeypatch.delenv("QUARANTINE_MODEL", raising=False)
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         config_mod._config = None
         provider = get_provider()
@@ -344,7 +344,7 @@ class TestGetProviderFactory:
     def test_openrouter_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openrouter")
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         config_mod._config = None
         with pytest.raises(QuarantineAgentError, match="OPENROUTER_API_KEY"):
@@ -355,7 +355,7 @@ class TestGetProviderFactory:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         config_mod._config = None
         provider = get_provider("openrouter", api_key=SecretStr("sk-or-profile"))
@@ -367,7 +367,7 @@ class TestGetProviderFactory:
 
     def test_unknown_provider_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "unknown")
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         config_mod._config = None
         with pytest.raises(QuarantineAgentError, match="Unknown provider"):
@@ -377,7 +377,7 @@ class TestGetProviderFactory:
     def test_missing_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "openai")
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         config_mod._config = None
         with pytest.raises(QuarantineAgentError, match="OPENAI_API_KEY"):
@@ -391,7 +391,7 @@ class TestGetProviderFactory:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "gemini")
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         config_mod._config = None
         default_provider = get_provider()
@@ -403,7 +403,7 @@ class TestGetProviderFactory:
     def test_per_name_caching(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         config_mod._config = None
         p1 = get_provider("gemini")
@@ -417,7 +417,7 @@ class TestGetProviderFactory:
     def test_none_falls_back_to_global(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", "gemini")
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         config_mod._config = None
         p = get_provider(None)
@@ -427,8 +427,8 @@ class TestGetProviderFactory:
 
 class TestReasoningEffort:
     def test_an_unknown_effort_refuses_startup(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from mcp_trentina_crunchtools.config import Config
-        from mcp_trentina_crunchtools.errors import ConfigError
+        from trentina.config import Config
+        from trentina.errors import ConfigError
 
         monkeypatch.setenv("QUARANTINE_REASONING_EFFORT", "none")
         with pytest.raises(ConfigError, match="QUARANTINE_REASONING_EFFORT"):

@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools.errors import BlockedSourceError, QuarantineAgentError
-from mcp_trentina_crunchtools.quarantine.agent import (
+from trentina.errors import BlockedSourceError, QuarantineAgentError
+from trentina.quarantine.agent import (
     _build_search_request_body,
     _enforce_search_quarantine,
     _extract_grounding_sources,
@@ -17,8 +17,8 @@ from mcp_trentina_crunchtools.quarantine.agent import (
     resolve_grounding_urls,
     search_grounded,
 )
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-from mcp_trentina_crunchtools.tools.search import (
+from trentina.quarantine.classifier import ClassifierResult
+from trentina.tools.search import (
     block_search,
     flag_search,
     redact_search,
@@ -85,10 +85,10 @@ class TestL0SearchGrounded:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.agent.get_config",
+                "trentina.quarantine.agent.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.quarantine.agent.httpx.AsyncClient",
+                "trentina.quarantine.agent.httpx.AsyncClient",
             ) as mock_client_cls,
         ):
             cfg = MagicMock()
@@ -121,7 +121,7 @@ class TestL0SearchGrounded:
     async def test_l0_missing_api_key(self) -> None:
         """Raises QuarantineAgentError when API key is missing."""
         with patch(
-            "mcp_trentina_crunchtools.quarantine.agent.get_config",
+            "trentina.quarantine.agent.get_config",
         ) as mock_config:
             cfg = MagicMock()
             cfg.has_api_key = False
@@ -136,14 +136,14 @@ class TestL0SearchGrounded:
         """Canary in plain text raises QuarantineAgentError."""
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.agent.get_config",
+                "trentina.quarantine.agent.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.quarantine.agent._generate_canary",
+                "trentina.quarantine.agent._generate_canary",
                 return_value="CANARY-abc123",
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.agent.httpx.AsyncClient",
+                "trentina.quarantine.agent.httpx.AsyncClient",
             ) as mock_client_cls,
         ):
             cfg = MagicMock()
@@ -365,7 +365,7 @@ class TestSearchThroughTheOneJudgingPath:
 
     @pytest.mark.parametrize("mode", ["block", "flag", "redact"])
     async def test_an_l0_canary_leak_refuses_in_every_mode(self, env: Path, mode: str) -> None:
-        from mcp_trentina_crunchtools.errors import SearchCanaryLeakedError
+        from trentina.errors import SearchCanaryLeakedError
 
         with layers(env) as fakes:
             fakes.search_grounded.side_effect = SearchCanaryLeakedError()
@@ -393,7 +393,7 @@ class TestSearchThroughTheOneJudgingPath:
                     latency_ms=1.0,
                 ),
             ),
-            patch("mcp_trentina_crunchtools.defense.record_detection") as record,
+            patch("trentina.defense.record_detection") as record,
         ):
             await flag_search("q")
         assert record.call_args.kwargs["provenance"] == "model_output"

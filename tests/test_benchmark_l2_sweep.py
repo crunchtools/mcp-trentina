@@ -11,8 +11,8 @@ import pytest
 
 from benchmarks import l2_sweep
 from benchmarks import provider_benchmark as bench
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
 from tests.adversarial_corpus import CORPUS, Case
+from trentina.quarantine.classifier import ClassifierResult
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -113,9 +113,9 @@ def test_markdown_without_scores_says_so() -> None:
 
 def test_threshold_in_force_is_the_models_own() -> None:
     """A profile leaves l2_threshold unset, so the loaded model decides (#350)."""
-    from mcp_trentina_crunchtools.config import DEFAULT_CLASSIFIER_THRESHOLD
-    from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
-    from mcp_trentina_crunchtools.quarantine.classifier import ModelInfo
+    from trentina.config import DEFAULT_CLASSIFIER_THRESHOLD
+    from trentina.gateway.profile import DefenseConfig
+    from trentina.quarantine.classifier import ModelInfo
 
     assert DefenseConfig().l2_threshold is None
     with patch.object(bench, "model_info", return_value=None):
@@ -132,7 +132,7 @@ def _fake_score(text: str, **_: object) -> ClassifierResult:
 def test_l2_only_run_writes_scores_and_sweep_without_providers(tmp_path: Path) -> None:
     with (
         patch.object(bench, "is_classifier_available", return_value=True),
-        patch("mcp_trentina_crunchtools.defense.classify_async", side_effect=_fake_score),
+        patch("trentina.defense.classify_async", side_effect=_fake_score),
         patch.object(bench, "available_providers", side_effect=AssertionError("no providers")),
     ):
         rc = bench.main(["--l2-only", "--limit", "6", "--out", str(tmp_path)])
@@ -168,7 +168,7 @@ async def test_score_l2_reads_each_payload_once_as_it_arrived() -> None:
 
     with (
         patch.object(bench, "is_classifier_available", return_value=True),
-        patch("mcp_trentina_crunchtools.defense.classify_async", side_effect=score) as spy,
+        patch("trentina.defense.classify_async", side_effect=score) as spy,
     ):
         scores = await bench.score_l2([case])
     assert [c.args[0] for c in spy.call_args_list] == [case.payload]
@@ -185,7 +185,7 @@ async def test_score_l2_records_a_failed_scan_as_none() -> None:
 
     with (
         patch.object(bench, "is_classifier_available", return_value=True),
-        patch("mcp_trentina_crunchtools.defense.classify_async", side_effect=score),
+        patch("trentina.defense.classify_async", side_effect=score),
     ):
         scores = await bench.score_l2(cases)
     assert scores == {cases[0].id: None, cases[1].id: 0.3}

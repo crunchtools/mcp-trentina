@@ -1536,71 +1536,6 @@ wheels = [
 ]
 
 [[package]]
-name = "mcp-trentina-crunchtools"
-version = "0.65.0"
-source = { editable = "." }
-dependencies = [
-    { name = "beautifulsoup4" },
-    { name = "dbus-fast" },
-    { name = "fastmcp" },
-    { name = "httpx" },
-    { name = "markdownify" },
-    { name = "mcp" },
-    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "onnxruntime" },
-    { name = "opencv-python-headless" },
-    { name = "petit-log-crunchtools" },
-    { name = "pydantic" },
-    { name = "pypdf" },
-    { name = "pyyaml" },
-    { name = "rapidocr" },
-    { name = "transformers" },
-]
-
-[package.optional-dependencies]
-bridge = [
-    { name = "matrix-nio", extra = ["e2e"] },
-    { name = "unpaddedbase64" },
-]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-matrix = [
-    { name = "vodozemac" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "beautifulsoup4", specifier = ">=4.12" },
-    { name = "dbus-fast", specifier = ">=2.0" },
-    { name = "fastmcp", specifier = ">=4.0,<5.0" },
-    { name = "httpx", specifier = ">=0.28" },
-    { name = "markdownify", specifier = ">=0.14" },
-    { name = "matrix-nio", extras = ["e2e"], marker = "extra == 'bridge'", specifier = ">=0.26,<0.27" },
-    { name = "mcp", specifier = ">=2.2,<3.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
-    { name = "numpy", specifier = ">=1.24" },
-    { name = "onnxruntime", specifier = ">=1.17" },
-    { name = "opencv-python-headless", specifier = ">=4.10" },
-    { name = "petit-log-crunchtools", specifier = ">=4.10.2" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pypdf", specifier = ">=6.19" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "rapidocr", specifier = ">=3.9" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
-    { name = "transformers", specifier = ">=4.40" },
-    { name = "unpaddedbase64", marker = "extra == 'bridge'", specifier = ">=2.1" },
-    { name = "vodozemac", marker = "extra == 'matrix'", specifier = ">=0.10,<0.11" },
-]
-provides-extras = ["matrix", "bridge", "dev"]
-
-[[package]]
 name = "mcp-types"
 version = "2.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3388,6 +3323,71 @@ sdist = { url = "https://files.pythonhosted.org/packages/0e/9e/750649904a065007a
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e8/d0/c502b60d684adbd98a8dc7d5bb866842772b816ac4354e4608be240041ae/transformers-5.17.0-py3-none-any.whl", hash = "sha256:78ec1ce21579b38dfb83950a0658cd119f87212a2fcfdff478096ce9d6c03801", size = 12295140, upload-time = "2026-09-09T15:39:53.746Z" },
 ]
+
+[[package]]
+name = "trentina"
+version = "1.0.0"
+source = { editable = "." }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "dbus-fast" },
+    { name = "fastmcp" },
+    { name = "httpx" },
+    { name = "markdownify" },
+    { name = "mcp" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "onnxruntime" },
+    { name = "opencv-python-headless" },
+    { name = "petit-log-crunchtools" },
+    { name = "pydantic" },
+    { name = "pypdf" },
+    { name = "pyyaml" },
+    { name = "rapidocr" },
+    { name = "transformers" },
+]
+
+[package.optional-dependencies]
+bridge = [
+    { name = "matrix-nio", extra = ["e2e"] },
+    { name = "unpaddedbase64" },
+]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+matrix = [
+    { name = "vodozemac" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.12" },
+    { name = "dbus-fast", specifier = ">=2.0" },
+    { name = "fastmcp", specifier = ">=4.0,<5.0" },
+    { name = "httpx", specifier = ">=0.28" },
+    { name = "markdownify", specifier = ">=0.14" },
+    { name = "matrix-nio", extras = ["e2e"], marker = "extra == 'bridge'", specifier = ">=0.26,<0.27" },
+    { name = "mcp", specifier = ">=2.2,<3.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
+    { name = "numpy", specifier = ">=1.24" },
+    { name = "onnxruntime", specifier = ">=1.17" },
+    { name = "opencv-python-headless", specifier = ">=4.10" },
+    { name = "petit-log-crunchtools", specifier = ">=4.10.2" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pypdf", specifier = ">=6.19" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "rapidocr", specifier = ">=3.9" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
+    { name = "transformers", specifier = ">=4.40" },
+    { name = "unpaddedbase64", marker = "extra == 'bridge'", specifier = ">=2.1" },
+    { name = "vodozemac", marker = "extra == 'matrix'", specifier = ">=0.10,<0.11" },
+]
+provides-extras = ["matrix", "bridge", "dev"]
 
 [[package]]
 name = "truststore"

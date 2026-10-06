@@ -22,8 +22,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.errors import BlockedSourceError, FetchError
-from mcp_trentina_crunchtools.modes import Mode
+from trentina.errors import BlockedSourceError, FetchError
+from trentina.modes import Mode
 
 from .mode_harness import FAMILIES, MODES, call, layers
 
@@ -84,12 +84,12 @@ async def test_finding_types_are_a_closed_set(env: Path) -> None:
 
 
 async def test_the_4xx_advisory_carries_no_l3_prose(env: Path) -> None:
-    from mcp_trentina_crunchtools.tools.fetch import flag_fetch
+    from trentina.tools.fetch import flag_fetch
 
     with (
         layers(env, payload=PAGE, detection=STEERED),
         patch(
-            "mcp_trentina_crunchtools.tools.fetch.fetch_url",
+            "trentina.tools.fetch.fetch_url",
             new_callable=AsyncMock,
             side_effect=FetchError(
                 "https://example.com/", "gone", status_code=404, error_body=PAGE
@@ -106,8 +106,8 @@ async def test_the_4xx_advisory_carries_no_l3_prose(env: Path) -> None:
 async def test_the_gateway_warning_carries_no_l3_prose(env: Path) -> None:
     from pydantic import SecretStr
 
-    from mcp_trentina_crunchtools.gateway.ingress_defense import scan_tool_response
-    from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+    from trentina.gateway.ingress_defense import scan_tool_response
+    from trentina.gateway.profile import AuthConfig, Backend, Profile
 
     profile = Profile(
         name="p",

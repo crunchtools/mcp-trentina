@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp_trentina_crunchtools.gateway.consent_ui import ConsentUsability
+from trentina.gateway.consent_ui import ConsentUsability
 
 _CONSENT_PAGE = (
     "<html><body><form id='consentForm' method='POST' action=''>"

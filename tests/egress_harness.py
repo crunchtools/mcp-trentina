@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from mcp_trentina_crunchtools import egress
+from trentina import egress
 
 if TYPE_CHECKING:
     from collections.abc import Callable

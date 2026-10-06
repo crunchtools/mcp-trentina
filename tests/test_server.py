@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.server import mcp
+from trentina.modes import Mode
+from trentina.server import mcp
 
 FAMILIES = ("fetch", "read", "dir", "content", "search")
 
@@ -49,7 +49,7 @@ class TestServerRegistration:
         assert tool_names == families | admin
 
     def test_server_name(self) -> None:
-        assert mcp.name == "mcp-trentina-crunchtools"
+        assert mcp.name == "trentina"
 
 
 FAMILY_CALLS = [
@@ -76,11 +76,11 @@ async def test_every_family_extracts_what_the_dict_form_asks(
     tool: str, family: str, args: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TRENTINA_MODES", "block,redact")
-    from mcp_trentina_crunchtools import config as config_mod
+    from trentina import config as config_mod
 
     config_mod._config = None
     fake = AsyncMock(return_value={"content": "ok"})
-    with patch(f"mcp_trentina_crunchtools.server.{family}", fake):
+    with patch(f"trentina.server.{family}", fake):
         await mcp.call_tool(tool, {**args, "trentina_mode": {"redact": "What ships?"}})
     config_mod._config = None
     call = fake.call_args

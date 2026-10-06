@@ -5,7 +5,7 @@
 > **Version:** 0.2.0
 > **Author:** Scott McCarty
 > **Date:** 2026-03-10
-> **GitHub Issue:** [#5](https://github.com/crunchtools/mcp-trentina/issues/5)
+> **GitHub Issue:** [#5](https://github.com/crunchtools/trentina/issues/5)
 
 ## Overview
 
@@ -51,6 +51,7 @@ These mirror the existing tool pairs exactly:
 async def safe_content(content: str, content_type: str = "text/plain") -> dict[str, Any]:
     """Sanitize inline content. Fails if injection detected."""
 
+
 async def quarantine_content(
     content: str,
     prompt: str = "Extract the main content.",
@@ -58,8 +59,10 @@ async def quarantine_content(
 ) -> dict[str, Any]:
     """Sanitize + Q-Agent extraction on inline content."""
 
+
 async def scan_content(content: str, content_type: str = "text/plain") -> dict[str, Any]:
     """Three-layer scan on inline content. L2/L3 see sanitized output."""
+
 
 async def deep_scan_content(content: str, content_type: str = "text/plain") -> dict[str, Any]:
     """Three-layer deep scan. L1 runs for stats, L2/L3 see raw content."""

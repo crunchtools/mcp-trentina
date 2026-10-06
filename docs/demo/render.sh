@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ENGINE=${ENGINE:-docker}
-IMAGE=${TRENTINA_IMAGE:-quay.io/crunchtools/mcp-trentina:latest}
+IMAGE=${TRENTINA_IMAGE:-quay.io/crunchtools/trentina:latest}
 DEMO=$(cd "$(dirname "$0")" && pwd)
 OUT=${OUT:-$DEMO/out}
 NET=trentina-demo

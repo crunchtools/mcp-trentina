@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-from mcp_trentina_crunchtools.quarantine.providers.base import ProviderResult
+from trentina.quarantine.providers.base import ProviderResult
 
 CI_TEST_KEY = "test_key_for_ci"
 
@@ -42,7 +42,7 @@ SIMPLE_SCHEMA = {
 @pytest.mark.asyncio
 class TestOpenAIIntegration:
     async def test_simple_generation(self) -> None:
-        from mcp_trentina_crunchtools.quarantine.providers.openai import OpenAIProvider
+        from trentina.quarantine.providers.openai import OpenAIProvider
 
         provider = OpenAIProvider(
             api_key=os.environ["OPENAI_API_KEY"],
@@ -68,7 +68,7 @@ class TestOpenAIIntegration:
 @pytest.mark.asyncio
 class TestAnthropicIntegration:
     async def test_simple_generation(self) -> None:
-        from mcp_trentina_crunchtools.quarantine.providers.anthropic import AnthropicProvider
+        from trentina.quarantine.providers.anthropic import AnthropicProvider
 
         provider = AnthropicProvider(
             api_key=os.environ["ANTHROPIC_API_KEY"],
@@ -94,7 +94,7 @@ class TestAnthropicIntegration:
 @pytest.mark.asyncio
 class TestGeminiIntegration:
     async def test_simple_generation(self) -> None:
-        from mcp_trentina_crunchtools.quarantine.providers.gemini import GeminiProvider
+        from trentina.quarantine.providers.gemini import GeminiProvider
 
         provider = GeminiProvider(
             api_key=os.environ["GEMINI_API_KEY"],

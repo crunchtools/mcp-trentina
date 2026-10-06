@@ -16,11 +16,11 @@ from unittest.mock import patch
 import pytest
 
 from benchmarks import l2_obfuscation
-from mcp_trentina_crunchtools import posture
-from mcp_trentina_crunchtools.errors import ConfigError
-from mcp_trentina_crunchtools.perimeter_db import perimeter_stamp
-from mcp_trentina_crunchtools.quarantine import classifier
-from mcp_trentina_crunchtools.quarantine.obfuscation import (
+from trentina import posture
+from trentina.errors import ConfigError
+from trentina.perimeter_db import perimeter_stamp
+from trentina.quarantine import classifier
+from trentina.quarantine.obfuscation import (
     GATE_KEY,
     TRANSFORMS,
     gate_state,

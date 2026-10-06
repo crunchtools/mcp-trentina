@@ -3,7 +3,7 @@ Version:        0.2.2
 Release:        1%{?dist}
 Summary:        Cockpit plugin for MCP Trentina defense pipeline visualization
 License:        AGPL-3.0-or-later
-URL:            https://github.com/crunchtools/mcp-trentina
+URL:            https://github.com/crunchtools/trentina
 Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch

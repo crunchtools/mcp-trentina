@@ -32,19 +32,19 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from mcp_trentina_crunchtools.config import get_config
-from mcp_trentina_crunchtools.quarantine.classifier import (
+from tests.adversarial_corpus import CORPUS
+from trentina.config import get_config
+from trentina.quarantine.classifier import (
     MANIFEST_FILE,
     classify,
     is_classifier_available,
 )
-from mcp_trentina_crunchtools.quarantine.obfuscation import (
+from trentina.quarantine.obfuscation import (
     GATE_KEY,
     GATE_MAX_DROP,
     TRANSFORMS,
     run_gate,
 )
-from tests.adversarial_corpus import CORPUS
 
 __all__ = ["TRANSFORMS", "main"]
 

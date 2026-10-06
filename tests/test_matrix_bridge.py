@@ -22,40 +22,40 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools import database
-from mcp_trentina_crunchtools.bridge.client import ROOM_ANNOUNCE, ROOM_LEFT
-from mcp_trentina_crunchtools.defense import DefenseVerdict, Layer
-from mcp_trentina_crunchtools.gateway.matrix_bridge import appservice as appservice_mod
-from mcp_trentina_crunchtools.gateway.matrix_bridge import core
-from mcp_trentina_crunchtools.gateway.matrix_bridge import routes as routes_mod
-from mcp_trentina_crunchtools.gateway.matrix_bridge.appservice import (
+from trentina import database
+from trentina.bridge.client import ROOM_ANNOUNCE, ROOM_LEFT
+from trentina.defense import DefenseVerdict, Layer
+from trentina.gateway.matrix_bridge import appservice as appservice_mod
+from trentina.gateway.matrix_bridge import core
+from trentina.gateway.matrix_bridge import routes as routes_mod
+from trentina.gateway.matrix_bridge.appservice import (
     AppService,
     ConduitError,
     _Recent,
 )
-from mcp_trentina_crunchtools.gateway.matrix_bridge.core import (
+from trentina.gateway.matrix_bridge.core import (
     AGENT_IN_ROOM,
     AGENT_SENDER,
     MEMBERS_UNREPORTED,
     BridgeUnavailableError,
     ProfileBridge,
 )
-from mcp_trentina_crunchtools.gateway.matrix_bridge.mapping import BridgeMapping, Room
-from mcp_trentina_crunchtools.gateway.matrix_bridge.rewrite import (
+from trentina.gateway.matrix_bridge.mapping import BridgeMapping, Room
+from trentina.gateway.matrix_bridge.rewrite import (
     IdMap,
     escape_localpart,
     rewrite_content,
     user_ids_in,
 )
-from mcp_trentina_crunchtools.gateway.matrix_bridge.routes import (
+from trentina.gateway.matrix_bridge.routes import (
     BridgeEvent,
     bridged_agents,
     close_bridges,
     register_bridge_routes,
 )
-from mcp_trentina_crunchtools.gateway.profile import Profile
-from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, PipelineStats
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
+from trentina.gateway.profile import Profile
+from trentina.l1.pipeline import PipelineResult, PipelineStats
+from trentina.quarantine.classifier import ClassifierResult
 
 from .test_bridge_agent_rule import _set_members, _started
 from .test_bridge_process import FakeNio as _FakeNio
@@ -1407,7 +1407,7 @@ class TestOutboundRefusedCount:
         await rig.bridge.outbound("t3", [_agent_event("$a3")])  # sent
         assert rig.bridge.outbound_refused == 2
 
-        from mcp_trentina_crunchtools.gateway import app as app_mod
+        from trentina.gateway import app as app_mod
 
         assert "matrix_bridge" not in json.loads(app_mod._health_payload({}).body)
         monkeypatch.setattr(routes_mod, "_registered", [rig.bridge])

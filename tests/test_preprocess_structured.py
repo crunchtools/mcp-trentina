@@ -19,7 +19,7 @@ import json
 
 import pytest
 
-from mcp_trentina_crunchtools.preprocess import (
+from trentina.preprocess import (
     Cost,
     PreProcessContext,
     PreProcessResult,
@@ -212,7 +212,7 @@ class TestIdentifierListing:
     async def test_integers_past_the_depth_cutoff_keep_records_apart(self) -> None:
         """Past _MAX_DEPTH integers are left as integers, so records that
         differ only down there are not grouped and nothing is lost."""
-        from mcp_trentina_crunchtools.preprocess.structured import _MAX_DEPTH
+        from trentina.preprocess.structured import _MAX_DEPTH
 
         def deep(n: int) -> dict:
             node: dict = {"leaf": n}

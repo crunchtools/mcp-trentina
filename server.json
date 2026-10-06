@@ -4,14 +4,14 @@
   "title": "Trentina",
   "description": "MCP gateway for AI agents — injection defense, token savings, policy and OAuth",
   "repository": {
-    "url": "https://github.com/crunchtools/mcp-trentina",
+    "url": "https://github.com/crunchtools/trentina",
     "source": "github"
   },
   "version": "0.54.1",
   "packages": [
     {
       "registryType": "pypi",
-      "identifier": "mcp-trentina-crunchtools",
+      "identifier": "trentina",
       "version": "0.54.1",
       "transport": {
         "type": "stdio"

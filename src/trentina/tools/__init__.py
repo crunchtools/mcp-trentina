@@ -1,4 +1,4 @@
-"""Tool implementations for mcp-trentina-crunchtools."""
+"""Tool implementations for trentina."""
 
 from __future__ import annotations
 

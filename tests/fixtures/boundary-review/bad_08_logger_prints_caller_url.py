@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from mcp_trentina_crunchtools.client import fetch_url
-from mcp_trentina_crunchtools.errors import FetchError, UnsupportedContentTypeError
+from trentina.client import fetch_url
+from trentina.errors import FetchError, UnsupportedContentTypeError
 
 log = logging.getLogger(__name__)
 

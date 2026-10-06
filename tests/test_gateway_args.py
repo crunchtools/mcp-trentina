@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway.args import normalize_arguments
+from trentina.gateway.args import normalize_arguments
 
 SCHEMA: dict[str, Any] = {
     "type": "object",

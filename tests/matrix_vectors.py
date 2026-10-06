@@ -13,7 +13,7 @@ import json
 import secrets
 from typing import Any
 
-from mcp_trentina_crunchtools.matrix.recovery_key import PREFIX
+from trentina.matrix.recovery_key import PREFIX
 
 _ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _BASE = len(_ALPHABET)

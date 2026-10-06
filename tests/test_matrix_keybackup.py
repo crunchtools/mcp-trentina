@@ -18,9 +18,9 @@ from typing import Any
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools.matrix.keybackup import KeyBackupError, KeyBackupProvider
-from mcp_trentina_crunchtools.matrix.megolm import decrypt_event, megolm_available
-from mcp_trentina_crunchtools.matrix.recovery_key import RecoveryKeyError
+from trentina.matrix.keybackup import KeyBackupError, KeyBackupProvider
+from trentina.matrix.megolm import decrypt_event, megolm_available
+from trentina.matrix.recovery_key import RecoveryKeyError
 
 from .matrix_vectors import Vectors, make_recovery_key
 

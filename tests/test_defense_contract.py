@@ -28,7 +28,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "mcp_trentina_crunchtools"
+SRC = Path(__file__).resolve().parents[1] / "src" / "trentina"
 
 # Modules whose names may not be imported outside the pipeline.
 GUARDED_MODULES = ("quarantine.classifier", "quarantine.agent", "l1.pipeline")
@@ -78,7 +78,7 @@ def _guarded_imports(path: Path) -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            # `import mcp_trentina_crunchtools.quarantine.classifier as c`
+            # `import trentina.quarantine.classifier as c`
             # reaches every detector via attribute access; flag the module
             # itself so the hole ImportFrom-only scanning left is closed.
             for alias in node.names:
@@ -117,7 +117,7 @@ class TestOnePipeline:
             "the defense pipeline, which means a second pipeline is forming:\n"
             + "\n".join(f"  {mod}: {', '.join(names)}" for mod, names in offenders.items())
             + "\n\nUse defend() or defend_json() from "
-            "mcp_trentina_crunchtools.defense. If this import genuinely is not "
+            "trentina.defense. If this import genuinely is not "
             "part of a defense decision, add it to EXEMPT with the reason."
         )
 
@@ -138,7 +138,7 @@ class TestOnePipeline:
 
     def test_defense_module_exposes_the_three_postures(self) -> None:
         """Callers should never need a detector; these are the ways in."""
-        from mcp_trentina_crunchtools import defense
+        from trentina import defense
 
         for name in ("defend", "defend_json", "defend_selection"):
             assert hasattr(defense, name), f"defense.{name} is the documented entry point"

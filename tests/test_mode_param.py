@@ -16,11 +16,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from mcp_trentina_crunchtools.config import get_config
-from mcp_trentina_crunchtools.errors import ConfigError, ModeNotPermittedError
-from mcp_trentina_crunchtools.gateway.backend import BackendCall
-from mcp_trentina_crunchtools.gateway.ingress_defense import IngressDecision
-from mcp_trentina_crunchtools.gateway.modes_policy import (
+from trentina.config import get_config
+from trentina.errors import ConfigError, ModeNotPermittedError
+from trentina.gateway.backend import BackendCall
+from trentina.gateway.ingress_defense import IngressDecision
+from trentina.gateway.modes_policy import (
     MODE_PARAM,
     PROMPT_PARAM,
     insert_params,
@@ -28,7 +28,7 @@ from mcp_trentina_crunchtools.gateway.modes_policy import (
     policy_for,
     strip_params,
 )
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.gateway.profile import (
     AuthConfig,
     Backend,
     DefenseConfig,
@@ -37,8 +37,8 @@ from mcp_trentina_crunchtools.gateway.profile import (
     ParameterConstraint,
     Profile,
 )
-from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
-from mcp_trentina_crunchtools.modes import (
+from trentina.gateway.router import NAMESPACE_SEP, route_jsonrpc
+from trentina.modes import (
     Gaps,
     Mode,
     ModePolicy,
@@ -46,7 +46,7 @@ from mcp_trentina_crunchtools.modes import (
     refusal_body,
 )
 
-ROUTER = "mcp_trentina_crunchtools.gateway.router"
+ROUTER = "trentina.gateway.router"
 TOOL = {
     "name": "jira_get_issue",
     "description": "Get an issue",
@@ -67,7 +67,7 @@ def mode_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[..., None]]:
     dropped — and a test that forgets to drop it again hands its policy to
     the next one.
     """
-    from mcp_trentina_crunchtools import config as config_mod
+    from trentina import config as config_mod
 
     def apply(mode: str | None = None, modes: str | None = None) -> None:
         for name, value in (("TRENTINA_MODE", mode), ("TRENTINA_MODES", modes)):
@@ -271,7 +271,7 @@ class TestAlternatives:
         assert body["alternatives"] == ["redact"]
 
     def test_gap_only_offers_flag(self) -> None:
-        from mcp_trentina_crunchtools.modes import Gaps
+        from trentina.modes import Gaps
 
         body = refusal_body(
             "not fully judged", Mode.BLOCK, gaps=Gaps(l3_unavailable=True), policy=self.ALL
@@ -471,8 +471,8 @@ class TestInternalBackend:
         return p
 
     async def _route(self, profile: Profile, request: dict[str, Any]) -> dict[str, Any]:
-        from mcp_trentina_crunchtools.gateway import internal
-        from mcp_trentina_crunchtools.server import mcp
+        from trentina.gateway import internal
+        from trentina.server import mcp
 
         saved = internal._server
         internal.register_internal_server(mcp)
@@ -533,7 +533,7 @@ class TestStandalone:
     """No gateway: TRENTINA_MODE / TRENTINA_MODES, both defaulting to block."""
 
     def test_default_is_block_only(self, mode_env: Callable[..., None]) -> None:
-        from mcp_trentina_crunchtools.modes import current_policy
+        from trentina.modes import current_policy
 
         mode_env()
         policy = current_policy()
@@ -542,7 +542,7 @@ class TestStandalone:
             policy.resolve("flag")
 
     def test_a_default_outside_the_set_fails_startup(self, mode_env: Callable[..., None]) -> None:
-        from mcp_trentina_crunchtools.errors import ConfigError
+        from trentina.errors import ConfigError
 
         mode_env("flag", "block,redact")
         with pytest.raises(ConfigError):
@@ -556,7 +556,7 @@ class TestStandalone:
 def test_a_bad_standalone_policy_fails_startup(
     mode_env: Callable[..., None], mode: str, modes: str
 ) -> None:
-    from mcp_trentina_crunchtools.errors import ConfigError
+    from trentina.errors import ConfigError
 
     mode_env(mode, modes)
     with pytest.raises(ConfigError):
@@ -594,8 +594,8 @@ async def test_a_mode_guard_refuses_at_call_even_when_the_mode_is_omitted() -> N
 
 
 def test_a_blocklist_refusal_offers_redact_only_where_allowed() -> None:
-    from mcp_trentina_crunchtools.gateway.context import profile_context
-    from mcp_trentina_crunchtools.tools.judged import blocklisted
+    from trentina.gateway.context import profile_context
+    from trentina.tools.judged import blocklisted
 
     p = _profile(["block", "flag", "redact"])
     with profile_context(p, ModePolicy((Mode.BLOCK, Mode.FLAG, Mode.REDACT), Mode.BLOCK)):
@@ -624,11 +624,11 @@ class TestServerTools:
     """
 
     async def _run(self, tool: str, **arguments: Any) -> AsyncMock:
-        from mcp_trentina_crunchtools.server import mcp
+        from trentina.server import mcp
 
         family_fn, target = FAMILY_TOOLS[tool]
         fake = AsyncMock(return_value={"content": "ok"})
-        with patch(f"mcp_trentina_crunchtools.server.{family_fn}", fake):
+        with patch(f"trentina.server.{family_fn}", fake):
             registered = await mcp.get_tool(tool)
             await registered.run({**target, **arguments})
         return fake
@@ -665,7 +665,7 @@ class TestServerTools:
         self, mode_env: Callable[..., None]
     ) -> None:
         """Under the gateway the bound profile policy decides, not TRENTINA_MODES."""
-        from mcp_trentina_crunchtools.gateway.context import (
+        from trentina.gateway.context import (
             get_current_policy,
             profile_context,
         )
@@ -699,9 +699,9 @@ class TestInternalModes:
     async def test_the_resolved_mode_and_prompt_reach_the_family(
         self, tool: str, mode: str
     ) -> None:
-        from mcp_trentina_crunchtools.gateway import internal
-        from mcp_trentina_crunchtools.gateway.context import get_current_policy
-        from mcp_trentina_crunchtools.server import mcp
+        from trentina.gateway import internal
+        from trentina.gateway.context import get_current_policy
+        from trentina.server import mcp
 
         family_fn, target = FAMILY_TOOLS[tool]
         seen: dict[str, Any] = {}
@@ -715,7 +715,7 @@ class TestInternalModes:
         internal.register_internal_server(mcp)
         try:
             with (
-                patch(f"mcp_trentina_crunchtools.server.{family_fn}", fake),
+                patch(f"trentina.server.{family_fn}", fake),
                 patch(f"{ROUTER}._audit"),
             ):
                 resp = await route_jsonrpc(

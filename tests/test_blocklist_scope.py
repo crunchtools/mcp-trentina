@@ -18,13 +18,13 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools import database
-from mcp_trentina_crunchtools.errors import BlockedSourceError
-from mcp_trentina_crunchtools.gateway.context import profile_context
-from mcp_trentina_crunchtools.gateway.loader import load_profiles, register_active_config
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, DefenseConfig, Profile
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.tools.fetch import fetch_page
+from trentina import database
+from trentina.errors import BlockedSourceError
+from trentina.gateway.context import profile_context
+from trentina.gateway.loader import load_profiles, register_active_config
+from trentina.gateway.profile import AuthConfig, DefenseConfig, Profile
+from trentina.modes import Mode
+from trentina.tools.fetch import fetch_page
 
 from .mode_harness import BENIGN, MALICIOUS, layers
 

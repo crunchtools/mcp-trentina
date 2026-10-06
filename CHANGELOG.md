@@ -10,6 +10,41 @@ under that name.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-06
+
+Trentina is renamed from `mcp-trentina`. It stopped being an MCP server some
+time ago: it is a gateway that carries a classifier, an LLM judge, document
+parsers in child processes, a policy engine and a Matrix bridge. Entries
+below this one keep the names they were written with.
+
+### Changed
+- **Renamed, breaking.** The Python package is `trentina` (was
+  `mcp_trentina_crunchtools`); the commands are `trentina` and
+  `trentina-bridge` (were `mcp-trentina-crunchtools` and
+  `mcp-trentina-bridge`); a unit that runs `python -m
+  mcp_trentina_crunchtools...` must name `trentina...`. The repository is
+  `crunchtools/trentina`.
+- **Images** are `quay.io/crunchtools/trentina` and
+  `ghcr.io/crunchtools/trentina`. The `mcp-trentina` image names are still
+  pushed for now and will stop in a later release.
+- What clients see: `serverInfo.name` is `trentina-gateway:<profile>` (was
+  `mcp-trentina-gateway:<profile>`), log records are named `trentina.*`, and
+  fetches send `User-Agent: trentina/...`.
+- Defaults that held the old name, for anyone not setting them: the
+  database is `~/.local/share/trentina/trentina.db` and the trust file
+  `~/.config/mcp-env/trentina-trust.json`. Environment variables are
+  unchanged.
+- Governed by the Security Gateway profile of the crunchtools constitution
+  (v1.19.1) instead of MCP Server.
+
+### Removed
+- **PyPI.** Trentina is distributed as a container image only.
+  `mcp-trentina-crunchtools` on PyPI stops at 0.54.1 and gets no further
+  releases; `uvx` and `pip install` are no longer ways to run it.
+- The `mcp-airlock-crunchtools` deprecation shim's source and its publish
+  workflow. The shim on PyPI is unchanged and still points at the last
+  PyPI release.
+
 ## [0.65.0] - 2026-10-06
 
 ### Added

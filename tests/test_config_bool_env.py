@@ -10,7 +10,7 @@ import logging
 
 import pytest
 
-from mcp_trentina_crunchtools.config import bool_env
+from trentina.config import bool_env
 
 VAR = "TRENTINA_TEST_BOOL"
 
@@ -38,7 +38,7 @@ def test_a_typo_keeps_the_default_and_says_so(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     monkeypatch.setenv(VAR, "flase")
-    with caplog.at_level(logging.WARNING, logger="mcp_trentina_crunchtools.config"):
+    with caplog.at_level(logging.WARNING, logger="trentina.config"):
         assert bool_env(VAR, default=True) is True
     assert VAR in caplog.text
 
@@ -48,10 +48,10 @@ def test_turning_a_layer_off_warns_at_startup(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, layer: str
 ) -> None:
     """A fail-closed switch turned off is announced, like the egress hatch (#298)."""
-    from mcp_trentina_crunchtools.config import Config
+    from trentina.config import Config
 
     monkeypatch.setenv(f"TRENTINA_REQUIRE_{layer}", "false")
-    with caplog.at_level(logging.WARNING, logger="mcp_trentina_crunchtools.config"):
+    with caplog.at_level(logging.WARNING, logger="trentina.config"):
         Config()
     assert f"TRENTINA_REQUIRE_{layer} is off" in caplog.text
 
@@ -59,10 +59,10 @@ def test_turning_a_layer_off_warns_at_startup(
 def test_the_default_is_silent(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    from mcp_trentina_crunchtools.config import Config
+    from trentina.config import Config
 
     monkeypatch.delenv("TRENTINA_REQUIRE_L2", raising=False)
     monkeypatch.delenv("TRENTINA_REQUIRE_L3", raising=False)
-    with caplog.at_level(logging.WARNING, logger="mcp_trentina_crunchtools.config"):
+    with caplog.at_level(logging.WARNING, logger="trentina.config"):
         Config()
     assert "TRENTINA_REQUIRE_" not in caplog.text

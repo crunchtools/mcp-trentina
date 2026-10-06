@@ -19,10 +19,10 @@ from starlette.responses import Response
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from mcp_trentina_crunchtools import httpbody
-from mcp_trentina_crunchtools.gateway.app import gateway_app
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Profile
-from mcp_trentina_crunchtools.httpbody import (
+from trentina import httpbody
+from trentina.gateway.app import gateway_app
+from trentina.gateway.profile import AuthConfig, Profile
+from trentina.httpbody import (
     DEFAULT_MAX_REQUEST_BYTES,
     MIN_REQUEST_BYTES,
     RequestBodyCap,

@@ -9,10 +9,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from mcp_trentina_crunchtools.database import record_gateway_call
-from mcp_trentina_crunchtools.gateway.backend import call_backend_tool
-from mcp_trentina_crunchtools.gateway.errors import BackendCallError
-from mcp_trentina_crunchtools.gateway.internal import call_internal_tool
+from trentina.database import record_gateway_call
+from trentina.gateway.backend import call_backend_tool
+from trentina.gateway.errors import BackendCallError
+from trentina.gateway.internal import call_internal_tool
 
 
 def _ok(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:

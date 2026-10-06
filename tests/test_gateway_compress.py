@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.errors import QuarantineAgentError
-from mcp_trentina_crunchtools.gateway import compress as compress_mod
-from mcp_trentina_crunchtools.gateway.compress import (
+from trentina.errors import QuarantineAgentError
+from trentina.gateway import compress as compress_mod
+from trentina.gateway.compress import (
     _cache,
     _call_compress_model,
     _hash_description,
@@ -20,7 +20,7 @@ from mcp_trentina_crunchtools.gateway.compress import (
     maybe_trigger_compression,
     set_profiles,
 )
-from mcp_trentina_crunchtools.quarantine.providers.base import ProviderResult
+from trentina.quarantine.providers.base import ProviderResult
 
 
 def _tool(name: str, description: str, schema: dict | None = None) -> dict[str, Any]:
@@ -121,8 +121,8 @@ class TestDatabaseRoundTrip:
     """Test save/load cycle through SQLite."""
 
     def test_save_and_load(self, tmp_path: Any) -> None:
-        from mcp_trentina_crunchtools import database as db_module
-        from mcp_trentina_crunchtools.database import (
+        from trentina import database as db_module
+        from trentina.database import (
             get_all_compressions,
             get_db,
             save_compression,
@@ -142,8 +142,8 @@ class TestDatabaseRoundTrip:
         db_module._db = None
 
     def test_compression_stats(self, tmp_path: Any) -> None:
-        from mcp_trentina_crunchtools import database as db_module
-        from mcp_trentina_crunchtools.database import (
+        from trentina import database as db_module
+        from trentina.database import (
             get_compression_stats,
             get_db,
             save_compression,
@@ -183,7 +183,7 @@ class TestCallCompressModel:
             )
         )
         with patch(
-            "mcp_trentina_crunchtools.gateway.compress.get_provider",
+            "trentina.gateway.compress.get_provider",
             return_value=mock_prov,
         ):
             result = await _call_compress_model(
@@ -199,7 +199,7 @@ class TestCallCompressModel:
             side_effect=QuarantineAgentError("provider error"),
         )
         with patch(
-            "mcp_trentina_crunchtools.gateway.compress.get_provider",
+            "trentina.gateway.compress.get_provider",
             return_value=mock_prov,
         ):
             result = await _call_compress_model([("h1", "desc")])
@@ -219,11 +219,11 @@ class TestPrecompressBackend:
         mock_tools = [_tool("t1", desc)]
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.backend.list_backend_tools",
+            "trentina.gateway.backend.list_backend_tools",
             new_callable=AsyncMock,
             return_value=mock_tools,
         ):
-            from mcp_trentina_crunchtools.gateway.profile import Backend
+            from trentina.gateway.profile import Backend
 
             backend = Backend(url="http://test:8000/mcp")
             count = await _precompress_backend("test", backend)
@@ -243,18 +243,18 @@ class TestPrecompressBackend:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.backend.list_backend_tools",
+                "trentina.gateway.backend.list_backend_tools",
                 new_callable=AsyncMock,
                 return_value=mock_tools,
             ),
             patch(
-                "mcp_trentina_crunchtools.gateway.compress._call_compress_model",
+                "trentina.gateway.compress._call_compress_model",
                 new_callable=AsyncMock,
                 return_value=longer_result,
             ),
-            patch("mcp_trentina_crunchtools.gateway.compress.save_compression"),
+            patch("trentina.gateway.compress.save_compression"),
         ):
-            from mcp_trentina_crunchtools.gateway.profile import Backend
+            from trentina.gateway.profile import Backend
 
             backend = Backend(url="http://test:8000/mcp")
             count = await _precompress_backend("test", backend)
@@ -274,7 +274,7 @@ class TestMaybeTriggerCompression:
 
     @pytest.mark.asyncio
     async def test_triggers_once_only(self) -> None:
-        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+        from trentina.gateway.profile import AuthConfig, Backend, Profile
 
         auth = AuthConfig(bearer_token_env="TEST_TOKEN")
         profile = Profile(
@@ -290,7 +290,7 @@ class TestMaybeTriggerCompression:
         set_profiles({"test": profile})
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.compress.precompress_all",
+            "trentina.gateway.compress.precompress_all",
             new_callable=AsyncMock,
             return_value={},
         ) as mock_precompress:
@@ -303,7 +303,7 @@ class TestMaybeTriggerCompression:
     async def test_no_profiles_is_noop(self) -> None:
         compress_mod._profiles = None
         with patch(
-            "mcp_trentina_crunchtools.gateway.compress.precompress_all",
+            "trentina.gateway.compress.precompress_all",
             new_callable=AsyncMock,
         ) as mock_precompress:
             await maybe_trigger_compression()
@@ -313,7 +313,7 @@ class TestMaybeTriggerCompression:
 
     @pytest.mark.asyncio
     async def test_creates_background_task(self) -> None:
-        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+        from trentina.gateway.profile import AuthConfig, Backend, Profile
 
         auth = AuthConfig(bearer_token_env="TEST_TOKEN")
         profile = Profile(
@@ -329,7 +329,7 @@ class TestMaybeTriggerCompression:
         set_profiles({"test": profile})
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.compress.precompress_all",
+            "trentina.gateway.compress.precompress_all",
             new_callable=AsyncMock,
             return_value={},
         ):
@@ -357,10 +357,10 @@ class TestRetryLogic:
         )
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.compress.get_provider",
+                "trentina.gateway.compress.get_provider",
                 return_value=mock_prov,
             ),
-            patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01),
+            patch("trentina.gateway.compress.RETRY_BASE_DELAY", 0.01),
         ):
             result = await _call_compress_model([("h1", "Long description")])
         assert len(result) == 1
@@ -377,10 +377,10 @@ class TestRetryLogic:
         )
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.compress.get_provider",
+                "trentina.gateway.compress.get_provider",
                 return_value=mock_prov,
             ),
-            patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01),
+            patch("trentina.gateway.compress.RETRY_BASE_DELAY", 0.01),
         ):
             result = await _call_compress_model([("h1", "Long description")])
         assert len(result) == 1
@@ -394,10 +394,10 @@ class TestRetryLogic:
         )
         with (
             patch(
-                "mcp_trentina_crunchtools.gateway.compress.get_provider",
+                "trentina.gateway.compress.get_provider",
                 return_value=mock_prov,
             ),
-            patch("mcp_trentina_crunchtools.gateway.compress.RETRY_BASE_DELAY", 0.01),
+            patch("trentina.gateway.compress.RETRY_BASE_DELAY", 0.01),
         ):
             result = await _call_compress_model([("h1", "desc")])
         assert result == []
@@ -410,7 +410,7 @@ class TestRetryLogic:
             side_effect=QuarantineAgentError("HTTP 400"),
         )
         with patch(
-            "mcp_trentina_crunchtools.gateway.compress.get_provider",
+            "trentina.gateway.compress.get_provider",
             return_value=mock_prov,
         ):
             result = await _call_compress_model([("h1", "desc")])
@@ -506,7 +506,7 @@ class TestParameterDescriptions:
 
     @pytest.mark.asyncio
     async def test_a_run_that_banked_anything_rebuilds_the_lists(self) -> None:
-        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+        from trentina.gateway.profile import AuthConfig, Backend, Profile
 
         profile = Profile(
             name="p",
@@ -543,15 +543,15 @@ class TestPreprocessToolDescriptions:
         """Removed in 0.40.0; extra="forbid" makes it a load error, not a no-op."""
         from pydantic import ValidationError
 
-        from mcp_trentina_crunchtools.gateway.profile import Backend
+        from trentina.gateway.profile import Backend
 
         with pytest.raises(ValidationError, match="compress_descriptions"):
             Backend(url="http://x:8000/mcp", compress_descriptions=True)
 
     def test_only_summarize_runs_on_the_description_channel(self) -> None:
-        from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-        from mcp_trentina_crunchtools.gateway.loader import _check_drivers
-        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, Profile
+        from trentina.gateway.errors import ProfileConfigError
+        from trentina.gateway.loader import _check_drivers
+        from trentina.gateway.profile import AuthConfig, Backend, Profile
 
         profile = Profile(
             name="p",
@@ -567,13 +567,13 @@ class TestPreprocessToolDescriptions:
 
     @pytest.mark.asyncio
     async def test_summarize_descriptions_parses_well_formed_entries(self) -> None:
-        from mcp_trentina_crunchtools.preprocess.summarize import summarize_descriptions
+        from trentina.preprocess.summarize import summarize_descriptions
 
         reply = ProviderResult(
             text=json.dumps({"compressed": [{"id": "a", "text": "A."}, {"id": "b"}, "junk"]})
         )
         with patch(
-            "mcp_trentina_crunchtools.preprocess.summarize.limited_generate",
+            "trentina.preprocess.summarize.limited_generate",
             AsyncMock(return_value=reply),
         ) as generate:
             out = await summarize_descriptions(

@@ -15,9 +15,9 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from mcp_trentina_crunchtools.gateway.matrix_bridge.appservice import ConduitError
-from mcp_trentina_crunchtools.gateway.matrix_bridge.core import BridgeUnavailableError
-from mcp_trentina_crunchtools.gateway.matrix_bridge.routes import (
+from trentina.gateway.matrix_bridge.appservice import ConduitError
+from trentina.gateway.matrix_bridge.core import BridgeUnavailableError
+from trentina.gateway.matrix_bridge.routes import (
     BridgeRoutes,
     register_bridge_routes,
 )

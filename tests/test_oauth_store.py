@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway.oauth_store import (
+from trentina.gateway.oauth_store import (
     DEFAULT_CULL_INTERVAL_SECONDS,
     DEFAULT_PROMOTED_TTL_DAYS,
     PROVISIONAL_TTL_SECONDS,

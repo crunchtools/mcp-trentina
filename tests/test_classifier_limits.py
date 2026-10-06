@@ -18,8 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.errors import UnscannableContentError
-from mcp_trentina_crunchtools.quarantine.classifier import (
+from trentina.errors import UnscannableContentError
+from trentina.quarantine.classifier import (
     WINDOW_CONTENT_TOKENS,
     WINDOW_SPECIAL_TOKENS,
     WINDOW_STRIDE,
@@ -33,7 +33,7 @@ from mcp_trentina_crunchtools.quarantine.classifier import (
     head,
 )
 
-_C = "mcp_trentina_crunchtools.quarantine.classifier"
+_C = "trentina.quarantine.classifier"
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -78,16 +78,16 @@ def mocked_model(token_count: int, max_tokens: int = MAX_TOKENS) -> Iterator[Mag
     config.classifier_threshold = 0.5
 
     with (
-        patch("mcp_trentina_crunchtools.quarantine.classifier._tokenizer", tokenizer),
-        patch("mcp_trentina_crunchtools.quarantine.classifier._session", session),
-        patch("mcp_trentina_crunchtools.quarantine.classifier._loaded", True),
+        patch("trentina.quarantine.classifier._tokenizer", tokenizer),
+        patch("trentina.quarantine.classifier._session", session),
+        patch("trentina.quarantine.classifier._loaded", True),
         patch(
-            "mcp_trentina_crunchtools.quarantine.classifier._model",
+            "trentina.quarantine.classifier._model",
             ModelInfo(id="three-class", revision="", threshold=0.5, malicious=(1, 2)),
         ),
-        patch("mcp_trentina_crunchtools.quarantine.classifier._load_attempted", True),
+        patch("trentina.quarantine.classifier._load_attempted", True),
         patch(
-            "mcp_trentina_crunchtools.quarantine.classifier.get_config",
+            "trentina.quarantine.classifier.get_config",
             return_value=config,
         ),
     ):
@@ -208,7 +208,7 @@ class TestAsyncOffload:
             seen.append(threading.get_ident())
 
         with patch(
-            "mcp_trentina_crunchtools.quarantine.classifier.classify",
+            "trentina.quarantine.classifier.classify",
             side_effect=record,
         ):
             await classify_async("anything")
@@ -220,9 +220,7 @@ class TestClassifierStatus:
     """Health probes must not trigger the lazy model load."""
 
     def test_status_does_not_load(self) -> None:
-        with patch(
-            "mcp_trentina_crunchtools.quarantine.classifier.is_classifier_available"
-        ) as loader:
+        with patch("trentina.quarantine.classifier.is_classifier_available") as loader:
             status = classifier_status()
 
         loader.assert_not_called()
@@ -239,13 +237,13 @@ class TestTelemetryDisabled:
     """
 
     def test_env_var_set_at_import(self) -> None:
-        from mcp_trentina_crunchtools.quarantine.classifier import TELEMETRY_ENV
+        from trentina.quarantine.classifier import TELEMETRY_ENV
 
         assert os.environ[TELEMETRY_ENV] == "1"
 
     def test_operator_can_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """setdefault, not assignment — an explicit opt-in must survive."""
-        import mcp_trentina_crunchtools.quarantine.classifier as mod
+        import trentina.quarantine.classifier as mod
 
         monkeypatch.setenv(mod.TELEMETRY_ENV, "0")
         importlib.reload(mod)
@@ -325,7 +323,7 @@ class TestPadSegment:
         so there is nothing to line the row up against — and padding made a
         15-token input cost a full 512-token pass (791 ms vs 52 ms) for a
         byte-identical score."""
-        from mcp_trentina_crunchtools.quarantine import classifier as mod
+        from trentina.quarantine import classifier as mod
 
         with patch.object(mod, "_tokenizer", self._tokenizer()):
             ids, mask = mod._pad_segment([7, 8, 9], 8)
@@ -337,7 +335,7 @@ class TestPadSegment:
     def test_no_pad_token_is_ever_emitted(self) -> None:
         """The property, not the example: whatever the segment length, the
         mask is all ones, so every position the model reads is real input."""
-        from mcp_trentina_crunchtools.quarantine import classifier as mod
+        from trentina.quarantine import classifier as mod
 
         with patch.object(mod, "_tokenizer", self._tokenizer()):
             for n in (0, 1, 3, 100, 509, 510, 511):
@@ -346,7 +344,7 @@ class TestPadSegment:
                 assert len(ids) == min(n + 2, 512)
 
     def test_full_window_needs_no_padding(self) -> None:
-        from mcp_trentina_crunchtools.quarantine import classifier as mod
+        from trentina.quarantine import classifier as mod
 
         with patch.object(mod, "_tokenizer", self._tokenizer()):
             ids, mask = mod._pad_segment(list(range(10, 520)), 512)
@@ -358,7 +356,7 @@ class TestPadSegment:
 
     def test_oversized_segment_is_clipped_not_overflowed(self) -> None:
         """A caller passing too many IDs must not produce a 514-wide tensor."""
-        from mcp_trentina_crunchtools.quarantine import classifier as mod
+        from trentina.quarantine import classifier as mod
 
         with patch.object(mod, "_tokenizer", self._tokenizer()):
             ids, mask = mod._pad_segment(list(range(600)), 512)
@@ -408,10 +406,10 @@ def word_tokenizer(*, fast: bool = True) -> Iterator[None]:
     tokenizer = MagicMock(side_effect=tokenize)
     tokenizer.decode.side_effect = lambda ids: " ".join(f"w{i - 10}" for i in ids)
     with (
-        patch("mcp_trentina_crunchtools.quarantine.classifier._tokenizer", tokenizer),
-        patch("mcp_trentina_crunchtools.quarantine.classifier._loaded", True),
+        patch("trentina.quarantine.classifier._tokenizer", tokenizer),
+        patch("trentina.quarantine.classifier._loaded", True),
         patch(
-            "mcp_trentina_crunchtools.quarantine.classifier._model",
+            "trentina.quarantine.classifier._model",
             ModelInfo(id="three-class", revision="", threshold=0.5, malicious=(1, 2)),
         ),
     ):

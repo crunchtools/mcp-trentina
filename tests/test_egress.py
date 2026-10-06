@@ -16,14 +16,14 @@ import httpcore
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools import egress
-from mcp_trentina_crunchtools.client import fetch_url
-from mcp_trentina_crunchtools.errors import BlockedSourceError, EgressRefusedError
-from mcp_trentina_crunchtools.gateway.errors import BackendCallError
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.outcomes import Outcome, classify_exception
 from tests.egress_harness import PUBLIC_ADDRESS, route
+from trentina import config as config_mod
+from trentina import egress
+from trentina.client import fetch_url
+from trentina.errors import BlockedSourceError, EgressRefusedError
+from trentina.gateway.errors import BackendCallError
+from trentina.modes import Mode
+from trentina.outcomes import Outcome, classify_exception
 
 OK_RESPONSE = [
     b"HTTP/1.1 200 OK\r\n",
@@ -381,11 +381,9 @@ class TestDeliveredAsARefusal:
     async def test_fetch_tool_refuses_with_no_alternatives(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from mcp_trentina_crunchtools.tools.fetch import fetch_page
+        from trentina.tools.fetch import fetch_page
 
-        monkeypatch.setattr(
-            "mcp_trentina_crunchtools.tools.fetch.check_blocklist", lambda _u, _m: False
-        )
+        monkeypatch.setattr("trentina.tools.fetch.check_blocklist", lambda _u, _m: False)
         route(monkeypatch, _unreachable, {"mcp-backend": ["10.89.0.5"]})
 
         with pytest.raises(BlockedSourceError) as exc:

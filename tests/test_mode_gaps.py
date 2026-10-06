@@ -16,10 +16,10 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools.errors import BlockedSourceError, UnscannableContentError
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
+from trentina import config as config_mod
+from trentina.errors import BlockedSourceError, UnscannableContentError
+from trentina.modes import Mode
+from trentina.quarantine.classifier import ClassifierResult
 
 from .mode_harness import BENIGN, FAMILIES, call, layers
 
@@ -144,7 +144,7 @@ def test_quarantine_max_content_is_refused_at_startup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """#225: a character cap beside the token cap was two units for one question."""
-    from mcp_trentina_crunchtools.errors import ConfigError
+    from trentina.errors import ConfigError
 
     monkeypatch.setenv("QUARANTINE_MAX_CONTENT", "100000")
     config_mod._config = None
@@ -170,7 +170,7 @@ def test_the_cap_is_the_smaller_budget(
 def test_quarantine_fallback_is_refused_at_startup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from mcp_trentina_crunchtools.errors import ConfigError
+    from trentina.errors import ConfigError
 
     monkeypatch.setenv("QUARANTINE_FALLBACK", "layer1")
     config_mod._config = None

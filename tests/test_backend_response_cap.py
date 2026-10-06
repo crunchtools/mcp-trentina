@@ -26,21 +26,21 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
-from mcp_trentina_crunchtools.gateway import backend as backend_mod
-from mcp_trentina_crunchtools.gateway.backend import (
+from trentina.gateway import backend as backend_mod
+from trentina.gateway.backend import (
     BYTES_PER_TOKEN,
     MIN_RESPONSE_BYTES,
     ResponseCap,
     call_backend_tool,
     response_byte_cap,
 )
-from mcp_trentina_crunchtools.gateway.circuit import State, breaker
-from mcp_trentina_crunchtools.gateway.errors import (
+from trentina.gateway.circuit import State, breaker
+from trentina.gateway.errors import (
     BackendCallError,
     BackendResponseTooLargeError,
 )
-from mcp_trentina_crunchtools.gateway.profile import Backend
-from mcp_trentina_crunchtools.outcomes import Outcome, classify_exception
+from trentina.gateway.profile import Backend
+from trentina.outcomes import Outcome, classify_exception
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -259,7 +259,7 @@ class TestResponseCap:
 
 class TestTheFactor:
     def test_cap_follows_admission(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         monkeypatch.setenv("CLASSIFIER_MAX_TOKENS", "100000")
         monkeypatch.setenv("QUARANTINE_CONTEXT_TOKENS", "1000000")
@@ -267,7 +267,7 @@ class TestTheFactor:
         assert response_byte_cap() == 100_000 * BYTES_PER_TOKEN
 
     def test_floor(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from mcp_trentina_crunchtools import config as config_mod
+        from trentina import config as config_mod
 
         monkeypatch.setenv("CLASSIFIER_MAX_TOKENS", "10")
         config_mod._config = None
@@ -280,10 +280,10 @@ class TestDeliveredAsTheOversizeRefusal:
     async def test_router_refuses_with_the_oversize_gap(self, tmp_path: Any) -> None:
         from pydantic import SecretStr
 
-        import mcp_trentina_crunchtools.database as db_mod
-        from mcp_trentina_crunchtools.database import get_gateway_call_stats
-        from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Profile
-        from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP, route_jsonrpc
+        import trentina.database as db_mod
+        from trentina.database import get_gateway_call_stats
+        from trentina.gateway.profile import AuthConfig, Profile
+        from trentina.gateway.router import NAMESPACE_SEP, route_jsonrpc
 
         profile = Profile(
             short_names=False,
@@ -298,8 +298,8 @@ class TestDeliveredAsTheOversizeRefusal:
 
         db_mod._db = None
         with (
-            patch("mcp_trentina_crunchtools.gateway.router.call_backend_tool", side_effect=too_big),
-            patch("mcp_trentina_crunchtools.database.get_config") as mock_cfg,
+            patch("trentina.gateway.router.call_backend_tool", side_effect=too_big),
+            patch("trentina.database.get_config") as mock_cfg,
         ):
             mock_cfg.return_value.db_path = str(tmp_path / "audit.db")
             mock_cfg.return_value.ensure_db_dir = lambda: None

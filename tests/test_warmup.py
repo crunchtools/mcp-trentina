@@ -14,10 +14,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway import ingress_defense as ing
-from mcp_trentina_crunchtools.gateway import router, warmup
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Backend, DefenseConfig, Profile
-from mcp_trentina_crunchtools.quarantine.limiter import (
+from trentina.gateway import ingress_defense as ing
+from trentina.gateway import router, warmup
+from trentina.gateway.profile import AuthConfig, Backend, DefenseConfig, Profile
+from trentina.quarantine.limiter import (
     Priority,
     l3_priority,
     l3_throttle_budget,
@@ -257,7 +257,7 @@ class TestLifespan:
             assert warmup._task is None
 
     async def test_fastmcp_runs_it_at_http_startup(self) -> None:
-        from mcp_trentina_crunchtools.server import mcp
+        from trentina.server import mcp
 
         started = asyncio.Event()
 

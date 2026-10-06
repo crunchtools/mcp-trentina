@@ -22,29 +22,29 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools import client as client_mod
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools import database, defense, egress
-from mcp_trentina_crunchtools.errors import FetchError
-from mcp_trentina_crunchtools.gateway import ingress_defense
-from mcp_trentina_crunchtools.gateway.context import get_current_profile, profile_context
-from mcp_trentina_crunchtools.gateway.profile import AuthConfig, Profile
-from mcp_trentina_crunchtools.httpbody import EncodedBodyError, TooLargeError, request_capped
-from mcp_trentina_crunchtools.l1.pipeline import run_l1
-from mcp_trentina_crunchtools.preprocess import PreProcessContext, Selection
-from mcp_trentina_crunchtools.preprocess.pdf import PdfProcessor
-from mcp_trentina_crunchtools.preprocess.select import SelectProcessor
-from mcp_trentina_crunchtools.preprocess.structured import StructuredProcessor
-from mcp_trentina_crunchtools.preprocess.view import SelectionContext
-from mcp_trentina_crunchtools.quarantine import agent as agent_mod
-from mcp_trentina_crunchtools.unpack import child
-from mcp_trentina_crunchtools.unpack import pdf as pdf_reader
-from mcp_trentina_crunchtools.unpack.scan import unpack
 from tests.egress_harness import PUBLIC_ADDRESS
 from tests.office_files import b64
 from tests.pdf_files import pdf, show
 from tests.test_egress_encoding import _Loopback as Loopback
 from tests.test_unpack import _defend
+from trentina import client as client_mod
+from trentina import config as config_mod
+from trentina import database, defense, egress
+from trentina.errors import FetchError
+from trentina.gateway import ingress_defense
+from trentina.gateway.context import get_current_profile, profile_context
+from trentina.gateway.profile import AuthConfig, Profile
+from trentina.httpbody import EncodedBodyError, TooLargeError, request_capped
+from trentina.l1.pipeline import run_l1
+from trentina.preprocess import PreProcessContext, Selection
+from trentina.preprocess.pdf import PdfProcessor
+from trentina.preprocess.select import SelectProcessor
+from trentina.preprocess.structured import StructuredProcessor
+from trentina.preprocess.view import SelectionContext
+from trentina.quarantine import agent as agent_mod
+from trentina.unpack import child
+from trentina.unpack import pdf as pdf_reader
+from trentina.unpack.scan import unpack
 
 _PDF = b64(pdf(show("Quarterly report for the storage team.")))
 
@@ -55,7 +55,7 @@ async def _defended(token: str) -> None:
 
 async def _output_checked(token: str) -> None:
     with patch(
-        "mcp_trentina_crunchtools.quarantine.classifier.classify_async",
+        "trentina.quarantine.classifier.classify_async",
         new_callable=AsyncMock,
         return_value=None,
     ):
@@ -165,7 +165,7 @@ class TestL1OffTheLoop:
         with (
             patch.object(agent_mod, "run_l1", _recording_run_l1(threads)),
             patch(
-                "mcp_trentina_crunchtools.quarantine.classifier.classify_async",
+                "trentina.quarantine.classifier.classify_async",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -244,7 +244,7 @@ def _count(db: Any) -> int:
 
 class TestStatsOffTheLoop:
     async def test_stats_read_in_a_worker_on_their_own_connection(self, audit_db: Any) -> None:
-        from mcp_trentina_crunchtools.tools import stats as stats_mod
+        from trentina.tools import stats as stats_mod
 
         seen: list[tuple[int, Any]] = []
         original = database.get_gateway_call_stats

@@ -39,7 +39,7 @@ Tool names are judged from the allowlist alone, because the lint runs without
 the backends. A wildcard counts as holding whatever it could admit: a glob that
 admits a write tool the backend adds next month holds it already.
 
-    python -m mcp_trentina_crunchtools.gateway.profile_lint /config/profiles.yaml
+    python -m trentina.gateway.profile_lint /config/profiles.yaml
 
 exits 1 with one line per finding, 0 when clean, 2 when the file cannot be read.
 """
@@ -393,7 +393,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = sys.argv[1:] if argv is None else argv
     if len(args) != 1:
-        print("usage: python -m mcp_trentina_crunchtools.gateway.profile_lint <profiles.yaml>")
+        print("usage: python -m trentina.gateway.profile_lint <profiles.yaml>")
         return 2
     try:
         findings = lint_file(args[0])

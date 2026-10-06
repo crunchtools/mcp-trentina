@@ -13,16 +13,16 @@ from pathlib import Path
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway import compress
-from mcp_trentina_crunchtools.gateway.backend import _tool_list_cache
-from mcp_trentina_crunchtools.gateway.compress import set_profiles
-from mcp_trentina_crunchtools.gateway.context import profile_context
-from mcp_trentina_crunchtools.gateway.loader import (
+from trentina.gateway import compress
+from trentina.gateway.backend import _tool_list_cache
+from trentina.gateway.compress import set_profiles
+from trentina.gateway.context import profile_context
+from trentina.gateway.loader import (
     load_profiles,
     register_active_config,
 )
-from mcp_trentina_crunchtools.gateway.router import _profile_tools_cache
-from mcp_trentina_crunchtools.tools.cache import cache_flush
+from trentina.gateway.router import _profile_tools_cache
+from trentina.tools.cache import cache_flush
 
 pytestmark = pytest.mark.asyncio
 

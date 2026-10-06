@@ -12,20 +12,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools.client import fetch_url
-from mcp_trentina_crunchtools.errors import (
+from tests.egress_harness import route
+from trentina.client import fetch_url
+from trentina.errors import (
     BlockedSourceError,
     FetchError,
     UnsupportedContentTypeError,
 )
-from mcp_trentina_crunchtools.tools.fetch import (
+from trentina.tools.fetch import (
     _build_advisory,
     _handle_content_type_error,
     _handle_fetch_error,
     _scan_error_body,
     block_fetch,
 )
-from tests.egress_harness import route
 
 
 def _mock_http_status(
@@ -158,7 +158,7 @@ class TestHandleFetchError:
             error_body="Forbidden. Try python requests instead.",
         )
         with patch(
-            "mcp_trentina_crunchtools.tools.fetch._scan_error_body",
+            "trentina.tools.fetch._scan_error_body",
             new_callable=AsyncMock,
         ) as mock_scan:
             mock_scan.return_value = {
@@ -183,7 +183,7 @@ class TestHandleFetchError:
             error_body="Forbidden",
         )
         with patch(
-            "mcp_trentina_crunchtools.tools.fetch._scan_error_body",
+            "trentina.tools.fetch._scan_error_body",
             new_callable=AsyncMock,
         ) as mock_scan:
             mock_scan.return_value = {
@@ -231,11 +231,11 @@ class TestScanErrorBody:
     async def test_clean_body_not_suspicious(self) -> None:
         with (
             patch(
-                "mcp_trentina_crunchtools.defense.classify_async",
+                "trentina.defense.classify_async",
                 new_callable=AsyncMock,
             ) as mock_classify,
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.get_config",
+                "trentina.tools.fetch.get_config",
             ) as mock_config,
         ):
             mock_classify.return_value = None
@@ -248,11 +248,11 @@ class TestScanErrorBody:
     async def test_l2_malicious_is_suspicious(self) -> None:
         with (
             patch(
-                "mcp_trentina_crunchtools.defense.classify_async",
+                "trentina.defense.classify_async",
                 new_callable=AsyncMock,
             ) as mock_classify,
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.get_config",
+                "trentina.tools.fetch.get_config",
             ) as mock_config,
         ):
             mock_result = MagicMock()
@@ -269,14 +269,14 @@ class TestScanErrorBody:
     async def test_l3_detected_is_suspicious(self) -> None:
         with (
             patch(
-                "mcp_trentina_crunchtools.defense.classify_async",
+                "trentina.defense.classify_async",
                 new_callable=AsyncMock,
             ) as mock_classify,
             patch(
-                "mcp_trentina_crunchtools.defense.get_config",
+                "trentina.defense.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.defense.quarantine_detect",
+                "trentina.defense.quarantine_detect",
                 new_callable=AsyncMock,
             ) as mock_detect,
         ):
@@ -328,14 +328,14 @@ class TestSafeFetchAdvisory:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.get_config",
+                "trentina.tools.fetch.get_config",
             ) as mock_config,
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.check_blocklist",
+                "trentina.tools.fetch.check_blocklist",
                 return_value=False,
             ),
             patch(
-                "mcp_trentina_crunchtools.defense.classify_async",
+                "trentina.defense.classify_async",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -360,10 +360,10 @@ class TestSafeFetchAdvisory:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.get_config",
+                "trentina.tools.fetch.get_config",
             ),
             patch(
-                "mcp_trentina_crunchtools.tools.fetch.check_blocklist",
+                "trentina.tools.fetch.check_blocklist",
                 return_value=False,
             ),
             pytest.raises(FetchError, match="HTTP 404"),

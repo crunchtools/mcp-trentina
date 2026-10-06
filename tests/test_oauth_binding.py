@@ -20,7 +20,7 @@ import pytest
 from key_value.aio.stores.memory import MemoryStore
 from mcp.server.auth.provider import AuthorizeError, TokenError
 
-from mcp_trentina_crunchtools.gateway.oauth_binding import (
+from trentina.gateway.oauth_binding import (
     BindTokensToProfile,
     resolve_profile,
 )

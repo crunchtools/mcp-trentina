@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import base64
 
-from mcp_trentina_crunchtools.l1.pipeline import PipelineResult, run_l1
-from mcp_trentina_crunchtools.preprocess.html import to_markdown
+from trentina.l1.pipeline import PipelineResult, run_l1
+from trentina.preprocess.html import to_markdown
 
 
 def _converted(html: str) -> PipelineResult:

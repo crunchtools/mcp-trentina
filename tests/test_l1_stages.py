@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from mcp_trentina_crunchtools import reserved
-from mcp_trentina_crunchtools.l1.exfiltration import _EXFIL_PARAM_NAMES
-from mcp_trentina_crunchtools.l1.pipeline import FINDING_NAMES, PipelineStats, run_l1
+from trentina import reserved
+from trentina.l1.exfiltration import _EXFIL_PARAM_NAMES
+from trentina.l1.pipeline import FINDING_NAMES, PipelineStats, run_l1
 
 from .adversarial_corpus import CORPUS, L1_PATTERN_CASES
 

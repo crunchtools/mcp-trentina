@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcp_trentina_crunchtools.l1.exfiltration import strip_exfiltration
+from trentina.l1.exfiltration import strip_exfiltration
 
 
 class TestExfiltrationDetection:

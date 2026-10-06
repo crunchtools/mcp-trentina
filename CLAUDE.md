@@ -1,4 +1,4 @@
-# mcp-trentina-crunchtools
+# trentina
 
 MCP gateway between AI agents and everything they touch. Five promises: prompt-injection
 defense (L1 ∥ L2 → L3 at every ingress), token savings, deterministic policy,
@@ -9,7 +9,7 @@ canonical statement of them; keep docs and comments in line with it.
 
 ```bash
 uv sync --all-extras
-uv run mcp-trentina-crunchtools
+uv run trentina
 ```
 
 ## Environment Variables
@@ -40,7 +40,7 @@ uv run mcp-trentina-crunchtools
 - `QUARANTINE_CONTEXT_TOKENS` — what the L3 model reads in one call (default
   1000000). With `CLASSIFIER_MAX_TOKENS` it sets `Config.admission_tokens`.
   `QUARANTINE_MAX_CONTENT` was removed in 0.43.0 (#225); setting it fails startup.
-- `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/mcp-trentina/trentina.db)
+- `QUARANTINE_DB` — SQLite blocklist path (default: ~/.local/share/trentina/trentina.db)
 - `TRENTINA_BLOCKLIST_TTL_DAYS` — days a block refusal stays on the blocklist
   (default 30, floor 1). Expired rows stop counting at once and are swept
   hourly by `is_blocked` (#263), `SWEEP_BATCH` rows a pass (#295).
@@ -145,7 +145,7 @@ uv run mcp-trentina-crunchtools
 - `TRENTINA_L3_THROTTLE_BUDGET` — seconds a user-facing L3 call waits out 429s
   on one provider before falling back (default 20; the boot warm-up uses 300).
 
-### Bridge process (`python -m mcp_trentina_crunchtools.bridge.main`)
+### Bridge process (`python -m trentina.bridge.main`)
 
 Its own environment, never profiles.yaml; full table in `docs/matrix-bridge.md`.
 Required: `BRIDGE_PROFILE`, `BRIDGE_USER_ID`, `BRIDGE_GATEWAY_URL`,
@@ -408,7 +408,7 @@ podman run --rm -v .:/repo:Z quay.io/crunchtools/gourmand:latest check /repo  # 
 # the pipeline build it.
 uv run python benchmarks/provider_benchmark.py  # L3 detection benchmark across providers — see docs/benchmark.md
 podman run --rm -v .:/src:Z docker.io/semgrep/semgrep semgrep --config /src/.semgrep --error /src/src  # in-repo rules
-uv run python -m mcp_trentina_crunchtools.gateway.profile_lint <profiles.yaml>  # posture lint
+uv run python -m trentina.gateway.profile_lint <profiles.yaml>  # posture lint
 uv run python tests/boundary_review_eval.py  # boundary-review skill eval; needs ANTHROPIC_API_KEY
 ```
 

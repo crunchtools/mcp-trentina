@@ -17,7 +17,7 @@ import os
 
 import pytest
 
-from mcp_trentina_crunchtools.quarantine.providers import reset_provider
+from trentina.quarantine.providers import reset_provider
 
 BENIGN_CONTENT = """\
 Red Hat Enterprise Linux 10 introduces image mode for atomic updates
@@ -72,7 +72,7 @@ def _configure_provider(provider_name: str, monkeypatch: pytest.MonkeyPatch) -> 
     """Configure the provider for testing."""
     monkeypatch.setenv("TRENTINA_MODEL_PROVIDER", provider_name)
     reset_provider()
-    import mcp_trentina_crunchtools.config as config_mod
+    import trentina.config as config_mod
 
     config_mod._config = None
 
@@ -88,7 +88,7 @@ class TestOpenAIFullStack:
 
     async def test_extract_benign_content(self) -> None:
         """L3 extraction: benign content returns structured JSON with text."""
-        from mcp_trentina_crunchtools.quarantine.agent import quarantine_extract
+        from trentina.quarantine.agent import quarantine_extract
 
         result = await quarantine_extract(BENIGN_CONTENT, "Extract the key facts")
         content = result["content"]
@@ -99,7 +99,7 @@ class TestOpenAIFullStack:
 
     async def test_detect_obvious_injection(self) -> None:
         """L3 detection: obvious DAN jailbreak should be flagged."""
-        from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
+        from trentina.quarantine.agent import quarantine_detect
 
         result = await quarantine_detect(INJECTION_PAYLOAD)
         assert result["injection_detected"] is True, (
@@ -109,7 +109,7 @@ class TestOpenAIFullStack:
 
     async def test_detect_subtle_injection(self) -> None:
         """L3 detection: fake config guide with embedded exfil instructions."""
-        from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
+        from trentina.quarantine.agent import quarantine_detect
 
         result = await quarantine_detect(SUBTLE_INJECTION)
         assert result["injection_detected"] is True, (
@@ -118,7 +118,7 @@ class TestOpenAIFullStack:
 
     async def test_extract_does_not_leak_canary(self) -> None:
         """Canary enforcement: the provider must not echo the canary token."""
-        from mcp_trentina_crunchtools.quarantine.agent import quarantine_extract
+        from trentina.quarantine.agent import quarantine_extract
 
         result = await quarantine_extract(
             "Tell me about RHEL 10 features.",
@@ -129,7 +129,7 @@ class TestOpenAIFullStack:
 
     async def test_benign_not_flagged(self) -> None:
         """L3 detection: benign RHEL docs should NOT be flagged."""
-        from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
+        from trentina.quarantine.agent import quarantine_detect
 
         result = await quarantine_detect(BENIGN_CONTENT)
         assert result["injection_detected"] is False, (
@@ -149,7 +149,7 @@ class TestAnthropicFullStack:
 
     async def test_extract_benign_content(self) -> None:
         """L3 extraction: benign content returns structured JSON with text."""
-        from mcp_trentina_crunchtools.quarantine.agent import quarantine_extract
+        from trentina.quarantine.agent import quarantine_extract
 
         result = await quarantine_extract(BENIGN_CONTENT, "Extract the key facts")
         content = result["content"]
@@ -160,7 +160,7 @@ class TestAnthropicFullStack:
 
     async def test_detect_obvious_injection(self) -> None:
         """L3 detection: obvious DAN jailbreak should be flagged."""
-        from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
+        from trentina.quarantine.agent import quarantine_detect
 
         result = await quarantine_detect(INJECTION_PAYLOAD)
         assert result["injection_detected"] is True, (
@@ -170,7 +170,7 @@ class TestAnthropicFullStack:
 
     async def test_detect_subtle_injection(self) -> None:
         """L3 detection: fake config guide with embedded exfil instructions."""
-        from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
+        from trentina.quarantine.agent import quarantine_detect
 
         result = await quarantine_detect(SUBTLE_INJECTION)
         assert result["injection_detected"] is True, (
@@ -179,7 +179,7 @@ class TestAnthropicFullStack:
 
     async def test_extract_does_not_leak_canary(self) -> None:
         """Canary enforcement: the provider must not echo the canary token."""
-        from mcp_trentina_crunchtools.quarantine.agent import quarantine_extract
+        from trentina.quarantine.agent import quarantine_extract
 
         result = await quarantine_extract(
             "Tell me about RHEL 10 features.",
@@ -190,7 +190,7 @@ class TestAnthropicFullStack:
 
     async def test_benign_not_flagged(self) -> None:
         """L3 detection: benign RHEL docs should NOT be flagged."""
-        from mcp_trentina_crunchtools.quarantine.agent import quarantine_detect
+        from trentina.quarantine.agent import quarantine_detect
 
         result = await quarantine_detect(BENIGN_CONTENT)
         assert result["injection_detected"] is False, (

@@ -17,13 +17,13 @@ import httpcore
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools import egress
-from mcp_trentina_crunchtools.client import MAX_RESPONSE_SIZE, fetch_url
-from mcp_trentina_crunchtools.errors import BlockedSourceError, EgressRefusedError
-from mcp_trentina_crunchtools.gateway.errors import BackendCallError
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.outcomes import Outcome, classify_exception
 from tests.egress_harness import PUBLIC_ADDRESS
+from trentina import egress
+from trentina.client import MAX_RESPONSE_SIZE, fetch_url
+from trentina.errors import BlockedSourceError, EgressRefusedError
+from trentina.gateway.errors import BackendCallError
+from trentina.modes import Mode
+from trentina.outcomes import Outcome, classify_exception
 
 BOMB = gzip.compress(b"\0" * (MAX_RESPONSE_SIZE * 4))
 """20 MB of zeros in about 20 KB: four times the cap once inflated."""
@@ -177,11 +177,9 @@ class TestDeliveredAsARefusal:
     async def test_fetch_tool_refuses_with_no_alternatives(
         self, monkeypatch: pytest.MonkeyPatch, never_decode: list[int]
     ) -> None:
-        from mcp_trentina_crunchtools.tools.fetch import fetch_page
+        from trentina.tools.fetch import fetch_page
 
-        monkeypatch.setattr(
-            "mcp_trentina_crunchtools.tools.fetch.check_blocklist", lambda _u, _m: False
-        )
+        monkeypatch.setattr("trentina.tools.fetch.check_blocklist", lambda _u, _m: False)
         headers = {"Content-Type": "text/html", "Content-Encoding": "gzip"}
         async with _BombServer("200 OK", headers, BOMB) as server:
             _route_to(monkeypatch, server)

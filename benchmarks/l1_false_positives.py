@@ -23,7 +23,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from mcp_trentina_crunchtools.l1.pipeline import FINDING_NAMES, run_l1
+from trentina.l1.pipeline import FINDING_NAMES, run_l1
 
 _REFUSES = ("high", "critical")
 _TEXT = {".md", ".py", ".txt", ".yaml", ".yml", ".toml", ".json", ".html", ".log", ".cfg", ""}

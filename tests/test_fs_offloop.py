@@ -18,12 +18,12 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools.l1.shadows import detect_module_shadows
-from mcp_trentina_crunchtools.modes import Mode
-from mcp_trentina_crunchtools.tools import confine
-from mcp_trentina_crunchtools.tools import dir as dir_mod
-from mcp_trentina_crunchtools.tools import read as read_mod
+from trentina import config as config_mod
+from trentina.l1.shadows import detect_module_shadows
+from trentina.modes import Mode
+from trentina.tools import confine
+from trentina.tools import dir as dir_mod
+from trentina.tools import read as read_mod
 
 
 @pytest.fixture
@@ -174,6 +174,6 @@ class TestShadowScanIsBounded:
                 pulled.append(entry.name)
                 return entry
 
-        monkeypatch.setattr("mcp_trentina_crunchtools.l1.shadows.os.scandir", Counting)
+        monkeypatch.setattr("trentina.l1.shadows.os.scandir", Counting)
         detect_module_shadows(str(tmp_path), max_entries=5)
         assert len(pulled) == 5

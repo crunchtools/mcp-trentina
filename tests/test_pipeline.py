@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 
-from mcp_trentina_crunchtools.l1.pipeline import (
+from trentina.l1.pipeline import (
     risk_level_for_count,
     run_l1,
 )

@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-from mcp_trentina_crunchtools.gateway.loader import load_profiles
-from mcp_trentina_crunchtools.gateway.profile import MatrixIngressConfig
+from trentina.gateway.errors import ProfileConfigError
+from trentina.gateway.loader import load_profiles
+from trentina.gateway.profile import MatrixIngressConfig
 
 if TYPE_CHECKING:
     from pathlib import Path

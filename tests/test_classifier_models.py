@@ -15,14 +15,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.config import (
+from trentina.config import (
     CLASSIFIER_MODELS_DIR,
     DEFAULT_CLASSIFIER_MODEL,
     DEFAULT_CLASSIFIER_THRESHOLD,
     classifier_settings,
 )
-from mcp_trentina_crunchtools.errors import ConfigError
-from mcp_trentina_crunchtools.quarantine import classifier
+from trentina.errors import ConfigError
+from trentina.quarantine import classifier
 
 # Through the module at call time, never imported names: another test
 # reloads the classifier module, and a class imported before that is no

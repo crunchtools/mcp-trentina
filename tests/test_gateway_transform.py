@@ -7,15 +7,15 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
-from mcp_trentina_crunchtools.defense import Provenance
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.defense import Provenance
+from trentina.gateway.profile import (
     AuthConfig,
     Backend,
     PreProcessConfig,
     Profile,
     ToolPreProcess,
 )
-from mcp_trentina_crunchtools.gateway.transform import resolve, transform_response
+from trentina.gateway.transform import resolve, transform_response
 
 # Log-shaped and repetitive: exactly what petit collapses. Distinct IPs and
 # timestamps per line so only the volatile tokens differ, which is the case
@@ -156,7 +156,7 @@ class TestReduction:
 
     async def test_processor_failure_delivers_content_unchanged(self, monkeypatch) -> None:
         """A reducer that breaks must never cost you the response."""
-        import mcp_trentina_crunchtools.gateway.transform as transform_mod
+        import trentina.gateway.transform as transform_mod
 
         async def boom(*_a: object, **_kw: object) -> object:
             raise RuntimeError("processor exploded")
@@ -175,7 +175,7 @@ class TestRouterOrdering:
         Reducing after the scan would hand the agent content the perimeter
         never saw, so this pins the order rather than trusting it.
         """
-        from mcp_trentina_crunchtools.gateway import router
+        from trentina.gateway import router
 
         seen: dict[str, Any] = {}
 
@@ -215,8 +215,8 @@ class TestDeclineLogLine:
     happened, and stay greppable by reason string."""
 
     def test_not_smaller_decline_shows_the_ratio_it_reached(self) -> None:
-        from mcp_trentina_crunchtools.gateway.transform import _describe_decline
-        from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
+        from trentina.gateway.transform import _describe_decline
+        from trentina.preprocess import Cost, PreProcessResult
 
         result = PreProcessResult.declined(
             "structured",
@@ -230,8 +230,8 @@ class TestDeclineLogLine:
         assert "would_be=104%" in line
 
     def test_shape_decline_shows_lines_and_bytes(self) -> None:
-        from mcp_trentina_crunchtools.gateway.transform import _describe_decline
-        from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
+        from trentina.gateway.transform import _describe_decline
+        from trentina.preprocess import Cost, PreProcessResult
 
         result = PreProcessResult.declined(
             "petit",
@@ -245,8 +245,8 @@ class TestDeclineLogLine:
         assert "lines=1" in line and "bytes=1645600" in line
 
     def test_bare_decline_stays_terse(self) -> None:
-        from mcp_trentina_crunchtools.gateway.transform import _describe_decline
-        from mcp_trentina_crunchtools.preprocess import Cost, PreProcessResult
+        from trentina.gateway.transform import _describe_decline
+        from trentina.preprocess import Cost, PreProcessResult
 
         result = PreProcessResult.declined(
             "email",

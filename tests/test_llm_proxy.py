@@ -14,22 +14,22 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from mcp_trentina_crunchtools import config as config_mod
-from mcp_trentina_crunchtools import database as database_mod
-from mcp_trentina_crunchtools.gateway import llm_proxy
-from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-from mcp_trentina_crunchtools.gateway.llm_proxy import (
+from trentina import config as config_mod
+from trentina import database as database_mod
+from trentina.gateway import llm_proxy
+from trentina.gateway.errors import ProfileConfigError
+from trentina.gateway.llm_proxy import (
     LlmProvider,
     _proxy_llm,
     load_llm_providers,
     validate_profile_llm_keys,
 )
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.gateway.profile import (
     AuthConfig,
     LlmKeyOverride,
     Profile,
 )
-from mcp_trentina_crunchtools.gateway.proxy_utils import normalize_proxy_path
+from trentina.gateway.proxy_utils import normalize_proxy_path
 
 if TYPE_CHECKING:
     from starlette.requests import Request

@@ -8,9 +8,17 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# The image is being renamed from mcp-trentina to trentina (1.0.0). For the
+# releases while deployments move, the old name is what the build must push,
+# and every tag is then copied to the new name in the same registry. The copy
+# may fail without failing the build: a new quay repository has to exist and
+# be public first, and nothing may stop the image that is running today from
+# being replaced. When the old name is retired the two are swapped.
 env:
   QUAY_IMAGE: quay.io/crunchtools/mcp-trentina
   GHCR_IMAGE: ghcr.io/crunchtools/mcp-trentina
+  OLD_NAME: mcp-trentina
+  NEW_NAME: trentina
 
 jobs:
   build-and-push-quay:
@@ -68,6 +76,16 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ steps.pkgver.outputs.version }}
+
+      - name: Copy every tag to the new image name
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          for tag in $TAGS; do
+            docker buildx imagetools create --tag "${tag/$OLD_NAME/$NEW_NAME}" "$tag"
+          done
 
       - name: Run Trivy vulnerability scanner
         continue-on-error: true
@@ -137,3 +155,13 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ steps.pkgver.outputs.version }}
+
+      - name: Copy every tag to the new image name
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          for tag in $TAGS; do
+            docker buildx imagetools create --tag "${tag/$OLD_NAME/$NEW_NAME}" "$tag"
+          done

@@ -9,16 +9,16 @@ import pytest
 from pydantic import SecretStr, ValidationError
 from starlette.testclient import TestClient
 
-from mcp_trentina_crunchtools.gateway.app import OAuthContext, gateway_app
-from mcp_trentina_crunchtools.gateway.backend import BackendCall
-from mcp_trentina_crunchtools.gateway.loader import GatewayConfig
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.gateway.app import OAuthContext, gateway_app
+from trentina.gateway.backend import BackendCall
+from trentina.gateway.loader import GatewayConfig
+from trentina.gateway.profile import (
     AuthConfig,
     Backend,
     OAuthConfig,
     Profile,
 )
-from mcp_trentina_crunchtools.gateway.router import NAMESPACE_SEP
+from trentina.gateway.router import NAMESPACE_SEP
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -111,7 +111,7 @@ class TestGatewayApp:
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["result"]["serverInfo"]["name"] == "mcp-trentina-gateway:alice"
+        assert body["result"]["serverInfo"]["name"] == "trentina-gateway:alice"
 
     def test_tools_call_invalid_backend_returns_jsonrpc_error(self, client: TestClient) -> None:
         resp = client.post(
@@ -140,7 +140,7 @@ class TestGatewayApp:
             )
 
         with patch(
-            "mcp_trentina_crunchtools.gateway.router.call_backend_tool",
+            "trentina.gateway.router.call_backend_tool",
             side_effect=fake_call,
         ):
             resp = client.post(
@@ -186,9 +186,7 @@ class TestHealthEndpoint:
         assert client.get("/health").status_code == 200
 
     def test_health_does_not_load_the_model(self, client: TestClient) -> None:
-        with patch(
-            "mcp_trentina_crunchtools.quarantine.classifier.is_classifier_available"
-        ) as loader:
+        with patch("trentina.quarantine.classifier.is_classifier_available") as loader:
             assert client.get("/health").status_code == 200
 
         loader.assert_not_called()
@@ -378,7 +376,7 @@ class TestOAuthResourcePin:
 
     @staticmethod
     def _build(profiles: dict[str, Profile]) -> OAuthContext:
-        from mcp_trentina_crunchtools import _build_oauth_context
+        from trentina import _build_oauth_context
 
         env = {
             "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",
@@ -425,7 +423,7 @@ class TestOAuthResourcePin:
         assert str(ctx.provider._resource_url) == (f"{OAUTH_BASE_URL}/gateway/gemini-app/mcp")
 
     def test_no_oauth_profile_builds_no_context(self) -> None:
-        from mcp_trentina_crunchtools import _build_oauth_context
+        from trentina import _build_oauth_context
 
         profile = Profile(name="alice", auth=AuthConfig(bearer_token_env="A"))
         assert _build_oauth_context(GatewayConfig(profiles={"alice": profile})) is None
@@ -464,8 +462,8 @@ class TestProvisionedConfidentialClient:
         )
 
     def _build(self, profiles: dict[str, Profile]) -> OAuthContext:
-        from mcp_trentina_crunchtools import _build_oauth_context
-        from mcp_trentina_crunchtools.gateway.loader import _resolve_oauth_client_secret
+        from trentina import _build_oauth_context
+        from trentina.gateway.loader import _resolve_oauth_client_secret
 
         for name, profile in profiles.items():
             _resolve_oauth_client_secret(name, profile)
@@ -494,7 +492,7 @@ class TestProvisionedConfidentialClient:
         clear it so a provisioned client from one test cannot satisfy another.
         """
         yield
-        from mcp_trentina_crunchtools import _build_oauth_context
+        from trentina import _build_oauth_context
 
         env = {
             "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",
@@ -557,8 +555,8 @@ class TestProvisionedConfidentialClient:
             )
 
     def test_unset_secret_env_fails_closed(self) -> None:
-        from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-        from mcp_trentina_crunchtools.gateway.loader import _resolve_oauth_client_secret
+        from trentina.gateway.errors import ProfileConfigError
+        from trentina.gateway.loader import _resolve_oauth_client_secret
 
         profile = self._provisioned_profile()
         with (
@@ -677,7 +675,7 @@ class _StubVerifier:
 @pytest.fixture
 def delegated_client() -> TestClient:
     """A gateway whose only OAuth profile delegates to Google."""
-    from mcp_trentina_crunchtools.gateway.app import DelegatedAuth
+    from trentina.gateway.app import DelegatedAuth
 
     profile = Profile(
         short_names=False,  # calls below use <backend>__<tool>
@@ -814,7 +812,7 @@ class TestConfidentialDynamicRegistration:
     SECRET = "0123456789abcdef" * 4
 
     def _provider(self) -> Any:
-        from mcp_trentina_crunchtools import _build_oauth_context
+        from trentina import _build_oauth_context
 
         env = {
             "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",
@@ -951,7 +949,7 @@ class TestMultiProfileResourceIndicator:
         )
 
     def _build(self, profiles: dict[str, Profile]) -> OAuthContext:
-        from mcp_trentina_crunchtools import _build_oauth_context
+        from trentina import _build_oauth_context
 
         env = {
             "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",
@@ -978,7 +976,7 @@ class TestMultiProfileResourceIndicator:
     def test_the_unpinned_profile_is_accepted(self) -> None:
         """'gemini-web' sorts second, so it is the one the base class would
         refuse. This is the whole point of the override."""
-        from mcp_trentina_crunchtools import _clear_known_resource
+        from trentina import _clear_known_resource
 
         ctx = self._both()
         params = self._Params(self.B)
@@ -986,7 +984,7 @@ class TestMultiProfileResourceIndicator:
         assert params.resource is None  # cleared => base check will skip
 
     def test_the_pinned_profile_is_accepted(self) -> None:
-        from mcp_trentina_crunchtools import _clear_known_resource
+        from trentina import _clear_known_resource
 
         ctx = self._both()
         params = self._Params(self.A)
@@ -997,7 +995,7 @@ class TestMultiProfileResourceIndicator:
         """Clearing the indicator must not become 'accept anything'."""
         from mcp.server.auth.provider import AuthorizeError
 
-        from mcp_trentina_crunchtools import _clear_known_resource
+        from trentina import _clear_known_resource
 
         ctx = self._both()
         params = self._Params("https://evil.example.com/gateway/claude-web/mcp")
@@ -1008,7 +1006,7 @@ class TestMultiProfileResourceIndicator:
     def test_a_profile_that_is_not_oauth_enabled_is_refused(self) -> None:
         from mcp.server.auth.provider import AuthorizeError
 
-        from mcp_trentina_crunchtools import _clear_known_resource
+        from trentina import _clear_known_resource
 
         ctx = self._both()
         params = self._Params(f"{self.BASE}/gateway/agent1/mcp")
@@ -1017,7 +1015,7 @@ class TestMultiProfileResourceIndicator:
 
     def test_no_indicator_is_left_alone(self) -> None:
         """RFC 8707 is optional; a client that sends nothing is not refused."""
-        from mcp_trentina_crunchtools import _clear_known_resource
+        from trentina import _clear_known_resource
 
         ctx = self._both()
         params = self._Params(None)
@@ -1055,7 +1053,7 @@ class TestMultiProfileResourceIndicator:
         """The mixin must sit ahead of OAuthProxy, or its exchanges never run."""
         from fastmcp.server.auth.oauth_proxy.proxy import OAuthProxy
 
-        from mcp_trentina_crunchtools.gateway.oauth_binding import BindTokensToProfile
+        from trentina.gateway.oauth_binding import BindTokensToProfile
 
         mro = type(self._both().provider).__mro__
         assert mro.index(BindTokensToProfile) < mro.index(OAuthProxy)
@@ -1087,7 +1085,7 @@ class TestRegisteredRedirectUriIsRestricted:
     )
 
     def _provider(self, **oauth_kwargs: Any) -> Any:
-        from mcp_trentina_crunchtools import _build_oauth_context
+        from trentina import _build_oauth_context
 
         env = {
             "TRENTINA_OAUTH_GOOGLE_CLIENT_ID": "cid",

@@ -22,7 +22,7 @@ FETCH_DEADLINE = 60.0
 DEFAULT_FETCH_CONCURRENCY = 8
 MAX_RESPONSE_SIZE = 5_000_000  # 5 MB
 MAX_ERROR_BODY = 2048
-USER_AGENT = "mcp-trentina-crunchtools/0.1.0 (security-scanner)"
+USER_AGENT = "trentina/0.1.0 (security-scanner)"
 
 TEXT_CONTENT_TYPES = frozenset(
     {

@@ -11,8 +11,8 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
-from mcp_trentina_crunchtools.client import fetch_url
-from mcp_trentina_crunchtools.errors import BlockedSourceError
+from trentina.client import fetch_url
+from trentina.errors import BlockedSourceError
 
 CLASSIFIER_MAX_TOKENS = 32768
 

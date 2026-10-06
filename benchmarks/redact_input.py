@@ -46,20 +46,20 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from benchmarks.l2_obfuscation import TRANSFORMS
-from mcp_trentina_crunchtools.l1 import run_l1
-from mcp_trentina_crunchtools.l1.delimiters import normalize_delimiters
-from mcp_trentina_crunchtools.l1.encoded import normalize_encoded
-from mcp_trentina_crunchtools.l1.exfiltration import strip_exfiltration
-from mcp_trentina_crunchtools.l1.unicode import normalize_unicode
-from mcp_trentina_crunchtools.quarantine import agent
-from mcp_trentina_crunchtools.quarantine.agent import (
+from tests.adversarial_corpus import ATTACKS, BENIGN
+from trentina.l1 import run_l1
+from trentina.l1.delimiters import normalize_delimiters
+from trentina.l1.encoded import normalize_encoded
+from trentina.l1.exfiltration import strip_exfiltration
+from trentina.l1.unicode import normalize_unicode
+from trentina.quarantine import agent
+from trentina.quarantine.agent import (
     DELIVERED_EXTRACTION_FIELDS,
     quarantine_detect,
     quarantine_redact,
 )
-from mcp_trentina_crunchtools.quarantine.classifier import is_classifier_available
-from mcp_trentina_crunchtools.unpack.scan import unpack
-from tests.adversarial_corpus import ATTACKS, BENIGN
+from trentina.quarantine.classifier import is_classifier_available
+from trentina.unpack.scan import unpack
 
 PROMPT = "Summarize this document."
 _HEAD = (

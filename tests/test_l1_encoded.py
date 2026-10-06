@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 
-from mcp_trentina_crunchtools.l1.encoded import normalize_encoded
+from trentina.l1.encoded import normalize_encoded
 
 
 class TestEncodedPayloadDetection:

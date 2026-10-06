@@ -16,18 +16,18 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_trentina_crunchtools.defense import (
+from trentina.defense import (
     Layer,
     Provenance,
     build_l3_briefing,
     defend,
 )
-from mcp_trentina_crunchtools.errors import UnscannableContentError
-from mcp_trentina_crunchtools.gateway.profile import DefenseConfig
-from mcp_trentina_crunchtools.modes import gaps_of
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
+from trentina.errors import UnscannableContentError
+from trentina.gateway.profile import DefenseConfig
+from trentina.modes import gaps_of
+from trentina.quarantine.classifier import ClassifierResult
 
-_D = "mcp_trentina_crunchtools.defense"
+_D = "trentina.defense"
 
 MALICIOUS = ClassifierResult(label="MALICIOUS", score=0.95, latency_ms=1.0)
 BENIGN_LOW = ClassifierResult(label="BENIGN", score=0.05, latency_ms=1.0)
@@ -335,8 +335,8 @@ class TestAdmission:
         assert not gaps.l2_unavailable and not gaps.l3_unavailable
 
     async def test_the_report_and_warning_say_not_admitted(self) -> None:
-        from mcp_trentina_crunchtools.report import layer_states
-        from mcp_trentina_crunchtools.warning import build_warning
+        from trentina.report import layer_states
+        from trentina.warning import build_warning
 
         with ExitStack() as stack:
             _patches(stack)
@@ -391,8 +391,8 @@ class TestL3Briefing:
         assert "0.050" in briefing
 
     def test_the_caveat_is_unconditional(self) -> None:
-        from mcp_trentina_crunchtools.l1.pipeline import PipelineStats
-        from mcp_trentina_crunchtools.quarantine.prompts import L2_BLINDSPOT_CAVEAT
+        from trentina.l1.pipeline import PipelineStats
+        from trentina.quarantine.prompts import L2_BLINDSPOT_CAVEAT
 
         for classification in (None, BENIGN_LOW, MALICIOUS):
             assert L2_BLINDSPOT_CAVEAT in build_l3_briefing(PipelineStats(), classification)

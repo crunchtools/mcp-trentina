@@ -17,7 +17,7 @@ is worth. It needs a hosted API key and nothing else: no GPU, no local model.
     # the candidate, once, on held-out; written out as a pack only if it wins
     uv run python benchmarks/prompt_pack.py --provider openrouter \\
         --prompt-pack my-pack.json --baseline results/generic.json \\
-        --emit src/mcp_trentina_crunchtools/quarantine/prompt_packs/my-model.json
+        --emit src/trentina/quarantine/prompt_packs/my-model.json
 
 **The split is fixed.** Train is the external corpus's ``train`` split (the
 first ``--train-external`` rows) and one internal case in four, chosen by a
@@ -64,8 +64,8 @@ if str(_REPO_ROOT) not in sys.path:
 
 from benchmarks import external_corpus
 from benchmarks.provider_benchmark import ProviderReport, resolved_model, run_provider
-from mcp_trentina_crunchtools.quarantine import packs
 from tests.adversarial_corpus import CORPUS, Case
+from trentina.quarantine import packs
 
 GENERIC = "generic"
 JUDGE_ATTACKS = "detector_meta"

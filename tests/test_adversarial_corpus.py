@@ -25,24 +25,24 @@ import json
 
 import pytest
 
-from mcp_trentina_crunchtools.l1.pipeline import run_l1
-from mcp_trentina_crunchtools.preprocess import (
-    EmailProcessor,
-    PetitProcessor,
-    PreProcessContext,
-    StructuredProcessor,
-    run_preprocessors,
-)
-from mcp_trentina_crunchtools.quarantine.classifier import (
-    classify,
-    is_classifier_available,
-)
 from tests.adversarial_corpus import (
     ATTACKS,
     BENIGN,
     CORPUS,
     RISK_ORDER,
     Case,
+)
+from trentina.l1.pipeline import run_l1
+from trentina.preprocess import (
+    EmailProcessor,
+    PetitProcessor,
+    PreProcessContext,
+    StructuredProcessor,
+    run_preprocessors,
+)
+from trentina.quarantine.classifier import (
+    classify,
+    is_classifier_available,
 )
 
 _has_classifier = is_classifier_available()

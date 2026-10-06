@@ -9,13 +9,13 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools.config import get_config
-from mcp_trentina_crunchtools.errors import ConfigError, QuarantineAgentError
-from mcp_trentina_crunchtools.quarantine.agent import (
+from trentina.config import get_config
+from trentina.errors import ConfigError, QuarantineAgentError
+from trentina.quarantine.agent import (
     _call_with_fallback,
     _is_retryable,
 )
-from mcp_trentina_crunchtools.quarantine.providers import (
+from trentina.quarantine.providers import (
     get_fallback_providers,
     get_provider,
     reset_provider,
@@ -25,7 +25,7 @@ from mcp_trentina_crunchtools.quarantine.providers import (
 @pytest.fixture(autouse=True)
 def reset_config_and_providers(monkeypatch):
     """Clear singletons between tests."""
-    import mcp_trentina_crunchtools.config as cfg_mod
+    import trentina.config as cfg_mod
 
     monkeypatch.setattr(cfg_mod, "_config", None)
     reset_provider()
@@ -164,7 +164,7 @@ FAKE_SCHEMA = {
 
 
 def make_provider_result(text: str) -> object:
-    from mcp_trentina_crunchtools.quarantine.providers.base import ProviderResult
+    from trentina.quarantine.providers.base import ProviderResult
 
     return ProviderResult(text=text, input_tokens=10, output_tokens=5)
 
@@ -200,7 +200,7 @@ class TestCallWithFallback:
             return good_result
 
         with patch(
-            "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+            "trentina.quarantine.providers.gemini.GeminiProvider.generate",
             new=fake_generate,
         ):
             result, _ = await _call_with_fallback(
@@ -225,7 +225,7 @@ class TestCallWithFallback:
         mock = AsyncMock(side_effect=[make_provider_result(t) for t in texts])
 
         with patch(
-            "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+            "trentina.quarantine.providers.gemini.GeminiProvider.generate",
             new=mock,
         ):
             call = _call_with_fallback(
@@ -250,11 +250,11 @@ class TestCallWithFallback:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                "trentina.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
             ),
         ):
@@ -279,11 +279,11 @@ class TestCallWithFallback:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                "trentina.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
             ),
         ):
@@ -309,11 +309,11 @@ class TestCallWithFallback:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                "trentina.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
             ),
         ):
@@ -338,11 +338,11 @@ class TestCallWithFallback:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                "trentina.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
             ),
             pytest.raises(QuarantineAgentError, match="HTTP 400"),
@@ -369,11 +369,11 @@ class TestCallWithFallback:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                "trentina.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
             ),
             pytest.raises(QuarantineAgentError, match="all providers exhausted"),
@@ -398,7 +398,7 @@ class TestCallWithFallback:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             pytest.raises(QuarantineAgentError, match="all providers exhausted"),
@@ -421,11 +421,11 @@ class TestCallWithFallback:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                "trentina.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
             ),
         ):
@@ -454,15 +454,15 @@ class TestCallWithFallback:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                "trentina.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.anthropic.AnthropicProvider.generate",
+                "trentina.quarantine.providers.anthropic.AnthropicProvider.generate",
                 new=anthropic_mock,
             ),
         ):
@@ -493,11 +493,11 @@ class TestThrottleRetry:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                "trentina.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
             ),
         ):
@@ -524,11 +524,11 @@ class TestThrottleRetry:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                "trentina.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
             ),
         ):
@@ -549,11 +549,11 @@ class TestThrottleRetry:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                "trentina.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
             ),
         ):
@@ -581,7 +581,7 @@ class TestThrottleBudgetPerProvider:
             return make_provider_result(make_good_response())
 
         with patch(
-            "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+            "trentina.quarantine.providers.gemini.GeminiProvider.generate",
             new=slow_then_throttled_then_ok,
         ):
             result, _ = await _call_with_fallback(
@@ -608,11 +608,11 @@ class TestThrottleBudgetCumulative:
 
         with (
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.gemini.GeminiProvider.generate",
+                "trentina.quarantine.providers.gemini.GeminiProvider.generate",
                 new=gemini_mock,
             ),
             patch(
-                "mcp_trentina_crunchtools.quarantine.providers.openai.OpenAIProvider.generate",
+                "trentina.quarantine.providers.openai.OpenAIProvider.generate",
                 new=openai_mock,
             ),
         ):

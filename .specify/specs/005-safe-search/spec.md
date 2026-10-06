@@ -5,7 +5,7 @@
 > **Version:** 0.3.0
 > **Author:** Scott McCarty
 > **Date:** 2026-03-10
-> **GitHub Issue:** [#6](https://github.com/crunchtools/mcp-trentina/issues/6)
+> **GitHub Issue:** [#6](https://github.com/crunchtools/trentina/issues/6)
 
 ## Overview
 
@@ -218,6 +218,7 @@ async def safe_search(
         num_results: Approximate number of results (guidance to L0)
     """
 
+
 async def quarantine_search(
     query: str,
     prompt: str = "Summarize the search results.",
@@ -272,19 +273,15 @@ acquisition, not structuring. The clean Q-Agent (L3) provides structure.
     "sources": [
         {
             "uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc...",
-            "title": "Getting Started with bootc - Red Hat Documentation"
+            "title": "Getting Started with bootc - Red Hat Documentation",
         },
-        ...
+        ...,
     ],
     "supports": [
-        {
-            "text": "Red Hat Enterprise Linux 10...",
-            "chunk_indices": [0],
-            "confidence": [0.92]
-        },
-        ...
+        {"text": "Red Hat Enterprise Linux 10...", "chunk_indices": [0], "confidence": [0.92]},
+        ...,
     ],
-    "usage": {"input_tokens": 320, "output_tokens": 580}
+    "usage": {"input_tokens": 320, "output_tokens": 580},
 }
 ```
 
@@ -363,18 +360,14 @@ def _enforce_search_quarantine(request_body: dict[str, Any]) -> None:
     has tool access.
     """
     if "functionDeclarations" in request_body:
-        raise QuarantineAgentError(
-            "SECURITY: functionDeclarations in L0 search request"
-        )
+        raise QuarantineAgentError("SECURITY: functionDeclarations in L0 search request")
     tools = request_body.get("tools", [])
     if len(tools) != 1:
         raise QuarantineAgentError(
             f"SECURITY: L0 search must have exactly 1 tool, got {len(tools)}"
         )
     if "google_search" not in tools[0]:
-        raise QuarantineAgentError(
-            "SECURITY: L0 search tool must be google_search"
-        )
+        raise QuarantineAgentError("SECURITY: L0 search tool must be google_search")
 
 
 def _build_search_request_body(
@@ -444,9 +437,7 @@ def _extract_grounding_supports(
     ]
 
 
-async def search_grounded(
-    query: str, num_results: int = 5
-) -> dict[str, Any]:
+async def search_grounded(query: str, num_results: int = 5) -> dict[str, Any]:
     """Run L0: Gemini with google_search grounding.
 
     Returns synthesized text + grounding metadata. The caller MUST
@@ -460,9 +451,7 @@ async def search_grounded(
     canary = _generate_canary()
     system_prompt = _inject_canary(SEARCH_L0_SYSTEM_PROMPT, canary)
 
-    request_body = _build_search_request_body(
-        query, system_prompt, num_results
-    )
+    request_body = _build_search_request_body(query, system_prompt, num_results)
     _enforce_search_quarantine(request_body)
 
     api_key = config.api_key.get_secret_value()
@@ -470,11 +459,10 @@ async def search_grounded(
     url = f"{GEMINI_API_BASE}/{model}:generateContent?key={api_key}"
 
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(GEMINI_TIMEOUT)
-        ) as http_client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(GEMINI_TIMEOUT)) as http_client:
             resp = await http_client.post(
-                url, json=request_body,
+                url,
+                json=request_body,
                 headers={"Content-Type": "application/json"},
             )
             resp.raise_for_status()
@@ -492,9 +480,7 @@ async def search_grounded(
 
             # Canary check on plain text
             if canary in text:
-                raise QuarantineAgentError(
-                    "SECURITY: canary leaked in L0 search response"
-                )
+                raise QuarantineAgentError("SECURITY: canary leaked in L0 search response")
 
             # Extract grounding metadata
             grounding = candidates[0].get("groundingMetadata", {})
@@ -553,16 +539,20 @@ async def _resolve_grounding_urls(
             try:
                 resp = await client.head(uri)
                 final_url = str(resp.url)
-                resolved.append({
-                    "uri": final_url,
-                    "title": source.get("title", ""),
-                    "original_redirect": uri,
-                })
+                resolved.append(
+                    {
+                        "uri": final_url,
+                        "title": source.get("title", ""),
+                        "original_redirect": uri,
+                    }
+                )
             except (httpx.RequestError, httpx.TimeoutException):
-                resolved.append({
-                    **source,
-                    "redirect_failed": True,
-                })
+                resolved.append(
+                    {
+                        **source,
+                        "redirect_failed": True,
+                    }
+                )
 
     return resolved
 ```
@@ -624,7 +614,8 @@ SEARCH_L3_RESPONSE_SCHEMA = {
                     },
                     "suspicious": {"type": "boolean"},
                     "suspicious_reason": {
-                        "type": "string", "maxLength": 200,
+                        "type": "string",
+                        "maxLength": 200,
                     },
                 },
                 "required": ["title", "url", "summary", "relevance", "suspicious"],
@@ -669,7 +660,8 @@ from ..sanitize.pipeline import sanitize_text
 
 
 def _sanitize_l0_output(
-    text: str, sources: list[dict[str, str]],
+    text: str,
+    sources: list[dict[str, str]],
 ) -> tuple[str, list[dict[str, str]], int]:
     """Run L1 on L0's synthesized text and source titles.
 
@@ -685,15 +677,14 @@ def _sanitize_l0_output(
     for source in sources:
         title_r = sanitize_text(source.get("title", ""))
         url_r = sanitize_text(source.get("uri", ""))
-        total_detections += (
-            title_r.stats.total_detections()
-            + url_r.stats.total_detections()
+        total_detections += title_r.stats.total_detections() + url_r.stats.total_detections()
+        sanitized_sources.append(
+            {
+                "uri": url_r.content,
+                "title": title_r.content,
+                "redirect_failed": source.get("redirect_failed", False),
+            }
         )
-        sanitized_sources.append({
-            "uri": url_r.content,
-            "title": title_r.content,
-            "redirect_failed": source.get("redirect_failed", False),
-        })
 
     return text_result.content, sanitized_sources, total_detections
 
@@ -711,9 +702,7 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
     resolved_sources = await _resolve_grounding_urls(raw.get("sources", []))
 
     # L1: sanitize L0 output
-    sanitized_text, sanitized_sources, total_l1 = _sanitize_l0_output(
-        raw["text"], resolved_sources
-    )
+    sanitized_text, sanitized_sources, total_l1 = _sanitize_l0_output(raw["text"], resolved_sources)
 
     # Fail on high L1 detections
     if total_l1 >= 3:
@@ -727,8 +716,7 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
     if classification and classification.label == "MALICIOUS":
         raise BlockedSourceError(
             f"search:{query}",
-            f"L2 classifier flagged L0 output as MALICIOUS "
-            f"(score: {classification.score:.3f})",
+            f"L2 classifier flagged L0 output as MALICIOUS (score: {classification.score:.3f})",
         )
 
     return {
@@ -745,7 +733,9 @@ async def safe_search(query: str, num_results: int = 5) -> dict[str, Any]:
 
 
 async def quarantine_search(
-    query: str, prompt: str, num_results: int = 5,
+    query: str,
+    prompt: str,
+    num_results: int = 5,
 ) -> dict[str, Any]:
     """L0 → resolve → L1 → L2 → L3."""
     config = get_config()
@@ -766,9 +756,7 @@ async def quarantine_search(
     resolved_sources = await _resolve_grounding_urls(raw.get("sources", []))
 
     # L1: sanitize L0 output
-    sanitized_text, sanitized_sources, total_l1 = _sanitize_l0_output(
-        raw["text"], resolved_sources
-    )
+    sanitized_text, sanitized_sources, total_l1 = _sanitize_l0_output(raw["text"], resolved_sources)
 
     # L2: classify sanitized text
     classifier_warning = None
@@ -815,9 +803,7 @@ async def quarantine_search(
         "l0_usage": raw.get("usage", {}),
         "l3_usage": extraction.get("usage", {}),
         "classifier_warning": classifier_warning,
-        "classifier_output_warning": extraction.get(
-            "classifier_output_warning"
-        ),
+        "classifier_output_warning": extraction.get("classifier_output_warning"),
     }
 ```
 
@@ -1023,14 +1009,16 @@ async def quarantine_search_tool(
 ### Update `instructions` String
 
 ```python
-instructions=(
-    "Quarantined web content extraction with three-layer prompt injection defense. "
-    "Layer 1: deterministic sanitization. Layer 2: Prompt Guard 2 classifier. "
-    "Layer 3: quarantined Gemini Q-Agent. "
-    "Use safe_fetch/safe_search for trusted content (fails on injection), "
-    "quarantine_fetch/quarantine_search for untrusted content (warns but proceeds), "
-    "quarantine_scan for pre-flight threat assessment."
-),
+instructions = (
+    (
+        "Quarantined web content extraction with three-layer prompt injection defense. "
+        "Layer 1: deterministic sanitization. Layer 2: Prompt Guard 2 classifier. "
+        "Layer 3: quarantined Gemini Q-Agent. "
+        "Use safe_fetch/safe_search for trusted content (fails on injection), "
+        "quarantine_fetch/quarantine_search for untrusted content (warns but proceeds), "
+        "quarantine_scan for pre-flight threat assessment."
+    ),
+)
 ```
 
 ---
@@ -1073,7 +1061,7 @@ instructions=(
 No new env vars. Existing `GEMINI_API_KEY` powers everything.
 
 ```bash
-systemctl restart mcp-trentina.crunchtools.com.service
+systemctl restart trentina.crunchtools.com.service
 ```
 
 ### Compatibility Check

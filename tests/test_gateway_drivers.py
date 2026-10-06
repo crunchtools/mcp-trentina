@@ -37,21 +37,21 @@ from typing import Any, cast, get_args
 
 import pytest
 
-from mcp_trentina_crunchtools.channels import Channel, Kind
-from mcp_trentina_crunchtools.gateway.drivers import (
+from trentina.channels import Channel, Kind
+from trentina.gateway.drivers import (
     CHANNEL_KIND,
     PREPROCESSORS,
     build_preprocessors,
 )
-from mcp_trentina_crunchtools.gateway.errors import ProfileConfigError
-from mcp_trentina_crunchtools.gateway.loader import load_profiles
-from mcp_trentina_crunchtools.gateway.profile import (
+from trentina.gateway.errors import ProfileConfigError
+from trentina.gateway.loader import load_profiles
+from trentina.gateway.profile import (
     _DEFAULT_PROCESSORS,
     MatrixPreProcessConfig,
     PreProcessConfig,
     ProcessorName,
 )
-from mcp_trentina_crunchtools.preprocess import Cost
+from trentina.preprocess import Cost
 
 
 class TestRegistryAndConfigAgree:

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/crunchtools/mcp-trentina/main/docs/images/trentina-logo.png" alt="trentina: a medieval merchant ship anchored offshore while an inspector in a rowboat checks each crate of code before it reaches the harbor gate" width="320">
+  <img src="https://raw.githubusercontent.com/crunchtools/trentina/main/docs/images/trentina-logo.png" alt="trentina: a medieval merchant ship anchored offshore while an inspector in a rowboat checks each crate of code before it reaches the harbor gate" width="320">
 </p>
 
 # Trentina
@@ -18,7 +18,7 @@ offshore for thirty days before anyone came ashore. The idea is the same:
 commerce keeps flowing, and nothing dangerous gets in.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/crunchtools/mcp-trentina/main/docs/demo/trentina.gif" alt="Demo: a request crosses Trentina's auth, policy, defense and minify stages; then, in a terminal, a 131-tool list is served as 6 tools, a recipe page with an injection in its comments is refused and then answered through redact, and a send to an outside address is refused while a draft goes through" width="800">
+  <img src="https://raw.githubusercontent.com/crunchtools/trentina/main/docs/demo/trentina.gif" alt="Demo: a request crosses Trentina's auth, policy, defense and minify stages; then, in a terminal, a 131-tool list is served as 6 tools, a recipe page with an injection in its comments is refused and then answered through redact, and a send to an outside address is refused while a draft goes through" width="800">
 </p>
 
 ## Why Trentina
@@ -151,18 +151,16 @@ commerce keeps flowing, and nothing dangerous gets in.
 ## Quick Start
 
 ```bash
-# Container (ships two L2 classifiers; CLASSIFIER_MODEL picks one)
+# The container image is the distribution: the L2 model, the parsers and
+# their process isolation ship in it. There is no PyPI package.
 podman run -d -p 127.0.0.1:8019:8019 \
     -v ./profiles.yaml:/config/profiles.yaml:ro,Z \
     -e TRENTINA_GATEWAY_ENABLED=true \
     -e TRENTINA_PROFILES_PATH=/config/profiles.yaml \
     -e TRENTINA_PROFILE_MYAGENT_TOKEN=your-token \
     -e OPENROUTER_API_KEY=your-key -e TRENTINA_MODEL_PROVIDER=openrouter \
-    quay.io/crunchtools/mcp-trentina \
+    quay.io/crunchtools/trentina \
     --transport streamable-http --host 0.0.0.0 --port 8019
-
-# Or from PyPI, standalone (content tools only, no gateway)
-uvx mcp-trentina-crunchtools
 ```
 
 L3 needs a key for one LLM provider. Any of Gemini, OpenRouter, OpenAI,

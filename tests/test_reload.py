@@ -33,31 +33,31 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mcp_trentina_crunchtools.gateway import compress
-from mcp_trentina_crunchtools.gateway.compress import set_profiles
-from mcp_trentina_crunchtools.gateway.context import profile_context
-from mcp_trentina_crunchtools.gateway.filter import filter_tools
-from mcp_trentina_crunchtools.gateway.loader import (
+from trentina.gateway import compress
+from trentina.gateway.compress import set_profiles
+from trentina.gateway.context import profile_context
+from trentina.gateway.filter import filter_tools
+from trentina.gateway.loader import (
     get_active_config,
     load_profiles,
     register_active_config,
     replace_active_config,
     reset_active_config,
 )
-from mcp_trentina_crunchtools.gateway.router import (
+from trentina.gateway.router import (
     _profile_tools_cache,
     invalidate_profile_cache,
     invalidate_profile_cache_for_backend,
     route_jsonrpc,
 )
-from mcp_trentina_crunchtools.gateway.sessions import session_registry
-from mcp_trentina_crunchtools.quarantine.classifier import ClassifierResult
-from mcp_trentina_crunchtools.tools.reload import AGENT_SCOPE_NOTE, reload_profiles
+from trentina.gateway.sessions import session_registry
+from trentina.quarantine.classifier import ClassifierResult
+from trentina.tools.reload import AGENT_SCOPE_NOTE, reload_profiles
 
 pytestmark = pytest.mark.asyncio
 
-_ROUTER = "mcp_trentina_crunchtools.gateway.router"
-_INGRESS = "mcp_trentina_crunchtools.gateway.ingress_defense"
+_ROUTER = "trentina.gateway.router"
+_INGRESS = "trentina.gateway.ingress_defense"
 
 _BENIGN = ClassifierResult(label="BENIGN", score=0.01, latency_ms=1.0)
 
@@ -853,7 +853,7 @@ class TestCacheBehaviour:
                 AsyncMock(return_value=_tools_result(["jira_get_issue"])),
             ),
             patch(
-                "mcp_trentina_crunchtools.defense.classify_async",
+                "trentina.defense.classify_async",
                 AsyncMock(return_value=_BENIGN),
             ),
         ):
@@ -875,7 +875,7 @@ class TestCacheBehaviour:
         key is (kind, thresholds, text) — none of which a tools_deny edit
         touches — so the rebuilt aggregate is a pure cache read.
         """
-        from mcp_trentina_crunchtools.gateway import ingress_defense
+        from trentina.gateway import ingress_defense
 
         judged: list[str] = []
         real_defend = ingress_defense.defend
@@ -896,12 +896,12 @@ class TestCacheBehaviour:
                 AsyncMock(return_value=_tools_result(["jira_get_issue", "jira_delete_issue"])),
             ),
             patch(
-                "mcp_trentina_crunchtools.defense.classify_async",
+                "trentina.defense.classify_async",
                 AsyncMock(return_value=_BENIGN),
             ),
-            patch("mcp_trentina_crunchtools.defense.get_config") as _cfg,
+            patch("trentina.defense.get_config") as _cfg,
             patch(
-                "mcp_trentina_crunchtools.defense.quarantine_detect",
+                "trentina.defense.quarantine_detect",
                 AsyncMock(return_value={"injection_detected": False, "risk_level": "low"}),
             ),
             patch(f"{_INGRESS}.defend", counting_defend),
@@ -954,7 +954,7 @@ class TestCacheBehaviour:
             return _tools_result(["jira_get_issue"])
 
         with patch(
-            "mcp_trentina_crunchtools.defense.classify_async",
+            "trentina.defense.classify_async",
             AsyncMock(return_value=_BENIGN),
         ):
             # The eviction cascade only knows a profile's backend URLs once an
@@ -995,7 +995,7 @@ class TestCacheBehaviour:
         with (
             patch(f"{_ROUTER}.list_backend_tools", slow_list),
             patch(
-                "mcp_trentina_crunchtools.defense.classify_async",
+                "trentina.defense.classify_async",
                 AsyncMock(return_value=_BENIGN),
             ),
         ):

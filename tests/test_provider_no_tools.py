@@ -12,14 +12,14 @@ from typing import Any
 
 import pytest
 
-from mcp_trentina_crunchtools.errors import QuarantineAgentError
-from mcp_trentina_crunchtools.quarantine.providers import (
+from trentina.errors import QuarantineAgentError
+from trentina.quarantine.providers import (
     anthropic,
     gemini,
     ollama,
     openai,
 )
-from mcp_trentina_crunchtools.quarantine.providers.base import TOOL_KEYS, enforce_no_tools
+from trentina.quarantine.providers.base import TOOL_KEYS, enforce_no_tools
 
 
 @pytest.mark.parametrize("key", sorted(TOOL_KEYS))

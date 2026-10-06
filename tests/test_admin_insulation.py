@@ -22,21 +22,21 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from mcp.types import ListToolsResult, Tool
 
-from mcp_trentina_crunchtools.database import record_detection, record_gateway_call
-from mcp_trentina_crunchtools.gateway import compress
-from mcp_trentina_crunchtools.gateway.backend import _tool_list_cache
-from mcp_trentina_crunchtools.gateway.compress import set_profiles
-from mcp_trentina_crunchtools.gateway.context import profile_context
-from mcp_trentina_crunchtools.gateway.loader import (
+from trentina.database import record_detection, record_gateway_call
+from trentina.gateway import compress
+from trentina.gateway.backend import _tool_list_cache
+from trentina.gateway.compress import set_profiles
+from trentina.gateway.context import profile_context
+from trentina.gateway.loader import (
     load_profiles,
     register_active_config,
 )
-from mcp_trentina_crunchtools.gateway.router import _profile_tools_cache
-from mcp_trentina_crunchtools.outcomes import Outcome
-from mcp_trentina_crunchtools.tools.cache import cache_flush
-from mcp_trentina_crunchtools.tools.reconnect import reconnect_backend
-from mcp_trentina_crunchtools.tools.reload import reload_profiles
-from mcp_trentina_crunchtools.tools.stats import get_trentina_stats
+from trentina.gateway.router import _profile_tools_cache
+from trentina.outcomes import Outcome
+from trentina.tools.cache import cache_flush
+from trentina.tools.reconnect import reconnect_backend
+from trentina.tools.reload import reload_profiles
+from trentina.tools.stats import get_trentina_stats
 
 pytestmark = pytest.mark.asyncio
 
@@ -125,7 +125,7 @@ async def _reconnect_own() -> dict[str, Any]:
     async def ok(_url: str, _headers: Any) -> ListToolsResult:
         return ListToolsResult(tools=[Tool(name="beta_tool", description="", input_schema={})])
 
-    with patch("mcp_trentina_crunchtools.gateway.backend._do_list_tools", side_effect=ok):
+    with patch("trentina.gateway.backend._do_list_tools", side_effect=ok):
         return await reconnect_backend("beta-backend")
 
 
@@ -161,7 +161,7 @@ async def test_no_admin_tool_hands_an_agent_another_profiles_shape(
     with (
         profile_context(profiles["beta"]),
         patch(
-            "mcp_trentina_crunchtools.gateway.sessions.session_registry.broadcast_tools_changed",
+            "trentina.gateway.sessions.session_registry.broadcast_tools_changed",
             AsyncMock(return_value=0),
         ),
     ):

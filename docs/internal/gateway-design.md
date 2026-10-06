@@ -430,7 +430,7 @@ the image bumps.
 
 ## Cascade integration
 
-mcp-trentina is already in the cascade (FROM-graph parent: the Hummingbird Python
+trentina is already in the cascade (FROM-graph parent: the Hummingbird Python
 3.13 base; dispatch fanout already covers it). The version bump for this work
 goes through the existing build pipeline:
 
@@ -532,7 +532,7 @@ Each phase is independently mergeable behind a feature flag (`TRENTINA_GATEWAY_E
 
 ## References
 
-- Existing trentina 3-layer defense: `src/mcp_trentina_crunchtools/l1/`,
+- Existing trentina 3-layer defense: `src/trentina/l1/`,
   `quarantine/` (this repo)
 - crunchtools MCP fleet topology: see private ops notes
 - Autonomous-agent constitution profile §V (kill switches): drives the L3

@@ -21,7 +21,7 @@ from .child import ask
 
 logger = logging.getLogger(__name__)
 
-WORKER = "mcp_trentina_crunchtools.unpack.pdf_worker"
+WORKER = "trentina.unpack.pdf_worker"
 DEADLINE = 30.0
 """Wall-clock seconds for one PDF. The worker limits its own CPU to 20."""
 

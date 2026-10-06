@@ -11,14 +11,14 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from mcp_trentina_crunchtools.client import (
+from tests.egress_harness import route
+from trentina.client import (
     MAX_ERROR_BODY,
     MAX_RESPONSE_SIZE,
     _is_text_content_type,
     fetch_url,
 )
-from mcp_trentina_crunchtools.errors import FetchError, UnsupportedContentTypeError
-from tests.egress_harness import route
+from trentina.errors import FetchError, UnsupportedContentTypeError
 
 
 def mock_http(
