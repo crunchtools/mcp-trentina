@@ -789,8 +789,9 @@ conversations, so its row is the least trustworthy.
 - **Planted credentials carry as much as the tools.** On GPT-OSS 20B, 41 of
   the 74 trips are a fake credential in the reply or an argument, and 14
   are a rendered link; no decoy tool would have seen those.
-- **The attack-named tool was never called**, by any model, in any
-  condition: `export_all_user_data`, 0 of about 6,200 conversations.
+- **The attack-named tool was never called from a document.**
+  `export_all_user_data` was called in 11 of 6,213 conversations, all of
+  them the attack asked directly by the user, none with a carrier.
 - **Neither rule is met.** No model trips on half of anything, and the
   judges flag 218 to 224 of the 224 attack documents, so there are not ten
   points left to add. On Haiku 4.5 and Gemini 3.8 Flash the models complied
