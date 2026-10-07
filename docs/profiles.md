@@ -472,6 +472,10 @@ What a trip does not tell you is which document caused it. The audit's
 back along the caller's earlier calls. What the check does not see is in
 [known gap 17](defense-pipeline.md#known-gaps).
 
+An agent is not shown its own trips. `quarantine_stats` leaves them out of
+an agent's call counts and recent destinations; an operator profile sees
+them, with where the call was pointed.
+
 A decoy backend takes `tools_allow`, `tools_deny` and `name_tag`. It takes
 no headers, guards, destinations or L3 briefing: there is no server for
 them to describe.

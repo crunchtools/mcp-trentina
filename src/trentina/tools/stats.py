@@ -30,6 +30,7 @@ from ..gateway.errors import ScopeError
 from ..gateway.scope import CallerScope, require_caller
 from ..gateway.surface import TOKEN_NOTE, surface_profiles, surface_report
 from ..logsafe import redact_source
+from ..outcomes import Outcome
 from ..quarantine.classifier import is_classifier_available, model_info
 
 GATEWAY_AUDIT_LOOKBACK_DAYS = 30
@@ -97,14 +98,22 @@ def _agent_stats(scope: CallerScope) -> dict[str, Any]:
         },
         "classifier": _classifier(),
         "blocklist": get_blocklist_stats(profile=scope.name),
+        # An agent is not shown its own decoy trips (#357), here or among its
+        # destinations: the operator's view below is where they are read.
         "gateway_audit": {
-            **get_gateway_call_stats(profile=scope.name, days=GATEWAY_AUDIT_LOOKBACK_DAYS),
-            "column_meanings": COLUMN_MEANINGS,
+            **get_gateway_call_stats(
+                profile=scope.name, days=GATEWAY_AUDIT_LOOKBACK_DAYS, trips=False
+            ),
+            "column_meanings": {k: v for k, v in COLUMN_MEANINGS.items() if k != "tripped"},
         },
         # Its own, as written: text it chose, shown back to it (#266).
-        "destinations": get_recent_destinations(
-            scope.name, RECENT_DESTINATIONS, GATEWAY_AUDIT_LOOKBACK_DAYS
-        ).get(scope.label, [])
+        "destinations": [
+            row
+            for row in get_recent_destinations(
+                scope.name, RECENT_DESTINATIONS, GATEWAY_AUDIT_LOOKBACK_DAYS
+            ).get(scope.label, [])
+            if row["outcome"] != Outcome.DECOY_TRIPPED.value
+        ]
         if scope.name
         else [],
         "surface": (surface_report(scope.name) if scope.name else None) or NOT_BUILT,

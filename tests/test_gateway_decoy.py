@@ -192,3 +192,14 @@ def test_a_honeytoken_that_would_match_by_chance_or_not_at_all_is_refused(
 ) -> None:
     with pytest.raises(ProfileConfigError, match=message):
         _load(tmp_path, monkeypatch, planted)
+
+
+async def test_an_agent_reading_its_own_numbers_is_not_shown_its_trips() -> None:
+    """A tripwire the caller can read back is one it can be told to avoid."""
+    await _rpc("tools/call", {"name": "host__send_email", "arguments": {}})
+    await _rpc("tools/call", {"name": "tickets__comment", "arguments": {"body": "hi"}})
+    mine = get_gateway_call_stats(profile="kage", trips=False)
+    assert mine["totals"] == {"ok": 1, "blocked": 0, "failed": 0, "unknown": 0}
+    assert [(row["backend"], row["tool"]) for row in mine["by_tool"]] == [("tickets", "comment")]
+    assert "decoy_tripped" not in str(mine)
+    assert get_gateway_call_stats(profile="kage")["totals"]["tripped"] == 1
