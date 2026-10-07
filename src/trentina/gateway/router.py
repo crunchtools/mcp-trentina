@@ -698,12 +698,15 @@ def _leaked(profile: Profile, req_id: Any, params: Any, leaked: list[str]) -> di
     if target is None:
         return _tripped(profile.name, "", redact_source(served_name), req_id, what, None, None)
     backend_name, tool_name, backend = target
-    dest = destination_of(backend, tool_name, arguments) if isinstance(arguments, dict) else None
-    if dest is not None and leaked_tokens(profile, dest.value):
-        dest = None  # the audit names a planted credential by id, here as everywhere
-    decoy = backend.decoys.get(tool_name)
-    held = isinstance(arguments, dict) and filter_tools([{"name": tool_name}], backend)
-    answer = canned_result(profile, decoy) if decoy is not None and held else None
+    dest: Destination | None = None
+    answer: dict[str, Any] | None = None
+    if isinstance(arguments, dict):
+        dest = destination_of(backend, tool_name, arguments)
+        if dest is not None and leaked_tokens(profile, dest.value):
+            dest = None  # the audit names a planted credential by id, here as everywhere
+        decoy = backend.decoys.get(tool_name)
+        if decoy is not None and filter_tools([{"name": tool_name}], backend):
+            answer = canned_result(profile, decoy)
     return _tripped(
         profile.name,
         backend_name,
