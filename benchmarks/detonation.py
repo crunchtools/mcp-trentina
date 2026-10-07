@@ -1119,8 +1119,6 @@ def coverage(answered: int, asked: int) -> str:
 
 
 def _corpus(args: argparse.Namespace) -> tuple[list[Case], int]:
-    if args.documents:
-        return wild_cases(Path(args.documents)), 0
     attacks, benign = internal_inserts()
     attacks += ACTION_ATTACKS
     if not args.no_injecagent:
@@ -1167,7 +1165,7 @@ def main(argv: list[str] | None = None) -> int:
     if not os.environ.get("OPENROUTER_API_KEY"):
         print("error: OPENROUTER_API_KEY is not set", file=sys.stderr)
         return 2
-    cases, attacks = _corpus(args)
+    cases, attacks = (wild_cases(Path(args.documents)), 0) if args.documents else _corpus(args)
     model = get_config().model
     print(f"{len(cases)} cases, {model}, {args.mode}, {attacks} attack inserts\n")
     if args.mode == "judge":

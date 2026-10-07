@@ -54,13 +54,6 @@ HOT_POSTS = 5
 SHORTEST = 40
 
 
-def _thread(comments: list[dict[str, Any]]) -> Iterator[str]:
-    """Every comment's text, replies included, in reading order."""
-    for comment in comments:
-        yield str(comment.get("content") or "")
-        yield from _thread(comment.get("replies") or [])
-
-
 @dataclass
 class Feed:
     """The read API, one paced request at a time.
@@ -81,11 +74,15 @@ class Feed:
         return dict(json.loads(self.fetch(f"{API}/{path}")))
 
     def comments(self) -> Iterator[tuple[str, str]]:
-        """Where each comment under the hottest posts was read, and its text."""
+        """Where each comment under the hottest posts was read, and its
+        text: replies included, in reading order."""
         for post in self.get(f"posts?sort=hot&limit={HOT_POSTS}")["posts"]:
             path = f"posts/{post['id']}/comments?sort=new&limit={COMMENTS_PER_POST}"
-            for text in _thread(self.get(path)["comments"]):
-                yield path, text
+            unread = list(self.get(path)["comments"])
+            while unread:
+                comment = unread.pop(0)
+                yield path, str(comment.get("content") or "")
+                unread[:0] = comment.get("replies") or []
 
     def posts(self) -> Iterator[tuple[str, str]]:
         """Where each of the newest posts was read, and its title and whole
