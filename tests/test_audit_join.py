@@ -7,7 +7,6 @@ all. What a decoy trip is traced back along is held here.
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -17,6 +16,7 @@ import pytest
 from pydantic import SecretStr
 from starlette.testclient import TestClient
 
+from trentina.config import get_config
 from trentina.database import get_db, record_detection
 from trentina.gateway import internal
 from trentina.gateway.app import gateway_app
@@ -125,7 +125,7 @@ def test_the_session_in_the_audit_is_a_fingerprint_of_the_header() -> None:
         headers={**headers, "mcp-session-id": session},
     )
     # The app wrote from its own thread, so the row is read on a connection of this one.
-    reader = sqlite3.connect(os.environ["QUARANTINE_DB"])
+    reader = sqlite3.connect(get_config().db_path)
     ((recorded,),) = reader.execute("SELECT session FROM gateway_calls").fetchall()
     assert len(recorded) == 16
     assert recorded not in session
