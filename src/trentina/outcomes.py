@@ -77,6 +77,11 @@ class Outcome(str, Enum):
     the decision is operator-authored policy, not a model's risk verdict.
     """
 
+    DECOY_TRIPPED = "decoy_tripped"
+    """A decoy tool was called, or a planted credential was in a call's
+    arguments (#357). Neither blocked nor failed: an alarm about the caller.
+    """
+
     BACKEND_ERROR = "backend_error"
     """Upstream failed: network, timeout, auth, malformed response."""
 
@@ -93,6 +98,10 @@ BLOCKED_OUTCOMES: frozenset[Outcome] = frozenset(
     }
 )
 """Policy outcomes. The gateway did its job; nothing is broken."""
+
+TRIPPED_OUTCOMES: frozenset[Outcome] = frozenset({Outcome.DECOY_TRIPPED})
+"""Alarms. The gateway is fine and so is the backend; the caller did
+something an agent doing its job has no reason to do."""
 
 FAILED_OUTCOMES: frozenset[Outcome] = frozenset(
     {Outcome.TOOL_ERROR, Outcome.BACKEND_ERROR, Outcome.GATEWAY_ERROR}
@@ -181,7 +190,7 @@ def classify_exception(exc: BaseException) -> Outcome:
 
 
 def group_of(outcome: str) -> str:
-    """Bucket an outcome into ``ok`` / ``blocked`` / ``failed`` / ``unknown``.
+    """Bucket an outcome into ``ok`` / ``blocked`` / ``tripped`` / ``failed`` / ``unknown``.
 
     Accepts the raw string form so it can classify rows read back from SQLite,
     including legacy rows whose ``outcome`` is NULL.
@@ -194,4 +203,6 @@ def group_of(outcome: str) -> str:
         return "ok"
     if parsed in BLOCKED_OUTCOMES:
         return "blocked"
+    if parsed in TRIPPED_OUTCOMES:
+        return "tripped"
     return "failed"

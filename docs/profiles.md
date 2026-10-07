@@ -409,6 +409,77 @@ check_trentina_fanout --db /data/trentina.db \
     --hosts-warn 20 --hosts-crit 50 --comms-warn 30 --comms-crit 100
 ```
 
+## Decoy Tools and Honeytokens
+
+Two tripwires with no model behind them (#357). Both are for the case the
+three layers exist to prevent and cannot promise to: an injection got
+through, and the agent is now doing what it says.
+
+**A decoy backend** serves tools that nothing answers. Its URL is
+`decoy://<label>` and its tools are declared in the profile:
+
+```yaml
+profiles:
+  agent1:
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_AGENT1_TOKEN
+    backends:
+      host:
+        url: "decoy://host"
+        decoys:
+          run_shell:
+            description: "Run a shell command on the host."
+            input_schema:
+              type: object
+              properties:
+                command: {type: string}
+          read_file:
+            description: "Read a file from disk."
+            input_schema:
+              type: object
+              properties:
+                path: {type: string}
+            result: "AWS_ACCESS_KEY_ID={honeytoken:aws-key}"
+    honeytokens:
+      aws-key:
+        value_env: AGENT1_HONEY_AWS_KEY
+```
+
+The tools appear in `tools/list` beside the profile's real ones, under the
+same naming rules, with nothing to tell them apart. A call to one returns
+its `result` (default `{"ok": true}`), reaches no network, and is recorded
+with the outcome [`decoy_tripped`](audit-log.md#outcomes), as a detection
+and as a live event. The caller is answered, so that what it does next is
+recorded too. Pick tools the agent's real work never needs: a decoy an
+honest agent calls out of habit is noise.
+
+**A honeytoken** is a fake credential. `value_env` names the variable holding it,
+as `bearer_token_env` does for a token; the value is never in the file. If
+it appears in the arguments of any tool call, to any backend, the call is
+recorded as `decoy_tripped` and refused with `Invalid arguments`, which says
+nothing of why. The audit row names the token's id, never its value.
+
+The gateway checks for a honeytoken; it does not plant one. Put the value
+where only an attacker's instructions lead: a `.env` in the agent's
+workspace, a file a decoy `read_file` returns (`{honeytoken:<id>}` in a
+decoy's `result` is replaced with the value), an entry in the agent's
+memory. A value must be at least 16 characters, printable, with no double
+quote or backslash, and should look like the real thing and be nothing
+else: never a credential that works.
+
+What a trip does not tell you is which document caused it. The audit's
+[`session` and `call_ref`](audit-log.md#joining-rows) columns are what lead
+back along the caller's earlier calls. What the check does not see is in
+[known gap 17](defense-pipeline.md#known-gaps).
+
+An agent is not shown its own trips. `quarantine_stats` leaves them out of
+an agent's call counts and recent destinations; an operator profile sees
+them, with where the call was pointed.
+
+A decoy backend takes `tools_allow`, `tools_deny` and `name_tag`. It takes
+no headers, guards, destinations or L3 briefing: there is no server for
+them to describe.
+
 ## Backend Headers
 
 Some backends require their own authentication. Pass headers per-backend:

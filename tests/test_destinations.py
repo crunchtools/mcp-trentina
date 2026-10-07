@@ -399,6 +399,28 @@ class TestStats:
             "take": {"fetch_hosts": 0, "comms_calls": 1},
         }
 
+    async def test_an_agent_is_not_shown_its_own_decoy_trips(self, gateway: dict) -> None:
+        """#357: the operator reads a trip, with where it was pointed. The
+        agent that made it reads neither the call nor the destination."""
+        db.record_gateway_call(
+            "kage",
+            "slack",
+            "send_message",
+            Outcome.DECOY_TRIPPED.value,
+            0,
+            "honeytoken aws-key",
+            destination="C0EXFIL",
+            destination_kind="param",
+        )
+        with profile_context(gateway["kage"]):
+            mine = await get_trentina_stats()
+        assert "C0EXFIL" not in str(mine)
+        assert "tripped" not in str(mine)
+        with profile_context(gateway["op"]):
+            everyone = await get_trentina_stats()
+        assert everyone["gateway_audit"]["totals"]["tripped"] == 1
+        assert "tripped" in everyone["gateway_audit"]["column_meanings"]
+
 
 # ------------------------------------------------------------ the nagios check
 

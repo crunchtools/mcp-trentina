@@ -562,6 +562,8 @@ def reset_gateway_calls() -> int:
 def get_gateway_call_stats(
     profile: str | None = None,
     days: int = 30,
+    *,
+    trips: bool = True,
 ) -> dict[str, Any]:
     """Per-backend/per-tool call outcomes for allowlist tuning and health checks.
 
@@ -574,6 +576,10 @@ def get_gateway_call_stats(
     A NULL outcome means the row predates the taxonomy. It is reported as
     "unknown" rather than guessed at: back-fitting an outcome from the old
     boolean would reintroduce the ambiguity this change removes.
+
+    ``trips`` False leaves decoy trips (#357) out of every count and drops
+    the ``tripped`` column: what an agent reading its own numbers is shown.
+    A tripwire the caller can read back is one it can be told to avoid.
     """
     db = _read_db()
     cutoff = time.time() - (days * 86400)
@@ -589,25 +595,26 @@ def get_gateway_call_stats(
     else:
         rows = db.execute(query.format(profile_clause=""), (cutoff,)).fetchall()
 
+    every = ("ok", "blocked", "tripped", "failed", "unknown")
+    groups = [group for group in every if trips or group != "tripped"]
     per_tool: dict[tuple[str, str], dict[str, Any]] = {}
-    totals: dict[str, int] = {"ok": 0, "blocked": 0, "failed": 0, "unknown": 0}
+    totals: dict[str, int] = dict.fromkeys(groups, 0)
     for row in rows:
         key = (row["backend"], row["tool"])
+        raw = row["outcome"] or "legacy"
+        group = group_of(raw)
+        if group == "tripped" and not trips:
+            continue
         entry = per_tool.setdefault(
             key,
             {
-                "backend": row["backend"],
-                "tool": row["tool"],
+                "backend": key[0],
+                "tool": key[1],
                 "calls": 0,
-                "ok": 0,
-                "blocked": 0,
-                "failed": 0,
-                "unknown": 0,
+                **dict.fromkeys(groups, 0),
                 "outcomes": {},
             },
         )
-        raw = row["outcome"] or "legacy"
-        group = group_of(raw)
         count = int(row["cnt"])
         entry["calls"] += count
         entry[group] += count

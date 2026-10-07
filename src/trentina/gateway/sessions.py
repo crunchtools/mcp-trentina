@@ -237,7 +237,7 @@ class SessionRegistry:
         affected: list[str] = []
         for pname, profile in all_profiles.items():
             for backend in profile.backends.values():
-                if not backend.is_internal and backend.url == url:
+                if backend.is_remote and backend.url == url:
                     affected.append(pname)
                     break
         return affected

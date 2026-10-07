@@ -64,6 +64,7 @@ from .compress import (
     set_on_compressed,
 )
 from .context import current_call, current_session, profile_context
+from .decoy import canned_result, leaked_tokens, record_trip, served_tools
 from .destination import Destination, destination_of
 from .errors import BackendCallError, BackendResponseTooLargeError
 from .filter import filter_tools
@@ -446,6 +447,16 @@ async def _single_flight_build(profile: Profile, generation: int) -> list[dict[s
         _profile_inflight.pop(profile.name, None)
 
 
+async def _offered_tools(backend_name: str, backend: Backend) -> list[dict[str, Any]]:
+    """A backend's tool list as it is offered, before any filter: ours, the
+    profile's own declarations for a decoy, or the remote server's."""
+    if backend.is_internal:
+        return await list_internal_tools()
+    if backend.is_decoy:
+        return served_tools(backend)
+    return await list_backend_tools(backend_name, backend)
+
+
 async def _build_profile_tools(
     profile: Profile, generation: int | None = None
 ) -> list[dict[str, Any]]:
@@ -477,10 +488,7 @@ async def _build_profile_tools(
         Also measures the list as offered, as allowed, and as shaped, for the
         surface report (``surface.py``).
         """
-        if backend.is_internal:
-            raw_tools = await list_internal_tools()
-        else:
-            raw_tools = await list_backend_tools(backend_name, backend)
+        raw_tools = await _offered_tools(backend_name, backend)
         offered = await asyncio.to_thread(Stage.of, raw_tools)
         # An internal tool takes a mode only if it declares one: the admin
         # tools return gateway-authored data that no mode applies to. Every
@@ -505,7 +513,10 @@ async def _build_profile_tools(
         # from the persisted cache, which is what closes the poisoned-cache
         # ingress. Internal tools are included: their DESCRIPTIONS are still
         # a poisoning surface even though their responses defend themselves.
-        filtered = await scan_tool_list(profile, backend_name, pre_compress, filtered)
+        # A decoy's text is the operator's, from the profile, as a mode's
+        # instructions are the gateway's: configuration, not backend output.
+        if not backend.is_decoy:
+            filtered = await scan_tool_list(profile, backend_name, pre_compress, filtered)
         # After the scan, not before: compaction only deletes, so what the
         # agent reads is a subset of what was judged and no verdict changes.
         if backend.compact_schemas:
@@ -565,7 +576,7 @@ async def _build_profile_tools(
         _profile_tools_cache[profile.name] = aggregated
         record_surface(profile.name, Surface(measured, served))
         _profile_backend_urls[profile.name] = {
-            b.url for b in profile.backends.values() if not b.is_internal
+            b.url for b in profile.backends.values() if b.is_remote
         }
     return aggregated
 
@@ -578,21 +589,26 @@ async def _route_tools_call(profile: Profile, req_id: Any, params: Any) -> dict[
     HTTP edge's 500: a probe that crashes the router is the probe the audit
     most needs to see.
     """
-    if not isinstance(params, dict):
-        _audit(profile.name, "", "", Outcome.DENIED_GUARD, 0, "params must be an object")
-        return _err(req_id, JSONRPC_INVALID_PARAMS, "params must be an object")
     token = _call_audited.set(False)
     # Random, not the JSON-RPC id: that one is the caller's to choose.
     call = current_call.set(secrets.token_hex(8))
     t0 = time.monotonic()
     try:
+        # First, on the request as sent: the params may not be a mapping and
+        # the name may resolve to nothing, and it is still the alarm (#357).
+        leaked = leaked_tokens(profile, params)
+        if leaked:
+            return _leaked(profile, req_id, params, leaked)
+        if not isinstance(params, dict):
+            _audit(profile.name, "", "", Outcome.DENIED_GUARD, 0, "params must be an object")
+            return _err(req_id, JSONRPC_INVALID_PARAMS, "params must be an object")
         return await _tools_call(profile, req_id, params)
     except Exception as exc:
         if not _call_audited.get():
             _audit(
                 profile.name,
                 "",
-                redact_source(params.get("name")),
+                redact_source(params.get("name") if isinstance(params, dict) else None),
                 Outcome.GATEWAY_ERROR,
                 int((time.monotonic() - t0) * 1000),
                 f"unhandled: {exc_kind(exc)}",
@@ -601,6 +617,105 @@ async def _route_tools_call(profile: Profile, req_id: Any, params: Any) -> dict[
     finally:
         current_call.reset(call)
         _call_audited.reset(token)
+
+
+def _tripped(
+    profile: str,
+    backend_name: str,
+    tool_name: str,
+    req_id: Any,
+    what: str,
+    result: dict[str, Any] | None,
+    dest: Destination | None,
+) -> dict[str, Any]:
+    """Record a decoy trip (#357) and answer it with ``result``, or with a
+    refusal that says nothing of why when there is none.
+
+    ``what`` goes in the audit row: the kind of trip and the ids of any
+    planted credentials, never a value.
+    """
+    _audit(
+        profile,
+        backend_name,
+        tool_name,
+        Outcome.DECOY_TRIPPED,
+        0,
+        what,
+        destination=dest,
+        content_digest=wire_digest(result)[1] if result is not None else None,
+    )
+    record_trip(profile, backend_name, tool_name, what)
+    if result is None:
+        return _err(req_id, JSONRPC_INVALID_PARAMS, "Invalid arguments")
+    return _ok(req_id, result)
+
+
+def _decoy_call(
+    profile: Profile,
+    req_id: Any,
+    served_name: object,
+    target: tuple[str, str, Backend],
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Answer a call to a decoy backend, as a real backend's tool would be
+    answered wherever a caller could tell the difference.
+
+    A decoy backend serves the tools it declares and no other, so a name it
+    does not declare is as unknown as one on no backend at all. A declared
+    one refuses a mode or a pre-processor request that a real tool would
+    refuse, in the same words, and is a trip either way: asking for a mode
+    that does not exist must not be a way to map the tripwires.
+    """
+    backend_name, tool_name, backend = target
+    decoy = backend.decoys.get(tool_name)
+    if decoy is None:
+        return _unknown_tool(profile, req_id, served_name)
+    try:
+        resolve_call(profile, backend, tool_name, arguments)
+        resolve_preprocess(profile, backend, tool_name, arguments)
+    except (ModeNotPermittedError, PreProcessNotPermittedError) as exc:
+        _audit(profile.name, backend_name, tool_name, Outcome.DECOY_TRIPPED, 0, str(exc))
+        record_trip(profile.name, backend_name, tool_name, "decoy tool")
+        return _err(req_id, JSONRPC_INVALID_PARAMS, str(exc))
+    answer = canned_result(profile, decoy)
+    return _tripped(profile.name, backend_name, tool_name, req_id, "decoy tool", answer, None)
+
+
+def _leaked(profile: Profile, req_id: Any, params: Any, leaked: list[str]) -> dict[str, Any]:
+    """Answer a request that carries a planted credential, whatever else is
+    wrong with it.
+
+    A tool the profile does not hold, a name that resolves to nothing, and
+    params or arguments that are not a mapping are each refused anyway; with a
+    honeytoken in them they are the alarm, not a denial. Sent to a decoy tool
+    the caller does hold, it gets the decoy's canned answer, so that what the
+    caller does next is recorded too.
+    """
+    what = f"honeytoken {', '.join(leaked)}"
+    sent = params if isinstance(params, dict) else {}
+    served_name, arguments = sent.get("name", ""), sent.get("arguments")
+    target = _resolve_target(profile, served_name)
+    if target is None:
+        return _tripped(profile.name, "", redact_source(served_name), req_id, what, None, None)
+    backend_name, tool_name, backend = target
+    dest: Destination | None = None
+    answer: dict[str, Any] | None = None
+    if isinstance(arguments, dict):
+        dest = destination_of(backend, tool_name, arguments)
+        if dest is not None and leaked_tokens(profile, dest.value):
+            dest = None  # the audit names a planted credential by id, here as everywhere
+        decoy = backend.decoys.get(tool_name)
+        if decoy is not None and filter_tools([{"name": tool_name}], backend):
+            answer = canned_result(profile, decoy)
+    return _tripped(
+        profile.name,
+        backend_name,
+        tool_name,
+        req_id,
+        f"decoy tool, {what}" if answer is not None else what,
+        answer,
+        dest,
+    )
 
 
 def _resolve_target(profile: Profile, served_name: object) -> tuple[str, str, Backend] | None:
@@ -689,6 +804,9 @@ async def _tools_call(profile: Profile, req_id: Any, params: dict[str, Any]) -> 
         message = "arguments must be an object"
         _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, message)
         return _err(req_id, JSONRPC_INVALID_PARAMS, message)
+
+    if backend.is_decoy:
+        return _decoy_call(profile, req_id, served_name, target, arguments)
 
     # The mode resolves BEFORE any guard reads it: an omitted mode becomes
     # the default and is checked as that, never skipped as absent.
@@ -987,6 +1105,10 @@ async def _dispatch(
     requested: Any = None,
 ) -> Any:
     """Forward the call: in-process for internal://, streamable-http otherwise."""
+    if backend.is_decoy:
+        # ``_decoy_call`` answers every one. Reaching here is a bug, and a
+        # bug must not become a request to a URL that is not one.
+        raise BackendCallError(f"backend {backend_name!r} has nothing to call")
     if not backend.is_internal:
         return await call_backend_tool(backend_name, backend, tool_name, forwarded)
 

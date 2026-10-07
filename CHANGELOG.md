@@ -20,6 +20,14 @@ under that name.
   (`docs/benchmark.md`).
 
 ### Added
+- Decoy backends and honeytokens (#357). A backend at `decoy://<label>`
+  serves tools declared in the profile that nothing answers: a call returns
+  a canned result and is recorded with the new outcome `decoy_tripped`, as a
+  detection and a live event. `honeytokens` names planted credentials by
+  environment variable; one appearing in the arguments of any call is
+  recorded the same way and the call refused. Both are exact matches with no
+  model call. `decoy_tripped` is its own group, `tripped`, in the audit
+  totals: neither a block nor a failure (`docs/profiles.md`).
 - The audit can be joined (#357). `gateway_calls` gains `session` (a
   fingerprint of the MCP session), `call_ref` (one random reference per
   call) and `content_digest` (a fingerprint of the delivered result), and

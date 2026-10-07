@@ -252,7 +252,7 @@ async def precompress_all(
         for backend_name, backend in profile.backends.items():
             if not backend.compresses_descriptions:
                 continue
-            if backend.is_internal:
+            if not backend.is_remote:
                 continue
             if backend.url in seen_urls:
                 continue

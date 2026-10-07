@@ -177,7 +177,7 @@ def _compression_surface(profiles: dict[str, Profile]) -> set[tuple[str, bool]]:
         (backend.url, backend.compresses_descriptions)
         for profile in profiles.values()
         for backend in profile.backends.values()
-        if not backend.is_internal
+        if backend.is_remote
     }
 
 
@@ -350,7 +350,7 @@ def _profile_compression_surface(profile: Profile) -> set[tuple[str, bool]]:
     return {
         (backend.url, backend.compresses_descriptions)
         for backend in profile.backends.values()
-        if not backend.is_internal
+        if backend.is_remote
     }
 
 
@@ -550,6 +550,18 @@ async def _apply_own_profile(
                 "this profile's role changed on disk — a role change is "
                 "applied by an operator reload or a restart, never by the "
                 "profile it promotes"
+            ),
+        }
+
+    if before.tripwires() != after.tripwires():
+        # Refused, and in words that name nothing (#357): a decoy the watched
+        # agent could drop, or be told about, by reloading is not one.
+        return {
+            "reloaded": False,
+            "scope": name,
+            "error": (
+                "this profile changed on disk in a way an operator reload or a "
+                "restart applies, never the profile itself"
             ),
         }
 
