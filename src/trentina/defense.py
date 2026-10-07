@@ -149,6 +149,12 @@ class DefenseVerdict:
         return self.flagged_by is not None
 
     @property
+    def verdicts(self) -> dict[str, Any]:
+        """Every layer's opinion as the audit columns hold it: ``flagged_by``,
+        ``l2_label``, ``l2_score``, ``l3_verdict`` and ``l3_risk``."""
+        return _layer_verdicts(self.flagged_by, self.classification, self.l3_assessment)
+
+    @property
     def l2_label(self) -> str | None:
         return self.classification.label if self.classification else None
 
@@ -212,11 +218,12 @@ def _decide(
 
 
 def _layer_verdicts(
-    flagged_by: Layer,
+    flagged_by: Layer | None,
     classification: ClassifierResult | None,
     l3_assessment: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """What every layer said, for the detection row, whichever one is credited."""
+    """What every layer said, whichever one is credited, or none: a detection
+    row always names one, a honeypot's capture row often does not."""
     l3_verdict: str | None = None
     l3_risk: str | None = None
     if l3_assessment is not None and l3_assessment.get("l3_unavailable"):
@@ -230,7 +237,7 @@ def _layer_verdicts(
     elif l3_assessment is not None:
         l3_verdict = "clean"
     return {
-        "flagged_by": flagged_by.value,
+        "flagged_by": flagged_by.value if flagged_by is not None else None,
         "l2_label": classification.label if classification else None,
         "l2_score": classification.score if classification else None,
         "l3_verdict": l3_verdict,

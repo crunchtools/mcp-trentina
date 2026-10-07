@@ -1,6 +1,6 @@
 # trentina Constitution
 
-> **Version:** 2.0.0
+> **Version:** 2.1.0
 > **Ratified:** 2026-09-22
 > **Amended:** 2026-10-06
 > **Status:** Active
@@ -129,6 +129,36 @@ A new L1 stage is a module in `l1/`, wired into `_run_stages` in
 `l1/pipeline.py` with its stats added to `PipelineStats`, and tested on
 normal input and adversarial vectors.
 
+## Decoys and Honeypot Profiles
+
+The layers judge what an agent reads. Two deterministic tripwires watch
+what it then does (#357): a call to a decoy tool (a `decoy://` backend's,
+declared in the profile and answered by nothing), and a planted credential
+(a honeytoken) in the arguments of any call. Both are exact matches with no
+model behind them, recorded as `decoy_tripped`. They are not a layer: they
+read no content, decide nothing about delivery, and a profile without them
+is no less judged. No L3 request carries a tool because of them.
+
+A profile declared `honeypot` belongs to an agent meant to be attacked, and
+three rules hold for it and for no other profile:
+
+- **It holds nothing real.** Only `decoy://` backends and the internal
+  reading tools, by name; no remote backend, no admin tool, no operator
+  role, no other channel in. The loader refuses anything else.
+- **It is told nothing of the verdict.** Its only mode is `flag`, every
+  layer runs, and what is delivered is exactly what was judged, with no
+  warning, report or score attached. The rule that what is delivered is
+  what was judged is unchanged; what is withheld is the gateway's opinion.
+- **What it reads is kept.** The delivered content and every layer's
+  verdict on it go to `honeypot_captures`. This is the one place the gateway
+  stores content a caller chose, and the stated exception to keeping such
+  text out of everything but the audit's `destination`: it is a table, never
+  a log line, written for honeypot profiles only and swept with the audit.
+
+Captured content is not a test fixture. An attack found there enters a
+corpus only rewritten by hand, with every third party's name, handle and
+host replaced (constitution XVII, profile VII).
+
 ## Blocklist Integrity
 
 The SQLite blocklist is writable by deterministic code only. The Q-Agent
@@ -236,3 +266,4 @@ justification in `gourmand-exceptions.toml`.
 | 1.9.0 | 2026-10-05 | PDFs are read (#369): pypdf joins the stack, and runs only in a child process with CPU and memory limits and no credential in its environment |
 | 1.10.0 | 2026-10-05 | Images are read by OCR (#370): rapidocr and opencv-python-headless join the stack, child process only. Matrix media and undecrypted events are not forwarded unread under withhold (#371) |
 | 2.0.0 | 2026-10-06 | Profile changed from MCP Server to Security Gateway (constitution v1.19.1): Trentina is a perimeter, not an API wrapper. Renamed from mcp-trentina to trentina (repo, module, commands, images, service); distributed as a container image only, no PyPI. Threat Model and Known Gaps sections added; Three-Layer Defense becomes Layer Contract; the CI-only build rule is now the profile's |
+| 2.1.0 | 2026-10-06 | Decoys and Honeypot Profiles added (#357): decoy tools and honeytokens are deterministic tripwires, not a layer; a `honeypot` profile holds nothing real, is delivered content with no verdict attached, and its content is kept in `honeypot_captures`, the one stated exception to storing caller-chosen text |

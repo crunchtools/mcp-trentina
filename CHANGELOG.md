@@ -20,6 +20,14 @@ under that name.
   (`docs/benchmark.md`).
 
 ### Added
+- Honeypot profiles (#357). `honeypot: true` marks a profile whose agent is
+  meant to be attacked. The loader lets it hold only `decoy://` backends and
+  the internal reading tools; what it reads is judged by every layer and
+  delivered with no warning, report or score attached; and each delivered
+  document is kept, with every layer's verdict, in a new
+  `honeypot_captures` table that is swept with the audit. The repo
+  constitution (2.1.0) states the three rules and the exception the capture
+  table is (`docs/profiles.md`, `docs/audit-log.md`).
 - Decoy backends and honeytokens (#357). A backend at `decoy://<label>`
   serves tools declared in the profile that nothing answers: a call returns
   a canned result and is recorded with the new outcome `decoy_tripped`, as a

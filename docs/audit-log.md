@@ -55,6 +55,29 @@ ORDER BY c.id;
 The session column is a fingerprint, never the header: a session id is a
 bearer of the session.
 
+### Honeypot captures
+
+A [honeypot profile](profiles.md#honeypot-profiles) is the one caller whose
+delivered content is stored. Each document it reads writes a row to
+`honeypot_captures`: `captured_at`, `profile`, `call_ref`, `source`, the
+five verdict columns a detection carries (`flagged_by`, `l2_label`,
+`l2_score`, `l3_verdict`, `l3_risk`) and `content`. `flagged_by` is NULL
+when no layer flagged the document, which is where a miss is found.
+
+```sql
+-- Documents no layer flagged, after which the agent tripped a decoy.
+SELECT cap.id, cap.source, trip.tool, trip.error_message
+FROM honeypot_captures cap
+JOIN gateway_calls read ON read.call_ref = cap.call_ref
+JOIN gateway_calls trip ON trip.session = read.session AND trip.id > read.id
+WHERE cap.flagged_by IS NULL AND trip.outcome = 'decoy_tripped'
+ORDER BY cap.id;
+```
+
+Captures are hostile text at rest. They are never logged, are swept with
+the audit (`TRENTINA_AUDIT_RETENTION_DAYS`), and are not test fixtures: an
+attack found there enters a corpus only rewritten by hand.
+
 ### Outcomes
 
 `success` alone cannot describe what happened, and reading it as a health
