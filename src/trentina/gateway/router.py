@@ -23,6 +23,7 @@ import copy
 import functools
 import json
 import logging
+import secrets
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -62,7 +63,7 @@ from .compress import (
     maybe_trigger_compression,
     set_on_compressed,
 )
-from .context import profile_context
+from .context import current_call, current_session, profile_context
 from .destination import Destination, destination_of
 from .errors import BackendCallError, BackendResponseTooLargeError
 from .filter import filter_tools
@@ -83,7 +84,15 @@ from .modes_policy import (
 )
 from .names import NAMESPACE_SEP, forget_issued_names, resolve_name, serve_short_names
 from .schema_compact import compact_tool
-from .surface import BackendSurface, Stage, Surface, forget_surface, record_surface, wire_bytes
+from .surface import (
+    BackendSurface,
+    Stage,
+    Surface,
+    forget_surface,
+    record_surface,
+    wire_bytes,
+    wire_digest,
+)
 from .transform import transform_response
 
 if TYPE_CHECKING:
@@ -223,6 +232,7 @@ def _audit(
     bytes_delivered: int | None = None,
     normalized: dict[str, str] | None = None,
     destination: Destination | None = None,
+    content_digest: str | None = None,
 ) -> None:
     _call_audited.set(True)
     # The audit must never fail the call it records, and sqlite3.Error is not
@@ -243,6 +253,9 @@ def _audit(
             normalized=normalized,
             destination=destination.value if destination else None,
             destination_kind=destination.kind.value if destination else None,
+            session=current_session.get() or None,
+            call_ref=current_call.get() or None,
+            content_digest=content_digest,
         )
     except Exception as exc:
         logger.warning("gateway: audit row lost profile=%s err=%s", profile, exc_kind(exc))
@@ -569,6 +582,8 @@ async def _route_tools_call(profile: Profile, req_id: Any, params: Any) -> dict[
         _audit(profile.name, "", "", Outcome.DENIED_GUARD, 0, "params must be an object")
         return _err(req_id, JSONRPC_INVALID_PARAMS, "params must be an object")
     token = _call_audited.set(False)
+    # Random, not the JSON-RPC id: that one is the caller's to choose.
+    call = current_call.set(secrets.token_hex(8))
     t0 = time.monotonic()
     try:
         return await _tools_call(profile, req_id, params)
@@ -584,6 +599,7 @@ async def _route_tools_call(profile: Profile, req_id: Any, params: Any) -> dict[
             )
         raise
     finally:
+        current_call.reset(call)
         _call_audited.reset(token)
 
 
@@ -940,6 +956,7 @@ async def _deliver(
             {"content": call_result.content, "structuredContent": call_result.structured_content},
         )
     )
+    delivered, digest = await asyncio.to_thread(wire_digest, assembled.result)
     _audit(
         profile.name,
         backend_name,
@@ -948,9 +965,10 @@ async def _deliver(
         int((time.monotonic() - t0) * 1000),
         assembled.error,
         bytes_arrived=arrived,
-        bytes_delivered=await asyncio.to_thread(wire_bytes, assembled.result),
+        bytes_delivered=delivered,
         normalized=normalized or None,
         destination=destination,
+        content_digest=digest,
     )
     return assembled.result
 

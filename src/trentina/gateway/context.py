@@ -24,6 +24,12 @@ _current_policy: ContextVar[ModePolicy | None] = ContextVar("current_mode_policy
 _current_preprocess: ContextVar[PreProcessPolicy | None] = ContextVar(
     "current_preprocess_policy", default=None
 )
+# What ties an audit row to the rows written beside it (#357): the MCP
+# session a request arrived on, as a fingerprint, and one random reference
+# per tools/call. Empty outside a gateway request, and for a client that
+# sends no session header.
+current_session: ContextVar[str] = ContextVar("current_session", default="")
+current_call: ContextVar[str] = ContextVar("current_call", default="")
 
 
 @contextmanager

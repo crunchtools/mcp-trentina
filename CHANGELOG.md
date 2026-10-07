@@ -20,6 +20,12 @@ under that name.
   (`docs/benchmark.md`).
 
 ### Added
+- The audit can be joined (#357). `gateway_calls` gains `session` (a
+  fingerprint of the MCP session), `call_ref` (one random reference per
+  call) and `content_digest` (a fingerprint of the delivered result), and
+  `detections` gains the `call_ref` of the call that raised it. What a
+  client did after it was delivered flagged content is now one query
+  (`docs/audit-log.md`). Additive: older rows read NULL.
 - `benchmarks/detonation.py` (#357): the decoy question asked the way an
   attack arrives. A model mid-task is handed a benign document with an
   injection spliced into it as a tool result, with a shell, a file reader,

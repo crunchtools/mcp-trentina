@@ -26,6 +26,34 @@ Each gateway call writes one row to the `gateway_calls` table:
 | `normalized` | text (JSON) | `{"feed_id": "dropped: below minimum 1"}`: arguments dropped before forwarding ([normalization](gateway.md#argument-normalization)) |
 | `destination` | text | `docs.example.org#1a2b3c4d5e6f7a8b`, `q#…`, `C0OPS`: where the call was pointed ([call destinations](profiles.md#call-destinations)). Never logged |
 | `destination_kind` | text | `fetch`, `search`, `param` or `model`; NULL when the tool names no destination |
+| `session` | text | `3f9a…`: a fingerprint of the MCP session the call arrived on. NULL for a client that sends no session header |
+| `call_ref` | text | `8c1d…`: a random reference for this call. A `detections` row raised by the call carries the same one |
+| `content_digest` | text | `b27e…`: a fingerprint of the delivered result. NULL when nothing was delivered |
+
+### Joining rows
+
+A flagged response used to share nothing with the call that carried it but a
+profile, a tool and a clock. Three columns make the audit readable as a
+sequence (#357):
+
+- `detections.call_ref = gateway_calls.call_ref` is the call a detection was
+  raised on.
+- `session`, in `id` order, is what one client did, call by call: what it
+  was delivered, and what it called next.
+- `content_digest` is equal on two calls that delivered the same result, so
+  "this document again" can be read without the audit holding the document.
+
+```sql
+-- What a session did after it was delivered something the layers flagged.
+SELECT c.id, c.backend, c.tool, c.outcome
+FROM gateway_calls c
+JOIN gateway_calls flagged ON flagged.session = c.session AND flagged.id < c.id
+JOIN detections d ON d.call_ref = flagged.call_ref
+ORDER BY c.id;
+```
+
+The session column is a fingerprint, never the header: a session id is a
+bearer of the session.
 
 ### Outcomes
 
