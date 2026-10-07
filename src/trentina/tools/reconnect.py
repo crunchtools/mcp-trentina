@@ -40,6 +40,7 @@ from ..gateway.backend import (
 )
 from ..gateway.circuit import breaker
 from ..gateway.compress import get_profiles
+from ..gateway.decoy import served_tools
 from ..gateway.errors import BackendCallError, ScopeError
 from ..gateway.filter import filter_tools
 from ..gateway.router import invalidate_profile_cache, invalidate_profile_cache_for_backend
@@ -65,7 +66,8 @@ def _safe_endpoint(url: str) -> str:
     echoed back to the caller. The host:port is a non-secret network alias.
     """
     parts = urlsplit(url)
-    if not parts.netloc:
+    # A decoy's URL says what it is, which its caller must not be told (#357).
+    if not parts.netloc or parts.scheme == "decoy":
         return "(redacted)"
     return f"{parts.scheme}://{parts.netloc}"
 
@@ -91,12 +93,21 @@ async def _reset_one(
     not the backend's raw surface, which for a shared backend is somebody
     else's view.
     """
-    if not cfg.is_remote:
+    if cfg.is_internal:
         return {
             **base,
             "reconnected": True,
-            "internal": cfg.is_internal,
+            "internal": True,
             "note": "in-process backend — nothing to reconnect",
+        }
+    if cfg.is_decoy:
+        # As a healthy remote backend answers (#357): a caller must not learn
+        # which of its backends has nothing behind it by asking to reconnect.
+        return {
+            **base,
+            "reconnected": True,
+            "tool_count": len(filter_tools(served_tools(cfg), cfg)),
+            "circuit": breaker.get_state(url).value,
         }
 
     breaker.reset(url)

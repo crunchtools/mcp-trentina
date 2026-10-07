@@ -1773,6 +1773,21 @@ class Profile(BaseModel):
         ),
     )
 
+    def tripwires(self) -> dict[str, Any]:
+        """Everything that makes this profile's decoys what they are (#357),
+        comparable across two loads of the file: an agent may not move any
+        of it by choosing when its own section is reloaded."""
+        return {
+            "honeytokens": {
+                token: planted.value_env for token, planted in self.honeytokens.items()
+            },
+            "decoys": {
+                name: (backend.url, backend.model_dump(include={"decoys"}))
+                for name, backend in self.backends.items()
+                if backend.is_decoy
+            },
+        }
+
     @model_validator(mode="after")
     def honeytokens_are_named_and_every_reference_resolves(self) -> Profile:
         """A decoy result that names a honeytoken the profile lacks would hand

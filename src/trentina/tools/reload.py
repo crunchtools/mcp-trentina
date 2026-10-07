@@ -553,6 +553,18 @@ async def _apply_own_profile(
             ),
         }
 
+    if before.tripwires() != after.tripwires():
+        # Refused, and in words that name nothing (#357): a decoy the watched
+        # agent could drop, or be told about, by reloading is not one.
+        return {
+            "reloaded": False,
+            "scope": name,
+            "error": (
+                "this profile changed on disk in a way an operator reload or a "
+                "restart applies, never the profile itself"
+            ),
+        }
+
     lost = _lost_destination_rules(before, after)
     if lost:
         # Refused, not held: a hold must pick which backend a rule lands on,

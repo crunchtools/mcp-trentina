@@ -26,10 +26,11 @@ pytestmark = pytest.mark.usefixtures("env")
 
 ROUTER = "trentina.gateway.router"
 PLANTED = "AKIAQ7HONEYTOKEN4X2B"
+SCHEMA = {"type": "object", "properties": {"to": {"type": "string"}}}
 DECOYS = {
     "send_email": DecoyTool(
         description="Send an email from the user's account.",
-        input_schema={"type": "object", "properties": {"to": {"type": "string"}}},
+        input_schema=SCHEMA,
     ),
     "read_file": DecoyTool(
         description="Read a file from disk.",
@@ -45,7 +46,7 @@ def _profile() -> Profile:
         auth=AuthConfig(bearer_token_env="TEST"),
         backends={
             "host": Backend(url="decoy://host", decoys=DECOYS),
-            "tickets": Backend(url="http://tickets:8000/mcp"),
+            "tickets": Backend(url="http://tickets:8000/mcp", tools_deny=["delete_*"]),
         },
         honeytokens={"aws-key": Honeytoken(value_env="KAGE_AWS_KEY", value=SecretStr(PLANTED))},
     )
@@ -55,8 +56,9 @@ def _profile() -> Profile:
 
 
 async def _rpc(method: str, params: Any = None) -> dict[str, Any]:
+    real = [{"name": "comment", "description": "Comment on a ticket.", "inputSchema": SCHEMA}]
     with (
-        patch(f"{ROUTER}.list_backend_tools", return_value=[]),
+        patch(f"{ROUTER}.list_backend_tools", return_value=real),
         patch(f"{ROUTER}.scan_tool_list", side_effect=lambda *a: a[3]),
         patch(
             f"{ROUTER}.call_backend_tool",
@@ -77,12 +79,15 @@ def _audit() -> list[tuple[str, str, str, str | None]]:
     return [(r["backend"], r["tool"], r["outcome"], r["error_message"]) for r in rows]
 
 
-async def test_decoy_tools_are_listed_like_any_backends() -> None:
+async def test_a_decoy_tool_is_listed_exactly_as_a_real_one_is() -> None:
     listed = (await _rpc("tools/list"))["result"]["tools"]
     tools = {tool["name"]: tool for tool in listed}
-    assert set(tools) == {"host__send_email", "host__read_file"}
-    assert tools["host__send_email"]["description"] == "Send an email from the user's account."
-    assert "to" in tools["host__send_email"]["inputSchema"]["properties"]
+    assert set(tools) == {"host__send_email", "host__read_file", "tickets__comment"}
+    decoy, real = tools["host__send_email"], tools["tickets__comment"]
+    assert decoy["description"] == "Send an email from the user's account."
+    # Same schema declared, so the same entry served: keys, gateway parameters and all.
+    assert decoy["inputSchema"] == real["inputSchema"]
+    assert set(decoy) == set(real)
     assert "decoy" not in str(listed).lower()
 
 
@@ -203,3 +208,81 @@ async def test_an_agent_reading_its_own_numbers_is_not_shown_its_trips() -> None
     assert [(row["backend"], row["tool"]) for row in mine["by_tool"]] == [("tickets", "comment")]
     assert "decoy_tripped" not in str(mine)
     assert get_gateway_call_stats(profile="kage")["totals"]["tripped"] == 1
+
+
+@pytest.mark.parametrize(
+    ("params", "row"),
+    [
+        ({"name": "tickets__delete_all", "arguments": {"k": PLANTED}}, ("tickets", "delete_all")),
+        ({"name": "tickets__comment", "arguments": [PLANTED]}, ("tickets", "comment")),
+        ({"name": "host__read_file", "arguments": [PLANTED]}, ("host", "read_file")),
+    ],
+    ids=["a tool the profile does not hold", "arguments not a mapping", "a decoy, malformed"],
+)
+async def test_a_planted_credential_trips_on_a_call_that_would_be_refused_anyway(
+    params: dict[str, Any], row: tuple[str, str]
+) -> None:
+    response = await _rpc("tools/call", params)
+    assert response["error"] == {"code": -32602, "message": "Invalid arguments"}
+    assert _audit() == [(*row, "decoy_tripped", "honeytoken aws-key")]
+    assert get_db().execute("SELECT COUNT(*) FROM detections").fetchone()[0] == 1
+
+
+async def test_a_planted_credential_trips_on_a_tool_that_does_not_exist() -> None:
+    await _rpc("tools/call", {"name": "nowhere__send", "arguments": {"k": PLANTED}})
+    ((backend, tool, outcome, message),) = _audit()
+    assert (backend, outcome, message) == ("", "decoy_tripped", "honeytoken aws-key")
+    assert "nowhere" not in tool
+
+
+async def test_an_undeclared_name_on_a_decoy_backend_is_as_unknown_as_any() -> None:
+    on_decoy = await _rpc("tools/call", {"name": "host__nope", "arguments": {}})
+    nowhere = await _rpc("tools/call", {"name": "ghost__nope", "arguments": {}})
+    assert on_decoy["error"]["message"] == "Unknown tool 'host__nope'"
+    assert on_decoy["error"]["code"] == nowhere["error"]["code"]
+    assert not on_decoy["reached_backend"]
+    assert [row[2] for row in _audit()] == ["denied_allowlist", "denied_allowlist"]
+
+
+@pytest.mark.parametrize("extra", [{"trentina_mode": "bogus"}, {"trentina_preprocess": "zzz"}])
+async def test_a_decoy_refuses_what_a_real_tool_refuses_and_trips_anyway(
+    extra: dict[str, str],
+) -> None:
+    decoy = await _rpc("tools/call", {"name": "host__send_email", "arguments": extra})
+    real = await _rpc("tools/call", {"name": "tickets__comment", "arguments": extra})
+    assert decoy["error"] == real["error"]
+    assert [row[2] for row in _audit()] == ["decoy_tripped", "denied_guard"]
+
+
+async def test_a_planted_credential_is_not_kept_as_a_destination() -> None:
+    profile = _profile()
+    profile.backends["tickets"].destination_params = {"comment": "to"}
+    with patch(f"{ROUTER}.call_backend_tool") as backend:
+        await route_jsonrpc(
+            profile,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "tickets__comment", "arguments": {"to": PLANTED}},
+            },
+        )
+    assert not backend.called
+    row = get_db().execute("SELECT destination, outcome FROM gateway_calls").fetchone()
+    assert (row["destination"], row["outcome"]) == (None, "decoy_tripped")
+
+
+def test_a_reload_that_moves_a_tripwire_is_not_the_agents_to_apply() -> None:
+    before, after = _profile(), _profile()
+    assert before.tripwires() == after.tripwires()
+    del after.backends["host"].decoys["read_file"]
+    assert before.tripwires() != after.tripwires()
+    renamed = _profile()
+    renamed.honeytokens["aws-key"].value_env = "OTHER"
+    assert before.tripwires() != renamed.tripwires()
+
+
+async def test_a_planted_credential_trips_when_the_params_are_not_even_a_mapping() -> None:
+    response = await _rpc("tools/call", [PLANTED])
+    assert response["error"]["message"] == "Invalid arguments"
+    assert [(row[2], row[3]) for row in _audit()] == [("decoy_tripped", "honeytoken aws-key")]

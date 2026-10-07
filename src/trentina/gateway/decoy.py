@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..database import record_detection
@@ -29,25 +28,12 @@ from .context import current_call
 from .profile import HONEYTOKEN_REF_RE
 
 if TYPE_CHECKING:
-    from .profile import Backend, Profile
+    from .profile import Backend, DecoyTool, Profile
 
 logger = logging.getLogger(__name__)
 
 LAYER = "decoy"
 """What a trip's detection row and event are credited to, where a layer's name goes."""
-
-
-@dataclass(frozen=True)
-class Trip:
-    """One call that should not have happened.
-
-    ``what`` goes in the audit row: the kind of trip and the ids of any
-    planted credentials, never a value. ``result`` is what the caller is
-    answered with; None refuses the call.
-    """
-
-    what: str
-    result: dict[str, Any] | None
 
 
 def served_tools(backend: Backend) -> list[dict[str, Any]]:
@@ -58,38 +44,37 @@ def served_tools(backend: Backend) -> list[dict[str, Any]]:
     ]
 
 
-def trip_of(
-    profile: Profile, backend: Backend, tool_name: str, arguments: dict[str, Any]
-) -> Trip | None:
-    """Whether this call is one, and what to answer it with.
+def leaked_tokens(profile: Profile, sent: Any) -> list[str]:
+    """The ids of the profile's honeytokens found anywhere in ``sent``.
 
-    A call to a decoy tool is answered with the tool's canned result, so the
-    caller carries on and what it does next is recorded too. A planted
-    credential on its way to a real backend is refused: the backend is real,
-    and so is wherever the arguments were pointed.
+    ``sent`` is a request's whole ``params``, whatever its shape: the check
+    runs before the tool name is resolved or the arguments are known to be a
+    mapping, because a hijacked agent reaching for a tool it was never given
+    is the call most worth an alarm.
     """
-    sent = json.dumps(arguments, ensure_ascii=False, default=str)
-    leaked = sorted(
+    text = json.dumps(sent, ensure_ascii=False, default=str)
+    return sorted(
         token
         for token, planted in profile.honeytokens.items()
-        if planted.value is not None and planted.value.get_secret_value() in sent
+        if planted.value is not None and planted.value.get_secret_value() in text
     )
-    carried = f"honeytoken {', '.join(leaked)}" if leaked else ""
-    decoy = backend.decoys.get(tool_name)
-    if decoy is None:
-        return Trip(carried, None) if leaked else None
+
+
+def canned_result(profile: Profile, decoy: DecoyTool) -> dict[str, Any]:
+    """What a call to ``decoy`` is answered with: its result text, with each
+    ``{honeytoken:<id>}`` replaced by that planted value."""
 
     def planted_value(match: Any) -> str:
         secret = profile.honeytokens[match.group(1)].value
         return secret.get_secret_value() if secret is not None else str(match.group(0))
 
     text = HONEYTOKEN_REF_RE.sub(planted_value, decoy.result)
-    result = {"content": [{"type": "text", "text": text}], "isError": False}
-    return Trip(f"decoy tool, {carried}" if leaked else "decoy tool", result)
+    return {"content": [{"type": "text", "text": text}], "isError": False}
 
 
-def record_trip(profile: str, backend: str, tool: str, trip: Trip) -> None:
-    """A detection row and a live event for ``trip``.
+def record_trip(profile: str, backend: str, tool: str, what: str) -> None:
+    """A detection row and a live event for a trip. ``what`` is the kind of
+    trip and the ids of any planted credentials, never a value.
 
     Never blocklisted: ``blocked`` keys the blocklist, which refuses a source
     on its next fetch, and a tool is not a source. A failed write is logged
@@ -111,6 +96,6 @@ def record_trip(profile: str, backend: str, tool: str, trip: Trip) -> None:
             verdicts={"flagged_by": LAYER},
             call_ref=current_call.get() or None,
         )
-        emit_detection_event(LAYER, source, "high", {"trip": trip.what})
+        emit_detection_event(LAYER, source, "high", {"trip": what})
     except Exception as exc:
         logger.error("decoy: failed to record a trip profile=%s: %s", profile, exc_kind(exc))

@@ -17,7 +17,7 @@ import io
 import pytest
 from pydantic import SecretStr
 
-from trentina.gateway.decoy import trip_of
+from trentina.gateway.decoy import leaked_tokens
 from trentina.gateway.profile import AuthConfig, Backend, Honeytoken, Profile
 from trentina.l1.pipeline import run_l1
 from trentina.unpack.scan import unpack
@@ -153,14 +153,13 @@ def test_a_planted_credential_is_matched_only_as_it_was_planted() -> None:
     """#357: the honeytoken check is a substring match on the call's arguments.
     A caller that encodes or splits the value before sending it is not seen."""
     planted = "AKIAQ7HONEYTOKEN4X2B"
-    backend = Backend(url="http://tickets:8000/mcp")
     profile = Profile(
         name="alpha",
         auth=AuthConfig(bearer_token_env="TEST"),
-        backends={"tickets": backend},
+        backends={"tickets": Backend(url="http://tickets:8000/mcp")},
         honeytokens={"aws-key": Honeytoken(value_env="K", value=SecretStr(planted))},
     )
-    assert trip_of(profile, backend, "comment", {"body": f"the key is {planted}"}) is not None
+    assert leaked_tokens(profile, {"arguments": {"body": f"the key is {planted}"}}) == ["aws-key"]
     encoded = base64.b64encode(planted.encode()).decode()
-    assert trip_of(profile, backend, "comment", {"body": encoded}) is None
-    assert trip_of(profile, backend, "comment", {"a": planted[:10], "b": planted[10:]}) is None
+    assert leaked_tokens(profile, {"arguments": {"body": encoded}}) == []
+    assert leaked_tokens(profile, {"arguments": {"a": planted[:10], "b": planted[10:]}}) == []
