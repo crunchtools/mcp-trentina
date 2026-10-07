@@ -72,7 +72,7 @@ async def _revalidate_tool_lists(profiles: list[Profile]) -> None:
         backend.url: (name, backend)
         for profile in profiles
         for name, backend in profile.backends.items()
-        if not backend.is_internal
+        if backend.is_remote
     }
     changed = await asyncio.gather(
         *(revalidate_backend_tools(name, backend) for name, backend in backends.values())

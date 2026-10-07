@@ -23,7 +23,13 @@ from ..channels import Channel
 from .drivers import build_preprocessors
 from .errors import ProfileConfigError
 from .filter import filter_tools
-from .profile import AlertIngressConfig, MatrixIngressConfig, Profile, is_matrix_user_id
+from .profile import (
+    HONEYTOKEN_MIN_CHARS,
+    AlertIngressConfig,
+    MatrixIngressConfig,
+    Profile,
+    is_matrix_user_id,
+)
 from .transform import resolve
 
 if TYPE_CHECKING:
@@ -91,6 +97,20 @@ def _build_profile(name: str, body: Any) -> Profile:
         raise ProfileConfigError(f"Profile {name!r}: {exc}") from exc
 
     _resolve_bearer_token(name, profile)
+    for token, planted in profile.honeytokens.items():
+        planted.value = _require_env(name, planted.value_env, f"honeytoken {token!r}")
+        value = planted.value.get_secret_value()
+        if len(value) < HONEYTOKEN_MIN_CHARS:
+            raise ProfileConfigError(
+                f"Profile {name!r}: honeytoken {token!r} is shorter than "
+                f"{HONEYTOKEN_MIN_CHARS} characters and would match by chance"
+            )
+        # Arguments are searched as JSON, where these two are written escaped.
+        if not value.isprintable() or set(value) & {'"', "\\"}:
+            raise ProfileConfigError(
+                f"Profile {name!r}: honeytoken {token!r} must be printable, with "
+                "no double quote or backslash"
+            )
     _resolve_oauth_client_secret(name, profile)
     _resolve_oauth_audience(name, profile)
     _resolve_llm_key_secrets(name, profile)

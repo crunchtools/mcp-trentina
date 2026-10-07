@@ -53,7 +53,7 @@ def _flush_named_gateway_wide(backend: str) -> dict[str, Any]:
     urls = {
         cfg.url
         for profile in profiles.values()
-        if (cfg := profile.backends.get(backend)) is not None and not cfg.is_internal
+        if (cfg := profile.backends.get(backend)) is not None and cfg.is_remote
     }
     return {
         "flushed": "backend",

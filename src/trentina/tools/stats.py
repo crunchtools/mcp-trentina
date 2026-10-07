@@ -44,6 +44,11 @@ COLUMN_MEANINGS = {
         "or parameter guard. Working as designed — a security metric, not an "
         "error rate."
     ),
+    "tripped": (
+        "A decoy tool was called, or a planted credential was in a call's "
+        "arguments. Not an error and not a block: read what that caller was "
+        "delivered before it."
+    ),
     "failed": (
         "Something broke: tool-reported error, upstream failure, or a gateway "
         "bug. This is the health signal."

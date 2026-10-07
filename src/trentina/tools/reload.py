@@ -177,7 +177,7 @@ def _compression_surface(profiles: dict[str, Profile]) -> set[tuple[str, bool]]:
         (backend.url, backend.compresses_descriptions)
         for profile in profiles.values()
         for backend in profile.backends.values()
-        if not backend.is_internal
+        if backend.is_remote
     }
 
 
@@ -350,7 +350,7 @@ def _profile_compression_surface(profile: Profile) -> set[tuple[str, bool]]:
     return {
         (backend.url, backend.compresses_descriptions)
         for backend in profile.backends.values()
-        if not backend.is_internal
+        if backend.is_remote
     }
 
 

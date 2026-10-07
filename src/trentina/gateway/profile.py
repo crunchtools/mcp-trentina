@@ -58,6 +58,25 @@ of at load. Keycloak is the intended next entry.
 """
 
 INTERNAL_SCHEME = "internal://"
+#: A backend nothing answers (#357): its tools are declared in the profile,
+#: a call to one returns a canned result, and the call is an alarm.
+DECOY_SCHEME = "decoy://"
+#: What an MCP tool may be called.
+DECOY_TOOL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
+#: Where a decoy's canned result carries one of the profile's honeytokens.
+HONEYTOKEN_REF_RE = re.compile(r"\{honeytoken:([a-z][a-z0-9-]{0,62})\}")
+#: Characters. A planted credential shorter than this turns up in ordinary
+#: arguments by chance, and every chance match is a false alarm.
+HONEYTOKEN_MIN_CHARS = 16
+#: Backend settings that describe a server a decoy does not have.
+_REMOTE_ONLY_FIELDS = (
+    "headers",
+    "parameter_guards",
+    "response_guards",
+    "destination_params",
+    "l3_briefing",
+    "preprocess_tools",
+)
 
 # What a profile may reach through the gateway's own admin tools. Two values,
 # because the only distinction that matters is "my slice" versus "the whole
@@ -426,6 +445,49 @@ class ToolPreProcess(BaseModel):
 MAX_L3_BRIEFING_CHARS = 2000
 
 
+class DecoyTool(BaseModel):
+    """One tool of a ``decoy://`` backend: what the agent is shown, and what
+    a call to it is answered with. Nothing executes."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    description: str = Field(..., min_length=1, max_length=1024)
+    input_schema: dict[str, Any] = Field(
+        default_factory=lambda: {"type": "object", "properties": {}},
+        description="The tool's JSON Schema, served as its inputSchema",
+    )
+    result: str = Field(
+        default='{"ok": true}',
+        max_length=4096,
+        description=(
+            "The text a call returns. {honeytoken:<id>} is replaced with that "
+            "honeytoken's value, so a decoy file reader can hand out a planted key."
+        ),
+    )
+
+
+class Honeytoken(BaseModel):
+    """A planted credential (#357): fake, and found only where an attacker
+    looks. ``value_env`` names the variable that holds it; ``value`` is resolved at
+    load and never serialized. Its appearance in any tool call's arguments is
+    an alarm, and the call is refused."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    value_env: str = Field(..., description="Env var name whose value is the planted credential")
+    value: SecretStr | None = Field(
+        default=None, exclude=True, description="Resolved value (load-time only)"
+    )
+
+    @field_validator("value_env")
+    @classmethod
+    def env_name_is_uppercase_identifier(cls, v: str) -> str:
+        """Reject lowercase, leading digits, or non-identifier characters."""
+        if not ENV_NAME_RE.match(v):
+            raise ValueError(f"honeytoken value_env {v!r} must be an UPPERCASE env-var identifier")
+        return v
+
+
 class Backend(BaseModel):
     """Per-profile backend MCP server config."""
 
@@ -434,8 +496,16 @@ class Backend(BaseModel):
     url: str = Field(
         ...,
         description=(
-            "Backend location. Either a streamable-http URL (http(s)://) or "
-            "internal://<label> for trentina's own in-process tool surface."
+            "Backend location. A streamable-http URL (http(s)://), "
+            "internal://<label> for trentina's own in-process tool surface, or "
+            "decoy://<label> for tools nothing answers (see `decoys`)."
+        ),
+    )
+    decoys: dict[str, DecoyTool] = Field(
+        default_factory=dict,
+        description=(
+            "The tools of a decoy:// backend, by name. A call to one returns its "
+            "canned result and is recorded as decoy_tripped."
         ),
     )
     tools_allow: list[str] = Field(
@@ -620,19 +690,50 @@ class Backend(BaseModel):
         """
         if v.startswith(("http://", "https://")):
             return v
-        if v.startswith(INTERNAL_SCHEME):
-            label = v[len(INTERNAL_SCHEME) :]
-            if not BACKEND_NAME_RE.match(label):
-                raise ValueError(
-                    f"internal:// URL must carry a slug label (^[a-z][a-z0-9-]*$): {v!r}"
-                )
-            return v
-        raise ValueError(f"Backend URL must start with http://, https://, or internal://: {v!r}")
+        for scheme in (INTERNAL_SCHEME, DECOY_SCHEME):
+            if v.startswith(scheme):
+                if not BACKEND_NAME_RE.match(v[len(scheme) :]):
+                    raise ValueError(
+                        f"{scheme} URL must carry a slug label (^[a-z][a-z0-9-]*$): {v!r}"
+                    )
+                return v
+        raise ValueError(
+            f"Backend URL must start with http://, https://, internal:// or decoy://: {v!r}"
+        )
+
+    @model_validator(mode="after")
+    def decoys_belong_to_a_decoy_backend(self) -> Backend:
+        """A decoy backend is its declared tools and nothing else; no other
+        backend declares any."""
+        if not self.is_decoy:
+            if self.decoys:
+                raise ValueError("decoys applies only to a decoy:// backend")
+            return self
+        if not self.decoys:
+            raise ValueError("a decoy:// backend must declare at least one tool under decoys")
+        for name in self.decoys:
+            if not DECOY_TOOL_NAME_RE.match(name):
+                raise ValueError(f"decoy tool name {name!r} is not a valid tool name")
+        given = [field for field in _REMOTE_ONLY_FIELDS if getattr(self, field)]
+        if given:
+            raise ValueError(f"{', '.join(given)} does not apply to a decoy:// backend")
+        return self
 
     @property
     def is_internal(self) -> bool:
         """True when this backend resolves to trentina's in-process tool surface."""
         return self.url.startswith(INTERNAL_SCHEME)
+
+    @property
+    def is_decoy(self) -> bool:
+        """True when nothing answers this backend's tools (#357)."""
+        return self.url.startswith(DECOY_SCHEME)
+
+    @property
+    def is_remote(self) -> bool:
+        """True when this backend is an MCP server reached over HTTP: the only
+        kind with a connection, a tool list of its own and a cache of it."""
+        return not (self.is_internal or self.is_decoy)
 
     @property
     def compresses_descriptions(self) -> bool:
@@ -1664,6 +1765,30 @@ class Profile(BaseModel):
         default=None,
         description="Google-backed OAuth access for this profile (optional)",
     )
+    honeytokens: dict[str, Honeytoken] = Field(
+        default_factory=dict,
+        description=(
+            "Planted credentials, by id (#357). One appearing in the arguments of "
+            "any tool call is recorded as decoy_tripped and the call is refused."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def honeytokens_are_named_and_every_reference_resolves(self) -> Profile:
+        """A decoy result that names a honeytoken the profile lacks would hand
+        the agent the placeholder, which tells it what it is talking to."""
+        for token in self.honeytokens:
+            if not BACKEND_NAME_RE.match(token):
+                raise ValueError(f"honeytoken id {token!r} must match ^[a-z][a-z0-9-]*$")
+        for name, backend in self.backends.items():
+            for tool, decoy in backend.decoys.items():
+                for token in HONEYTOKEN_REF_RE.findall(decoy.result):
+                    if token not in self.honeytokens:
+                        raise ValueError(
+                            f"backend {name!r}: decoy {tool!r} names honeytoken "
+                            f"{token!r}, which the profile does not declare"
+                        )
+        return self
 
     @field_validator("name")
     @classmethod

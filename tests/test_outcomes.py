@@ -27,6 +27,7 @@ from trentina.gateway.errors import BackendCallError
 from trentina.outcomes import (
     BLOCKED_OUTCOMES,
     FAILED_OUTCOMES,
+    TRIPPED_OUTCOMES,
     Outcome,
     classify_exception,
     group_of,
@@ -86,10 +87,16 @@ class TestGrouping:
     def test_every_outcome_lands_in_exactly_one_group(self) -> None:
         """No outcome may be ungrouped, or totals silently stop reconciling."""
         for outcome in Outcome:
-            assert group_of(outcome.value) in {"ok", "blocked", "failed"}
+            assert group_of(outcome.value) in {"ok", "blocked", "tripped", "failed"}
 
     def test_blocked_and_failed_are_disjoint(self) -> None:
         assert not (BLOCKED_OUTCOMES & FAILED_OUTCOMES)
+
+    def test_a_decoy_trip_is_neither_a_block_nor_a_failure(self) -> None:
+        """It is an alarm about the caller: counted apart, so a health read
+        does not page on it and a block count does not absorb it (#357)."""
+        assert group_of(Outcome.DECOY_TRIPPED.value) == "tripped"
+        assert not (TRIPPED_OUTCOMES & (BLOCKED_OUTCOMES | FAILED_OUTCOMES))
 
     def test_legacy_rows_are_unknown_not_guessed(self) -> None:
         """Pre-migration rows must not be back-fitted into a real outcome."""
@@ -108,7 +115,12 @@ class TestAuditRecording:
         cfg = type(
             "Cfg",
             (),
-            {"db_path": str(tmp_path / "audit.db"), "ensure_db_dir": lambda self: None},
+            {
+                "db_path": str(tmp_path / "audit.db"),
+                "ensure_db_dir": lambda self: None,
+                # The first call of a process sweeps, and the sweep reads this.
+                "blocklist_ttl_days": 30,
+            },
         )()
         monkeypatch.setattr(db_mod, "get_config", lambda: cfg)
         yield db_mod
@@ -145,7 +157,7 @@ class TestAuditRecording:
 
         stats = db.get_gateway_call_stats(days=1)
         assert stats["total_calls"] == 3
-        assert stats["totals"] == {"ok": 1, "blocked": 1, "failed": 1, "unknown": 0}
+        assert stats["totals"] == {"ok": 1, "blocked": 1, "tripped": 0, "failed": 1, "unknown": 0}
 
     def test_legacy_rows_report_as_unknown(self, db: Any) -> None:
         """A row written before the migration must not be silently miscounted."""

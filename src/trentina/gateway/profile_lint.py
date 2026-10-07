@@ -99,6 +99,7 @@ _TOKEN_RE = re.compile(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])")
 _REQUIRE_RE = re.compile(r"^TRENTINA_REQUIRE_[A-Z0-9_]+$")
 FETCH_TOOL = "fetch_tool"
 INTERNAL_SCHEME = "internal://"
+DECOY_SCHEME = "decoy://"
 
 
 @dataclass(frozen=True)
@@ -243,7 +244,7 @@ def check_shared_write_backends(profiles_file: dict[str, Any]) -> list[Finding]:
     for profile, body in _profiles(profiles_file).items():
         for backend in (body.get("backends") or {}).values():
             url = str(backend.get("url", "")).rstrip("/")
-            if url.startswith(INTERNAL_SCHEME):
+            if url.startswith((INTERNAL_SCHEME, DECOY_SCHEME)):
                 continue  # in-process, per profile; the shared state inside is #263's
             if any("write" in kinds for kinds in held_tools(backend).values()):
                 writers.setdefault(url, set()).add(profile)
@@ -290,8 +291,9 @@ def _public_inbox(body: dict[str, Any]) -> str | None:
 def _unguarded_outbound(body: dict[str, Any]) -> list[str]:
     found = []
     for name, backend in (body.get("backends") or {}).items():
-        if str(backend.get("url", "")).startswith(INTERNAL_SCHEME):
-            continue  # Trentina's own tools; fetch is the open-fetch leg, and none sends
+        if str(backend.get("url", "")).startswith((INTERNAL_SCHEME, DECOY_SCHEME)):
+            # Trentina's own tools (fetch is the open-fetch leg, none sends), or no tool at all.
+            continue
         for pattern, kinds in held_tools(backend).items():
             if "outbound" in kinds and not _guarded(backend, pattern):
                 found.append(f"{name}:{pattern}")

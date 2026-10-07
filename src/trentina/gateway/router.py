@@ -64,6 +64,7 @@ from .compress import (
     set_on_compressed,
 )
 from .context import current_call, current_session, profile_context
+from .decoy import Trip, record_trip, served_tools, trip_of
 from .destination import Destination, destination_of
 from .errors import BackendCallError, BackendResponseTooLargeError
 from .filter import filter_tools
@@ -446,6 +447,16 @@ async def _single_flight_build(profile: Profile, generation: int) -> list[dict[s
         _profile_inflight.pop(profile.name, None)
 
 
+async def _offered_tools(backend_name: str, backend: Backend) -> list[dict[str, Any]]:
+    """A backend's tool list as it is offered, before any filter: ours, the
+    profile's own declarations for a decoy, or the remote server's."""
+    if backend.is_internal:
+        return await list_internal_tools()
+    if backend.is_decoy:
+        return served_tools(backend)
+    return await list_backend_tools(backend_name, backend)
+
+
 async def _build_profile_tools(
     profile: Profile, generation: int | None = None
 ) -> list[dict[str, Any]]:
@@ -477,10 +488,7 @@ async def _build_profile_tools(
         Also measures the list as offered, as allowed, and as shaped, for the
         surface report (``surface.py``).
         """
-        if backend.is_internal:
-            raw_tools = await list_internal_tools()
-        else:
-            raw_tools = await list_backend_tools(backend_name, backend)
+        raw_tools = await _offered_tools(backend_name, backend)
         offered = await asyncio.to_thread(Stage.of, raw_tools)
         # An internal tool takes a mode only if it declares one: the admin
         # tools return gateway-authored data that no mode applies to. Every
@@ -505,7 +513,10 @@ async def _build_profile_tools(
         # from the persisted cache, which is what closes the poisoned-cache
         # ingress. Internal tools are included: their DESCRIPTIONS are still
         # a poisoning surface even though their responses defend themselves.
-        filtered = await scan_tool_list(profile, backend_name, pre_compress, filtered)
+        # A decoy's text is the operator's, from the profile, as a mode's
+        # instructions are the gateway's: configuration, not backend output.
+        if not backend.is_decoy:
+            filtered = await scan_tool_list(profile, backend_name, pre_compress, filtered)
         # After the scan, not before: compaction only deletes, so what the
         # agent reads is a subset of what was judged and no verdict changes.
         if backend.compact_schemas:
@@ -565,7 +576,7 @@ async def _build_profile_tools(
         _profile_tools_cache[profile.name] = aggregated
         record_surface(profile.name, Surface(measured, served))
         _profile_backend_urls[profile.name] = {
-            b.url for b in profile.backends.values() if not b.is_internal
+            b.url for b in profile.backends.values() if b.is_remote
         }
     return aggregated
 
@@ -601,6 +612,33 @@ async def _route_tools_call(profile: Profile, req_id: Any, params: Any) -> dict[
     finally:
         current_call.reset(call)
         _call_audited.reset(token)
+
+
+def _tripped(
+    profile: str,
+    backend_name: str,
+    tool_name: str,
+    req_id: Any,
+    trip: Trip,
+    dest: Destination | None,
+) -> dict[str, Any]:
+    """Record a decoy trip and answer it: the canned result for a decoy tool,
+    a refusal that says nothing of why for a planted credential on its way
+    to a real backend."""
+    record_trip(profile, backend_name, tool_name, trip)
+    _audit(
+        profile,
+        backend_name,
+        tool_name,
+        Outcome.DECOY_TRIPPED,
+        0,
+        trip.what,
+        destination=dest,
+        content_digest=wire_digest(trip.result)[1] if trip.result is not None else None,
+    )
+    if trip.result is None:
+        return _err(req_id, JSONRPC_INVALID_PARAMS, "Invalid arguments")
+    return _ok(req_id, trip.result)
 
 
 def _resolve_target(profile: Profile, served_name: object) -> tuple[str, str, Backend] | None:
@@ -689,6 +727,12 @@ async def _tools_call(profile: Profile, req_id: Any, params: dict[str, Any]) -> 
         message = "arguments must be an object"
         _audit(profile.name, backend_name, tool_name, Outcome.DENIED_GUARD, 0, message)
         return _err(req_id, JSONRPC_INVALID_PARAMS, message)
+
+    # Before the mode and every guard, on the arguments as sent: a call that
+    # a guard would refuse anyway is still the alarm (#357).
+    trip = trip_of(profile, backend, tool_name, arguments)
+    if trip is not None:
+        return _tripped(profile.name, backend_name, tool_name, req_id, trip, dest)
 
     # The mode resolves BEFORE any guard reads it: an omitted mode becomes
     # the default and is checked as that, never skipped as absent.

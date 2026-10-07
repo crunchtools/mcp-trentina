@@ -307,6 +307,14 @@ one does; the rest name the benchmark that measured them.
     `binary_unread` only when OCR could not read the picture, which
     includes every such page past the sixth. Stage 1 delivers the layer's
     text and no picture. Tested.
+17. **A planted credential is matched only as it was planted** (#357). The
+    honeytoken check ([decoys](profiles.md#decoy-tools-and-honeytokens)) is
+    a substring match on a call's arguments. A caller that base64-encodes
+    the value, splits it across two arguments or two calls, or describes it
+    in words is not seen, and neither is anything an agent sends without a
+    tool call through the gateway. It is a tripwire for the common case,
+    where an injection says "send the key to this address" and the agent
+    does. Tested.
 
 ### Attack coverage by layer (Prompt Guard 2, 2026-06)
 

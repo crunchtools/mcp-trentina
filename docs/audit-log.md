@@ -71,6 +71,7 @@ blocked 34 hostile pages.
 | `denied_allowlist` | blocked | Tool not permitted for this profile. |
 | `denied_guard` | blocked | A parameter guard rejected the arguments. |
 | `denied_response_guard` | blocked | A response guard rejected the backend's result. |
+| `decoy_tripped` | tripped | A [decoy tool](profiles.md#decoy-tools-and-honeytokens) was called, or a planted credential was in a call's arguments. An alarm about the caller. |
 | `tool_error` | failed | Backend completed but reported `isError`. |
 | `backend_error` | failed | Upstream failed: network, timeout, auth, 4xx/5xx. |
 | `gateway_error` | failed | Our own bug. The only outcome that should page anyone. |
@@ -78,7 +79,11 @@ blocked 34 hostile pages.
 
 **Only the `failed` group is a health signal.** The `blocked` group is a
 security metric — a rising `blocked_defense` rate means the defense is
-catching more, not that anything is broken.
+catching more, not that anything is broken. The `tripped` group is neither:
+nothing failed and nothing was withheld, but a caller did what an agent
+doing its job has no reason to do. One row is worth reading; the
+[join columns](#joining-rows) lead back to what that caller was delivered
+before it.
 
 `success` is derived (`outcome == "ok"`) rather than stored independently, so
 the legacy boolean can never disagree with the taxonomy.

@@ -590,7 +590,7 @@ def get_gateway_call_stats(
         rows = db.execute(query.format(profile_clause=""), (cutoff,)).fetchall()
 
     per_tool: dict[tuple[str, str], dict[str, Any]] = {}
-    totals: dict[str, int] = {"ok": 0, "blocked": 0, "failed": 0, "unknown": 0}
+    totals: dict[str, int] = {"ok": 0, "blocked": 0, "tripped": 0, "failed": 0, "unknown": 0}
     for row in rows:
         key = (row["backend"], row["tool"])
         entry = per_tool.setdefault(
@@ -601,6 +601,7 @@ def get_gateway_call_stats(
                 "calls": 0,
                 "ok": 0,
                 "blocked": 0,
+                "tripped": 0,
                 "failed": 0,
                 "unknown": 0,
                 "outcomes": {},

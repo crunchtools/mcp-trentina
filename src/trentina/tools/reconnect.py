@@ -91,11 +91,11 @@ async def _reset_one(
     not the backend's raw surface, which for a shared backend is somebody
     else's view.
     """
-    if cfg.is_internal:
+    if not cfg.is_remote:
         return {
             **base,
             "reconnected": True,
-            "internal": True,
+            "internal": cfg.is_internal,
             "note": "in-process backend — nothing to reconnect",
         }
 
