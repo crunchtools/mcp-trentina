@@ -13,16 +13,19 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from pydantic import SecretStr, ValidationError
 
 from trentina import database
+from trentina.client import fetch_url
 from trentina.database import get_db
 from trentina.gateway import internal
 from trentina.gateway.names import NAMESPACE_SEP
 from trentina.gateway.profile import AuthConfig, Backend, DecoyTool, DefenseConfig, Profile
 from trentina.gateway.router import route_jsonrpc
 
+from .egress_harness import route
 from .mode_harness import MALICIOUS, layers
 
 pytestmark = pytest.mark.usefixtures("env", "real_server")
@@ -99,6 +102,30 @@ async def test_what_a_honeypot_read_is_kept_with_every_layers_verdict(tmp_path: 
     assert flagged["profile"] == "kage"
 
 
+async def test_an_error_page_that_carries_an_attack_is_kept_and_not_explained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 4xx whose body is an injection is an advisory to any other profile:
+    the layers' opinion, with scores. A honeypot gets the plain error."""
+    route(monkeypatch, lambda _request: httpx.Response(403, text=ATTACK))
+
+    async def refused(profile: Profile) -> str:
+        with layers(tmp_path, classification=MALICIOUS) as fakes:
+            fakes.fetch_url.side_effect = fetch_url  # the real fetch, over the mock transport
+            response = await route_jsonrpc(
+                profile, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": FETCH}
+            )
+        return str(response["error"])
+
+    explained = await refused(_profile(honeypot=False))
+    plain = await refused(_profile())
+    assert "advisory" in explained
+    for word in ("advisory", "MALICIOUS", "flagged", "injection", "l2_"):
+        assert word not in plain
+    (kept,) = get_db().execute("SELECT content, l2_label, source FROM honeypot_captures")
+    assert (kept["content"], kept["l2_label"]) == (ATTACK, "MALICIOUS")
+
+
 async def test_no_other_profile_is_captured(tmp_path: Path) -> None:
     with layers(tmp_path, payload=ATTACK, classification=MALICIOUS):
         await _fetch(_profile(honeypot=False))
@@ -126,6 +153,10 @@ def test_a_capture_is_swept_with_the_audit(monkeypatch: pytest.MonkeyPatch) -> N
             "must allow only",
         ),
         ({"role": "operator"}, "role must be agent"),
+        (
+            {"backends": {"host": DECOY.model_copy(update={"modes": ["flag", "redact"]})}},
+            "must not set modes other than flag",
+        ),
         ({"defense": DefenseConfig(enforcement="block")}, "must be flag only"),
         ({"defense": DefenseConfig(enforcement="flag", modes=["flag", "redact"])}, "flag only"),
     ],

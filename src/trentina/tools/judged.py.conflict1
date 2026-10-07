@@ -77,19 +77,6 @@ def _caller() -> tuple[str | None, bool]:
     return scope.name, scope.is_operator
 
 
-def honeypot_caller() -> str | None:
-    """The calling profile's name when it is a honeypot (#357), else None.
-
-    Every place a tool would tell its caller what the layers made of
-    something asks this first: a honeypot is told nothing, and what it was
-    sent is kept instead.
-    """
-    scope = current_scope()
-    if scope is None or scope.profile is None or not scope.profile.honeypot:
-        return None
-    return scope.profile.name
-
-
 def check_blocklist(source: str, mode: Mode) -> bool:
     """Refuse block and flag on a source the caller's blocklist holds.
 
@@ -267,9 +254,9 @@ async def judge_and_deliver(
     original = document if delivered is None else delivered
 
     if mode is Mode.FLAG:
-        honeypot = honeypot_caller()
-        if honeypot is not None:
-            return _deliver_unmarked(call, verdict, original, extras, honeypot)
+        scope = current_scope()
+        if scope is not None and scope.profile is not None and scope.profile.honeypot:
+            return _deliver_unmarked(call, verdict, original, extras, scope.profile.name)
         return _deliver(call, verdict, original, extras)
 
     flagged_by = verdict.flagged_by.value if verdict.flagged_by is not None else None

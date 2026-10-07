@@ -335,7 +335,8 @@ def sweep_old_gateway_calls(db: sqlite3.Connection | None = None) -> int:
     A retention of 0 keeps every row.
 
     Returns:
-        The number of rows removed.
+        The larger of the two tables' removals: a full batch from either
+        means the sweep is not finished.
     """
     days = audit_retention_days()
     if days <= 0:
@@ -480,7 +481,10 @@ def record_capture(
     Args:
         profile: The honeypot profile the content was delivered to.
         source: The URL, query or hash the content came from.
-        content: The payload as every layer read it and as it was delivered.
+        content: The payload the layers were given to judge. For search that
+            is the answer with its sources, of which the caller is delivered
+            the answer; where the unpack stage decoded something, the layers
+            read this decoded.
         verdicts: ``DefenseVerdict.verdicts``; ``flagged_by`` is None when no
             layer flagged it, which is the row a miss is found in.
         call_ref: The delivering call; ``gateway_calls.call_ref`` carries it too.
