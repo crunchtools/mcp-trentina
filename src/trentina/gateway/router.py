@@ -634,7 +634,6 @@ def _tripped(
     ``what`` goes in the audit row: the kind of trip and the ids of any
     planted credentials, never a value.
     """
-    record_trip(profile, backend_name, tool_name, what)
     _audit(
         profile,
         backend_name,
@@ -645,6 +644,7 @@ def _tripped(
         destination=dest,
         content_digest=wire_digest(result)[1] if result is not None else None,
     )
+    record_trip(profile, backend_name, tool_name, what)
     if result is None:
         return _err(req_id, JSONRPC_INVALID_PARAMS, "Invalid arguments")
     return _ok(req_id, result)
@@ -674,8 +674,8 @@ def _decoy_call(
         resolve_call(profile, backend, tool_name, arguments)
         resolve_preprocess(profile, backend, tool_name, arguments)
     except (ModeNotPermittedError, PreProcessNotPermittedError) as exc:
-        record_trip(profile.name, backend_name, tool_name, "decoy tool")
         _audit(profile.name, backend_name, tool_name, Outcome.DECOY_TRIPPED, 0, str(exc))
+        record_trip(profile.name, backend_name, tool_name, "decoy tool")
         return _err(req_id, JSONRPC_INVALID_PARAMS, str(exc))
     answer = canned_result(profile, decoy)
     return _tripped(profile.name, backend_name, tool_name, req_id, "decoy tool", answer, None)
@@ -698,16 +698,23 @@ def _leaked(profile: Profile, req_id: Any, params: Any, leaked: list[str]) -> di
     if target is None:
         return _tripped(profile.name, "", redact_source(served_name), req_id, what, None, None)
     backend_name, tool_name, backend = target
-    dest = destination_of(backend, tool_name, arguments) if isinstance(arguments, dict) else None
-    if dest is not None and leaked_tokens(profile, dest.value):
-        dest = None  # the audit names a planted credential by id, here as everywhere
-    decoy = backend.decoys.get(tool_name)
-    held = isinstance(arguments, dict) and filter_tools([{"name": tool_name}], backend)
-    if decoy is None or not held:
-        return _tripped(profile.name, backend_name, tool_name, req_id, what, None, dest)
-    answer = canned_result(profile, decoy)
+    dest: Destination | None = None
+    answer: dict[str, Any] | None = None
+    if isinstance(arguments, dict):
+        dest = destination_of(backend, tool_name, arguments)
+        if dest is not None and leaked_tokens(profile, dest.value):
+            dest = None  # the audit names a planted credential by id, here as everywhere
+        decoy = backend.decoys.get(tool_name)
+        if decoy is not None and filter_tools([{"name": tool_name}], backend):
+            answer = canned_result(profile, decoy)
     return _tripped(
-        profile.name, backend_name, tool_name, req_id, f"decoy tool, {what}", answer, dest
+        profile.name,
+        backend_name,
+        tool_name,
+        req_id,
+        f"decoy tool, {what}" if answer is not None else what,
+        answer,
+        dest,
     )
 
 

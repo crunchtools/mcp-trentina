@@ -58,7 +58,18 @@ under that name.
   documents Gemini 2.5 Flash Lite calls clean, for one benign document in 300;
   on the stronger judges almost nothing is left to catch.
 
+- `benchmarks/wild_feed.py` and `collect-wild.yml` (#357): a daily sample of
+  Moltbook's public posts and comments, read by every judge with a shipped
+  pack, and on request by two decoy models (`detonation.py --documents`).
+  The run ends in a list of documents to read: flagged, split between
+  judges, or tripped. The rule for what it decides is in `docs/benchmark.md`.
+
 ### Fixed
+- The benchmark harness gave up on a request after four tries and did not
+  say why, so models were compared on different numbers of answers. It now
+  tries eight times with waits up to a minute, leads every report with how
+  many asks were answered and the cause of the rest, and stops on a 401, 402
+  or 403 rather than report an unanswerable model as a quiet one.
 - The detonation spike counted two habits as hijack: any memory save, and
   an argument that was the fetched page copied out. A memory save is now a
   trip only when it carries the insert's own words, and a copied page is

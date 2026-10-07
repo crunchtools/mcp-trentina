@@ -15,7 +15,6 @@ advisories). Everything after the payload exists is here, once.
 
 from __future__ import annotations
 
-import logging
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -26,7 +25,6 @@ from ..defense import DefenseVerdict, Provenance, defend
 from ..errors import BlockedSourceError
 from ..gateway.context import current_call
 from ..gateway.scope import current_scope
-from ..logsafe import exc_kind
 from ..modes import Mode, gaps_of, refusal_body, refusal_reason
 from ..quarantine.agent import quarantine_redact
 from ..report import Disposition, LayerState, build_report
@@ -36,8 +34,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from ..l1.pipeline import PipelineResult
-
-logger = logging.getLogger(__name__)
 
 DEFAULT_REDACT_PROMPT = "Extract the main content."
 """Used when block downgrades an allowlisted source to redact: the agent asked
@@ -336,16 +332,14 @@ def _deliver_unmarked(
     Every layer ran and the verdict is kept, beside the content, in the
     capture table. It is not attached: an agent told "this was flagged" is
     not the reader an attack was written for, and what a honeypot measures
-    is what that reader does. A lost capture is logged and the delivery
-    stands, as a lost detection row does not change a verdict.
+    is what that reader does. The capture is written first: content a
+    honeypot read and nobody can read back is the one outcome it has no use
+    for, so a write that fails fails the call.
     """
+    record_capture(
+        profile, call.source, verdict.content, verdict.verdicts, current_call.get() or None
+    )
     call.emit(verdict, Disposition.DELIVERED, verdict.pipeline.output_size)
-    try:
-        record_capture(
-            profile, call.source, verdict.content, verdict.verdicts, current_call.get() or None
-        )
-    except Exception as exc:
-        logger.error("honeypot: capture lost profile=%s: %s", profile, exc_kind(exc))
     return {"content": original, **(extras or {})}
 
 

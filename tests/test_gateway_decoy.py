@@ -26,6 +26,8 @@ pytestmark = pytest.mark.usefixtures("env")
 
 ROUTER = "trentina.gateway.router"
 PLANTED = "AKIAQ7HONEYTOKEN4X2B"
+# Every audit row, oldest first, as the tests compare them.
+AUDITED = "SELECT backend, tool, outcome, error_message FROM gateway_calls ORDER BY id"
 SCHEMA = {"type": "object", "properties": {"to": {"type": "string"}}}
 DECOYS = {
     "send_email": DecoyTool(
@@ -72,13 +74,6 @@ async def _rpc(method: str, params: Any = None) -> dict[str, Any]:
     return response
 
 
-def _audit() -> list[tuple[str, str, str, str | None]]:
-    rows = get_db().execute(
-        "SELECT backend, tool, outcome, error_message FROM gateway_calls ORDER BY id"
-    )
-    return [(r["backend"], r["tool"], r["outcome"], r["error_message"]) for r in rows]
-
-
 async def test_a_decoy_tool_is_listed_exactly_as_a_real_one_is() -> None:
     listed = (await _rpc("tools/list"))["result"]["tools"]
     tools = {tool["name"]: tool for tool in listed}
@@ -98,7 +93,9 @@ async def test_a_decoy_call_returns_its_canned_result_and_is_an_alarm() -> None:
         "isError": False,
     }
     assert not response["reached_backend"]
-    assert _audit() == [("host", "send_email", "decoy_tripped", "decoy tool")]
+    assert list(map(tuple, get_db().execute(AUDITED))) == [
+        ("host", "send_email", "decoy_tripped", "decoy tool")
+    ]
     row = get_db().execute("SELECT * FROM detections").fetchone()
     call = get_db().execute("SELECT call_ref FROM gateway_calls").fetchone()
     assert (row["source_type"], row["flagged_by"], row["blocked"]) == ("decoy", "decoy", 0)
@@ -115,19 +112,23 @@ async def test_a_planted_credential_bound_for_a_real_backend_is_refused_unexplai
     response = await _rpc("tools/call", {"name": "tickets__comment", "arguments": arguments})
     assert response["error"] == {"code": -32602, "message": "Invalid arguments"}
     assert not response["reached_backend"]
-    assert _audit() == [("tickets", "comment", "decoy_tripped", "honeytoken aws-key")]
-    assert PLANTED not in str(_audit())
+    assert list(map(tuple, get_db().execute(AUDITED))) == [
+        ("tickets", "comment", "decoy_tripped", "honeytoken aws-key")
+    ]
+    assert PLANTED not in str(list(map(tuple, get_db().execute(AUDITED))))
 
 
 async def test_a_planted_credential_sent_to_a_decoy_is_named_in_the_one_row() -> None:
     await _rpc("tools/call", {"name": "host__send_email", "arguments": {"to": PLANTED}})
-    assert _audit() == [("host", "send_email", "decoy_tripped", "decoy tool, honeytoken aws-key")]
+    assert list(map(tuple, get_db().execute(AUDITED))) == [
+        ("host", "send_email", "decoy_tripped", "decoy tool, honeytoken aws-key")
+    ]
 
 
 async def test_an_ordinary_call_to_a_real_backend_is_untouched() -> None:
     response = await _rpc("tools/call", {"name": "tickets__comment", "arguments": {"body": "hi"}})
     assert response["reached_backend"]
-    assert [row[2] for row in _audit()] == ["ok"]
+    assert [row[2] for row in list(map(tuple, get_db().execute(AUDITED)))] == ["ok"]
 
 
 async def test_trips_are_counted_apart_from_blocks_and_failures() -> None:
@@ -224,13 +225,15 @@ async def test_a_planted_credential_trips_on_a_call_that_would_be_refused_anyway
 ) -> None:
     response = await _rpc("tools/call", params)
     assert response["error"] == {"code": -32602, "message": "Invalid arguments"}
-    assert _audit() == [(*row, "decoy_tripped", "honeytoken aws-key")]
+    assert list(map(tuple, get_db().execute(AUDITED))) == [
+        (*row, "decoy_tripped", "honeytoken aws-key")
+    ]
     assert get_db().execute("SELECT COUNT(*) FROM detections").fetchone()[0] == 1
 
 
 async def test_a_planted_credential_trips_on_a_tool_that_does_not_exist() -> None:
     await _rpc("tools/call", {"name": "nowhere__send", "arguments": {"k": PLANTED}})
-    ((backend, tool, outcome, message),) = _audit()
+    ((backend, tool, outcome, message),) = list(map(tuple, get_db().execute(AUDITED)))
     assert (backend, outcome, message) == ("", "decoy_tripped", "honeytoken aws-key")
     assert "nowhere" not in tool
 
@@ -241,7 +244,10 @@ async def test_an_undeclared_name_on_a_decoy_backend_is_as_unknown_as_any() -> N
     assert on_decoy["error"]["message"] == "Unknown tool 'host__nope'"
     assert on_decoy["error"]["code"] == nowhere["error"]["code"]
     assert not on_decoy["reached_backend"]
-    assert [row[2] for row in _audit()] == ["denied_allowlist", "denied_allowlist"]
+    assert [row[2] for row in list(map(tuple, get_db().execute(AUDITED)))] == [
+        "denied_allowlist",
+        "denied_allowlist",
+    ]
 
 
 @pytest.mark.parametrize("extra", [{"trentina_mode": "bogus"}, {"trentina_preprocess": "zzz"}])
@@ -251,7 +257,10 @@ async def test_a_decoy_refuses_what_a_real_tool_refuses_and_trips_anyway(
     decoy = await _rpc("tools/call", {"name": "host__send_email", "arguments": extra})
     real = await _rpc("tools/call", {"name": "tickets__comment", "arguments": extra})
     assert decoy["error"] == real["error"]
-    assert [row[2] for row in _audit()] == ["decoy_tripped", "denied_guard"]
+    assert [row[2] for row in list(map(tuple, get_db().execute(AUDITED)))] == [
+        "decoy_tripped",
+        "denied_guard",
+    ]
 
 
 async def test_a_planted_credential_is_not_kept_as_a_destination() -> None:
@@ -285,4 +294,6 @@ def test_a_reload_that_moves_a_tripwire_is_not_the_agents_to_apply() -> None:
 async def test_a_planted_credential_trips_when_the_params_are_not_even_a_mapping() -> None:
     response = await _rpc("tools/call", [PLANTED])
     assert response["error"]["message"] == "Invalid arguments"
-    assert [(row[2], row[3]) for row in _audit()] == [("decoy_tripped", "honeytoken aws-key")]
+    assert [(row[2], row[3]) for row in list(map(tuple, get_db().execute(AUDITED)))] == [
+        ("decoy_tripped", "honeytoken aws-key")
+    ]
