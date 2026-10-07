@@ -9,19 +9,21 @@ from urllib.parse import urlparse
 
 from ..client import fetch_url
 from ..config import get_config
+from ..database import record_capture
 from ..dbus_interface import emit_request_event
-from ..defense import defend
+from ..defense import defend, layer_verdicts
 from ..errors import (
     BlockedSourceError,
     EgressRefusedError,
     FetchError,
     UnsupportedContentTypeError,
 )
+from ..gateway.context import current_call
 from ..logsafe import exc_kind, redact_source
 from ..modes import Mode
 from ..quarantine.prompts import finding_types
 from ..report import Disposition
-from .judged import check_blocklist, judge_and_deliver
+from .judged import check_blocklist, honeypot_caller, judge_and_deliver
 from .preprocess import prepare
 
 log = logging.getLogger(__name__)
@@ -261,10 +263,26 @@ async def fetch_page(
     """
     blocked = check_blocklist(url, mode)
     start = time.time()
+    honeypot = honeypot_caller()
 
     try:
         content, content_type, hops = await fetch_url(url)
     except FetchError as exc:
+        if honeypot is not None:
+            # An advisory is the layers' opinion of the error body, with their
+            # scores (#357). A honeypot gets the plain error, and the body is
+            # kept with that opinion instead: a 4xx that carries instructions
+            # is an attack like any other.
+            if exc.error_body:
+                judged = await defend(exc.error_body, source=url, source_type="url", record=False)
+                record_capture(
+                    honeypot,
+                    url,
+                    exc.error_body,
+                    layer_verdicts(judged.flagged_by, judged.classification, judged.l3_assessment),
+                    current_call.get() or None,
+                )
+            raise
         advisory = await _handle_fetch_error(url, exc)
         if advisory:
             log.warning("security advisory for %s: %s", redact_source(url), exc_kind(exc))
@@ -273,6 +291,8 @@ async def fetch_page(
     except EgressRefusedError as exc:
         raise _egress_refused(url, mode, exc) from exc
     except UnsupportedContentTypeError as exc:
+        if honeypot is not None:
+            raise  # as above: the refusal without the gateway's reading of it
         log.warning("redirect-to-binary advisory for %s: %s", redact_source(url), exc_kind(exc))
         raise _advisory_refused(url, mode, _handle_content_type_error(exc), start) from None
 

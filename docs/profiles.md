@@ -480,6 +480,50 @@ A decoy backend takes `tools_allow`, `tools_deny` and `name_tag`. It takes
 no headers, guards, destinations or L3 briefing: there is no server for
 them to describe.
 
+### Honeypot profiles
+
+A profile with `honeypot: true` belongs to an agent you want attacked: one
+you point at hostile content to learn what gets past the layers and what a
+hijacked agent reaches for. Three things are different about it.
+
+```yaml
+profiles:
+  decoy-agent:
+    honeypot: true
+    auth:
+      bearer_token_env: TRENTINA_PROFILE_DECOY_AGENT_TOKEN
+    backends:
+      web:
+        url: "internal://web"
+        tools_allow: [fetch_tool, search_tool]
+      host:
+        url: "decoy://host"
+        decoys:
+          run_shell:
+            description: "Run a shell command on the host."
+          send_email:
+            description: "Send an email from the user's account."
+```
+
+- **It holds nothing real.** Its backends are `decoy://` ones and the
+  internal reading tools (`fetch_tool`, `search_tool`, `content_tool`),
+  each allowed by name. A remote backend, an admin tool, the operator role
+  or an ingress channel fails the load.
+- **It is told nothing of the verdict.** Its only mode is `flag`. Every
+  layer runs on what it reads, and the content is delivered as it arrived
+  with no `_trentina_warning`, no scan report and no score. An agent told
+  "this was flagged" is not the reader an attack was written for.
+- **What it reads is kept.** Each delivered document goes to the
+  `honeypot_captures` table whole, with every layer's verdict and the
+  `call_ref` of the call that delivered it
+  ([audit log](audit-log.md#honeypot-captures)).
+
+The agent still knows it is behind a gateway: its tools carry Trentina's
+names and parameters. What it cannot learn is what the layers thought of
+any one document. Give its model key a hard spending cap, and keep the
+host it runs on away from everything else: the gateway makes its tools
+fake, not its container.
+
 ## Backend Headers
 
 Some backends require their own authentication. Pass headers per-backend:

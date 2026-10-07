@@ -302,6 +302,10 @@ class TestEveryLayersVerdict:
         try:
             conn = database.get_db(str(path))
             assert database.is_blocked("https://legacy.test/", None, gateway_wide=True)
+            # What later releases added arrives too: the capture table (#357),
+            # and an index on a column the old audit table gains on the way.
+            tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master")}
+            assert {"honeypot_captures", "idx_gateway_calls_session"} <= tables
             assert not database.is_blocked("https://legacy.test/", "alpha")
             conn.close()
         finally:

@@ -211,12 +211,13 @@ def _decide(
     return None, l1_risk, None
 
 
-def _layer_verdicts(
-    flagged_by: Layer,
+def layer_verdicts(
+    flagged_by: Layer | None,
     classification: ClassifierResult | None,
     l3_assessment: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """What every layer said, for the detection row, whichever one is credited."""
+    """What every layer said, whichever one is credited, or none: a detection
+    row always names one, a honeypot's capture row often does not."""
     l3_verdict: str | None = None
     l3_risk: str | None = None
     if l3_assessment is not None and l3_assessment.get("l3_unavailable"):
@@ -230,7 +231,7 @@ def _layer_verdicts(
     elif l3_assessment is not None:
         l3_verdict = "clean"
     return {
-        "flagged_by": flagged_by.value,
+        "flagged_by": flagged_by.value if flagged_by is not None else None,
         "l2_label": classification.label if classification else None,
         "l2_score": classification.score if classification else None,
         "l3_verdict": l3_verdict,
@@ -518,7 +519,7 @@ async def defend(
                     provenance=provenance.value,
                     blocked=bool(attr.get("blocked", True)),
                     call_ref=attr.get("call_ref"),
-                    verdicts=_layer_verdicts(flagged_by, classification, l3_assessment),
+                    verdicts=layer_verdicts(flagged_by, classification, l3_assessment),
                 )
             emit_detection_event(
                 flagged_by.value,

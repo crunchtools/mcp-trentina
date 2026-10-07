@@ -101,6 +101,24 @@ CREATE TABLE IF NOT EXISTS tool_list_cache (
     tools_json TEXT NOT NULL,
     cached_at TEXT NOT NULL
 );
+
+-- What a honeypot profile was delivered, whole, with every layer's verdict
+-- on it (#357). The one table that holds content: the audit holds none.
+CREATE TABLE IF NOT EXISTS honeypot_captures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    captured_at REAL NOT NULL,
+    profile TEXT NOT NULL,
+    call_ref TEXT,
+    source TEXT NOT NULL,
+    flagged_by TEXT,
+    l2_label TEXT,
+    l2_score REAL,
+    l3_verdict TEXT,
+    l3_risk TEXT,
+    content TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_honeypot_captures_at ON honeypot_captures(captured_at);
 """
 
 
@@ -270,6 +288,10 @@ _SWEEP_BLOCKS = (
     "DELETE FROM detections WHERE rowid IN (SELECT rowid FROM detections "
     "WHERE blocked = 1 AND detected_at <= ? LIMIT ?)"
 )
+_SWEEP_CAPTURES = (
+    "DELETE FROM honeypot_captures WHERE rowid IN "
+    "(SELECT rowid FROM honeypot_captures WHERE captured_at <= ? LIMIT ?)"
+)
 _SWEEP_CALLS = (
     "DELETE FROM gateway_calls WHERE rowid IN "
     "(SELECT rowid FROM gateway_calls WHERE timestamp <= ? LIMIT ?)"
@@ -313,12 +335,18 @@ def sweep_old_gateway_calls(db: sqlite3.Connection | None = None) -> int:
     A retention of 0 keeps every row.
 
     Returns:
-        The number of rows removed.
+        The larger of the two tables' removals: a full batch from either
+        means the sweep is not finished.
     """
     days = audit_retention_days()
     if days <= 0:
         return 0
-    return _delete_batch(db or get_db(), _SWEEP_CALLS, time.time() - days * 86400)
+    conn = db or get_db()
+    cutoff = time.time() - days * 86400
+    # A capture is kept as long as the call row it is read beside, and no longer.
+    return max(
+        _delete_batch(conn, _SWEEP_CALLS, cutoff), _delete_batch(conn, _SWEEP_CAPTURES, cutoff)
+    )
 
 
 def _maybe_sweep(db: sqlite3.Connection) -> None:
@@ -435,6 +463,47 @@ def record_detection(
     )
     db.commit()
     return cursor.lastrowid or 0
+
+
+def record_capture(
+    profile: str,
+    source: str,
+    content: str,
+    verdicts: dict[str, Any],
+    call_ref: str | None = None,
+) -> None:
+    """Keep what a honeypot profile was delivered, with what the layers said of it (#357).
+
+    The only place the gateway stores content a caller chose, and only for a
+    profile declared ``honeypot``: reading what got past the layers is what
+    such a profile is for. Never logged, and swept with the audit.
+
+    Args:
+        profile: The honeypot profile the content was delivered to.
+        source: The URL, query or hash the content came from.
+        content: The payload the layers were given to judge. For search that
+            is the answer with its sources, of which the caller is delivered
+            the answer; where the unpack stage decoded something, the layers
+            read this decoded.
+        verdicts: ``defense.layer_verdicts`` of the verdict; ``flagged_by`` is None when no
+            layer flagged it, which is the row a miss is found in.
+        call_ref: The delivering call; ``gateway_calls.call_ref`` carries it too.
+    """
+    db = get_db()
+    db.execute(
+        "INSERT INTO honeypot_captures (captured_at, profile, call_ref, source, "
+        "flagged_by, l2_label, l2_score, l3_verdict, l3_risk, content) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            time.time(),
+            profile,
+            call_ref,
+            source,
+            *(verdicts.get(column) for column, _ in _VERDICT_COLUMNS),
+            content,
+        ),
+    )
+    db.commit()
 
 
 def get_blocklist_stats(profile: str | None = None) -> dict[str, Any]:

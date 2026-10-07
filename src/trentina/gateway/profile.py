@@ -68,6 +68,10 @@ HONEYTOKEN_REF_RE = re.compile(r"\{honeytoken:([a-z][a-z0-9-]{0,62})\}")
 #: Characters. A planted credential shorter than this turns up in ordinary
 #: arguments by chance, and every chance match is a false alarm.
 HONEYTOKEN_MIN_CHARS = 16
+#: The internal tools a honeypot profile may hold: the ones that read the
+#: outside. Named one by one: an admin tool, or one that reads the gateway's
+#: own disk, is not something to hand an agent meant to be hijacked.
+HONEYPOT_READS = frozenset({"fetch_tool", "search_tool", "content_tool"})
 #: Characters: the longest description and canned result a decoy tool may carry.
 DECOY_DESCRIPTION_MAX_CHARS = 1024
 DECOY_RESULT_MAX_CHARS = 4096
@@ -731,6 +735,16 @@ class Backend(BaseModel):
     def is_decoy(self) -> bool:
         """True when nothing answers this backend's tools (#357)."""
         return self.url.startswith(DECOY_SCHEME)
+
+    def unfit_for_a_honeypot(self) -> str | None:
+        """Why a profile meant to be hijacked may not hold this backend, or None."""
+        if self.is_remote:
+            return "is a real server"
+        if self.is_internal and not set(self.tools_allow) <= HONEYPOT_READS:
+            return f"must allow only {sorted(HONEYPOT_READS)}, each by name"
+        if self.modes not in (None, ["flag"]):
+            return "must not set modes other than flag"
+        return None
 
     @property
     def is_remote(self) -> bool:
@@ -1768,6 +1782,15 @@ class Profile(BaseModel):
         default=None,
         description="Google-backed OAuth access for this profile (optional)",
     )
+    honeypot: bool = Field(
+        default=False,
+        description=(
+            "An agent meant to be attacked (#357). It may hold only decoy:// "
+            "backends and the internal reading tools; what it reads is delivered "
+            "with no verdict attached and kept, with every layer's verdict, in "
+            "the capture table."
+        ),
+    )
     honeytokens: dict[str, Honeytoken] = Field(
         default_factory=dict,
         description=(
@@ -1790,6 +1813,34 @@ class Profile(BaseModel):
                 if backend.is_decoy
             },
         }
+
+    @model_validator(mode="after")
+    def a_honeypot_holds_nothing_real(self) -> Profile:
+        """Refuse a honeypot that could do anything, or be told what it read.
+
+        It is the one profile whose agent is expected to be hijacked, so the
+        rule is structural: no backend that reaches a real system, no admin
+        or disk-reading tool, no operator role, no channel in but its own
+        reading tools. And its only mode is flag, because block would
+        withhold the attack and redact would rewrite it.
+        """
+        if not self.honeypot:
+            return self
+        problems = [
+            f"backend {name!r} {why}"
+            for name, backend in self.backends.items()
+            if (why := backend.unfit_for_a_honeypot()) is not None
+        ]
+        if self.role != "agent":
+            problems.append("role must be agent")
+        if self.defense.enforcement != "flag" or self.defense.modes not in (None, ["flag"]):
+            problems.append("defense.enforcement and defense.modes must be flag only")
+        for channel in ("alert_ingress", "matrix_ingress", "matrix_bridge"):
+            if getattr(self, channel) is not None:
+                problems.append(f"{channel} does not apply")
+        if problems:
+            raise ValueError(f"honeypot profile: {'; '.join(problems)}")
+        return self
 
     @model_validator(mode="after")
     def honeytokens_are_named_and_every_reference_resolves(self) -> Profile:

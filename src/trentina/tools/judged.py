@@ -19,9 +19,9 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from ..config import get_config
-from ..database import is_blocked
+from ..database import is_blocked, record_capture
 from ..dbus_interface import emit_request_event
-from ..defense import DefenseVerdict, Provenance, defend
+from ..defense import DefenseVerdict, Provenance, defend, layer_verdicts
 from ..errors import BlockedSourceError
 from ..gateway.context import current_call
 from ..gateway.scope import current_scope
@@ -71,6 +71,19 @@ def _caller() -> tuple[str | None, bool]:
     if scope is None:
         return None, False
     return scope.name, scope.is_operator
+
+
+def honeypot_caller() -> str | None:
+    """The calling profile's name when it is a honeypot (#357), else None.
+
+    Every place a tool would tell its caller what the layers made of
+    something asks this first: a honeypot is told nothing, and what it was
+    sent is kept instead.
+    """
+    scope = current_scope()
+    if scope is None or scope.profile is None or not scope.profile.honeypot:
+        return None
+    return scope.profile.name
 
 
 def check_blocklist(source: str, mode: Mode) -> bool:
@@ -250,6 +263,9 @@ async def judge_and_deliver(
     original = document if delivered is None else delivered
 
     if mode is Mode.FLAG:
+        honeypot = honeypot_caller()
+        if honeypot is not None:
+            return _deliver_unmarked(call, verdict, original, extras, honeypot)
         return _deliver(call, verdict, original, extras)
 
     flagged_by = verdict.flagged_by.value if verdict.flagged_by is not None else None
@@ -301,6 +317,34 @@ def _deliver(
         response["scan"] = {"layers": "complete", "disposition": disposition.value}
         del response["l1"]
     return response
+
+
+def _deliver_unmarked(
+    call: _Call,
+    verdict: DefenseVerdict,
+    original: Any,
+    extras: Mapping[str, Any] | None,
+    profile: str,
+) -> dict[str, Any]:
+    """A honeypot's delivery (#357): the bytes as they arrived, and nothing
+    of what the layers made of them.
+
+    Every layer ran and the verdict is kept, beside the content, in the
+    capture table. It is not attached: an agent told "this was flagged" is
+    not the reader an attack was written for, and what a honeypot measures
+    is what that reader does. The capture is written first: content a
+    honeypot read and nobody can read back is the one outcome it has no use
+    for, so a write that fails fails the call.
+    """
+    record_capture(
+        profile,
+        call.source,
+        verdict.content,
+        layer_verdicts(verdict.flagged_by, verdict.classification, verdict.l3_assessment),
+        current_call.get() or None,
+    )
+    call.emit(verdict, Disposition.DELIVERED, verdict.pipeline.output_size)
+    return {"content": original, **(extras or {})}
 
 
 def _scripted(extras: Mapping[str, Any] | None) -> bool:
