@@ -18,19 +18,15 @@ open), and anything an agent does without a tool call through the gateway.
 from __future__ import annotations
 
 import json
-import logging
 from typing import TYPE_CHECKING, Any
 
 from ..database import record_detection
 from ..dbus_interface import emit_detection_event
-from ..logsafe import exc_kind
 from .context import current_call
 from .profile import HONEYTOKEN_REF_RE
 
 if TYPE_CHECKING:
     from .profile import Backend, DecoyTool, Profile
-
-logger = logging.getLogger(__name__)
 
 LAYER = "decoy"
 """What a trip's detection row and event are credited to, where a layer's name goes."""
@@ -77,25 +73,23 @@ def record_trip(profile: str, backend: str, tool: str, what: str) -> None:
     trip and the ids of any planted credentials, never a value.
 
     Never blocklisted: ``blocked`` keys the blocklist, which refuses a source
-    on its next fetch, and a tool is not a source. A failed write is logged
-    and the trip stands: the audit row is written separately.
+    on its next fetch, and a tool is not a source. Called after the audit row
+    is written, so a write that fails here loses the detection and not the
+    trip: it surfaces as the gateway error it is.
     """
     source = f"{profile}:{backend}:{tool}"
-    try:
-        record_detection(
-            source_type="decoy",
-            source=source,
-            domain=None,
-            layer1_stats={},
-            risk_level="high",
-            profile=profile,
-            backend=backend,
-            tool=tool,
-            direction="request",
-            blocked=False,
-            verdicts={"flagged_by": LAYER},
-            call_ref=current_call.get() or None,
-        )
-        emit_detection_event(LAYER, source, "high", {"trip": what})
-    except Exception as exc:
-        logger.error("decoy: failed to record a trip profile=%s: %s", profile, exc_kind(exc))
+    record_detection(
+        source_type="decoy",
+        source=source,
+        domain=None,
+        layer1_stats={},
+        risk_level="high",
+        profile=profile,
+        backend=backend,
+        tool=tool,
+        direction="request",
+        blocked=False,
+        verdicts={"flagged_by": LAYER},
+        call_ref=current_call.get() or None,
+    )
+    emit_detection_event(LAYER, source, "high", {"trip": what})

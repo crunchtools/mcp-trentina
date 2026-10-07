@@ -68,6 +68,9 @@ HONEYTOKEN_REF_RE = re.compile(r"\{honeytoken:([a-z][a-z0-9-]{0,62})\}")
 #: Characters. A planted credential shorter than this turns up in ordinary
 #: arguments by chance, and every chance match is a false alarm.
 HONEYTOKEN_MIN_CHARS = 16
+#: Characters: the longest description and canned result a decoy tool may carry.
+DECOY_DESCRIPTION_MAX_CHARS = 1024
+DECOY_RESULT_MAX_CHARS = 4096
 #: Backend settings that describe a server a decoy does not have.
 _REMOTE_ONLY_FIELDS = (
     "headers",
@@ -451,14 +454,14 @@ class DecoyTool(BaseModel):
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
-    description: str = Field(..., min_length=1, max_length=1024)
+    description: str = Field(..., min_length=1, max_length=DECOY_DESCRIPTION_MAX_CHARS)
     input_schema: dict[str, Any] = Field(
         default_factory=lambda: {"type": "object", "properties": {}},
         description="The tool's JSON Schema, served as its inputSchema",
     )
     result: str = Field(
         default='{"ok": true}',
-        max_length=4096,
+        max_length=DECOY_RESULT_MAX_CHARS,
         description=(
             "The text a call returns. {honeytoken:<id>} is replaced with that "
             "honeytoken's value, so a decoy file reader can hand out a planted key."
