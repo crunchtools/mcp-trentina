@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS detections (
     l2_label TEXT,
     l2_score REAL,
     l3_verdict TEXT,
-    l3_risk TEXT
+    l3_risk TEXT,
+    call_ref TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_detections_domain ON detections(domain);
@@ -66,7 +67,10 @@ CREATE TABLE IF NOT EXISTS gateway_calls (
     bytes_delivered INTEGER,
     normalized TEXT,
     destination TEXT,
-    destination_kind TEXT
+    destination_kind TEXT,
+    session TEXT,
+    call_ref TEXT,
+    content_digest TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_gateway_calls_timestamp ON gateway_calls(timestamp);
@@ -180,6 +184,13 @@ _CALL_COLUMNS = (
     # that name no destination.
     ("destination", "TEXT"),
     ("destination_kind", "TEXT"),
+    # What joins a call to the rows around it (#357): a fingerprint of the
+    # MCP session, one random reference per call (detections carry the same
+    # one), and a fingerprint of the delivered result. NULL for older rows,
+    # for a client with no session, and for a call that delivered nothing.
+    ("session", "TEXT"),
+    ("call_ref", "TEXT"),
+    ("content_digest", "TEXT"),
 )
 
 
@@ -200,6 +211,11 @@ def _migrate(db: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_gateway_calls_destination "
         "ON gateway_calls(profile, timestamp) WHERE destination IS NOT NULL"
     )
+    # One session's calls in order: the read a detection is traced back along.
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_gateway_calls_session "
+        "ON gateway_calls(session, id) WHERE session IS NOT NULL"
+    )
     db.commit()
 
     detection_columns = {row["name"] for row in db.execute("PRAGMA table_info(detections)")}
@@ -207,7 +223,8 @@ def _migrate(db: sqlite3.Connection) -> None:
     # which direction the content was moving, and the provenance the L3
     # gate saw). Nullable — 50 web-shaped legacy rows and the standalone
     # tools carry none of this.
-    for column in ("profile", "backend", "tool", "direction", "provenance"):
+    # call_ref (#357) is the gateway_calls row the content arrived on.
+    for column in ("profile", "backend", "tool", "direction", "provenance", "call_ref"):
         if column not in detection_columns:
             db.execute(f"ALTER TABLE detections ADD COLUMN {column} TEXT")
         db.commit()
@@ -372,6 +389,7 @@ def record_detection(
     provenance: str | None = None,
     blocked: bool = True,
     verdicts: dict[str, Any] | None = None,
+    call_ref: str | None = None,
 ) -> int:
     """Record a detection. Returns the detection ID.
 
@@ -383,17 +401,20 @@ def record_detection(
     ``verdicts`` holds every layer's opinion whichever one is credited:
     ``flagged_by``, ``l2_label``, ``l2_score``, ``l3_verdict`` (``flagged``,
     ``clean`` or ``unavailable``) and ``l3_risk``. A missing key is NULL.
+
+    ``call_ref`` is the reference of the gateway call the content arrived
+    on; ``gateway_calls.call_ref`` carries the same one.
     """
     db = get_db()
     now = datetime.now(UTC).isoformat()
     cursor = db.execute(
         "INSERT INTO detections (source_type, source, domain, detected_at, "
         "layer1_stats, qagent_assessment, risk_level, blocked, "
-        "profile, backend, tool, direction, provenance, "
+        "profile, backend, tool, direction, provenance, call_ref, "
         # The last five in _VERDICT_COLUMNS order, which the values below are
         # read in; test_database pins the two orders together.
         "flagged_by, l2_label, l2_score, l3_verdict, l3_risk) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             source_type,
             source,
@@ -408,6 +429,7 @@ def record_detection(
             tool,
             direction,
             provenance,
+            call_ref,
             *((verdicts or {}).get(column) for column, _ in _VERDICT_COLUMNS),
         ),
     )
@@ -475,8 +497,15 @@ def record_gateway_call(
     normalized: dict[str, str] | None = None,
     destination: str | None = None,
     destination_kind: str | None = None,
+    session: str | None = None,
+    call_ref: str | None = None,
+    content_digest: str | None = None,
 ) -> None:
     """Record a gateway tools/call invocation.
+
+    ``session``, ``call_ref`` and ``content_digest`` are what a reader joins
+    on: the calls of one session in ``id`` order, the detections a call
+    raised, and the calls that delivered the same result.
 
     ``destination`` is caller-chosen text (``gateway/destination.py``). It is
     stored here and nowhere else: never logged, never in an error message.
@@ -493,8 +522,8 @@ def record_gateway_call(
         "INSERT INTO gateway_calls "
         "(timestamp, profile, backend, tool, success, duration_ms, error_message, "
         "outcome, bytes_arrived, bytes_delivered, normalized, "
-        "destination, destination_kind) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "destination, destination_kind, session, call_ref, content_digest) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             time.time(),
             profile,
@@ -509,6 +538,9 @@ def record_gateway_call(
             json.dumps(normalized) if normalized else None,
             destination,
             destination_kind,
+            session,
+            call_ref,
+            content_digest,
         ),
     )
     db.commit()

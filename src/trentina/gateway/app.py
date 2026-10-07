@@ -16,6 +16,7 @@ notifications (e.g. ``tools/listChanged`` on circuit breaker state changes).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
@@ -30,6 +31,7 @@ from ..httpbody import STATUS_TOO_LARGE, RequestBodyCap, TooLargeError
 from ..logsafe import exc_kind, exc_where, redact_source, safe_address
 from ..quarantine.classifier import classifier_status
 from .auth import verify_bearer, verify_oauth
+from .context import current_session
 from .errors import (
     AuthError,
     BackendCallError,
@@ -675,6 +677,9 @@ async def _handle_post(
         elif session is not None and session.profile_name != profile_name:
             return _plain(403, "Session does not belong to this profile")
 
+    # Each request is its own task, so the binding ends with it. The id is a
+    # bearer of the session: only its fingerprint reaches the audit.
+    current_session.set(hashlib.sha256(session_id.encode()).hexdigest()[:16] if session_id else "")
     try:
         response = await route_jsonrpc(profile, body)
     except ProfileNotFoundError:

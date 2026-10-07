@@ -71,6 +71,7 @@ from ..quarantine.packs import GENERIC_ID, pack_for
 from ..unpack.child import run_unpacking
 from ..unpack.scan import IMAGE_BLOCK, UNDECODABLE, image_too_small_to_draw, read_blobs
 from ..warning import build_warning
+from .context import current_call
 from .service import judge_of, service_context, service_profile
 
 if TYPE_CHECKING:
@@ -513,6 +514,7 @@ async def scan_tool_response(
             "tool": tool_name,
             "direction": "response",
             "blocked": mode is Mode.BLOCK,
+            "call_ref": current_call.get() or None,
         },
     )
     warning = build_warning(verdict, unscannable=unscannable)

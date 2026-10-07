@@ -23,6 +23,7 @@ from ..database import is_blocked
 from ..dbus_interface import emit_request_event
 from ..defense import DefenseVerdict, Provenance, defend
 from ..errors import BlockedSourceError
+from ..gateway.context import current_call
 from ..gateway.scope import current_scope
 from ..modes import Mode, gaps_of, refusal_body, refusal_reason
 from ..quarantine.agent import quarantine_redact
@@ -243,6 +244,7 @@ async def judge_and_deliver(
             "profile": _caller()[0],
             "tool": call.tool,
             "blocked": mode is Mode.BLOCK and not allowlisted,
+            "call_ref": current_call.get() or None,
         },
     )
     original = document if delivered is None else delivered

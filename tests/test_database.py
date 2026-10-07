@@ -275,6 +275,8 @@ class TestEveryLayersVerdict:
         assert {"flagged_by", "l2_label", "l2_score", "l3_verdict", "l3_risk"} <= columns
         audit = {r["name"] for r in conn.execute("PRAGMA table_info(gateway_calls)")}
         assert {"outcome", "bytes_arrived", "bytes_delivered", "normalized"} <= audit
+        assert {"session", "call_ref", "content_digest"} <= audit
+        assert "call_ref" in columns
         indexes = {r["name"] for r in conn.execute("PRAGMA index_list(detections)")}
         assert "idx_detections_profile_source" in indexes
 

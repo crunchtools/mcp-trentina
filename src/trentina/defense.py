@@ -517,6 +517,7 @@ async def defend(
                     direction=attr.get("direction"),
                     provenance=provenance.value,
                     blocked=bool(attr.get("blocked", True)),
+                    call_ref=attr.get("call_ref"),
                     verdicts=_layer_verdicts(flagged_by, classification, l3_assessment),
                 )
             emit_detection_event(

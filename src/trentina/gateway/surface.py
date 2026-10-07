@@ -15,6 +15,7 @@ The boot warm-up rebuilds every profile, so a restart repopulates it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass, field
@@ -39,6 +40,15 @@ def wire_bytes(obj: Any) -> int:
     return len(
         json.dumps(obj, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8")
     )
+
+
+def wire_digest(obj: Any) -> tuple[int, str]:
+    """``wire_bytes`` of *obj*, and a fingerprint of those bytes: the first
+    16 hex digits of their SHA-256. Two calls that delivered the same result
+    carry the same one, which is what lets an audit read "this document
+    again" without the audit holding the document."""
+    wire = json.dumps(obj, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8")
+    return len(wire), hashlib.sha256(wire).hexdigest()[:16]
 
 
 @dataclass
