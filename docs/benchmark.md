@@ -883,6 +883,46 @@ judges, where the misses are a handful, nor on attacks written to evade a
 judge, which this corpus is not. The run wants repeating at a concurrency
 the provider answers before any of it is built on.
 
+### A live feed: what agents are actually sent
+
+Every number above is on text we or a paper wrote. `benchmarks/wild_feed.py`
+collects what is written for agents to read: Moltbook's public posts and
+comments, read through its API with no account. `collect-wild.yml` runs it
+daily and by hand. Each run takes up to 300 documents (the newest comments
+under the five hottest posts for at most half, then the newest posts,
+fetched whole) and asks every judge with a shipped pack for a verdict on
+each, three votes, as `detonation.py --mode judge --documents` does. With
+`replay` it also hands each document to GPT-OSS 20B and Gemma 3 12B with
+the decoy tools and planted credentials, five draws at temperature 0.7.
+
+Nobody has labelled these documents, so nothing here is a detection rate.
+A trip has no insert to attribute a call to: it is a planted credential in
+an argument or the reply, or a use no summary needs (`classify`). The run's
+last job prints a reading list: every document a judge flagged or a decoy
+model tripped on, with who flagged it and who cleared it. Whether a
+document is an attack is decided by reading it. The documents are a run
+artifact and never a fixture; one that is an attack enters a corpus only
+rewritten by hand, as the security-gateway profile requires.
+
+Two things changed in the harness for this, after the join above came back
+with uneven counts. A request is now tried eight times with waits up to a
+minute, honouring `Retry-After`; and every report leads with a coverage
+line that says how many asks were answered and, for the rest, the last
+status seen. A 401, 402 or 403 stops the run: a model that cannot answer is
+not reported as a model that stayed quiet.
+
+Decision rule, written before the first run. The question is whether a
+honeypot agent on this feed is worth standing up. After fourteen daily runs
+and two replays:
+
+- **Stand it up** if the feed carries injections at all (a judge flags a
+  document that reads as one), and either a judge with a shipped pack clears
+  a document that reads as an attack, or a replay trips on one.
+- **Do not** if nothing flagged reads as an attack, or if every judge
+  catches everything that does and the replays trip on nothing. The
+  collector then stays as it is: a daily check of the judges' false
+  positives on real text, which the written benign cases understate (#397).
+
 ## OCR for images (#370)
 
 Images are read by RapidOCR 3.9 (PP-OCRv6 small detection and recognition

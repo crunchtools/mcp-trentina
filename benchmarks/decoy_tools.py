@@ -78,7 +78,21 @@ from trentina.quarantine.providers.openai import (
 )
 
 HTTP_OK = 200
-RETRIES = 4
+RETRIES = 8
+# Seconds: the longest wait between two tries, whatever the provider asks for.
+BACKOFF_CAP = 60.0
+# Statuses no retry changes: a bad key, an empty balance, a forbidden model.
+REFUSED = frozenset({401, 402, 403})
+
+FAILURES: Counter[str] = Counter()
+"""Why each request that got no answer got none: the last status seen,
+``network`` or ``unparsed``. A run's report leads with it, so uneven
+coverage across models is explained and not just visible."""
+
+
+class ProviderRefusedError(RuntimeError):
+    """The provider will not answer this key at all. Nothing is retried: a
+    run that carried on would report an empty model as a quiet one."""
 
 
 def tool(name: str, description: str, fields: dict[str, str]) -> dict[str, Any]:
@@ -259,7 +273,8 @@ async def send(
     parse: Callable[[dict[str, Any], float], _T | None],
 ) -> _T | None:
     """Send one request and parse its reply. None when the provider gave
-    nothing ``parse`` could use after ``RETRIES``.
+    nothing ``parse`` could use after ``RETRIES``, with the reason counted in
+    ``FAILURES``. Raises ``ProviderRefusedError`` on a status in ``REFUSED``.
 
     ``parse`` gets the reply's JSON and the call's latency in milliseconds;
     returning None asks again. A model that refuses a request setting
@@ -267,6 +282,7 @@ async def send(
     """
     headers = {"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"}
     attempt = 0
+    reason = "network"
     while attempt < RETRIES:
         start = time.perf_counter()
         try:
@@ -276,20 +292,27 @@ async def send(
         except httpx.HTTPError:
             reply = None
         latency = (time.perf_counter() - start) * 1000
-        if reply is not None and reply.status_code == NOT_FOUND and "temperature" in body:
+        status = reply.status_code if reply is not None else 0
+        if status in REFUSED:
+            raise ProviderRefusedError(f"OpenRouter answered {status} for {body['model']}")
+        if status == NOT_FOUND and "temperature" in body:
             # No host takes this model with a temperature: asked again without.
             NO_TEMPERATURE.add(body["model"])
             del body["temperature"]
             continue
-        if reply is not None and reply.status_code == HTTP_OK:
+        reason = str(status) if status else "network"
+        if reply is not None and status == HTTP_OK:
             try:
                 parsed = parse(reply.json(), latency)
             except ValueError:
                 parsed = None  # a 200 whose body is not JSON: asked again
             if parsed is not None:
                 return parsed
-        await asyncio.sleep(2**attempt)
+            reason = "unparsed"
+        asked = reply.headers.get("retry-after", "") if reply is not None else ""
+        await asyncio.sleep(min(float(asked) if asked.isdigit() else 2.0**attempt, BACKOFF_CAP))
         attempt += 1
+    FAILURES[reason] += 1
     return None
 
 
