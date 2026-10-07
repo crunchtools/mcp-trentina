@@ -485,7 +485,7 @@ def record_capture(
             is the answer with its sources, of which the caller is delivered
             the answer; where the unpack stage decoded something, the layers
             read this decoded.
-        verdicts: ``DefenseVerdict.verdicts``; ``flagged_by`` is None when no
+        verdicts: ``defense.layer_verdicts`` of the verdict; ``flagged_by`` is None when no
             layer flagged it, which is the row a miss is found in.
         call_ref: The delivering call; ``gateway_calls.call_ref`` carries it too.
     """

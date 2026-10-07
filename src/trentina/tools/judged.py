@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from ..config import get_config
 from ..database import is_blocked, record_capture
 from ..dbus_interface import emit_request_event
-from ..defense import DefenseVerdict, Provenance, defend
+from ..defense import DefenseVerdict, Provenance, defend, layer_verdicts
 from ..errors import BlockedSourceError
 from ..gateway.context import current_call
 from ..gateway.scope import current_scope
@@ -337,7 +337,11 @@ def _deliver_unmarked(
     for, so a write that fails fails the call.
     """
     record_capture(
-        profile, call.source, verdict.content, verdict.verdicts, current_call.get() or None
+        profile,
+        call.source,
+        verdict.content,
+        layer_verdicts(verdict.flagged_by, verdict.classification, verdict.l3_assessment),
+        current_call.get() or None,
     )
     call.emit(verdict, Disposition.DELIVERED, verdict.pipeline.output_size)
     return {"content": original, **(extras or {})}

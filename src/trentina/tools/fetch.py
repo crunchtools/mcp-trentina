@@ -11,7 +11,7 @@ from ..client import fetch_url
 from ..config import get_config
 from ..database import record_capture
 from ..dbus_interface import emit_request_event
-from ..defense import defend
+from ..defense import defend, layer_verdicts
 from ..errors import (
     BlockedSourceError,
     EgressRefusedError,
@@ -276,7 +276,11 @@ async def fetch_page(
             if exc.error_body:
                 judged = await defend(exc.error_body, source=url, source_type="url", record=False)
                 record_capture(
-                    honeypot, url, exc.error_body, judged.verdicts, current_call.get() or None
+                    honeypot,
+                    url,
+                    exc.error_body,
+                    layer_verdicts(judged.flagged_by, judged.classification, judged.l3_assessment),
+                    current_call.get() or None,
                 )
             raise
         advisory = await _handle_fetch_error(url, exc)

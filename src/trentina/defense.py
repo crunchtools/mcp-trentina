@@ -149,12 +149,6 @@ class DefenseVerdict:
         return self.flagged_by is not None
 
     @property
-    def verdicts(self) -> dict[str, Any]:
-        """Every layer's opinion as the audit columns hold it: ``flagged_by``,
-        ``l2_label``, ``l2_score``, ``l3_verdict`` and ``l3_risk``."""
-        return _layer_verdicts(self.flagged_by, self.classification, self.l3_assessment)
-
-    @property
     def l2_label(self) -> str | None:
         return self.classification.label if self.classification else None
 
@@ -217,7 +211,7 @@ def _decide(
     return None, l1_risk, None
 
 
-def _layer_verdicts(
+def layer_verdicts(
     flagged_by: Layer | None,
     classification: ClassifierResult | None,
     l3_assessment: dict[str, Any] | None,
@@ -525,7 +519,7 @@ async def defend(
                     provenance=provenance.value,
                     blocked=bool(attr.get("blocked", True)),
                     call_ref=attr.get("call_ref"),
-                    verdicts=_layer_verdicts(flagged_by, classification, l3_assessment),
+                    verdicts=layer_verdicts(flagged_by, classification, l3_assessment),
                 )
             emit_detection_event(
                 flagged_by.value,
