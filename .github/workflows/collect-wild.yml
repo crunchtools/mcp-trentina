@@ -7,14 +7,15 @@ name: Collect - wild feed
 # does for the written corpus. The last job prints the documents worth
 # reading: flagged by any judge, split between judges, or tripped.
 #
-# Daily, and by hand. It spends money and runs the checked-out code with
+# By hand only. The daily collection moved to crunchtools/data-collector,
+# which runs on a host, keeps what it collects in a database and asks the
+# shipped pipeline, not this harness. This stays for a one-off sample with
+# the decoy replay. It spends money and runs the checked-out code with
 # OPENROUTER_API_KEY in its environment, so it runs merged code only, as
 # live-l3 in ci.yml does. The collecting job holds no key: it is the one that
 # reads the hostile feed.
 
 on:
-  schedule:
-    - cron: "17 6 * * *"
   workflow_dispatch:
     inputs:
       limit:

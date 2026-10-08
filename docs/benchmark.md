@@ -895,6 +895,14 @@ each, three votes, as `detonation.py --mode judge --documents` does. With
 `replay` it also hands each document to GPT-OSS 20B and Gemma 3 12B with
 the decoy tools and planted credentials, five draws at temperature 0.7.
 
+Since 2026-10-08 the daily collection is
+[crunchtools/data-collector](https://github.com/crunchtools/data-collector):
+it runs on a host, keeps documents and verdicts in SQLite across days, and
+calls the shipped pipeline (`defend`, all three layers) once per judge model
+where this harness asks the judge alone. `collect-wild.yml` remains for a
+one-off sample by hand, with the decoy replay. The first runs made here are
+imported there, marked as the benchmark's.
+
 Nobody has labelled these documents, so nothing here is a detection rate.
 A trip has no insert to attribute a call to: it is a planted credential in
 an argument or the reply, or a use no summary needs (`classify`). The run's
