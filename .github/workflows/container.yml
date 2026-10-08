@@ -69,6 +69,20 @@ jobs:
           build-args: |
             VERSION=${{ steps.pkgver.outputs.version }}
 
+      # crunchtools/data-collector is built FROM this image. Tell it to
+      # rebuild, as every parent image in the fleet tells its children
+      # (crunchtools/constitution, validate-cascade.py).
+      - name: Trigger downstream rebuilds
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.CRUNCHTOOLS_DISPATCH_TOKEN }}
+        run: |
+          for repo in data-collector; do
+            gh api repos/crunchtools/$repo/dispatches \
+              -f event_type=parent-image-updated \
+              || echo "::warning::$repo was not told to rebuild; start its build by hand"
+          done
+
       - name: Run Trivy vulnerability scanner
         continue-on-error: true
         if: github.event_name != 'pull_request'
