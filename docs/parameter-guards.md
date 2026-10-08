@@ -88,9 +88,15 @@ parameter_guards:
 parameter_guards:
   fetch_tool:
     url:
-      allow: ["https://*"]
-      deny: ["*://evil.com/*", "*://localhost*"]
+      allow: ["https*//*"]
+      deny: ["*//evil.example.net/*", "*//localhost*"]
 ```
+
+A pattern cannot hold a colon, so the scheme is matched with `https*//`. The
+pattern is a glob over the whole string, not a parsed URL: `https*//www.example.org/*`
+also matches a URL that only carries that text in its path, and a redirect is
+not checked against it. A guard narrows what an agent asks for; it is not an
+egress control ([Deployment hardening](deployment-hardening.md)).
 
 ### Narrow the mode on one tool
 
