@@ -10,6 +10,10 @@ under that name.
 
 ## [Unreleased]
 
+### Changed
+- The image build tells `crunchtools/data-collector`, which is built on this
+  image, to rebuild.
+
 ## [1.1.0] - 2026-10-08
 
 ### Changed
