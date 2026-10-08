@@ -79,7 +79,8 @@ jobs:
         run: |
           for repo in data-collector; do
             gh api repos/crunchtools/$repo/dispatches \
-              -f event_type=parent-image-updated || true
+              -f event_type=parent-image-updated \
+              || echo "::warning::$repo was not told to rebuild; start its build by hand"
           done
 
       - name: Run Trivy vulnerability scanner
