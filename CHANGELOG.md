@@ -10,6 +10,8 @@ under that name.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-08
+
 ### Changed
 - `benchmarks/decoy_tools.py` (#357) measures decoys named for the attack
   (`exfiltrate_password`, `send_token`, ...) beside the neutral set, under
@@ -65,6 +67,8 @@ under that name.
   judges, or tripped. The rule for what it decides is in `docs/benchmark.md`.
 
 ### Fixed
+- `docs/parameter-guards.md`: the URL example used a colon, which a guard
+  pattern cannot hold, and so failed to load.
 - The benchmark harness gave up on a request after four tries and did not
   say why, so models were compared on different numbers of answers. It now
   tries eight times with waits up to a minute, leads every report with how
