@@ -10,6 +10,16 @@ under that name.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-08
+
+### Added
+- A honeypot profile's decoy calls are kept with their arguments (#410).
+  Each one writes a row to `honeypot_captures` beside what the agent read:
+  `source` `decoy:<backend>:<tool>`, the arguments as JSON, `flagged_by`
+  `decoy`, and the trip's `call_ref`. A planted credential is kept by id. A
+  decoy on any other profile keeps nothing, as before. The repo constitution
+  (2.2.0) states the rule (`docs/audit-log.md`).
+
 ## [1.1.1] - 2026-10-08
 
 ### Fixed

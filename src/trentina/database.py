@@ -103,7 +103,8 @@ CREATE TABLE IF NOT EXISTS tool_list_cache (
 );
 
 -- What a honeypot profile was delivered, whole, with every layer's verdict
--- on it (#357). The one table that holds content: the audit holds none.
+-- on it (#357), and what it sent a decoy tool (#410). The one table that
+-- holds content: the audit holds none.
 CREATE TABLE IF NOT EXISTS honeypot_captures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     captured_at REAL NOT NULL,
