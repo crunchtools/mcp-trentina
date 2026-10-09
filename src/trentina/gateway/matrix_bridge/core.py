@@ -49,7 +49,7 @@ from ...reserved import WARNING_KEY, strip_reserved, with_stripped
 from ...warning import build_warning
 from ..context import profile_context
 from ..matrix_relation import withheld_relation
-from .rewrite import IdMap, referenced_ids, rewrite_content
+from .rewrite import IdMap, judged_view, referenced_ids, rewrite_content
 
 if TYPE_CHECKING:
     from ..profile import MatrixBridgeConfig, Profile
@@ -315,7 +315,7 @@ class ProfileBridge:
             "room_name": str(room.get("name") or ""),
             "room_topic": str(room.get("topic") or ""),
             "peer": str(room.get("peer_displayname") or ""),
-            "content": content,
+            "content": judged_view(content),
         }
         verdict = await self._judge(scanned, room=remote_room, direction="inbound")
         stages.lap("judge")
@@ -562,7 +562,9 @@ class ProfileBridge:
             return
 
         stages = _Stages()
-        verdict = await self._judge({"content": content}, room=remote_room, direction="outbound")
+        verdict = await self._judge(
+            {"content": judged_view(content)}, room=remote_room, direction="outbound"
+        )
         stages.lap("judge")
         reason = self._refusal(verdict)
         if reason is not None:
