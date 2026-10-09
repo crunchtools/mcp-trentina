@@ -54,7 +54,11 @@ field is operator-only: an agent-scope `reload_profiles` holds the block, and
 an operator reload reports that a restart applies it.
 
 **Inbound**, each message, reaction and sticker is judged together with its
-sender's display name and the room's name and topic. A redaction is mirrored
+sender's display name and the room's name and topic. The event IDs its
+relation points at are left out of what is judged, in both directions: each is
+replaced from the mapping table or dropped, never delivered as written, and an
+opaque ID reads to L2 as encoded text (one alone scored 0.79 MALICIOUS on
+`prompt-injection-guard-small`, which withheld every reaction). A redaction is mirrored
 without being judged, because it carries nothing across: its reason text is
 dropped, and it only removes an event that was judged when it arrived. Under `block` a flagged or incompletely judged event becomes a
 `[trentina] withheld: <reason>` notice from the appservice bot, keeping its

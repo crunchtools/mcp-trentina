@@ -10,6 +10,20 @@ under that name.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-08
+
+### Fixed
+- The Matrix bridge withheld the agent's reactions, and would have withheld
+  replies and thread messages in either direction: the event ID a relation
+  points at went to the layers, and L2 reads an opaque ID as encoded text
+  (one alone scored 0.79 MALICIOUS on `prompt-injection-guard-small`; a
+  reaction's three leaves together 0.83 to 0.92). Those IDs are replaced from
+  the mapping table or dropped and are never delivered as written, so
+  `rewrite.judged_view` leaves them out of what is judged. The reaction key,
+  `rel_type` and every text field are judged as before, and an `event_id`
+  that is not a string, which is delivered as it arrived, still is.
+  `PERIMETER_VERSION` is "12".
+
 ### Changed
 - The image build tells `crunchtools/data-collector`, which is built on this
   image, to rebuild.

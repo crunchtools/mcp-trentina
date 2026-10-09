@@ -8,6 +8,11 @@ and nothing it writes was unjudged.
 A relation that points at an event the other side never saw is dropped rather
 than left dangling. The one exception is a reaction: it has no content of its
 own, so a reaction to an unknown event means nothing and is not delivered.
+
+The event IDs a relation points at are therefore never delivered as written:
+each is replaced from the mapping table or dropped. ``judged_view`` leaves
+them out of what the layers read, because an opaque ID reads to a classifier
+as encoded text and withheld every reaction and reply that carried one.
 """
 
 from __future__ import annotations
@@ -82,6 +87,28 @@ def referenced_ids(content: dict[str, Any]) -> tuple[set[str], set[str]]:
         if isinstance(mentions, dict) and isinstance(mentions.get("user_ids"), list):
             users.update(u for u in mentions["user_ids"] if isinstance(u, str))
     return events, users
+
+
+def judged_view(content: dict[str, Any]) -> dict[str, Any]:
+    """``content`` as the layers read it: without the relation's event IDs.
+
+    Leaves out exactly the IDs ``_rewrite_relation`` and ``_rewrite_reply``
+    replace or drop, and only where they would: an ``event_id`` that is not a
+    string is delivered as it arrived, so it stays in and is judged. The
+    reaction ``key``, ``rel_type`` and every other field are judged as sent.
+    """
+    relation = content.get("m.relates_to")
+    if not isinstance(relation, dict):
+        return content
+    seen = _without_event_id(relation)
+    if isinstance(seen.get("m.in_reply_to"), dict):
+        seen["m.in_reply_to"] = _without_event_id(seen["m.in_reply_to"])
+    return {**content, "m.relates_to": seen}
+
+
+def _without_event_id(holder: dict[str, Any]) -> dict[str, Any]:
+    """A copy of ``holder`` minus a string ``event_id``."""
+    return {k: v for k, v in holder.items() if k != "event_id" or not isinstance(v, str)}
 
 
 def user_ids_in(content: dict[str, Any]) -> set[str]:
