@@ -74,6 +74,24 @@ WHERE cap.flagged_by IS NULL AND trip.outcome = 'decoy_tripped'
 ORDER BY cap.id;
 ```
 
+A call the profile makes to a decoy tool writes a row too (#410): `source`
+is `decoy:<backend>:<tool>`, `content` is the call's arguments as JSON, and
+`flagged_by` is `decoy`, so the query above never mistakes it for a
+document. A planted credential in the arguments is kept as
+`{honeytoken:<id>}`. The row carries the trip's `call_ref`:
+
+```sql
+-- What each decoy was asked to do, oldest first.
+SELECT trip.timestamp, trip.tool, sent.content
+FROM gateway_calls trip
+JOIN honeypot_captures sent ON sent.call_ref = trip.call_ref
+WHERE trip.outcome = 'decoy_tripped' AND sent.flagged_by = 'decoy'
+ORDER BY trip.id;
+```
+
+A decoy on a profile that is not a honeypot keeps no arguments: it sits
+beside real tools and may be handed a real user's text.
+
 Captures are hostile text at rest. They are never logged, are swept with
 the audit (`TRENTINA_AUDIT_RETENTION_DAYS`), and are not test fixtures: an
 attack found there enters a corpus only rewritten by hand.

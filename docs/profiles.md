@@ -517,6 +517,9 @@ profiles:
   `honeypot_captures` table whole, with every layer's verdict and the
   `call_ref` of the call that delivered it
   ([audit log](audit-log.md#honeypot-captures)).
+- **What it sends a decoy is kept.** The arguments of each decoy call go to
+  the same table beside the trip: what the agent tried to run, send or pay
+  is what tells its job from an attacker's.
 
 The agent still knows it is behind a gateway: its tools carry Trentina's
 names and parameters. What it cannot learn is what the layers thought of

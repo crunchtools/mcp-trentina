@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from ..database import record_detection
+from ..database import record_capture, record_detection
 from ..dbus_interface import emit_detection_event
 from .context import current_call
 from .profile import HONEYTOKEN_REF_RE
@@ -66,6 +66,44 @@ def canned_result(profile: Profile, decoy: DecoyTool) -> dict[str, Any]:
 
     text = HONEYTOKEN_REF_RE.sub(planted_value, decoy.result)
     return {"content": [{"type": "text", "text": text}], "isError": False}
+
+
+def _by_id(profile: Profile, sent: Any) -> Any:
+    """``sent`` with each planted value in a string or a key replaced by
+    ``{honeytoken:<id>}``. Done before serializing: JSON escapes a quote or a
+    backslash, and a value holding one would not match its own escaped form."""
+    if isinstance(sent, str):
+        for token, planted in profile.honeytokens.items():
+            if planted.value is not None:
+                sent = sent.replace(planted.value.get_secret_value(), f"{{honeytoken:{token}}}")
+        return sent
+    if isinstance(sent, dict):
+        return {_by_id(profile, key): _by_id(profile, value) for key, value in sent.items()}
+    if isinstance(sent, list):
+        return [_by_id(profile, item) for item in sent]
+    return sent
+
+
+def keep_arguments(profile: Profile, backend: str, tool: str, arguments: Any) -> None:
+    """Keep what a honeypot profile sent a decoy tool, beside what it read (#410).
+
+    Whether a trip was the agent's job or an attacker's turns on what was
+    asked for, and the audit row keeps the tool's name alone. Honeypot
+    profiles only: a decoy on any other profile may be handed real text. A
+    name the backend does not declare is no decoy and keeps nothing. A
+    planted credential is kept by id, as the audit names it. The row carries
+    the trip's ``call_ref`` and ``flagged_by`` of this tripwire, so a search
+    for documents no layer flagged never returns it.
+    """
+    if not profile.honeypot or tool not in profile.backends[backend].decoys:
+        return
+    record_capture(
+        profile.name,
+        f"decoy:{backend}:{tool}",
+        json.dumps(_by_id(profile, arguments), ensure_ascii=False, default=str),
+        {"flagged_by": LAYER},
+        current_call.get() or None,
+    )
 
 
 def record_trip(profile: str, backend: str, tool: str, what: str) -> None:

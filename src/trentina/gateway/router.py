@@ -64,7 +64,7 @@ from .compress import (
     set_on_compressed,
 )
 from .context import current_call, current_session, profile_context
-from .decoy import canned_result, leaked_tokens, record_trip, served_tools
+from .decoy import canned_result, keep_arguments, leaked_tokens, record_trip, served_tools
 from .destination import Destination, destination_of
 from .errors import BackendCallError, BackendResponseTooLargeError
 from .filter import filter_tools
@@ -707,7 +707,7 @@ def _leaked(profile: Profile, req_id: Any, params: Any, leaked: list[str]) -> di
         decoy = backend.decoys.get(tool_name)
         if decoy is not None and filter_tools([{"name": tool_name}], backend):
             answer = canned_result(profile, decoy)
-    return _tripped(
+    response = _tripped(
         profile.name,
         backend_name,
         tool_name,
@@ -716,6 +716,9 @@ def _leaked(profile: Profile, req_id: Any, params: Any, leaked: list[str]) -> di
         answer,
         dest,
     )
+    if answer is not None:
+        keep_arguments(profile, backend_name, tool_name, arguments)
+    return response
 
 
 def _resolve_target(profile: Profile, served_name: object) -> tuple[str, str, Backend] | None:
@@ -806,7 +809,11 @@ async def _tools_call(profile: Profile, req_id: Any, params: dict[str, Any]) -> 
         return _err(req_id, JSONRPC_INVALID_PARAMS, message)
 
     if backend.is_decoy:
-        return _decoy_call(profile, req_id, served_name, target, arguments)
+        response = _decoy_call(profile, req_id, served_name, target, arguments)
+        # After the audit row, as the detection is: a write that fails here
+        # loses what was asked for and not the trip.
+        keep_arguments(profile, backend_name, tool_name, arguments)
+        return response
 
     # The mode resolves BEFORE any guard reads it: an omitted mode becomes
     # the default and is checked as that, never skipped as absent.
