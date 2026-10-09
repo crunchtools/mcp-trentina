@@ -1,8 +1,8 @@
 # trentina Constitution
 
-> **Version:** 2.1.0
+> **Version:** 2.2.0
 > **Ratified:** 2026-09-22
-> **Amended:** 2026-10-06
+> **Amended:** 2026-10-08
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.21.0
 > **Profile:** Security Gateway
@@ -149,11 +149,16 @@ three rules hold for it and for no other profile:
   layer runs, and what is delivered is exactly what was judged, with no
   warning, report or score attached. The rule that what is delivered is
   what was judged is unchanged; what is withheld is the gateway's opinion.
-- **What it reads is kept.** The delivered content and every layer's
-  verdict on it go to `honeypot_captures`. This is the one place the gateway
-  stores content a caller chose, and the stated exception to keeping such
-  text out of everything but the audit's `destination`: it is a table, never
-  a log line, written for honeypot profiles only and swept with the audit.
+- **What it reads and what it sends a decoy are kept.** The delivered
+  content and every layer's verdict on it go to `honeypot_captures`, and so
+  do the arguments of each call it makes to a decoy tool (#410): whether a
+  trip was the agent's job or an attacker's turns on what was asked for. A
+  planted credential in those arguments is kept by id, never by value. This
+  is the one place the gateway stores content a caller chose, and the stated
+  exception to keeping such text out of everything but the audit's
+  `destination`: it is a table, never a log line, written for honeypot
+  profiles only and swept with the audit. A decoy on any other profile keeps
+  no arguments.
 
 Captured content is not a test fixture. An attack found there enters a
 corpus only rewritten by hand, with every third party's name, handle and
@@ -267,3 +272,4 @@ justification in `gourmand-exceptions.toml`.
 | 1.10.0 | 2026-10-05 | Images are read by OCR (#370): rapidocr and opencv-python-headless join the stack, child process only. Matrix media and undecrypted events are not forwarded unread under withhold (#371) |
 | 2.0.0 | 2026-10-06 | Profile changed from MCP Server to Security Gateway (constitution v1.19.1): Trentina is a perimeter, not an API wrapper. Renamed from mcp-trentina to trentina (repo, module, commands, images, service); distributed as a container image only, no PyPI. Threat Model and Known Gaps sections added; Three-Layer Defense becomes Layer Contract; the CI-only build rule is now the profile's |
 | 2.1.0 | 2026-10-06 | Decoys and Honeypot Profiles added (#357): decoy tools and honeytokens are deterministic tripwires, not a layer; a `honeypot` profile holds nothing real, is delivered content with no verdict attached, and its content is kept in `honeypot_captures`, the one stated exception to storing caller-chosen text |
+| 2.2.0 | 2026-10-08 | A honeypot profile's decoy-call arguments are kept in `honeypot_captures` beside what it read, planted credentials by id (#410); no other profile's are |
