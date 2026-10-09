@@ -100,14 +100,15 @@ def judged_view(content: dict[str, Any]) -> dict[str, Any]:
     relation = content.get("m.relates_to")
     if not isinstance(relation, dict):
         return content
-    view = copy.deepcopy(content)
-    seen = view["m.relates_to"]
-    if isinstance(seen.get("event_id"), str):
-        del seen["event_id"]
-    reply = seen.get("m.in_reply_to")
-    if isinstance(reply, dict) and isinstance(reply.get("event_id"), str):
-        del reply["event_id"]
-    return view
+    seen = _without_event_id(relation)
+    if isinstance(seen.get("m.in_reply_to"), dict):
+        seen["m.in_reply_to"] = _without_event_id(seen["m.in_reply_to"])
+    return {**content, "m.relates_to": seen}
+
+
+def _without_event_id(holder: dict[str, Any]) -> dict[str, Any]:
+    """A copy of ``holder`` minus a string ``event_id``."""
+    return {k: v for k, v in holder.items() if k != "event_id" or not isinstance(v, str)}
 
 
 def user_ids_in(content: dict[str, Any]) -> set[str]:
