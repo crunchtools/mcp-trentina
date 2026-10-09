@@ -2,7 +2,7 @@
 
 > **Version:** 2.2.0
 > **Ratified:** 2026-09-22
-> **Amended:** 2026-10-06
+> **Amended:** 2026-10-08
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.21.0
 > **Profile:** Security Gateway
