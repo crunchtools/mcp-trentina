@@ -61,7 +61,7 @@ from .l1.pipeline import (
     run_l1,
 )
 from .logsafe import exc_kind, exc_where, redact_source
-from .quarantine.agent import quarantine_detect
+from .quarantine.agent import get_current_profile, llm_available, quarantine_detect
 from .quarantine.classifier import (
     ClassifierResult,
     classify_async,
@@ -166,9 +166,43 @@ def _l3_provider_configured(defense: DefenseConfig | None) -> bool:
     as ``l3_unavailable`` in the verdict, and block and redact refuse on it
     unless ``TRENTINA_REQUIRE_L3=false``.
     """
-    # A profile that overrides defense.provider brings its own key
-    # (validated at profile load) or is keyless ollama.
+    # A bound profile is asked the way the call itself resolves it (#407):
+    # its own provider and its own key for it. Until then this read the
+    # global key first, so a gateway holding only per-profile keys had no L3
+    # on any path that did not pass ``defense``.
+    profile = get_current_profile()
+    if profile is not None:
+        return llm_available(profile)
+    # No profile bound: the global chain, or a caller whose defense names a
+    # provider (validated with its key at profile load, or keyless ollama).
     return get_config().has_llm or (defense is not None and defense.provider is not None)
+
+
+_no_judge_logged: set[tuple[str | None, str]] = set()
+"""(profile, provider) pairs already named as having no judge."""
+
+
+def _log_no_judge(defense: DefenseConfig | None) -> None:
+    """Say once per profile that its L3 has no provider to ask (#407).
+
+    The gap is in every verdict, and nothing else says why: a wrong variable
+    name and a missing ``defense=`` each cost an afternoon of reading
+    ``l3_unavailable`` rows. The profile and provider are the operator's own
+    configuration, never anything a caller chose.
+    """
+    profile = get_current_profile()
+    source = profile.defense if profile is not None else defense
+    provider = (source.provider if source is not None else None) or get_config().provider
+    key = (profile.name if profile is not None else None, provider)
+    if key in _no_judge_logged:
+        return
+    _no_judge_logged.add(key)
+    logger.warning(
+        "L3 has no provider to ask for %s (judge provider %r, no key for it): "
+        "every verdict reports l3_unavailable, and block and redact refuse on it",
+        f"profile {key[0]!r}" if key[0] is not None else "the standalone gateway",
+        provider,
+    )
 
 
 def _decide(
@@ -372,6 +406,7 @@ async def _stage_two(content: str, defense: DefenseConfig | None, briefing: str)
     from "ran and found nothing".
     """
     if not _l3_provider_configured(defense):
+        _log_no_judge(defense)
         return {"l3_unavailable": True, "injection_detected": False}
     return await quarantine_detect(content, layer1_context=briefing)
 

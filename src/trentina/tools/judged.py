@@ -33,6 +33,7 @@ from ..warning import build_warning
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from ..gateway.profile import DefenseConfig
     from ..l1.pipeline import PipelineResult
 
 DEFAULT_REDACT_PROMPT = "Extract the main content."
@@ -71,6 +72,12 @@ def _caller() -> tuple[str | None, bool]:
     if scope is None:
         return None, False
     return scope.name, scope.is_operator
+
+
+def _caller_defense() -> DefenseConfig | None:
+    """The calling profile's defense policy, or None standalone or unbound."""
+    scope = current_scope()
+    return scope.profile.defense if scope is not None and scope.profile is not None else None
 
 
 def honeypot_caller() -> str | None:
@@ -242,6 +249,9 @@ async def judge_and_deliver(
         document,
         source=source,
         source_type=source_type,
+        # The caller's own thresholds and judge, as every gateway path passes
+        # them (#407): without it the tools were judged on built-in defaults.
+        defense=_caller_defense(),
         provenance=provenance,
         domain=domain,
         # flag delivers a partial scan with a warning, so it pays for the

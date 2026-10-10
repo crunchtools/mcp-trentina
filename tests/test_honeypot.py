@@ -33,6 +33,7 @@ from trentina.gateway.profile import (
 from trentina.gateway.router import route_jsonrpc
 
 from .egress_harness import route
+from .judge_key import with_judge_key
 from .mode_harness import MALICIOUS, layers
 
 pytestmark = pytest.mark.usefixtures("env", "real_server")
@@ -66,7 +67,7 @@ def _profile(*, honeypot: bool = True, **more: Any) -> Profile:
     )
     assert profile.auth is not None
     profile.auth.bearer_token = SecretStr("x")
-    return profile
+    return with_judge_key(profile)
 
 
 async def _fetch(profile: Profile) -> dict[str, Any]:
