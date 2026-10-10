@@ -128,12 +128,22 @@ class TestState:
             {"flagged": 500},
             {"threshold": "0.7"},
             {"threshold": None},
+            {"threshold": float("nan")},
+            {"threshold": float("inf")},
+            {"threshold": 0.0},
+            {"threshold": 1.5},
             {"cases": "200"},
         ],
     )
     def test_a_malformed_record_is_unrecorded(self, broken: dict[str, object]) -> None:
         record = {**record_of({"a": (1, 200)}, 0.7), **broken}
         assert benign_state({BENIGN_KEY: record}) == "unrecorded"
+
+    def test_a_nan_threshold_in_the_manifest_matches_no_threshold_in_force(self) -> None:
+        """``json.loads`` reads a bare NaN, and NaN compares false with everything."""
+        record = json.loads(json.dumps(record_of({"a": (1, 200)}, 0.7)).replace("0.7", "NaN"))
+        assert benign_state({BENIGN_KEY: record}, 0.7) == "unrecorded"
+        assert benign_state({BENIGN_KEY: record}, 0.1) == "unrecorded"
 
     def test_a_record_that_is_not_an_object_is_unrecorded(self) -> None:
         assert benign_state({BENIGN_KEY: "passed"}) == "unrecorded"

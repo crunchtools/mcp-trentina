@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import io
+from pathlib import Path
 
 import pytest
 from pydantic import SecretStr
@@ -22,6 +23,7 @@ from trentina.gateway.profile import AuthConfig, Backend, Honeytoken, Profile
 from trentina.l1.pipeline import run_l1
 from trentina.unpack.scan import unpack
 
+from .benign_corpus import BENIGN, CATEGORIES, KNOWN_GAPS
 from .image_files import picture
 from .office_files import b64, docx, paragraph, run, zipped
 from .pdf_files import pdf, show
@@ -163,3 +165,18 @@ def test_a_planted_credential_is_matched_only_as_it_was_planted() -> None:
     encoded = base64.b64encode(planted.encode()).decode()
     assert leaked_tokens(profile, {"arguments": {"body": encoded}}) == []
     assert leaked_tokens(profile, {"arguments": {"a": planted[:10], "b": planted[10:]}}) == []
+
+
+def test_the_shapes_l2_is_known_to_flag_are_numbered_gaps_and_stay_in_the_corpus() -> None:
+    """Gaps 18 and 19 (#411). That the model still flags them needs the model,
+    so that half is ``tests/test_l2_integration.py``, run inside the image.
+    This half holds the list, the corpus and the document together: a shape
+    cannot be dropped from the corpus, or moved into the gated budget, without
+    the document changing in the same commit."""
+    gaps = Path(__file__).parents[1].joinpath("docs/defense-pipeline.md").read_text()
+    gaps = gaps[gaps.index("### Known gaps") :]
+    assert KNOWN_GAPS == ("event_id_reply", "journal_query_100")
+    for name in KNOWN_GAPS:
+        assert f"`{name}`" in gaps
+        assert name not in CATEGORIES, "a known gap is scored, never gated"
+        assert any(case.category == name for case in BENIGN)

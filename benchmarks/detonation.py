@@ -973,16 +973,17 @@ async def judge(
     pack = pack_for(("openrouter", model))
     documents = {document_id(c): c for c in cases if c.carrier and c.condition != "control"}
 
-    async def ask(client: httpx.AsyncClient, case: Case) -> bool | None:
+    async def ask(client: httpx.AsyncClient, text: str) -> bool | None:
         async with gate:
-            body = decoy_tools.request(
-                model, pack.detection, briefed(case.document(), briefing, pack)
-            )
+            body = decoy_tools.request(model, pack.detection, text)
             answer = await decoy_tools.ask(client, body)
         return answer.detected if answer else None
 
     async def one(client: httpx.AsyncClient, name: str, case: Case) -> dict[str, Any]:
-        cast = list(await asyncio.gather(*(ask(client, case) for _ in range(votes))))
+        # Once a document: every vote is asked the same text, and L1 is not
+        # run again for each.
+        text = briefed(case.document(), briefing, pack)
+        cast = list(await asyncio.gather(*(ask(client, text) for _ in range(votes))))
         return {
             "document": name,
             "condition": case.condition,

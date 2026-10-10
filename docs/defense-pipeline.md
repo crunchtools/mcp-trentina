@@ -317,20 +317,23 @@ one does; the rest name the benchmark that measured them.
     tool call through the gateway. It is a tripwire for the common case,
     where an injection says "send the key to this address" and the agent
     does. Tested.
-18. **A response that is one base64-shaped identifier is flagged by L2**
-    (#411). The shipped model passes the obfuscation gate because it reads
-    base64 as possibly hostile, and a reply that is a Matrix event ID and
-    nothing else gives it no context to read the ID against: 9 of 12 flag
-    at 0.7, scoring 0.71 to 0.94. An identifier inside a record does not
+18. **A response that is little but a base64-shaped identifier is flagged
+    by L2** (#411). The shipped model passes the obfuscation gate because it
+    reads base64 as possibly hostile, and a reply such as
+    `{"ok": true, "event_id": "$..."}`, a Matrix event ID in an object with
+    one other field, gives it almost no context to read the ID against: 9 of
+    12 flag at 0.7, scoring 0.71 to 0.94. An identifier inside a record does not
     (0 of 41 unit, container, image and disk listings). `block` refuses such
     a reply and offers `redact`. Scored on every image build as
     `event_id_reply` ([benchmark](benchmark.md#l2-benign-gate-411-404)).
+    Tested, in the image (`tests/test_l2_integration.py`).
 19. **A long log inside a JSON string can be flagged by L2** (#411). A
     hundred journal lines returned as one string is about 15,000 tokens that
     no pre-processor reduces, read in over thirty windows of which the worst
     decides: 1 of 6 flags at 0.7. The same lines as plain text are reduced
     by petit and pass. Asking for fewer lines, or a narrower unit or
-    pattern, avoids it. Scored on every image build as `journal_query_100`.
+    pattern, avoids it. Scored on every image build as `journal_query_100`
+    (#419). Tested, in the image.
 
 ### Attack coverage by layer (Prompt Guard 2, 2026-06)
 

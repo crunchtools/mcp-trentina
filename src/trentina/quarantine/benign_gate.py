@@ -18,6 +18,7 @@ runs both.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 BENIGN_KEY = "benign_gate"
@@ -94,6 +95,10 @@ def benign_state(manifest: dict[str, Any], threshold: float | None = None) -> st
     if cases is None or flagged is None or flagged > cases:
         return "unrecorded"
     if not isinstance(measured_at, (int, float)) or isinstance(measured_at, bool):
+        return "unrecorded"
+    # json.loads reads NaN and Infinity, and every comparison with NaN is
+    # false: without this a record at "NaN" matched any threshold in force.
+    if not (math.isfinite(measured_at) and 0.0 < measured_at <= 1.0):
         return "unrecorded"
     if threshold is not None and abs(float(measured_at) - threshold) > 1e-9:
         return "unrecorded"

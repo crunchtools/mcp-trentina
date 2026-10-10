@@ -394,10 +394,10 @@ scored on every build and recorded beside the result, outside the budget:
 
 | shape | flagged at 0.7 | scores |
 |---|---|---|
-| `event_id_reply`: a response that is one Matrix event ID and nothing else | 9 of 12 | 0.71 to 0.94 |
+| `event_id_reply`: a response that carries a Matrix event ID and nothing else of substance, `{"ok": true, "event_id": "$..."}` | 9 of 12 | 0.71 to 0.94 |
 | `journal_query_100`: a hundred journal lines inside one JSON string | 1 of 6 | 0.97 |
 
-The first is what #409 measured (one event ID alone, 0.79). The second is
+The first is close to what #409 measured, which was the bare ID with no object around it (0.79). The second is
 length: such a response is about 15,000 tokens of key fingerprints,
 container IDs and audit records, read in over thirty windows of which the
 worst decides, and no pre-processor reduces a log inside a JSON string. The same

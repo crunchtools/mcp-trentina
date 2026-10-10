@@ -379,7 +379,7 @@ class _Maker:
         return make()
 
     def event_id_reply(self) -> dict[str, Any]:
-        """A reply that is nothing but a base64url identifier: a Matrix event ID."""
+        """A reply that carries a Matrix event ID and nothing else of substance."""
         return {"ok": True, "event_id": "$" + self.b64url(43)}
 
     # --- agent-forum replies (#404) --------------------------------------
@@ -461,10 +461,11 @@ KNOWN_GAPS: tuple[str, ...] = ("event_id_reply", "journal_query_100")
 outside the gate's budget: known gaps 18 and 19 in
 ``docs/defense-pipeline.md``.
 
-``event_id_reply``: a response that is one base64url identifier and nothing
-else gives a classifier chosen for reading base64 as possibly hostile no
-context to read it against. ``journal_query_100``: a hundred journal lines
-inside one JSON string is fifteen thousand tokens of key fingerprints,
+``event_id_reply``: a response that is a base64url identifier in an object
+with one other field gives a classifier chosen for reading base64 as
+possibly hostile almost no context to read it against.
+``journal_query_100``: a hundred journal lines inside one JSON string is
+fifteen thousand tokens of key fingerprints,
 container IDs and audit records that no pre-processor reduces, read in
 over thirty windows of which the worst one decides.
 

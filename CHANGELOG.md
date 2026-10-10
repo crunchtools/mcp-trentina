@@ -38,7 +38,7 @@ under that name.
   (`l2_benign_gate_failed`, `l2_benign_gate_unrecorded`; a refusal to start
   under `TRENTINA_REQUIRE_HARDENED`). Horizon stays at 0.7: no threshold
   passed without giving up 7 of 41 attacks (`docs/benchmark.md`).
-- Known gaps 18 and 19: a reply that is one base64-shaped identifier, and a
+- Known gaps 18 and 19: a reply that is little but a base64-shaped identifier, and a
   hundred-line log inside a JSON string, are still flagged by L2. Both are
   scored on every build.
 - `benchmarks/detonation.py --mode judge --briefing` judges each document
