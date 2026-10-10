@@ -6,7 +6,7 @@ Synchronous — ONNX inference is CPU-bound, not I/O-bound.
 Which model is pluggable (#350): any sequence-classification ONNX export in a
 directory, described by a ``trentina-model.json`` manifest (or, failing one,
 by the labels in its ``config.json``). The image ships Horizon-Labs'
-prompt-injection-guard-small, the default, and Llama Prompt Guard 2 86M.
+prompt-injection-guard-small, the default.
 
 The classifier sees the L2 input (post-Layer 1) on the input path,
 and extracted text (post-Layer 3) on the output verification path.
@@ -26,6 +26,7 @@ from typing import Any
 
 from ..config import DEFAULT_CLASSIFIER_THRESHOLD, get_config, int_env
 from ..errors import UnscannableContentError
+from .benign_gate import benign_state
 from .obfuscation import gate_state
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ class ModelInfo:
     source: str = ""
     license: str = ""
     gate: str = "unrecorded"  # obfuscation gate: passed, failed or unrecorded (#362)
+    benign_gate: str = "unrecorded"  # benign gate, the same three states (#411)
 
 
 def resolve_model(model_path: str, threshold_override: float | None = None) -> ModelInfo:
@@ -160,6 +162,7 @@ def resolve_model(model_path: str, threshold_override: float | None = None) -> M
         source=str(manifest.get("source", "")),
         license=str(manifest.get("license", "")),
         gate=gate_state(manifest),
+        benign_gate=benign_state(manifest, threshold),
     )
 
 
@@ -256,12 +259,14 @@ def is_classifier_available() -> bool:
         _check_output_width(_session, _model)
         _loaded = True
         logger.info(
-            "Layer 2 classifier loaded from %s: %s@%s, threshold %.2f, obfuscation gate %s",
+            "Layer 2 classifier loaded from %s: %s@%s, threshold %.2f, "
+            "obfuscation gate %s, benign gate %s",
             model_path,
             _model.id,
             _model.revision or "unpinned",
             _model.threshold,
             _model.gate,
+            _model.benign_gate,
         )
     except Exception:
         logger.warning(  # logsafe: ours — loading the operator's model

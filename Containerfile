@@ -118,7 +118,7 @@ RUN pip install --no-cache-dir uv \
 RUN tr -d - < /proc/sys/kernel/random/uuid > /etc/machine-id.seed
 
 # ============================================================
-# Stage 2b: the L2 obfuscation gate (#362)
+# Stage 2b: the L2 gates: obfuscation (#362), then benign content (#411)
 # The Layer contract makes reading through obfuscation the model's job, so
 # the build proves it: every corpus attack is classified plain and under six
 # transforms by the classifier code this image runs, and the result is
@@ -128,11 +128,19 @@ RUN tr -d - < /proc/sys/kernel/random/uuid > /etc/machine-id.seed
 # ============================================================
 FROM pip-builder AS l2-gate
 COPY --from=model-builder /models/ /models/
-COPY benchmarks/l2_obfuscation.py /gate/benchmarks/l2_obfuscation.py
-COPY tests/adversarial_corpus.py /gate/tests/adversarial_corpus.py
+COPY benchmarks/l2_obfuscation.py benchmarks/l2_benign.py /gate/benchmarks/
+COPY tests/adversarial_corpus.py tests/benign_corpus.py /gate/tests/
 RUN cd /gate \
  && ORT_DISABLE_TELEMETRY=1 CLASSIFIER_MODEL_PATH=/models/prompt-injection-guard-small \
     python benchmarks/l2_obfuscation.py --record
+
+# The benign gate (#411), at the same threshold: the model must not refuse
+# the operations output and forum replies of tests/benign_corpus.py, read
+# through the default pre-processors as the gateway reads them. Its own layer,
+# after the obfuscation gate's, so a change to one corpus re-runs one gate.
+RUN cd /gate \
+ && ORT_DISABLE_TELEMETRY=1 CLASSIFIER_MODEL_PATH=/models/prompt-injection-guard-small \
+    python benchmarks/l2_benign.py --record
 
 # ============================================================
 # Stage 3: Runtime image (distroless — no shell, no dnf)

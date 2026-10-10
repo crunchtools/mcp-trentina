@@ -158,12 +158,15 @@ def check_secret_sources(names: Iterable[str], proc: Path = Path("/proc/self")) 
 
 
 def check_l2_gate() -> Posture:
-    """Name an L2 model that has no passing obfuscation-gate record (#362).
+    """Name an L2 model that has no passing record for either of its gates.
 
     The Layer contract makes reading through obfuscation the model's job, so
     a model that one zero-width character blinds is a gap in the perimeter
-    the same way a missing seccomp filter is one in the container. Call
-    after the classifier has loaded. No model at all is not this gap:
+    the same way a missing seccomp filter is one in the container (#362).
+    The benign gate is the other side (#411): a model, or a threshold, never
+    measured against the content the gateway delivers refuses routine reads,
+    and an agent refused its data works from part of it. Call after the
+    classifier has loaded. No model at all is not this gap:
     ``TRENTINA_REQUIRE_L2`` decides that.
     """
     from .quarantine.classifier import model_info
@@ -172,6 +175,9 @@ def check_l2_gate() -> Posture:
     model = model_info()
     if model is not None and model.gate != "passed":
         posture.gaps.append(f"l2_obfuscation_gate_{model.gate}")
+    if model is not None and model.benign_gate != "passed":
+        posture.gaps.append(f"l2_benign_gate_{model.benign_gate}")
+    if posture.gaps:
         _report(posture)
     return posture
 

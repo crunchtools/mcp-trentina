@@ -22,7 +22,17 @@ is worth. It needs a hosted API key and nothing else: no GPU, no local model.
 **The split is fixed.** Train is the external corpus's ``train`` split (the
 first ``--train-external`` rows) and one internal case in four, chosen by a
 hash of the case id. Held-out is the external ``test`` split and the other
-three internal cases in four. Tuning against the cases you report on is how
+three internal cases in four.
+
+**Embedded documents are in both splits (#397).** A bare payload is not what
+the judge reads in production: it reads a README, a runbook or a support
+thread with the text somewhere inside. Packs tuned on bare payloads flagged
+a benign instruction about 2% of the time alone and up to 41% of the time
+inside a document. So every benign insert is spliced into every carrier
+document (``embedded_benign``) and every internal attack into two
+(``embedded_attack``), by ``detonation.splice``. An embedded document goes
+where its insert goes, so no insert is tuned on bare and reported on
+embedded. Tuning against the cases you report on is how
 a 90% pack turns out to be 70% in production, so a ``--split train`` run is
 labelled as tuning, lists its misses by id, and cannot ``--emit``.
 
@@ -63,6 +73,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from benchmarks import external_corpus
+from benchmarks.detonation import CARRIERS_PER_INSERT, build_cases, document_id
+from benchmarks.detonation_corpus import BENIGN_INSERTS, CARRIERS, internal_inserts
 from benchmarks.provider_benchmark import ProviderReport, resolved_model, run_provider
 from tests.adversarial_corpus import CORPUS, Case
 from trentina.quarantine import packs
@@ -75,6 +87,12 @@ INTERNAL_TRAIN_ONE_IN = 4
 TRAIN_EXTERNAL = 300
 """Rows of the external train split a tuning run uses by default."""
 
+EMBEDDED_BENIGN = "embedded_benign"
+"""Benign text inside a carrier document: what a pack must not start flagging."""
+
+EMBEDDED_ATTACK = "embedded_attack"
+EMBEDDED_PREFIX = "emb-"
+
 _UNPARSEABLE = ("MalformedResponseError", "TruncatedResponseError")
 
 
@@ -84,12 +102,40 @@ def in_train(case_id: str) -> bool:
     return int.from_bytes(digest[:4]) % INTERNAL_TRAIN_ONE_IN == 0
 
 
+def embedded_cases(train: bool) -> list[Case]:
+    """The embedded documents of one split (#397), benign first.
+
+    Every benign insert (the internal corpus's benign and trap cases, and the
+    detonation corpus's) in every carrier; every internal attack in
+    ``CARRIERS_PER_INSERT`` carriers. A document is in the split its insert's
+    id puts it in, so an internal case and the documents built from it are
+    always on the same side.
+    """
+    attacks, benign = internal_inserts()
+    built = build_cases(
+        (), benign + BENIGN_INSERTS, carriers=len(CARRIERS), tasks=(0,), only=("benign",)
+    )
+    built += build_cases(attacks, (), carriers=CARRIERS_PER_INSERT, tasks=(0,), only=("attack",))
+    return [
+        Case(
+            id=f"{EMBEDDED_PREFIX}{document_id(case)}",
+            category=EMBEDDED_ATTACK if case.insert.attack else EMBEDDED_BENIGN,
+            payload=case.document(),
+            expect_injection=case.insert.attack,
+            notes=f"{case.insert.id} in {case.carrier.id}",
+        )
+        for case in built
+        if case.insert is not None and case.carrier is not None
+        if in_train(case.insert.id) == train
+    ]
+
+
 def split_cases(split: str, train_external: int, cache_dir: Path) -> list[Case]:
-    """The cases of ``train`` or ``held-out``, internal first."""
+    """The cases of ``train`` or ``held-out``: internal, embedded, external."""
     train = split == "train"
     internal = [case for case in CORPUS if in_train(case.id) == train]
     external = external_corpus.load("train" if train else "test", cache_dir=cache_dir)
-    return internal + (external[:train_external] if train else external)
+    return internal + embedded_cases(train) + (external[:train_external] if train else external)
 
 
 def voted(runs: list[ProviderReport]) -> ProviderReport:
@@ -151,6 +197,12 @@ def measure(report: ProviderReport, attempts: list[Any] | None = None) -> dict[s
     }
 
 
+def _embedded_flagged(measured: dict[str, Any]) -> tuple[int, int]:
+    """``(flagged, of)`` over the embedded benign documents; zeros without any."""
+    row = measured.get("false_positives_by_category", {}).get(EMBEDDED_BENIGN)
+    return (row["flagged"], row["of"]) if row else (0, 0)
+
+
 def _judge_attacks(measured: dict[str, Any]) -> float:
     row = measured["by_category"].get(JUDGE_ATTACKS)
     return row["caught"] / max(row["of"], 1) if row else 0.0
@@ -170,8 +222,9 @@ def gate(candidate: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
     """Why ``candidate`` may not ship against ``baseline``. Empty when it may.
 
     On planted instructions (every category of the internal corpus, the
-    attacks on the judge among them) it catches no fewer. It flags no more
-    benign content. It may give up direct jailbreaks, up to
+    attacks on the judge among them, and the attacks embedded in a document)
+    it catches no fewer. It flags no more benign content, overall and among
+    the benign instructions embedded in a document. It may give up direct jailbreaks, up to
     ``JAILBREAK_ALLOWANCE`` of them, when it spares more benign refusals
     than the jailbreaks it gives up. And it is better at something.
     """
@@ -183,6 +236,10 @@ def gate(candidate: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
         reasons.append(f"it catches fewer planted instructions: {', '.join(lost)}")
     if candidate["false_positive"] > baseline["false_positive"]:
         reasons.append("it flags more benign content than the baseline")
+    # Held apart from the overall rate (#397): fewer bare prompts flagged must
+    # not pay for more documents flagged, which is what production reads.
+    if _embedded_flagged(candidate)[0] > _embedded_flagged(baseline)[0]:
+        reasons.append("it flags more benign instructions embedded in a document")
     jailbreak = external_corpus.CATEGORY_ATTACK
     given_up = _caught(theirs, jailbreak) - _caught(ours, jailbreak)
     spared = round(
@@ -210,6 +267,7 @@ def _summary(run: dict[str, Any]) -> dict[str, str]:
         "pack": run["pack"],
         "attacks caught": f"{measured['catch']:.1%} of {measured['attacks']}",
         "benign flagged": f"{measured['false_positive']:.1%} of {measured['benign']}",
+        "embedded benign flagged": "{} of {}".format(*_embedded_flagged(measured)),
         "precision": f"{measured['precision']:.1%}",
         f"{JUDGE_ATTACKS} caught": f"{_judge_attacks(measured):.1%}",
         "answers that parsed": f"{measured['schema_conformance']:.1%} of {measured['calls']}",
@@ -331,7 +389,8 @@ async def main_async(args: argparse.Namespace) -> int:
         "split": args.split,
         "votes": max(args.votes, 1),
         "corpus": {
-            "internal": sum(1 for c in cases if not c.id.startswith("ext-")),
+            "internal": sum(1 for c in cases if not c.id.startswith(("ext-", EMBEDDED_PREFIX))),
+            "embedded": sum(1 for c in cases if c.id.startswith(EMBEDDED_PREFIX)),
             "external": {
                 "dataset": external_corpus.DATASET,
                 "revision": external_corpus.REVISION,

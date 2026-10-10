@@ -33,6 +33,7 @@ from trentina.outcomes import Outcome, classify_exception
 from trentina.tools.fetch import fetch_page
 
 from .egress_harness import route
+from .judge_key import with_judge_key
 from .mode_harness import layers
 
 if TYPE_CHECKING:
@@ -55,7 +56,7 @@ def _profile(name: str, backends: dict[str, Backend] | None = None) -> Profile:
     )
     assert profile.auth is not None
     profile.auth.bearer_token = SecretStr("x")
-    return profile
+    return with_judge_key(profile)
 
 
 async def _refused(url: str) -> BlockedSourceError:

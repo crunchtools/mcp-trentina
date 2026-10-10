@@ -120,7 +120,13 @@ class TestGateState:
 
 
 def _startup_gaps(gate: str | None) -> list[str]:
-    model = None if gate is None else classifier.ModelInfo("m", "r", 0.7, (1,), gate=gate)
+    # The benign gate (tests/test_benign_gate.py) passes here: this file is
+    # about the obfuscation gate's own state.
+    model = (
+        None
+        if gate is None
+        else classifier.ModelInfo("m", "r", 0.7, (1,), gate=gate, benign_gate="passed")
+    )
     with patch.object(classifier, "model_info", return_value=model):
         return posture.check_l2_gate().gaps
 
@@ -151,7 +157,7 @@ def test_the_gate_state_is_in_the_perimeter_stamp() -> None:
         with patch.object(classifier, "resolve_model", return_value=model):
             return perimeter_stamp()
 
-    assert stamp("passed").endswith(":gate-passed")
+    assert ":gate-passed:" in stamp("passed")
     assert stamp("passed") != stamp("unrecorded")
 
 

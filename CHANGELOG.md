@@ -10,6 +10,54 @@ under that name.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-10
+
+### Fixed
+- Internal tools ask the calling profile's own judge (#407). `fetch`,
+  `read`, `content` and `search` were judged without the caller's `defense`,
+  and the check for a provider read the gateway's global key first: on a
+  gateway holding only per-profile keys every one of those calls reported
+  `l3_unavailable`, with nothing logged, while the model proxy judged the
+  same profile's completions. The check now resolves a bound profile the way
+  the call does, its provider and its own key. A missing judge is logged
+  once per profile.
+- The `structured` pre-processor's markers no longer begin with
+  `[structured]` (#411). A bracketed tag among rows of data read to L2 as an
+  injected note: the same metrics rows scored 0.01 as they arrived and 0.99
+  once minified. This was most of the L2 refusals of routine operations
+  output since Horizon became the default L2 (0.55.0). The words are unchanged: `9 more element(s) with this
+  shape omitted`. `PERIMETER_VERSION` is "13".
+
+### Added
+- The L2 benign gate (#411, #404): `benchmarks/l2_benign.py` over
+  `tests/benign_corpus.py`, 225 invented cases of the shapes production
+  refused, read as the gateway reads a tool response. The image build runs
+  it beside the obfuscation gate and stops when the model flags more than 2%
+  of the held-out cases. The result is in the model's manifest with the
+  threshold it was taken at, in the verdict stamp, and checked at startup
+  (`l2_benign_gate_failed`, `l2_benign_gate_unrecorded`; a refusal to start
+  under `TRENTINA_REQUIRE_HARDENED`). Horizon stays at 0.7: no threshold
+  passed without giving up 7 of 41 attacks (`docs/benchmark.md`).
+- Known gaps 18 and 19: a reply that is little but a base64-shaped identifier, and a
+  hundred-line log inside a JSON string, are still flagged by L2. Both are
+  scored on every build.
+- `benchmarks/detonation.py --mode judge --briefing` judges each document
+  under the production briefing with a chosen Layer 2 label, and
+  `benchmarks/prompt_pack.py` includes documents with a benign instruction
+  or an attack embedded in them, gated apart from bare payloads (#397). The
+  `briefing` and `packs` jobs of `benchmark-decoys.yml` run them.
+
+### Changed
+- A gateway started with a `CLASSIFIER_THRESHOLD` other than the one its
+  model's benign gate was recorded at logs `l2_benign_gate_unrecorded`, and
+  under `TRENTINA_REQUIRE_HARDENED` does not start. Run
+  `benchmarks/l2_benign.py --record` at that threshold, or unset it.
+- A profile bound to a call is never judged on the gateway's global key, in
+  the availability check as in the call (#407). A profile with no key for
+  its judge's provider reports `l3_unavailable` without a provider call
+  being attempted; `load_profiles` already warns about such a profile.
+- Repo constitution 2.3.0: the benign gate is part of the Layer Contract.
+
 ## [1.2.0] - 2026-10-08
 
 ### Added

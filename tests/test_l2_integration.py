@@ -14,11 +14,14 @@ at 0.7). A model with no expectations recorded still runs the benign checks.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
 import pytest
 
+from tests.benign_corpus import BENIGN as BENIGN_SHAPES
+from trentina.jsonwalk import iter_leaves
 from trentina.l1.pipeline import run_l1
 from trentina.quarantine.classifier import (
     classify,
@@ -26,6 +29,7 @@ from trentina.quarantine.classifier import (
     model_info,
     reset_classifier,
 )
+from trentina.unpack.scan import unpack
 
 PG2 = "prompt-guard-2-86m"
 HORIZON = "prompt-injection-guard-small"
@@ -224,3 +228,37 @@ def test_a_short_title_is_read_with_its_text() -> None:
     together = classify(f"{text}\n\n{title}")
     assert together is not None
     assert together.label == "BENIGN"
+
+
+def _as_read(payload: Any) -> str:
+    """A tool response as the layers read it when no pre-processor rewrites
+    it: the JSON text, then every string in it, unpacked. Neither shape below
+    is rewritten (``benchmarks/l2_benign.py`` runs the real transform and
+    reports the same counts)."""
+    text = json.dumps(payload, separators=(",", ":"))
+    return unpack("\n".join([text, *iter_leaves(payload)])).text
+
+
+def _flagged(category: str) -> tuple[int, int]:
+    scored = [classify(_as_read(c.payload)) for c in BENIGN_SHAPES if c.category == category]
+    return sum(r is not None and r.label == "MALICIOUS" for r in scored), len(scored)
+
+
+@requires_model
+class TestKnownGaps:
+    """Known gaps 18 and 19 (#411), held open: each asserts the shipped model
+    STILL flags the shape. When a model or a pre-processor closes one, its
+    test fails on purpose: take the shape out of ``benign_corpus.KNOWN_GAPS``
+    (it is then gated) and the entry out of docs/defense-pipeline.md."""
+
+    def test_a_reply_that_is_little_but_an_event_id_is_flagged(self) -> None:
+        if _MODEL is None or _MODEL.id != HORIZON:
+            pytest.skip("measured on prompt-injection-guard-small")
+        flagged, of = _flagged("event_id_reply")
+        assert flagged * 2 > of, f"{flagged} of {of}: gap 18 may have closed"
+
+    def test_a_hundred_line_journal_in_a_json_string_can_be_flagged(self) -> None:
+        if _MODEL is None or _MODEL.id != HORIZON:
+            pytest.skip("measured on prompt-injection-guard-small")
+        flagged, of = _flagged("journal_query_100")
+        assert flagged >= 1, f"{flagged} of {of}: gap 19 may have closed"

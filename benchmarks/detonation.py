@@ -38,9 +38,13 @@ Conditions, per model:
   use no summary needs, and ``--mode venn`` prints what to read by hand.
 
 ``--mode judge`` asks the configured L3 judge, with its prompt pack and no
-tools, for a verdict on the same documents. ``--mode venn`` joins the two
-artifacts document by document: what the judge flags, what trips, and above
-all what trips among the documents the judge called clean. ``--votes`` runs
+tools, for a verdict on the same documents. ``--briefing`` puts in front of
+each the briefing production gives the judge (#397): L1's real counts for the
+document, the pack's Layer 2 caveat, and a Layer 2 label the arm chooses,
+``benign`` or ``malicious``. The default, ``none``, asks the judge alone.
+``--mode venn`` joins the two artifacts document by document: what the judge
+flags, what trips, and above all what trips among the documents the judge
+called clean. ``--votes`` runs
 each case several times, since a model that trips on a document does not
 trip on it every time.
 
@@ -86,7 +90,11 @@ from benchmarks.detonation_corpus import (
     internal_inserts,
 )
 from trentina.config import get_config
-from trentina.quarantine.packs import pack_for
+from trentina.defense import build_l3_briefing
+from trentina.l1 import run_l1
+from trentina.quarantine.classifier import ClassifierResult
+from trentina.quarantine.packs import PromptPack, pack_for
+from trentina.quarantine.prompts import L2_BLINDSPOT_CAVEAT
 from trentina.quarantine.providers.openai import OPENROUTER_ROUTING
 
 FETCH = "fetch_url"
@@ -916,8 +924,33 @@ def majority(votes: list[bool | None]) -> bool | None:
     return sum(answered) * 2 >= len(answered) if answered else None
 
 
+BRIEFINGS: dict[str, ClassifierResult | None] = {
+    "none": None,
+    "benign": ClassifierResult(label="BENIGN", score=0.02, latency_ms=0.0),
+    "malicious": ClassifierResult(label="MALICIOUS", score=0.95, latency_ms=0.0),
+}
+"""The ``--briefing`` arms: what the judge is told Layer 2 made of a document.
+The label is the arm, not a measurement, so the same document is judged under
+both and the difference is what the label does to the judge (#397)."""
+
+
+def briefed(document: str, arm: str, pack: PromptPack) -> str:
+    """``document`` as the judge receives it under ``arm``.
+
+    ``none`` is the document alone. Otherwise the production user text
+    (``agent._build_request_body``): ``build_l3_briefing`` over L1's counts
+    for this document and the arm's Layer 2 label, with the pack's caveat in
+    place of the generic one (``agent._from_pack``), a rule, the document.
+    """
+    classification = BRIEFINGS[arm]
+    if classification is None:
+        return document
+    briefing = build_l3_briefing(run_l1(document).stats, classification)
+    return f"{briefing.replace(L2_BLINDSPOT_CAVEAT, pack.l2_caveat)}\n\n---\n\n{document}"
+
+
 async def judge(
-    cases: list[Case], model: str, concurrency: int, votes: int = 1
+    cases: list[Case], model: str, concurrency: int, votes: int = 1, briefing: str = "none"
 ) -> list[dict[str, Any]]:
     """The L3 judge's verdict on each distinct document, with its pack and no tools.
 
@@ -928,6 +961,7 @@ async def judge(
         model: The judge's OpenRouter model id; its shipped pack is used.
         concurrency: Requests in flight at most.
         votes: Asks per document.
+        briefing: One of ``BRIEFINGS``: what precedes each document.
 
     Returns:
         One record per document: ``document`` (``document_id``),
@@ -936,17 +970,20 @@ async def judge(
         ``detected`` (``majority`` of the votes; None when none answered).
     """
     gate = asyncio.Semaphore(concurrency)
-    detection = pack_for(("openrouter", model)).detection
+    pack = pack_for(("openrouter", model))
     documents = {document_id(c): c for c in cases if c.carrier and c.condition != "control"}
 
-    async def ask(client: httpx.AsyncClient, case: Case) -> bool | None:
+    async def ask(client: httpx.AsyncClient, text: str) -> bool | None:
         async with gate:
-            body = decoy_tools.request(model, detection, case.document())
+            body = decoy_tools.request(model, pack.detection, text)
             answer = await decoy_tools.ask(client, body)
         return answer.detected if answer else None
 
     async def one(client: httpx.AsyncClient, name: str, case: Case) -> dict[str, Any]:
-        cast = list(await asyncio.gather(*(ask(client, case) for _ in range(votes))))
+        # Once a document: every vote is asked the same text, and L1 is not
+        # run again for each.
+        text = briefed(case.document(), briefing, pack)
+        cast = list(await asyncio.gather(*(ask(client, text) for _ in range(votes))))
         return {
             "document": name,
             "condition": case.condition,
@@ -1147,6 +1184,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=("detonate", "judge", "venn"), default="detonate")
     parser.add_argument("--steps", type=int, choices=(1, 2), default=2)
     parser.add_argument("--votes", type=int, default=1, help="draws per case")
+    parser.add_argument(
+        "--briefing",
+        choices=tuple(BRIEFINGS),
+        default="none",
+        help="judge mode: the Layer 2 label the judge is briefed with",
+    )
     parser.add_argument("--temperature", type=float, default=0.0, help="detonate mode only")
     parser.add_argument("--carriers", choices=("2", "all"), default="2")
     parser.add_argument("--tasks", default="0,1", help="0 summary, 1 question")
@@ -1167,13 +1210,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     cases, attacks = (wild_cases(Path(args.documents)), 0) if args.documents else _corpus(args)
     model = get_config().model
-    print(f"{len(cases)} cases, {model}, {args.mode}, {attacks} attack inserts\n")
+    arm = f", briefing {args.briefing}" if args.mode == "judge" else ""
+    print(f"{len(cases)} cases, {model}, {args.mode}{arm}, {attacks} attack inserts\n")
     if args.mode == "judge":
-        verdicts = asyncio.run(judge(cases, model, args.concurrency, args.votes))
+        verdicts = asyncio.run(judge(cases, model, args.concurrency, args.votes, args.briefing))
         cast = [vote for verdict in verdicts for vote in verdict["votes"]]
         print(coverage(sum(vote is not None for vote in cast), len(cast)))
         print(judge_report(verdicts))
-        text = json.dumps({"model": model, "verdicts": verdicts}, indent=1)
+        text = json.dumps(
+            {"model": model, "briefing": args.briefing, "verdicts": verdicts}, indent=1
+        )
     else:
         rows, tokens = asyncio.run(
             run(cases, model, args.concurrency, args.steps, args.votes, args.temperature)

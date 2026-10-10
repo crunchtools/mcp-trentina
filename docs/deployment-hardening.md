@@ -41,6 +41,7 @@ startup and logs one WARNING naming each gap:
 | `secret_in_environment` | a secret came in as `FOO`, not `FOO_FILE` |
 | `unverifiable` | `/proc/self` could not be read, so nothing was checked |
 | `l2_obfuscation_gate_failed`, `l2_obfuscation_gate_unrecorded` | the L2 model's manifest has no passing [obfuscation-gate](benchmark.md#l2-obfuscation-gate-359) record: a zero-width split or an encoding may blind it |
+| `l2_benign_gate_failed`, `l2_benign_gate_unrecorded` | the L2 model's manifest has no passing [benign-gate](benchmark.md#l2-benign-gate-411-404) record at the threshold in force: it may refuse routine tool output. Setting `CLASSIFIER_THRESHOLD` to anything but the recorded threshold is this gap until the gate is run at it |
 
 Once profiles are loaded it checks again, for every secret name configuration
 read (`${VAR}` references, `llm_providers` keys, ingress tokens), because a

@@ -1,8 +1,8 @@
 # trentina Constitution
 
-> **Version:** 2.2.0
+> **Version:** 2.3.0
 > **Ratified:** 2026-09-22
-> **Amended:** 2026-10-08
+> **Amended:** 2026-10-10
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.22.0
 > **Profile:** Security Gateway
@@ -94,7 +94,12 @@ and `tests/test_layer_contract.py` enforces the first two.
   image build runs it and records the result in the manifest, and the
   gateway names a model without a passing record at startup and refuses to
   start on one under `TRENTINA_REQUIRE_HARDENED` (#362). Llama Prompt Guard
-  2 86M fails the gate and is no longer shipped. A model
+  2 86M fails the gate and is no longer shipped. A shipped model also passes
+  the benign gate (`benchmarks/l2_benign.py`, #411), at the same threshold
+  and under the same enforcement: it flags at most 2% of the held-out benign
+  corpus, read as the gateway reads a tool response. A shape it is known to
+  flag is measured on every build and listed as a known gap, never dropped
+  from the corpus. A model
   an operator brings through `CLASSIFIER_MODEL_PATH` without a manifest
   loads only when every label in its `config.json` is a known benign or
   malicious name, at the 0.5 default. A model whose polarity cannot be read
@@ -273,3 +278,4 @@ justification in `gourmand-exceptions.toml`.
 | 2.0.0 | 2026-10-06 | Profile changed from MCP Server to Security Gateway (constitution v1.19.1): Trentina is a perimeter, not an API wrapper. Renamed from mcp-trentina to trentina (repo, module, commands, images, service); distributed as a container image only, no PyPI. Threat Model and Known Gaps sections added; Three-Layer Defense becomes Layer Contract; the CI-only build rule is now the profile's |
 | 2.1.0 | 2026-10-06 | Decoys and Honeypot Profiles added (#357): decoy tools and honeytokens are deterministic tripwires, not a layer; a `honeypot` profile holds nothing real, is delivered content with no verdict attached, and its content is kept in `honeypot_captures`, the one stated exception to storing caller-chosen text |
 | 2.2.0 | 2026-10-08 | A honeypot profile's decoy-call arguments are kept in `honeypot_captures` beside what it read, planted credentials by id (#410); no other profile's are |
+| 2.3.0 | 2026-10-10 | The L2 benign gate is enforced beside the obfuscation gate (#411): run by the image build at the shipped threshold, recorded in the model manifest with that threshold, checked at startup |

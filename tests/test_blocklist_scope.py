@@ -26,6 +26,7 @@ from trentina.gateway.profile import AuthConfig, DefenseConfig, Profile
 from trentina.modes import Mode
 from trentina.tools.fetch import fetch_page
 
+from .judge_key import with_judge_key
 from .mode_harness import BENIGN, MALICIOUS, layers
 
 pytestmark = pytest.mark.asyncio
@@ -42,7 +43,7 @@ def _agent(name: str) -> Profile:
     )
     assert p.auth is not None
     p.auth.bearer_token = SecretStr("x")
-    return p
+    return with_judge_key(p)
 
 
 ALPHA = _agent("alpha")

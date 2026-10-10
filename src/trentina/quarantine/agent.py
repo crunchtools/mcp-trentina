@@ -158,6 +158,15 @@ def resolve_profile_llm(
     return resolved, llm_keys[resolved].api_key, profile.defense.model
 
 
+def bound_profile() -> Profile | None:
+    """The profile this call is bound to, or None standalone or unbound.
+
+    For callers outside the gateway package (``defense.py``), which must not
+    import it: this module already carries the standalone fallback.
+    """
+    return get_current_profile()
+
+
 def llm_available(profile: Profile | None = None) -> bool:
     """Whether a model call made now would have a provider to go to.
 

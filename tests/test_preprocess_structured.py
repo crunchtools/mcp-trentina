@@ -83,6 +83,16 @@ class TestStructuredReduction:
     async def test_is_free(self) -> None:
         assert StructuredProcessor().cost is Cost.FREE
 
+    async def test_a_marker_carries_no_bracketed_tag(self) -> None:
+        """#411: ``[structured] N more...`` among rows of data read to L2 as an
+        injected system note, 0.99 where the rows alone scored 0.00. The
+        benign gate (``benchmarks/l2_benign.py``) measures it; this pins the
+        wording it passed with."""
+        result = await _run(_issues(200))
+        markers = [e for e in json.loads(result.content) if isinstance(e, str)]
+        assert markers == ["197 more element(s) with this shape omitted"]
+        assert "[" not in markers[0]
+
 
 class TestSecurityProperties:
     async def test_element_with_different_words_survives(self) -> None:
@@ -148,9 +158,7 @@ class TestSecurityProperties:
         result = await _run(json.dumps(pair * 20, indent=2))
         assert result.applied
         assert result.details["groups_listed"] == 1
-        assert json.loads(result.content)[1] == (
-            "[structured] 39 more element(s) identical to the one above"
-        )
+        assert json.loads(result.content)[1] == ("39 more element(s) identical to the one above")
 
 
 _KEYED = [{"key": f"PROJ-{1000 + i}", "summary": "Nightly build failed"} for i in range(200)]
@@ -172,7 +180,7 @@ class TestIdentifierListing:
         first, *markers = json.loads(result.content)
         assert first == _KEYED[0]
         assert markers[0] == (
-            "[structured] 100 more element(s) with this shape; /key: "
+            "100 more element(s) with this shape; /key: "
             + ", ".join(r["key"] for r in _KEYED[1:101])
         )
         # Past _MAX_LISTED the next member opens a new group, verbatim, and
@@ -180,8 +188,7 @@ class TestIdentifierListing:
         delivered = json.loads(result.content)
         assert delivered[2] == _KEYED[101]
         assert delivered[3] == (
-            "[structured] 98 more element(s) with this shape; /key: "
-            + ", ".join(r["key"] for r in _KEYED[102:])
+            "98 more element(s) with this shape; /key: " + ", ".join(r["key"] for r in _KEYED[102:])
         )
         assert len(delivered) == 4
 
@@ -199,7 +206,7 @@ class TestIdentifierListing:
         ]
         result = await _run(json.dumps(records))
         marker = json.loads(result.content)[1]
-        assert marker.startswith("[structured] 9 more element(s) with this shape; /id /key: ")
+        assert marker.startswith("9 more element(s) with this shape; /id /key: ")
         assert "10002 PROJ-2, 10003 PROJ-3" in marker
         assert "10000" not in marker
 
@@ -248,7 +255,7 @@ class TestIdentifierListing:
         records = [{"a/b": {"ids": [f"PROJ-{i}"]}, "s": "x y"} for i in range(10)]
         result = await _run(json.dumps(records))
         marker = json.loads(result.content)[1]
-        assert marker.startswith("[structured] 9 more element(s) with this shape; /a~1b/ids/0: ")
+        assert marker.startswith("9 more element(s) with this shape; /a~1b/ids/0: ")
         assert "PROJ-9" in marker
 
     async def test_too_many_integers_fall_back_to_the_string_identifiers(self) -> None:

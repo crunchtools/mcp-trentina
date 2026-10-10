@@ -35,6 +35,8 @@ from trentina.gateway.profile import AuthConfig, Backend, Profile
 from trentina.modes import Mode, ModePolicy
 from trentina.quarantine.classifier import ClassifierResult
 
+from .judge_key import with_judge_key
+
 pytestmark = pytest.mark.asyncio
 
 _I = "trentina.gateway.ingress_defense"
@@ -78,7 +80,7 @@ def _profile(name: str = "testp") -> Profile:
         backends={"jira": Backend(url="http://jira:1/mcp", tools_allow=["*"])},
     )
     p.auth.bearer_token = SecretStr("x")
-    return p
+    return with_judge_key(p)
 
 
 @contextmanager

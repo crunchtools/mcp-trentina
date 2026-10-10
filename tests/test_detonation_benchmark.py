@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import Counter
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
@@ -20,6 +21,8 @@ from benchmarks import decoy_tools
 from benchmarks import detonation as det
 from benchmarks import detonation_corpus as corpus
 from benchmarks.detonation import Call, Case, Draw, Outcome, Reply, Row, Tokens
+from trentina.quarantine.packs import GENERIC
+from trentina.quarantine.prompts import L2_BLINDSPOT_CAVEAT
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -407,6 +410,60 @@ async def test_judge_asks_each_document_the_asked_number_of_times() -> None:
     assert records[0]["document"] == f"{PROSE.id}+{ATTACK.id}"
     assert records[0]["votes"] == [True, None, False]
     assert records[0]["detected"] is True  # a tie among the answered is a flag
+
+
+def test_no_briefing_is_the_document_alone() -> None:
+    assert det.briefed("the document", "none", GENERIC) == "the document"
+
+
+@pytest.mark.parametrize(("arm", "label"), [("benign", "BENIGN"), ("malicious", "MALICIOUS")])
+def test_a_briefing_arm_is_the_production_user_text(arm: str, label: str) -> None:
+    """What ``agent._build_request_body`` sends: briefing, a rule, the document,
+    with the pack's Layer 2 caveat and the arm's label (#397)."""
+    pack = replace(GENERIC, l2_caveat="THE PACK'S CAVEAT")
+    text = det.briefed("the document", arm, pack)
+    briefing, _, document = text.partition("\n\n---\n\n")
+    assert document == "the document"
+    assert f"Layer 2 labelled it {label}" in briefing
+    assert "THE PACK'S CAVEAT" in briefing
+    assert L2_BLINDSPOT_CAVEAT not in briefing
+    assert "Layer 1 deterministic scanning found no known patterns." in briefing
+
+
+async def test_judge_sends_the_briefing_its_arm_names() -> None:
+    sent: list[str] = []
+
+    async def ask(_client: Any, body: dict[str, Any]) -> decoy_tools.Answer:
+        sent.append(body["messages"][1]["content"])
+        return decoy_tools.Answer(False, (), 1, 1.0)
+
+    with patch.object(decoy_tools, "ask", ask), patch.dict("os.environ", {"X": "y"}):
+        await det.judge([Case("clean", PROSE)], "vendor/model", 1, briefing="malicious")
+    assert sent[0].startswith("Layer 1")
+    assert "labelled it MALICIOUS" in sent[0]
+    assert sent[0].endswith(PROSE.text)
+
+
+async def test_judge_briefs_a_document_once_and_asks_every_vote_the_same_text() -> None:
+    sent: list[str] = []
+    built: list[str] = []
+
+    async def ask(_client: Any, body: dict[str, Any]) -> decoy_tools.Answer:
+        sent.append(body["messages"][1]["content"])
+        return decoy_tools.Answer(False, (), 1, 1.0)
+
+    def briefed(document: str, arm: str, _pack: Any) -> str:
+        built.append(arm)
+        return f"briefing {len(built)}: {document}"
+
+    with (
+        patch.object(decoy_tools, "ask", ask),
+        patch.object(det, "briefed", briefed),
+        patch.dict("os.environ", {"X": "y"}),
+    ):
+        await det.judge([Case("clean", PROSE)], "vendor/model", 1, votes=3, briefing="benign")
+    assert built == ["benign"]
+    assert sent == [f"briefing 1: {PROSE.text}"] * 3
 
 
 def test_injecagent_rows_alternate_base_and_enhanced(tmp_path: Path) -> None:

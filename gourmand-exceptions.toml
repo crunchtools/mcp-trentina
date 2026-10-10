@@ -714,3 +714,15 @@ check = "hidden_env_config"
 path = "tests/test_l2_integration.py"
 justification = "TRENTINA_REQUIRE_L2_MODEL is a test-only switch that turns 'no L2 model loaded' from a skip into a failure, set by CI's in-container L2 runs (#350): until it existed, a wrong model path made every L2 integration test skip silently. It is not part of the deployed application's configuration surface; CLAUDE.md's Development section documents it."
 classification = "by_design"
+
+[[exceptions]]
+check = "primitive_obsession"
+path = "tests/benign_corpus.py"
+justification = "The numbers are the data. This file generates invented operations output (#411): the literals are PID ranges, byte sizes, port ranges, row counts and identifier lengths (32 hex for an invocation ID, 64 for a container ID, 43 base64url for a Matrix event ID), each used once where the line it belongs to is written. A named constant per range would be fifty names for values the surrounding f-string already explains."
+classification = "by_design"
+
+[[exceptions]]
+check = "print_alongside_logger"
+path = "benchmarks/l2_benign.py"
+justification = "The harness prints a Markdown report to stdout, as every benchmark here does, and the image build's log is where it is read. `logging` is imported for one call that quiets gateway.transform's per-response WARNING line, which would otherwise put 225 lines between the report's tables. Nothing is logged by this file."
+classification = "by_design"

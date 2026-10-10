@@ -35,6 +35,8 @@ from trentina.gateway.profile import (
 from trentina.httpbody import MAX_BODY_BYTES
 from trentina.quarantine.classifier import ClassifierResult
 
+from .judge_key import with_judge_key
+
 
 def _make_profile(
     name: str,
@@ -247,7 +249,7 @@ class TestHandleAlertClassifierAndQAgent:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         calls = _mock_forward_http(monkeypatch)
-        profile = _make_profile("alpha", alert_token="tok")
+        profile = with_judge_key(_make_profile("alpha", alert_token="tok"))
         client = _client(_alert_app({"alpha": profile}))
 
         with (
