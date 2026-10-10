@@ -88,18 +88,29 @@ def benign_state(manifest: dict[str, Any], threshold: float | None = None) -> st
         threshold: The threshold in force; None skips that comparison.
     """
     record = manifest.get(BENIGN_KEY)
-    if not isinstance(record, dict):
+    counts = _counts(record) if isinstance(record, dict) else None
+    measured_at = _threshold(record.get("threshold")) if isinstance(record, dict) else None
+    stale = (
+        threshold is not None and measured_at is not None and abs(measured_at - threshold) > 1e-9
+    )
+    if counts is None or measured_at is None or stale:
         return "unrecorded"
+    return "passed" if _passes(*counts) else "failed"
+
+
+def _counts(record: dict[str, Any]) -> tuple[int, int] | None:
+    """``(cases, flagged)`` from a record, or None when either is not a count
+    or more are flagged than there are cases."""
     cases, flagged = _count(record.get("cases")), _count(record.get("flagged"))
-    measured_at = record.get("threshold")
-    if cases is None or flagged is None or flagged > cases:
-        return "unrecorded"
-    if not isinstance(measured_at, (int, float)) or isinstance(measured_at, bool):
-        return "unrecorded"
-    # json.loads reads NaN and Infinity, and every comparison with NaN is
-    # false: without this a record at "NaN" matched any threshold in force.
-    if not (math.isfinite(measured_at) and 0.0 < measured_at <= 1.0):
-        return "unrecorded"
-    if threshold is not None and abs(float(measured_at) - threshold) > 1e-9:
-        return "unrecorded"
-    return "passed" if _passes(cases, flagged) else "failed"
+    return None if cases is None or flagged is None or flagged > cases else (cases, flagged)
+
+
+def _threshold(value: object) -> float | None:
+    """A recorded threshold, or None for anything that is not one.
+
+    ``json.loads`` reads NaN and Infinity, and every comparison with NaN is
+    false: unchecked, a record at NaN matched any threshold in force.
+    """
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    return float(value) if math.isfinite(value) and 0.0 < value <= 1.0 else None

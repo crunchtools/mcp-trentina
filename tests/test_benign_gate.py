@@ -136,6 +136,8 @@ class TestState:
         ],
     )
     def test_a_malformed_record_is_unrecorded(self, broken: dict[str, object]) -> None:
+        # No threshold in force: nothing but the record's own checks can
+        # refuse it, so each case is refused by the check it names.
         record = {**record_of({"a": (1, 200)}, 0.7), **broken}
         assert benign_state({BENIGN_KEY: record}) == "unrecorded"
 

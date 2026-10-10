@@ -444,6 +444,28 @@ async def test_judge_sends_the_briefing_its_arm_names() -> None:
     assert sent[0].endswith(PROSE.text)
 
 
+async def test_judge_briefs_a_document_once_and_asks_every_vote_the_same_text() -> None:
+    sent: list[str] = []
+    built: list[str] = []
+
+    async def ask(_client: Any, body: dict[str, Any]) -> decoy_tools.Answer:
+        sent.append(body["messages"][1]["content"])
+        return decoy_tools.Answer(False, (), 1, 1.0)
+
+    def briefed(document: str, arm: str, _pack: Any) -> str:
+        built.append(arm)
+        return f"briefing {len(built)}: {document}"
+
+    with (
+        patch.object(decoy_tools, "ask", ask),
+        patch.object(det, "briefed", briefed),
+        patch.dict("os.environ", {"X": "y"}),
+    ):
+        await det.judge([Case("clean", PROSE)], "vendor/model", 1, votes=3, briefing="benign")
+    assert built == ["benign"]
+    assert sent == [f"briefing 1: {PROSE.text}"] * 3
+
+
 def test_injecagent_rows_alternate_base_and_enhanced(tmp_path: Path) -> None:
     rows = b"".join(
         json.dumps({"Attacker Instruction": text}).encode() + b"\n"
