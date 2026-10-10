@@ -69,13 +69,24 @@ jobs:
           build-args: |
             VERSION=${{ steps.pkgver.outputs.version }}
 
+      # The crunchtools-ci App's token, not a personal one: it has its own rate
+      # limit, so a throttled account can't stop this step.
+      - name: Mint CI token
+        id: ci-token
+        if: github.event_name != 'pull_request'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.CRUNCHTOOLS_CI_APP_ID || secrets.CRUNCHTOOLS_CI_APP_ID }}
+          private-key: ${{ secrets.CRUNCHTOOLS_CI_APP_KEY }}
+          owner: crunchtools
+
       # crunchtools/data-collector is built FROM this image. Tell it to
       # rebuild, as every parent image in the fleet tells its children
       # (crunchtools/constitution, validate-cascade.py).
       - name: Trigger downstream rebuilds
         if: github.event_name != 'pull_request'
         env:
-          GH_TOKEN: ${{ secrets.CRUNCHTOOLS_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ steps.ci-token.outputs.token }}
         run: |
           for repo in data-collector; do
             gh api repos/crunchtools/$repo/dispatches \
