@@ -119,7 +119,12 @@ uv run trentina
   manifest's `obfuscation_gate` record is written by
   `benchmarks/l2_obfuscation.py --record` (the Containerfile's `l2-gate`
   stage); `posture.check_l2_gate` warns on a model without a passing one and
-  refuses under `TRENTINA_REQUIRE_HARDENED`.
+  refuses under `TRENTINA_REQUIRE_HARDENED`. The same stage then runs the
+  benign gate (#411): `benchmarks/l2_benign.py --record` over
+  `tests/benign_corpus.py`, read through `transform_response` as a tool
+  response is, at most 2% of held-out flagged. Its `benign_gate` record
+  holds the threshold, so another `CLASSIFIER_THRESHOLD` reads as
+  `unrecorded`. `benign_corpus.KNOWN_GAPS` is scored and never gated.
 - `TRENTINA_L3_PROMPT_PACK` — an L3 prompt pack file (#354), or `generic`.
   `quarantine/packs.py` loads and checks packs: closed key set, the framing
   sentences in every system prompt, an exact (provider, model). The pack for

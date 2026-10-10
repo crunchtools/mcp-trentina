@@ -61,7 +61,7 @@ from .l1.pipeline import (
     run_l1,
 )
 from .logsafe import exc_kind, exc_where, redact_source
-from .quarantine.agent import get_current_profile, llm_available, quarantine_detect
+from .quarantine.agent import bound_profile, llm_available, quarantine_detect
 from .quarantine.classifier import (
     ClassifierResult,
     classify_async,
@@ -170,7 +170,7 @@ def _l3_provider_configured(defense: DefenseConfig | None) -> bool:
     # its own provider and its own key for it. Until then this read the
     # global key first, so a gateway holding only per-profile keys had no L3
     # on any path that did not pass ``defense``.
-    profile = get_current_profile()
+    profile = bound_profile()
     if profile is not None:
         return llm_available(profile)
     # No profile bound: the global chain, or a caller whose defense names a
@@ -190,7 +190,7 @@ def _log_no_judge(defense: DefenseConfig | None) -> None:
     ``l3_unavailable`` rows. The profile and provider are the operator's own
     configuration, never anything a caller chose.
     """
-    profile = get_current_profile()
+    profile = bound_profile()
     source = profile.defense if profile is not None else defense
     provider = (source.provider if source is not None else None) or get_config().provider
     key = (profile.name if profile is not None else None, provider)

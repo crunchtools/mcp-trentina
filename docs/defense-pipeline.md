@@ -68,7 +68,7 @@ Four rules shape every layer, and any change to a layer is held to them. `tests/
 
 1. **Nothing is delivered that the layers did not read, in its original or decoded form, or, for binary, by its identified type. Each layer reads it exactly once.** Pre-processing is two stages, always in this order (#365). Stage 1, the pre-processors, shrinks what will be delivered. Stage 2, the unpack stage (`unpack/scan.py`), builds what the layers read from that delivery: strict base64 and hex that decode to text are decoded in place, archives, office files and PDFs are opened and read inside (#368, #369), images are read by OCR (#370), and other binary is labelled by its signature, `(image/png, 1.1 KB, not read)`. The delivery itself is never changed. L1 and L2 run in parallel on the unpacked text, and L3 reads it after both. Redact's checks on turn 2's output follow the same rule: L1 and L2 read the delivered strings once, unpacked, as the one document turn 3 then reads (#379). Binary an agent could open and no layer can read yet (an image, a PDF, an archive this stage does not open) is the `binary_unread` gap: block and redact refuse it, and offer `flag`.
 2. **Layers share findings, never inputs.** L1's counts by type and L2's label and score reach L3's briefing as structure: fixed names and numbers, never payload text. No layer reads text that another layer produced.
-3. **A layer's weakness is fixed inside that layer or at model selection.** The fix is a better model, a new L1 stage, or the obfuscation gate, which rejects a model a trick can blind: the image build runs it, and the gateway checks its record at startup (`benchmarks/l2_obfuscation.py`, #362). The pipeline never gets an extra pass, a second input, or a reshaped copy to compensate.
+3. **A layer's weakness is fixed inside that layer or at model selection.** The fix is a better model, a new L1 stage, or a gate at model selection. Two gates hold L2, from opposite sides: the obfuscation gate rejects a model a trick can blind (`benchmarks/l2_obfuscation.py`, #362), and the benign gate rejects one that refuses what the gateway delivers (`benchmarks/l2_benign.py`, #411). The image build runs both at one threshold, and the gateway checks their records at startup. The pipeline never gets an extra pass, a second input, or a reshaped copy to compensate.
 4. **Read time is linear in payload size, one pass per layer.** The admission cap (`CLASSIFIER_MAX_TOKENS`) is sized on that: 32K tokens is about 23 s of L2 on production CPU, well inside the 60 s MCP client timeout.
 
 Redact's extraction turn reads the same unpacked text (`DefenseVerdict.read`), so it extracts from what was judged. Until 0.57.1 it read a copy L1 had normalized, which made L1 a cleansing layer for that one consumer (#360).
@@ -135,6 +135,8 @@ A prompt-injection classifier running on ONNX Runtime (CPU, no GPU required), sl
 The image ships that one model. Meta's `prompt-guard-2-86m` shipped beside it from 0.55.0 to 0.58.0 and was dropped (#362): it fails five of the six transforms of the obfuscation gate, so one zero-width character blinded it. `CLASSIFIER_MODEL_PATH` still reaches an export of it, or of any model, for research.
 
 **The obfuscation gate is enforced.** The image build classifies every corpus attack plain and under six transforms with the shipped model and writes the result into its `trentina-model.json` (`benchmarks/l2_obfuscation.py --record`); a model that fails stops the build. At startup the gateway reads the record: a model with a failing record, or none, is logged as `l2_obfuscation_gate_failed` or `l2_obfuscation_gate_unrecorded`, and under `TRENTINA_REQUIRE_HARDENED` the gateway refuses to start. The gate's state is part of the verdict stamp. To run your own model, export it and record the gate against it before you point `CLASSIFIER_MODEL_PATH` at it.
+
+**So is the benign gate (#411).** The same build then runs the model, at the threshold it ships with, over 207 invented benign cases of the shapes production refused (unit properties, journals, disk-usage and container listings, metrics rows, replies that carry an identifier, agent-forum replies), each read as the gateway reads a tool response: through the default pre-processors, the text block and then every string of the structured content, unpacked. A model that flags more than 2% of the held-out cases stops the build (`benchmarks/l2_benign.py --record`). The record carries the threshold it was taken at, so a gateway started with another `CLASSIFIER_THRESHOLD` reports `l2_benign_gate_unrecorded` until the gate is run at that one. Numbers, and the two shapes the shipped model still flags, are in [benchmark.md](benchmark.md#l2-benign-gate-411-404).
 
 Measured on our corpora (`docs/benchmark.md`, #350), the default catches 36 of 39 internal attacks to Prompt Guard 2's 8, and 21 of 39 when they are planted inside long benign documents to Prompt Guard 2's 4, flagging 3 of 150 benign documents to Prompt Guard 2's 0, at 2.4x the throughput on CPU. Two English-only DeBERTa models, ProtectAI's v2 and PIGuard, were measured and rejected (#353): they flag 29 and 67 of the 150. Prompt Guard 2 is the better detector of DAN-style direct jailbreaks (624 vs 520 of 666 on the jackhhao set, 1 and 3 false positives of 640).
 
@@ -315,6 +317,20 @@ one does; the rest name the benchmark that measured them.
     tool call through the gateway. It is a tripwire for the common case,
     where an injection says "send the key to this address" and the agent
     does. Tested.
+18. **A response that is one base64-shaped identifier is flagged by L2**
+    (#411). The shipped model passes the obfuscation gate because it reads
+    base64 as possibly hostile, and a reply that is a Matrix event ID and
+    nothing else gives it no context to read the ID against: 9 of 12 flag
+    at 0.7, scoring 0.71 to 0.94. An identifier inside a record does not
+    (0 of 41 unit, container, image and disk listings). `block` refuses such
+    a reply and offers `redact`. Scored on every image build as
+    `event_id_reply` ([benchmark](benchmark.md#l2-benign-gate-411-404)).
+19. **A long log inside a JSON string can be flagged by L2** (#411). A
+    hundred journal lines returned as one string is about 15,000 tokens that
+    no pre-processor reduces, read in over thirty windows of which the worst
+    decides: 1 of 6 flags at 0.7. The same lines as plain text are reduced
+    by petit and pass. Asking for fewer lines, or a narrower unit or
+    pattern, avoids it. Scored on every image build as `journal_query_100`.
 
 ### Attack coverage by layer (Prompt Guard 2, 2026-06)
 

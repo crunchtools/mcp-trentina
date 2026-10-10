@@ -314,6 +314,150 @@ a passing one (`l2_obfuscation_gate_failed`, `l2_obfuscation_gate_unrecorded`);
 `TRENTINA_REQUIRE_HARDENED` turns that into a refusal to start. Prompt Guard
 2 no longer ships in the image.
 
+## L2 benign gate (#411, #404)
+
+The obfuscation gate selects for a model that reads encoded text as possibly
+hostile, and nothing held the other side. Horizon became the default on
+2026-10-04, and one operations profile's L2 refusals went from 0 to 4 a day
+to 11 to 29: metrics rows, journals, unit properties, disk usage. Across
+every profile, L3 called 313 of 401 L2 detections clean (#411).
+
+`benchmarks/l2_benign.py` is the gate for that side. The corpus
+(`tests/benign_corpus.py`) is 225 invented cases of the shapes that were
+refused, generated from a fixed seed; no line of it comes from a production
+host. Each case is read exactly as the gateway reads a tool response:
+through the default pre-processors (`transform_response`), the text block
+and then every string of the structured content, unpacked. One case in four
+is the tuning split; the held-out split is what is reported, gated and
+recorded. A model passes when, at its own threshold, it flags at most 2% of
+the held-out cases (2 of 146).
+
+```bash
+CLASSIFIER_MODEL_PATH=<export> uv run python benchmarks/l2_benign.py --sweep
+```
+
+The image build runs it with `--record` after the obfuscation gate, about
+six minutes for 330K tokens, and stops on a failure. The record holds the
+threshold it was taken at: a gateway started with another
+`CLASSIFIER_THRESHOLD` reports `l2_benign_gate_unrecorded`.
+
+### What it found (2026-10-10, Horizon small at 0.7, the 1.2.0 image's model)
+
+**The gateway's own minifier was most of it.** The `structured`
+pre-processor collapses a long array and leaves a marker in its place. The
+marker began with a bracketed tag, `[structured] 9 more element(s) with
+this shape omitted`. A bracketed note in the middle of data is what an
+injected system note looks like, and L2 read it as one: one metrics
+response scored 0.01 as it arrived and 0.99 reduced, with one marker among
+its rows; reduced with the same marker minus its tag, 0.00. Responses under
+4 KB are not minified, which is why short ones passed.
+
+| held-out, at 0.7 | 1.2.0 markers | untagged markers |
+|---|---|---|
+| `query_influxdb` (12) | 3 | 0 |
+| every other gated shape (134) | 0 | 0 |
+| all (146; 2 allowed) | 3, fails | **0, passes** |
+| tuning split (61), for comparison | 5 | 0 |
+
+The eight flags across both splits are all minified listings: every
+120-row metrics response and two of the three largest `system_df` listings. The marker wording is the change (1.3.0); the tag was
+removed from all four `structured` markers. The choice was made on a first
+pass that scored both splits, before the split existed; the table above is
+the harness's own run afterwards.
+
+**The threshold was not the fix, and stays at 0.7.** `--sweep` reads both
+gates at each cut. With the 1.2.0 markers:
+
+| threshold | held-out benign flagged (146) | attacks detected, plain (44) | obfuscation gate |
+|---|---|---|---|
+| 0.5 | 4 | 42 | pass |
+| **0.7** | 3 | 41 | pass |
+| 0.9 | 3 | 39 | pass |
+| 0.95 | 3 | 38 | pass |
+| 0.98 | 1 | 34 | pass |
+| 0.99 | 0 | 29 | pass |
+
+The first cut that passes the benign gate is 0.98, which gives up 7 of the
+41 attacks 0.7 detects. Measured and rejected.
+
+**A backend's bug was the rest of `unit_status` and `unit_show`.**
+mcp-systemd returned `InvocationID` as Python's bytes repr
+(`b'\xe5\x1a...'`), which L2 flagged 19 times in 24 at 0.7. The same
+property in hex, as `systemctl show` prints it, flagged 0 of 24. Fixed in
+mcp-systemd 0.2.1; the corpus carries the hex form. An identifier inside a
+record is not a problem for this model at all: unit properties, container
+and image listings and disk usage, each full of 32- and 64-character hex,
+flag 0 of 41 held-out.
+
+**Two shapes are still flagged, and are known gaps 18 and 19.** They are
+scored on every build and recorded beside the result, outside the budget:
+
+| shape | flagged at 0.7 | scores |
+|---|---|---|
+| `event_id_reply`: a response that is one Matrix event ID and nothing else | 9 of 12 | 0.71 to 0.94 |
+| `journal_query_100`: a hundred journal lines inside one JSON string | 1 of 6 | 0.97 |
+
+The first is what #409 measured (one event ID alone, 0.79). The second is
+length: such a response is about 15,000 tokens of key fingerprints,
+container IDs and audit records, read in over thirty windows of which the
+worst decides, and no pre-processor reduces a log inside a JSON string. The same
+lines as plain text go through petit and score 0.04 to 0.18.
+
+### The agent-forum feed (#404)
+
+The corpus's 72 forum replies are invented, and Horizon flags none of them
+held-out. The real feed is another matter, and a fixture cannot stand in
+for it: `crunchtools/data-collector` judges it with the shipped pipeline
+every day. Its stored scores on 2026-10-10 (1,427 documents, 1.0.1
+pipeline):
+
+| threshold | documents flagged |
+|---|---|
+| 0.5 | 250 (17.5%) |
+| **0.7** | 183 (12.8%) |
+| 0.9 | 119 (8.3%) |
+| 0.95 | 97 (6.8%) |
+| 0.99 | 47 (3.3%) |
+
+No threshold answers #404 either: a third of the flagged documents score
+0.98 or more. The flagged documents are short, 461 characters on average
+against 1,160 for the feed.
+
+The same rows show what L2's label does to each judge, since every document
+was judged under the production briefing. Share of documents each judge
+flagged (majority of its votes), by L2's label:
+
+| judge | L2 said BENIGN | L2 said MALICIOUS |
+|---|---|---|
+| claude-haiku-4.5 | 76 of 872 (8.7%) | 38 of 124 (30.6%) |
+| gemini-2.5-flash-lite | 19 of 1,238 (1.5%) | 6 of 181 (3.3%) |
+| gemini-3.8-flash | 18 of 791 (2.3%) | 1 of 115 (0.9%) |
+| gemini-3.5-flash-lite | 3 of 1,241 (0.2%) | 1 of 181 (0.6%) |
+
+Haiku flags three and a half times as often when L2 does. That is a
+correlation: the documents L2 flags may also be the ones Haiku would flag
+unbriefed. `detonation.py --mode judge --briefing` (below) judges the same
+documents under each label, which is the measurement that separates the two.
+
+Not measured here: whether L2's lone flag should refuse on this kind of
+source, which #404 asks. That is a count of attacks L2 flags and the judge
+misses, per judge, and needs the judges.
+
+## Briefing arms and embedded documents (#397)
+
+Two harness changes, with no numbers yet: both need a provider key, and a
+keyed benchmark runs merged code only (`benchmark-decoys.yml`).
+
+- `benchmarks/detonation.py --mode judge --briefing none|benign|malicious`
+  puts the production briefing in front of each document: L1's real counts
+  for it, the pack's Layer 2 caveat, and the Layer 2 label the arm names.
+  The `briefing` job runs the four shipped judges under all three arms on
+  the clean and benign-insert documents, every insert in every carrier.
+- `benchmarks/prompt_pack.py` now includes embedded documents in both
+  splits (288 benign, 88 attack), split by insert, and its gate holds
+  embedded benign apart from the overall rate. The `packs` job measures each
+  shipped pack against the generic prompts under the new rule.
+
 ## L1 briefing ablation
 
 L1 reaches the verdict two ways: its own refusal at high or critical

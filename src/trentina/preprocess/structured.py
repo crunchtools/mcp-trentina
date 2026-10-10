@@ -136,9 +136,13 @@ _FINGERPRINT_MAX_CHARS = 400
 _MAX_LISTED = 100
 
 # Marker text. In-band and therefore spoofable, like petit's [petit] prefix.
-_OMITTED = "[structured] {count} more element(s) with this shape omitted"
-_LISTED = "[structured] {count} more element(s) with this shape; {fields}: {rows}"
-_IDENTICAL = "[structured] {count} more element(s) identical to the one above"
+# It carried a "[structured] " tag until 1.3.0 (#411). A bracketed tag in the
+# middle of data is what an injected system note looks like, and L2 read it
+# as one: the same rows scored 0.00 as they arrived and 0.99 with one tagged
+# marker among them. The words say what the tag said.
+_OMITTED = "{count} more element(s) with this shape omitted"
+_LISTED = "{count} more element(s) with this shape; {fields}: {rows}"
+_IDENTICAL = "{count} more element(s) identical to the one above"
 
 
 class _GroupKey(NamedTuple):
@@ -208,7 +212,7 @@ def _identifiers(item: Any) -> _Pulled | None:
     return _Pulled(_GroupKey(text, fields, frozenset(ints)), values)
 
 
-_TRUNCATED = "... [structured] {count} more character(s) truncated"
+_TRUNCATED = "... {count} more character(s) truncated"
 
 
 class _Reducer:

@@ -296,6 +296,45 @@ class TestTheHarness:
         assert 0 < len(train) < len(CORPUS) / 2
         assert any(c.category == harness.JUDGE_ATTACKS for c in CORPUS if c.id not in train)
 
+    def test_an_embedded_document_goes_where_its_insert_goes(self) -> None:
+        """#397: no insert is tuned on bare and reported on inside a document."""
+        train, held_out = harness.embedded_cases(True), harness.embedded_cases(False)
+        assert not {c.id for c in train} & {c.id for c in held_out}
+        assert all(c.id.startswith(harness.EMBEDDED_PREFIX) for c in train + held_out)
+        internal = {case.id: harness.in_train(case.id) for case in CORPUS}
+        for cases, side in ((train, True), (held_out, False)):
+            for case in cases:
+                insert = case.notes.split(" in ")[0]
+                assert internal.get(insert, side) is side
+                assert harness.in_train(insert) is side
+        benign = [c for c in train + held_out if c.category == harness.EMBEDDED_BENIGN]
+        assert len(benign) == 288, "every benign insert in every carrier, as #397 measured"
+        assert all(not c.expect_injection for c in benign)
+        assert any(c.category == harness.EMBEDDED_ATTACK for c in held_out)
+
+    def test_an_embedded_document_carries_its_insert_inside_a_carrier(self) -> None:
+        case = harness.embedded_cases(False)[0]
+        bare = next(c for c in CORPUS if c.id == case.notes.split(" in ")[0])
+        assert bare.payload in case.payload
+        assert len(case.payload) > 2 * len(bare.payload)
+
+    def test_the_gate_holds_embedded_benign_apart_from_the_overall_rate(self) -> None:
+        """Fewer bare prompts flagged does not pay for more documents flagged."""
+
+        def measured(bare: int, embedded: int) -> dict[str, Any]:
+            report = _report(caught=3, flagged=bare, meta=3)
+            report.results += [
+                _result(f"e{i}", harness.EMBEDDED_BENIGN, attack=False, detected=i < embedded)
+                for i in range(10)
+            ]
+            return harness.measure(report)
+
+        baseline = measured(bare=5, embedded=2)
+        assert harness.gate(measured(bare=4, embedded=2), baseline) == []
+        assert harness.gate(measured(bare=5, embedded=0), baseline) == []
+        reasons = harness.gate(measured(bare=1, embedded=3), baseline)
+        assert reasons == ["it flags more benign instructions embedded in a document"]
+
     def test_a_malformed_answer_is_not_a_pass(self) -> None:
         report = _report(caught=6, flagged=0, meta=4)
         report.results.append(
